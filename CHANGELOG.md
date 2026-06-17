@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 - 2026-06-17
+
+- Adapted `dev-flow` spec/plan phases for Codex by defining an embedded author/critic adapter instead of requiring Claude Code dynamic workflows.
+- Clarified that `spec-flow` and `plan-flow` are standalone prompt-level routes, not internal `dev-flow` substeps.
+- Documented Claude Code versus Codex runtime mapping for workflows, subagents, hooks, and spec/plan artifact generation.
+
 ## 0.2.1 - 2026-06-17
 
 - Defined explicit runtime bindings for `spec-flow` and `plan-flow`: router hook, skill contracts, author/critic agents, workflow, and validator.
