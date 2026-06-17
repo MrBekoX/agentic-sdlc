@@ -267,6 +267,10 @@ def _ref_resolves(ref, kind, skill_dir, reg):
         return ref in reg["script"]
     if kind == "file":
         return (skill_dir / ref).exists()
+    if kind == "contract":
+        return (SKILL_CONTRACTS_DIR / ref).exists()
+    if kind == "hook":
+        return (HOOKS_DIR / ref).exists()
     return False
 
 

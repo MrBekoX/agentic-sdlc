@@ -10,11 +10,19 @@ argument-hint: "<thing to specify>"
 
 Own the WHAT only: problem, business rules, acceptance criteria, edge cases, definition of done, and must-not-change behavior. Do not write an implementation plan and do not edit product code.
 
+## Runtime Bindings
+
+- **Hook:** `session-start.mjs` injects `using-agentic-sdlc` as the session-local router. That hook may route directly to `spec-flow` for WHAT-only prompts; this does not require `dev-flow`.
+- **Contracts:** Apply `${CLAUDE_PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md` as the primary behavior contract. Use `${CLAUDE_PLUGIN_ROOT}/contracts/skills/00-global-behavior.md` and `${CLAUDE_PLUGIN_ROOT}/contracts/skills/01-context-first.md` for evidence and context discipline when available.
+- **Agents:** `spec-plan-draft` calls `spec-plan-author` to draft and `spec-plan-critic` to audit the spec. If the workflow/agent runtime is unavailable, draft manually in the main loop and explicitly mark the degraded path.
+- **Validator:** Saved specs use `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py` with `--mode spec`.
+- In Codex plugin contexts, resolve the same plugin-root paths with `${PLUGIN_ROOT}`.
+
 ## Route First
 
 - If the design intent is ambiguous, use `mind-spark` first and turn the approved design into the spec input.
 - If the user asks for HOW, tasks, implementation steps, or sequencing, use `plan-flow` instead.
-- If the user asks to build, fix, test, secure, and finalize end-to-end, return to `using-agentic-sdlc` routing and escalate to `dev-flow` when the full envelope is needed.
+- If the user asks to build, fix, test, secure, and finalize end-to-end, return to `using-agentic-sdlc` routing and escalate to `dev-flow` only when the full envelope is needed.
 
 ## Flow
 
@@ -32,7 +40,7 @@ Return:
 1. Spec summary.
 2. Spec body or saved path.
 3. Decision points, if any.
-4. Evidence: context read, workflow/degraded path, and validator result if saved.
+4. Evidence: context read, contract(s) applied, workflow/degraded path, agent bindings, and validator result if saved.
 
 ## Red Flags
 
@@ -40,3 +48,4 @@ Return:
 - Implementing code or writing tests.
 - Generating a generic spec without concrete context.
 - Treating an ambiguous idea as specified instead of routing to `mind-spark`.
+- Escalating to `dev-flow` without an implementation or end-to-end prompt.

@@ -49,8 +49,14 @@
         {"ref": "mind-spark", "kind": "skill"},
         {"ref": "plan-flow", "kind": "skill"},
         {"ref": "dev-flow", "kind": "skill"},
+        {"ref": "spec-plan-author", "kind": "agent"},
+        {"ref": "spec-plan-critic", "kind": "agent"},
         {"ref": "spec-plan-draft", "kind": "workflow"},
-        {"ref": "validate_artifacts.py", "kind": "script"}
+        {"ref": "validate_artifacts.py", "kind": "script"},
+        {"ref": "02-spec-driven-development.md", "kind": "contract"},
+        {"ref": "00-global-behavior.md", "kind": "contract"},
+        {"ref": "01-context-first.md", "kind": "contract"},
+        {"ref": "session-start.mjs", "kind": "hook"}
       ]
     },
     "plan-flow": {
@@ -63,8 +69,13 @@
         {"ref": "fix-flow", "kind": "skill"},
         {"ref": "refactor-flow", "kind": "skill"},
         {"ref": "test-flow", "kind": "skill"},
+        {"ref": "spec-plan-author", "kind": "agent"},
+        {"ref": "spec-plan-critic", "kind": "agent"},
         {"ref": "spec-plan-draft", "kind": "workflow"},
-        {"ref": "validate_artifacts.py", "kind": "script"}
+        {"ref": "validate_artifacts.py", "kind": "script"},
+        {"ref": "03-plan-mode.md", "kind": "contract"},
+        {"ref": "02-spec-driven-development.md", "kind": "contract"},
+        {"ref": "session-start.mjs", "kind": "hook"}
       ]
     },
     "fix-flow": {

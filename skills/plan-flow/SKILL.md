@@ -10,6 +10,14 @@ argument-hint: "<thing to plan>"
 
 Own the HOW only: implementation tasks, ordering, affected surfaces, TDD points, verification, risks, and acceptance-criteria mapping. Do not edit product code.
 
+## Runtime Bindings
+
+- **Hook:** `session-start.mjs` injects `using-agentic-sdlc` as the session-local router. That hook may route directly to `plan-flow` for HOW-only prompts; this does not require `dev-flow`.
+- **Contracts:** Apply `${CLAUDE_PLUGIN_ROOT}/contracts/skills/03-plan-mode.md` as the primary behavior contract. Use `${CLAUDE_PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md` only as the source-WHAT coverage contract; do not rewrite the spec.
+- **Agents:** `spec-plan-draft` calls `spec-plan-author` to draft and `spec-plan-critic` to audit the plan. If the workflow/agent runtime is unavailable, draft manually in the main loop and explicitly mark the degraded path.
+- **Validator:** Saved plans use `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py` with `--mode plan`.
+- In Codex plugin contexts, resolve the same plugin-root paths with `${PLUGIN_ROOT}`.
+
 ## Route First
 
 - If there is no approved spec, ticket, or clear WHAT, use `spec-flow` first or ask for the missing behavior contract.
@@ -33,7 +41,7 @@ Return:
 2. Task breakdown or saved path.
 3. Acceptance-criteria mapping.
 4. Verification plan.
-5. Evidence: source WHAT, workflow/degraded path, and validator result if saved.
+5. Evidence: source WHAT, contract(s) applied, workflow/degraded path, agent bindings, and validator result if saved.
 
 ## Red Flags
 
@@ -41,3 +49,4 @@ Return:
 - Editing code, tests, docs, or config as part of plan-only work.
 - Escalating to `dev-flow` just because a plan exists.
 - Continuing from plan to implementation without a fresh routing decision.
+- Rewriting spec content instead of mapping the approved WHAT to implementation tasks.
