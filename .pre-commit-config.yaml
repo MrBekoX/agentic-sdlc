@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: agentic-sdlc-check-all
+        name: agentic-sdlc check_all
+        entry: python scripts/check_all.py
+        language: system
+        pass_filenames: false
+      - id: agentic-sdlc-skill-harness
+        name: agentic-sdlc skill harness
+        entry: python tests/skills/harness.py
+        language: system
+        pass_filenames: false

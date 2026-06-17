@@ -1,0 +1,11 @@
+{
+  "_comment": "Live trigger eval-set for test-flow. Positives = test writing/fixing with meaningful assertions; negatives = feature/fix/refactor ownership.",
+  "queries": [
+    {"query": "Bu servis için eksik unit ve regression testlerini yaz.", "should_trigger": true},
+    {"query": "Flaky e2e testini anlamlı assertionlarla düzelt.", "should_trigger": true},
+    {"query": "Add integration tests for this endpoint without changing production behavior.", "should_trigger": true},
+    {"query": "Yeni bir kullanıcı ayarları özelliği ekle.", "should_trigger": false},
+    {"query": "Production bug'ının root cause'unu bul ve düzelt.", "should_trigger": false},
+    {"query": "Bu modülü behavior-preserving refactor et.", "should_trigger": false}
+  ]
+}

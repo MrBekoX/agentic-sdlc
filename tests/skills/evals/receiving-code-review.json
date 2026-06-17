@@ -1,0 +1,11 @@
+{
+  "_comment": "Live trigger eval-set for receiving-code-review (taking feedback on your own change). Positives = applying/judging reviewer or bot feedback; negatives = reviewing someone else's code (code-review), plain feature work.",
+  "queries": [
+    {"query": "CodeRabbit su yorumlari birakti, bunlari ele al.", "should_trigger": true},
+    {"query": "The reviewer asked me to make this more robust, can you address the PR comments.", "should_trigger": true},
+    {"query": "Reviewer su degisikligi istedi ama emin degilim, feedback dogru mu?", "should_trigger": true},
+    {"query": "Arkadasimin yazdigi bu kodu kalite acisindan gozden gecir.", "should_trigger": false},
+    {"query": "Yeni bir export endpoint'i ekle.", "should_trigger": false},
+    {"query": "Login bug'ini root cause ile duzelt.", "should_trigger": false}
+  ]
+}

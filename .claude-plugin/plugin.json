@@ -1,0 +1,19 @@
+{
+  "name": "agentic-sdlc",
+  "description": "Claude Code skill library for gated spec, plan, TDD, security, and review workflows",
+  "version": "0.1.0",
+  "author": {
+    "name": "AGENTIC-SDLC"
+  },
+  "homepage": "https://github.com/MrBekoX/agentic-sdlc",
+  "repository": "https://github.com/MrBekoX/agentic-sdlc",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "skills",
+    "sdlc",
+    "tdd",
+    "security",
+    "code-review"
+  ]
+}

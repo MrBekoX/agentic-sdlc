@@ -1,0 +1,11 @@
+{
+  "_comment": "Live trigger eval-set for completion-claim-gate. Positives = about to claim done/passing/fixed; negatives = ordinary implementation or planning.",
+  "queries": [
+    {"query": "Testleri çalıştırmadan finalde her şey geçti ve bitti diyeceğim.", "should_trigger": true},
+    {"query": "Bu bug fix tamamlandı demeden önce hangi kanıtı göstermeliyim?", "should_trigger": true},
+    {"query": "I want to say the build is passing; verify the evidence first.", "should_trigger": true},
+    {"query": "Yeni bir export endpoint'i için spec yaz.", "should_trigger": false},
+    {"query": "Bu dosyayı refactor et ama davranış değişmesin.", "should_trigger": false},
+    {"query": "Kod incelemesi yap, bulguları sırala.", "should_trigger": false}
+  ]
+}

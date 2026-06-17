@@ -1,0 +1,11 @@
+{
+  "_comment": "Live trigger eval-set for dev-flow. Positives = production-impacting end-to-end change; negatives = narrow review/test/refactor requests.",
+  "queries": [
+    {"query": "Production etkisi olan yeni ödeme akışını spec, plan, TDD, security ve review ile uçtan uca geliştir.", "should_trigger": true},
+    {"query": "Bu müşteri-facing değişikliği disciplined SDLC akışıyla baştan sona uygula.", "should_trigger": true},
+    {"query": "Add this backend feature with spec, plan, tests, security review, and PR-ready diff.", "should_trigger": true},
+    {"query": "Sadece bu diff için code review yap.", "should_trigger": false},
+    {"query": "Sadece eksik regression testlerini yaz.", "should_trigger": false},
+    {"query": "Bu küçük typo'yu düzelt.", "should_trigger": false}
+  ]
+}
