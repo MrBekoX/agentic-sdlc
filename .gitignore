@@ -21,6 +21,7 @@ settings.local.json
 scheduled_tasks.lock
 .handoffs/
 .sdd/
+.worktrees/
 tests/artifacts/
 .tmp-superpowers-compare/
 _tmp_superpowers_benchmark/
