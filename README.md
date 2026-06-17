@@ -110,7 +110,7 @@ The plugin wires deterministic Claude Code hooks from [hooks/hooks.json](hooks/h
 
 ## Versioning
 
-Current version: `0.2.6`.
+Current version: `0.2.7`.
 
 Check version metadata:
 

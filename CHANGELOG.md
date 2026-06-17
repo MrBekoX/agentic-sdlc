@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7 - 2026-06-17
+
+- Added full-project trigger eval batch coverage for Claude and Codex skill routing, including no-command-shim Claude live activation and Codex route-classifier updates.
+- Tuned all 16 skill trigger descriptions and eval fixtures around smallest-sufficient-skill routing, focused feature/spec/plan boundaries, and explicit claim-gate prompts.
+- Added all-skill trigger fixture enforcement so every `skills/*/SKILL.md` has a matching eval set.
+
 ## 0.2.6 - 2026-06-17
 
 - Stabilized Claude `spec-flow` live trigger evaluation by narrowing router/workflow trigger metadata and allowing harmless prelude reads in the trigger detector without counting command files as skill activation.
