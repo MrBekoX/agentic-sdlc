@@ -80,6 +80,27 @@ class TestProcedureEvalHarness(unittest.TestCase):
         self.assertIn("permission_denied:Bash", proc.stdout)
         self.assertIn("procedure_eval=failed", proc.stdout)
 
+    def test_agent_dispatch_satisfies_mapped_gate_skill(self):
+        # A gate delegated to its specialist agent counts as satisfied (delegation path).
+        trace = procedure_eval.Trace()
+        procedure_eval._record_tool(
+            trace, "Agent", {"subagent_type": "agentic-sdlc:security-reviewer", "description": "review the diff"}
+        )
+        procedure_eval._record_tool(
+            trace, "Agent", {"subagent_type": "agentic-sdlc:implementation-auditor", "description": "audit flow"}
+        )
+        self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:security-audit"))
+        self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:implementasyon-control"))
+
+    def test_unmapped_gate_skill_not_satisfied_by_agent(self):
+        # A skill with no agent equivalent still requires an actual Skill call.
+        trace = procedure_eval.Trace()
+        procedure_eval._record_tool(trace, "Agent", {"subagent_type": "agentic-sdlc:security-reviewer"})
+        self.assertFalse(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:completion-claim-gate"))
+        # And the direct Skill call still satisfies it.
+        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:completion-claim-gate"})
+        self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:completion-claim-gate"))
+
     def test_live_fixture_has_baseline_commit_before_claude_runs(self):
         case = {
             "id": "agentic-sdlc-pipeline-feature-no-commit",

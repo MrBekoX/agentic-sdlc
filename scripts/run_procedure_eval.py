@@ -31,6 +31,17 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 
+# A required gate skill can also be satisfied by dispatching its specialist agent
+# (the fresh-context delegation path the pipeline prefers, e.g. security-audit -> the
+# security-reviewer agent). Without this, a model strong enough to delegate the gate to a
+# sub-agent is wrongly scored as "missing_skill". Map: skill short-name -> agent short-names.
+SKILL_AGENT_EQUIVALENTS: dict[str, list[str]] = {
+    "security-audit": ["security-reviewer"],
+    "implementasyon-control": ["implementation-auditor"],
+    "code-quality-review": ["code-reviewer"],
+    "test-authoring": ["test-engineer"],
+}
+
 
 @dataclass
 class Trace:
@@ -194,6 +205,21 @@ def tool_invoked(trace: Trace, tool_name: str, expected: str) -> bool:
     return False
 
 
+def required_skill_satisfied(trace: Trace, expected: str) -> bool:
+    """A required gate is met by a `Skill` call OR a dispatch to its specialist agent.
+
+    The pipeline lets review/audit gates run as fresh-context sub-agents (e.g. security-audit
+    via the security-reviewer agent); credit that as satisfying the gate.
+    """
+    if tool_invoked(trace, "Skill", expected):
+        return True
+    short = expected.rsplit(":", 1)[-1]
+    for agent in SKILL_AGENT_EQUIVALENTS.get(short, []):
+        if tool_invoked(trace, "Agent", agent) or tool_invoked(trace, "Task", agent):
+            return True
+    return False
+
+
 def evaluate_case(case: dict[str, Any], trace: Trace, cwd: Path) -> list[str]:
     errors = []
     haystack = trace.haystack()
@@ -202,7 +228,7 @@ def evaluate_case(case: dict[str, Any], trace: Trace, cwd: Path) -> list[str]:
     if case.get("fail_on_permission_denials", True):
         errors += [f"permission_denied:{denial}" for denial in trace.permission_denials]
     for skill in case.get("required_skills", []):
-        if not tool_invoked(trace, "Skill", skill):
+        if not required_skill_satisfied(trace, skill):
             errors.append(f"missing_skill:{skill}")
     for workflow in case.get("required_workflows", []):
         if not tool_invoked(trace, "Workflow", workflow):
