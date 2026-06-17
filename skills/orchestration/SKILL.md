@@ -17,6 +17,12 @@ user-invocable: true
 | **Dynamic-workflow** | Large parallelizable work: **verification, research, OR code** (≈3+ similar items; deterministic phases, adversarial cross-check, loop-until-done, pipeline). Parallel code writing via worktree isolation | `Workflow` tool (JS: `agent()`/`parallel()`/`pipeline()`; `isolation:"worktree"` for parallel writes) | High but amortized; runs in background, returns structured results |
 | **Agent-team** | Continuous, **interactive**, collaborative parallel work: multi-angle review (security/perf/test), competing-hypothesis debugging, independent module ownership; peers talk, a live lead steers | Natural language: "set up an agent team with roles … " | **Most expensive**; needs interaction, **not for headless/CI**; requires the experimental teams flag + a recent Claude Code |
 
+## Runtime adapter
+
+- **Claude Code:** `Dynamic-workflow` means the native JavaScript Workflow runtime. Use it only when its scale/repeatability properties matter.
+- **Codex:** there is no Claude Workflow tool. Map `Dynamic-workflow` decisions to Codex subagent fan-out, parallel local tool calls, cloud delegation for larger implementation milestones, or a sequential degraded path with a note. Do not invent a workflow script requirement in Codex.
+- **Spec/plan inside dev-flow:** Claude Code uses `spec-plan-draft`; Codex uses dev-flow's embedded author/critic adapter. Standalone `spec-flow` and `plan-flow` remain prompt-level entry skills, not dev-flow substeps.
+
 ## Decision tree
 1. Is it **interdependent code** or a design/sequencing decision? → **Main loop**. (But hand independent sub-parts — exploration, fixed-pattern generation — to a **sub-agent**.)
 2. Is it **large-scale and parallelizable** (≈3+ similar items — verification, research, **or code**; deterministic phases / adversarial cross-check; worktree isolation for parallel writes)? → **Dynamic-workflow**.
@@ -43,7 +49,8 @@ user-invocable: true
 - **security-review:** multiple lenses (injection / authz-IDOR / secrets / auth) → **dynamic-workflow** (parallel lenses) or **agent-team** (interactive review).
 - **code-review:** fresh-context **sub-agent** so the reviewer isn't the author.
 - **refactor-flow / test-flow:** large multi-file passes → **dynamic-workflow**; heavy reference analysis → **sub-agent**.
-- Spec/plan drafting in any flow → `spec-plan-draft` workflow (author → critic), not shallow main-loop writing.
+- Spec/plan drafting in Claude Code flows → `spec-plan-draft` workflow (author → critic), not shallow main-loop writing.
+- Spec/plan drafting inside Codex `dev-flow` → embedded author/critic adapter with a fresh-context subagent critic when available. Standalone `spec-flow` and `plan-flow` remain independent prompt routes.
 
 ## Quick mapping (example → mechanism)
 | Work | Mechanism |

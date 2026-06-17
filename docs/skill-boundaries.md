@@ -21,6 +21,15 @@ This document is the source-of-truth map for when the current Claude Code and Co
 | `mind-spark` | Ambiguous design/build intent before spec. | Clear bug fix, test-only, security review, or code review. |
 | `writing-skills` | Creating, changing, evaluating, or packaging Claude Code skills. | Ordinary application feature work. |
 
+## Spec/Plan Boundary
+
+`spec-flow` and `plan-flow` are standalone prompt-level routes. They are not dev-flow substeps.
+
+When `dev-flow` needs spec and plan artifacts, it owns those phases directly:
+
+- Claude Code: use `spec-plan-draft` workflow.
+- Codex: use dev-flow's embedded author/critic adapter and validate the saved artifacts.
+
 ## Layer Ownership
 
 | Layer | Owns |

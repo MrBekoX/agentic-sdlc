@@ -86,10 +86,10 @@ python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/dev-flow.
 
 Live mode defaults to `--permission-mode auto` so safe headless commands can run without an interactive prompt. Override it only when intentionally auditing permission behavior.
 
-The live eval inspects stream-json tool use for:
+This live eval is a Claude Code transcript check. It inspects stream-json tool use for:
 
 - required skill invocations such as `agentic-sdlc:dev-flow`, `orchestration`, `feature-flow`, `security-review`, `implementasyon-control`, and `completion-claim-gate`
-- `agentic-sdlc:spec-plan-draft` workflow use
+- `agentic-sdlc:spec-plan-draft` workflow use in Claude Code; Codex dev-flow uses the embedded adapter instead
 - `detect_context.py` and `validate_artifacts.py` commands
 - spec/plan artifacts under `docs/specs/` and `docs/plans/`
 - absence of forbidden publish commands such as `git commit`, `git push`, and `git merge`

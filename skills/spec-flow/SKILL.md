@@ -10,6 +10,8 @@ argument-hint: "<thing to specify>"
 
 Own the WHAT only: problem, business rules, acceptance criteria, edge cases, definition of done, and must-not-change behavior. Do not write an implementation plan and do not edit product code.
 
+This is a standalone entry skill. `dev-flow` owns its own end-to-end Spec phase and must not call `spec-flow` as an internal substep.
+
 ## Runtime Bindings
 
 - **Hook:** `session-start.mjs` injects `using-agentic-sdlc` as the session-local router. That hook may route directly to `spec-flow` for WHAT-only prompts; this does not require `dev-flow`.

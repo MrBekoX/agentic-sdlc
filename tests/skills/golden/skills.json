@@ -1,5 +1,5 @@
 {
-  "_comment": "Golden/regression baseline per skill. 'description_must_include' = core trigger keywords that must survive any description edit (lowercased substring match). 'must_reference' = cross-references that must both APPEAR in SKILL.md and RESOLVE to a real component/file. kinds: skill|agent|workflow|command|script|file (file = path relative to the skill dir). Update deliberately when a skill's contract legitimately changes.",
+  "_comment": "Golden/regression baseline per skill. 'description_must_include' = core trigger keywords that must survive any description edit (lowercased substring match). 'must_reference' = cross-references that must both APPEAR in SKILL.md and RESOLVE to a real component/file. kinds: skill|agent|workflow|command|script|file|contract|hook (file = path relative to the skill dir; contract = contracts/skills; hook = hooks). Update deliberately when a skill's contract legitimately changes.",
   "skills": {
     "using-agentic-sdlc": {
       "description_must_include": ["starting", "smallest sufficient skill", "dev-flow", "evidence-before-claim"],

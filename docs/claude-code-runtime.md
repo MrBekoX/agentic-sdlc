@@ -54,12 +54,21 @@ Runtime concepts used by the skills:
 |---|---|
 | Load a skill | Claude Code skill invocation |
 | Dispatch subagent | Agent / Task facility when available |
-| Dynamic workflow | Workflow facility when available |
+| Dynamic workflow | Claude Code Workflow facility when available; in Codex, map to subagent fan-out, parallel local tools, cloud delegation, or a documented degraded main-loop path |
 | Slash command | `commands/*.md` |
 | Plugin hook | `hooks/hooks.json` |
 | Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}` in Claude Code; `${PLUGIN_ROOT}` in Codex |
 
 If a runtime capability is unavailable in the current version/configuration, fall back to the nearest supported mechanism and state the fallback in the final report.
+
+## Spec/Plan Runtime Split
+
+Claude Code can run `workflows/spec-plan-draft.js` as a JavaScript dynamic workflow. Codex does not use that runtime. Therefore:
+
+- `spec-flow` and `plan-flow` remain standalone prompt-level entry skills.
+- `dev-flow` must not call `spec-flow` or `plan-flow` for its internal steps 4-5.
+- In Claude Code, `dev-flow` uses `spec-plan-draft`.
+- In Codex, `dev-flow` uses its embedded author/critic adapter: main-loop draft, fresh-context subagent critic when available, revise, save artifact, validate.
 
 ## Skill Frontmatter Policy
 

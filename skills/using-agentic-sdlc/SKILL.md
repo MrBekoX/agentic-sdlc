@@ -67,6 +67,7 @@ Examples:
 - Do not inline another skill's checklist when the runtime can invoke that skill.
 - `dev-flow` is the full-envelope escalation path, not the default route.
 - Step skills should not call `dev-flow` unless the user is intentionally escalating to the full flow.
+- `spec-flow` and `plan-flow` are standalone prompt-level routes. When `dev-flow` needs spec/plan artifacts, it uses its own phase logic; in Codex that means dev-flow's embedded author/critic adapter, not invoking the standalone spec/plan skills.
 - Use `contracts/skills/` as the durable behavior contract layer; skills remain the runnable procedure layer.
 
 ## Evidence Discipline
@@ -85,6 +86,6 @@ If evidence is missing, say it is uncertain and state what would verify it.
 ## Platform Notes
 
 - In Claude Code, use the native Skill/Workflow/Agent mechanisms when available.
-- In Codex, follow the activated skill instructions and use available tools directly.
+- In Codex, follow the activated skill instructions and use available tools directly. Treat Claude Code Workflow-only gates as runtime-adapted: use Codex subagents, parallel local tools, or documented degraded main-loop execution as the skill specifies.
 - If a required skill or workflow mechanism is unavailable, state the degraded path and use the smallest safe fallback.
 - Match the user's language unless they request otherwise.

@@ -10,6 +10,8 @@ argument-hint: "<thing to plan>"
 
 Own the HOW only: implementation tasks, ordering, affected surfaces, TDD points, verification, risks, and acceptance-criteria mapping. Do not edit product code.
 
+This is a standalone entry skill. `dev-flow` owns its own end-to-end Plan phase and must not call `plan-flow` as an internal substep.
+
 ## Runtime Bindings
 
 - **Hook:** `session-start.mjs` injects `using-agentic-sdlc` as the session-local router. That hook may route directly to `plan-flow` for HOW-only prompts; this does not require `dev-flow`.

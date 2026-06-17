@@ -43,7 +43,7 @@ Claude hook paths use `${CLAUDE_PLUGIN_ROOT}`. Codex hook paths use `${PLUGIN_RO
 | Skill | Purpose |
 |---|---|
 | `using-agentic-sdlc` | Session-local router; chooses the smallest sufficient skill, tracks scope shifts, and gates evidence-before-claim discipline. |
-| `dev-flow` | Full-envelope SDLC orchestrator for end-to-end implementation; owns the gated envelope and delegates the core. |
+| `dev-flow` | Full-envelope SDLC orchestrator for end-to-end implementation; owns the gated envelope and delegates the core. Claude uses `spec-plan-draft`; Codex uses dev-flow's embedded author/critic adapter. |
 | `spec-flow` | Spec-only WHAT flow for requirements, acceptance criteria, and behavior contracts. |
 | `plan-flow` | Plan-only HOW flow for task breakdown, sequencing, and verification strategy. |
 | `fix-flow` | Bug / broken-behavior fix via root cause, spec, plan, TDD, security, and verification. |
@@ -69,7 +69,7 @@ Responsibility boundaries are enforced by the skill bodies, integration tests, a
 skills/           one folder per skill (SKILL.md + bundled references/scripts)
 agents/           sub-agent role contracts
 commands/         slash commands such as git-safety-check
-workflows/        dynamic workflow scripts
+workflows/        Claude Code dynamic workflow scripts
 hooks/            secret scan, branch guard, destructive command guard, session start
 scripts/          deterministic helpers and subagent handoff utilities
 tests/            stdlib unittest suites, skill fixtures, and static checks
@@ -104,9 +104,13 @@ The plugin wires deterministic Claude Code hooks from [hooks/hooks.json](hooks/h
 - `destructive-command-guard.mjs` blocks deterministic high-risk destructive commands.
 - `session-start.mjs` injects workspace context and operating reminders.
 
+## Runtime Note
+
+`spec-flow` and `plan-flow` are standalone routes for spec-only and plan-only prompts. They are not internal `dev-flow` substeps. Codex does not use Claude Code's JavaScript Workflow runtime, so `dev-flow` maps its spec/plan author-critic loop to a Codex-friendly embedded adapter.
+
 ## Versioning
 
-Current version: `0.1.0`.
+Current version: `0.2.1`.
 
 Check version metadata:
 

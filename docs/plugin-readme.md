@@ -80,9 +80,9 @@ Full Mode akışı:
 
 1. `orchestration` ile yürütme mekanizmasını seçer.
 2. `detect_context.py` ile workspace'i deterministik sınıflandırır.
-3. `spec-plan-draft` workflow ile spec taslağı üretir.
+3. Claude Code'da `spec-plan-draft` workflow ile, Codex'te dev-flow embedded author/critic adapter ile spec taslağı üretir.
 4. Spec'i `validate_artifacts.py` ile doğrular.
-5. `spec-plan-draft` workflow ile plan üretir.
+5. Claude Code'da `spec-plan-draft` workflow ile, Codex'te dev-flow embedded author/critic adapter ile plan üretir.
 6. Planı strict mode'da doğrular.
 7. Uygulama çekirdeğini uygun flow skill'e delege eder.
 8. Security review gate'lerini çalıştırır.
@@ -96,6 +96,8 @@ Full Mode akışı:
 - `feature-flow`
 - `refactor-flow`
 - `test-flow`
+
+`spec-flow` ve `plan-flow` sadece bağımsız prompt girişleri içindir. `dev-flow`, kendi step 4-5 fazlarında bu iki skill'i çağırmaz.
 
 ### Dar Kapsamlı Skill'ler
 
@@ -136,14 +138,14 @@ Bu roller ana context'i kirletmeden bağımsız analiz, review, audit veya draft
 
 ## Workflows
 
-`workflows/` altında iki deterministic multi-agent workflow vardır:
+`workflows/` altında Claude Code için iki deterministic multi-agent workflow vardır:
 
 | Workflow | Görev |
 |---|---|
 | `spec-plan-draft.js` | Spec/plan için author -> critic -> revise döngüsü. |
 | `skill-draft.js` | Skill yazımı için author/critic döngüsü. |
 
-`spec-plan-draft.js`, eksik context durumunda fail-loud davranır ve normal işlerde ad hoc workflow yerine bu named workflow kullanılmalıdır.
+`spec-plan-draft.js`, eksik context durumunda fail-loud davranır ve Claude Code işlerinde ad hoc workflow yerine bu named workflow kullanılmalıdır. Codex'te Claude Workflow runtime yoktur; aynı author/critic disiplin dev-flow'un embedded adapter'ı ile uygulanır.
 
 ## Commands
 
