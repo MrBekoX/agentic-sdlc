@@ -19,9 +19,12 @@ user-invocable: true
 
 ## Runtime adapter
 
+Use the portable capability matrix in `docs/runtime-adapter.md`.
+
 - **Claude Code:** `Dynamic-workflow` means the native JavaScript Workflow runtime. Use it only when its scale/repeatability properties matter.
-- **Codex:** there is no Claude Workflow tool. Map `Dynamic-workflow` decisions to Codex subagent fan-out, parallel local tool calls, cloud delegation for larger implementation milestones, or a sequential degraded path with a note. Do not invent a workflow script requirement in Codex.
-- **Spec/plan inside agentic-sdlc-pipeline:** Claude Code uses `spec-plan-draft`; Codex uses agentic-sdlc-pipeline's embedded author/critic adapter. Standalone `spec-authoring` and `plan-authoring` remain prompt-level entry skills, not agentic-sdlc-pipeline substeps.
+- **Codex/OpenCode/Kimi Code:** map `Dynamic-workflow` to subagent fan-out, parallel local tools, cloud delegation, or a sequential degraded path with an explicit note. Do not invent a workflow script requirement when the runtime lacks a Workflow tool.
+- **Agent-team:** runtime-specific. If unavailable, use subagents or a documented degraded path.
+- **Spec/plan inside agentic-sdlc-pipeline:** Claude Code uses `spec-plan-draft`; non-Claude runtimes use the embedded author/critic adapter. Standalone `spec-authoring` and `plan-authoring` remain prompt-level entry skills, not agentic-sdlc-pipeline substeps.
 
 ## Decision tree
 1. Is it **interdependent code** or a design/sequencing decision? → **Main loop**. (But hand independent sub-parts — exploration, fixed-pattern generation — to a **sub-agent**.)
@@ -50,7 +53,7 @@ user-invocable: true
 - **code-quality-review:** fresh-context **sub-agent** so the reviewer isn't the author.
 - **safe-refactor / test-authoring:** large multi-file passes → **dynamic-workflow**; heavy reference analysis → **sub-agent**.
 - Spec/plan drafting in Claude Code flows → `spec-plan-draft` workflow (author → critic), not shallow main-loop writing.
-- Spec/plan drafting inside Codex `agentic-sdlc-pipeline` → embedded author/critic adapter with a fresh-context subagent critic when available. Standalone `spec-authoring` and `plan-authoring` remain independent prompt routes.
+- Spec/plan drafting inside non-Claude `agentic-sdlc-pipeline` runs the embedded author/critic adapter with a fresh-context critic when available. Standalone `spec-authoring` and `plan-authoring` remain independent prompt routes.
 
 ## Quick mapping (example → mechanism)
 | Work | Mechanism |

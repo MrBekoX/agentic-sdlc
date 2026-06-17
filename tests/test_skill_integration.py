@@ -60,6 +60,29 @@ class TestSkillCrossReferences(unittest.TestCase):
         ):
             self.assertIn(phrase, text)
 
+    def test_pipeline_references_runtime_adapter_and_non_claude_runtimes(self):
+        text = (h.SKILLS_DIR / "agentic-sdlc-pipeline" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("runtime-adapter.md", text)
+        self.assertIn("OpenCode", text)
+        self.assertIn("Kimi Code", text)
+        self.assertIn("Portable capability", text)
+
+    def test_adapter_dependent_skills_do_not_make_workflow_unconditional(self):
+        skills = [
+            "dispatch-strategy",
+            "spec-authoring",
+            "plan-authoring",
+            "mind-spark",
+            "security-audit",
+            "code-quality-review",
+            "implementasyon-control",
+        ]
+        for skill in skills:
+            text = (h.SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+            with self.subTest(skill=skill):
+                if "Workflow" in text or "workflow" in text:
+                    self.assertRegex(text, r"Claude Code|runtime|adapter|unavailable|degraded")
+
     def test_implementasyon_control_references_auditor_agent(self):
         text = (h.SKILLS_DIR / "implementasyon-control" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("implementation-auditor", text)
@@ -107,6 +130,22 @@ class TestDocConsistency(unittest.TestCase):
             gating, [],
             f"doc-consistency errors: {gating}",
         )
+
+    def test_runtime_adapter_doc_exists_and_names_supported_runtimes(self):
+        path = h.REPO / "docs" / "runtime-adapter.md"
+        self.assertTrue(path.exists(), "docs/runtime-adapter.md is required for cross-runtime adapter behavior")
+        text = path.read_text(encoding="utf-8")
+        for phrase in (
+            "Portable capability",
+            "Claude Code",
+            "Codex",
+            "OpenCode",
+            "Kimi Code",
+            "Degraded fallback",
+            "agentic-sdlc-pipeline",
+            "spec-plan-draft",
+        ):
+            self.assertIn(phrase, text)
 
 
 if __name__ == "__main__":

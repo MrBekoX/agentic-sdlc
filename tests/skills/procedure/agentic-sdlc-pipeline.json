@@ -16,6 +16,33 @@
       "required_workflows": [
         "agentic-sdlc:spec-plan-draft"
       ],
+      "required_runtime_adapters": [
+        {
+          "runtime": "non-claude",
+          "capability": "pipeline-delegates-and-spec-plan-author-critic",
+          "satisfies": [
+            "skill:agentic-sdlc:dispatch-strategy",
+            "skill:agentic-sdlc:feature-build",
+            "skill:agentic-sdlc:security-audit",
+            "skill:agentic-sdlc:implementasyon-control",
+            "skill:agentic-sdlc:completion-claim-gate",
+            "workflow:agentic-sdlc:spec-plan-draft"
+          ],
+          "required_patterns": [
+            "Runtime:\\s*Codex|OpenCode|Kimi Code|non-Claude",
+            "Workflow unavailable|embedded author/critic adapter",
+            "dispatch-strategy",
+            "feature-build",
+            "security-audit",
+            "implementasyon-control",
+            "completion-claim-gate",
+            "spec-plan-author",
+            "spec-plan-critic",
+            "docs/specs/",
+            "docs/plans/"
+          ]
+        }
+      ],
       "required_commands": [
         "detect_context\\.py",
         "validate_artifacts\\.py"

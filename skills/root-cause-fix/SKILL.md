@@ -11,7 +11,7 @@ argument-hint: "<bug description or issue id>"
 The primary fix workflow. Resolves a problem at its **root cause**, with the smallest change, verified by tests and a double security pass, and audited before the final answer. It is a **gated, looped** flow — don't skip steps; a red gate means go back, not forward.
 
 ## Orchestration (consult first)
-Before heavy/independent/parallelizable steps, the **`dispatch-strategy`** skill chooses the mechanism (main loop / sub-agent / dynamic-workflow / agent-team). Delegate heavy root-cause exploration and multi-lens verification; don't run everything serially in the main loop.
+Before heavy/independent/parallelizable steps, the **`dispatch-strategy`** skill chooses the mechanism (main loop / sub-agent / dynamic-workflow / agent-team) using `docs/runtime-adapter.md` for runtime-specific equivalents. Delegate heavy root-cause exploration and multi-lens verification; don't run everything serially in the main loop.
 
 ## Flow (with gates)
 
@@ -22,15 +22,15 @@ State: what is the bug; expected behavior; actual behavior; how to reproduce; af
 Read the relevant code, tests, logs, and config. Check for prior patches/refactors in the area. (If heavy/independent → delegate to a **sub-agent**; intermediate reads stay in its context.)
 
 ### 3. Spec (the WHAT — code-independent) — contract 02
-Problem definition · acceptance criteria (each testable) · edge cases · definition of done · **must-not-change behaviors**. For deep specs use `spec-plan-author` → `spec-plan-critic` (workflow `spec-plan-draft`).
+Problem definition · acceptance criteria (each testable) · edge cases · definition of done · **must-not-change behaviors**. For deep specs use the `spec-plan-author` -> `spec-plan-critic` adapter (`spec-plan-draft` in Claude Code; available subagents or main-loop degraded pass elsewhere).
 **Gate:** spec exists and criteria are testable.
 
 ### 4. Plan (the HOW) — contract 03
 Break into small single-purpose tasks; each maps to acceptance criteria, each is testable; name files + TDD points; flag risky steps; request approval if the fix is large/architectural.
 **Gate:** every acceptance criterion has a task.
 
-### 5. Goal lock — built-in `/goal`
-Run the built-in **`/goal`** with a measurable end-state (e.g. *"the failing test in X passes, full suite green, no other behavior changed"*). This locks scope and keeps a fresh evaluator checking the condition each turn, preventing scope creep. (If `/goal` is unavailable, do it manually: restate the goal, lock scope, re-confirm acceptance criteria, list non-goals.) Use the **Goal Lock** template below.
+### 5. Goal lock
+Use the runtime goal tool when available with a measurable end-state (e.g. *"the failing test in X passes, full suite green, no other behavior changed"*). Otherwise write the Goal Lock template inline and treat it as the scope lock.
 
 ### 6. TDD / Regression test (RED) — contract 05
 Write a failing test that reproduces the bug. **Confirm it actually fails** (show output) before writing any fix.
@@ -40,7 +40,7 @@ Minimal code to pass the test. Only files in plan scope. No unrelated refactor, 
 
 ### 8. Test Run
 Run the targeted test, then the full suite where feasible. **Show real output.**
-**Loop A — test fail:** analyze → fix → retest. Manage with built-in **`/loop`** (or manually) using the **Loop Iteration** template. Don't proceed while red.
+**Loop A — test fail:** analyze → fix → retest. Use the runtime loop tool when available; otherwise record each fail -> fix -> retest cycle with the Loop Iteration template and command evidence. Don't proceed while red.
 
 ### 9. Security Analysis (#1) — contract 06
 Review the diff: input validation, auth/authorization (incl. IDOR), secret leakage, injection, race conditions, data-loss risk, permission issues, dependency risk. Mask any secret (`***MASKED***`).
@@ -63,7 +63,7 @@ Trigger the **`implementasyon-control`** skill to audit that steps 1–12 were t
 Report: what was fixed · which files changed · which tests ran (with result) · remaining risks · any action the user must take.
 
 ## Loop points (summary)
-- **Test fail** → analyze → fix → retest (`/loop`).
+- **Test fail** → analyze → fix → retest (runtime loop tool or manual Loop Iteration artifact).
 - **Security finding** → fix → re-check security → retest.
 - **Implementation-control gap** → complete step → re-run control.
 

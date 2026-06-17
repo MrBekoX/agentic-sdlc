@@ -44,6 +44,23 @@ class TestProcedureEvalHarness(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("procedure_eval=passed", proc.stdout)
 
+    def test_codex_adapter_transcript_satisfies_non_claude_spec_plan_gate(self):
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_procedure_eval.py",
+                "--eval-set",
+                "tests/skills/procedure/agentic-sdlc-pipeline.json",
+                "--transcript",
+                "tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-codex-adapter-pass.jsonl",
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("procedure_eval=passed", proc.stdout)
+
     def test_runtime_error_transcript_fails_even_with_required_calls(self):
         proc = subprocess.run(
             [

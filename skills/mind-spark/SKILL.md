@@ -48,7 +48,7 @@ underspecified one through as "just a fix".
 design you still confirm, never silence.
 
 > If superpowers' intent/design-gate skill is also installed, this house skill supersedes it: use the house
-> register and hand off to `spec-plan-draft` / `agentic-sdlc-pipeline`, not the superpowers planning path.
+> register and hand off to the runtime's spec-plan adapter / `agentic-sdlc-pipeline`, not the superpowers planning path.
 
 ## "This is too simple to need a design"
 
@@ -149,9 +149,7 @@ into the spec-driven flow and stop here — do not start implementing and do not
 (frontend, API scaffolding, etc.) yourself.
 
 - Inside **`agentic-sdlc-pipeline`**: the approved intent feeds its Spec phase directly — return control.
-- Standalone: invoke the **`spec-plan-draft`** workflow with `mode=spec` to turn the intent into
-  testable acceptance criteria (contract 02), then its plan phase (`mode=plan`). Record the spec when the
-  work is substantial.
+- Standalone: use **`spec-plan-draft`** only when the runtime exposes the named Claude Code Workflow. In Codex, OpenCode, Kimi Code, or a degraded runtime, run the author -> critic -> revise adapter manually or through available subagents, then state the adapter path used. Record the spec when the work is substantial.
 
 This skill produces intent + an approved design. The spec (the testable WHAT) and the plan (the HOW)
 are owned downstream — don't duplicate them here.
@@ -193,4 +191,4 @@ Keep it as short as the task allows — this is the agreed intent, not the spec.
 - [ ] 2-3 approaches offered with trade-offs and a recommendation.
 - [ ] Design presented in scaled sections, approved section by section.
 - [ ] No code / scaffold / build skill before the design was approved (explicit build instruction is not approval).
-- [ ] Handed off to the spec-driven flow (agentic-sdlc-pipeline Spec phase / `spec-plan-draft` `mode=spec`); spec & plan left downstream.
+- [ ] Handed off to the spec-driven flow (agentic-sdlc-pipeline Spec phase / runtime spec-plan adapter); spec & plan left downstream.

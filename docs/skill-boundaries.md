@@ -219,7 +219,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 When `agentic-sdlc-pipeline` needs spec and plan artifacts:
 
 - **Claude Code:** use the named `Workflow` `spec-plan-draft` (author → critic → revise, ≤2 rounds + closing audit).
-- **Codex:** use `agentic-sdlc-pipeline`'s **embedded author/critic adapter**. Do **not** call standalone `spec-authoring` or `plan-authoring` from inside the pipeline.
+- **Non-Claude Agent Skills runtimes:** use `agentic-sdlc-pipeline`'s **embedded author/critic adapter** as described in [`runtime-adapter.md`](./runtime-adapter.md). Do **not** call standalone `spec-authoring` or `plan-authoring` from inside the pipeline.
 
 Standalone `spec-authoring` / `plan-authoring` may still use `spec-plan-draft` and the same validator (`validate_artifacts.py`), but they are entry points for single-artifact requests, not phases of a full pipeline run.
 

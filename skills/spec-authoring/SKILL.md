@@ -18,11 +18,13 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 - **Contracts:** Apply the runtime-local contract files as the primary behavior contract:
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md`
   - Codex: `${PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md`
+  - OpenCode/Kimi Code: configured plugin or skill root.
   Also use `00-global-behavior.md` and `01-context-first.md` from the same runtime root for evidence and context discipline when available.
-- **Agents:** `spec-plan-draft` calls `spec-plan-author` to draft and `spec-plan-critic` to audit the spec. If the workflow/agent runtime is unavailable, draft manually in the main loop and explicitly mark the degraded path.
+- **Agents:** Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex, OpenCode, Kimi Code, or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
 - **Validator:** Saved specs use the runtime-local validator with `--mode spec`:
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py`
   - Codex: `${PLUGIN_ROOT}/scripts/validate_artifacts.py`
+  - OpenCode/Kimi Code: `<runtime-root>/scripts/validate_artifacts.py`
 
 ## Route First
 
@@ -35,9 +37,9 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 
 1. Identify the target behavior, audience, constraints, and explicit non-goals from the prompt and available context.
 2. Read only the local context needed to avoid an off-target spec.
-3. Invoke the named workflow `spec-plan-draft` with `mode:"spec"` and non-empty context. In Claude Code, use the Workflow tool. In Codex or a degraded runtime, draft manually and state that workflow invocation was unavailable.
+3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex, OpenCode, Kimi Code, or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
 4. If a durable artifact is requested or the work is substantial, save the spec as `docs/specs/<name>.md`.
-5. Validate saved specs with `python "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/specs/<name>.md`, resolving `<runtime-root>` as `${CLAUDE_PLUGIN_ROOT}` in Claude Code and `${PLUGIN_ROOT}` in Codex.
+5. Validate saved specs with `python "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/specs/<name>.md`, resolving `<runtime-root>` from the active runtime as described in `docs/runtime-adapter.md`.
 6. Present decision points and stop. Do not continue to plan or implementation unless the user asks.
 
 ## Output

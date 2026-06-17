@@ -29,7 +29,7 @@ Designs and writes meaningful tests, or repairs broken ones.
 1. Identify what behavior needs proving and at which level (unit/integration/regression/e2e).
 2. Write the failing test; confirm it fails for the right reason.
 3. Implement (or fix) the minimum to pass.
-4. Run targeted tests, then the suite; show output. Loop fail→fix→retest with `/loop`.
+4. Run targeted tests, then the suite; show output. Use the runtime loop tool when available; otherwise record each fail -> fix -> retest cycle with command evidence.
 5. Review: are the assertions meaningful? Edge cases covered? Any flaky timing/order dependence?
 
 ## Forbidden

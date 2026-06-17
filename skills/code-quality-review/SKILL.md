@@ -8,10 +8,10 @@ argument-hint: "<file/dir — defaults to current git diff>"
 
 > **Argument:** `/code-quality-review $ARGUMENTS` — a file/dir, or empty for the current `git diff`. Match the user's language.
 
-Reviews changes for quality. Best run in a **fresh context** (delegate to the **`code-reviewer`** sub-agent) so the review isn't biased toward code it just wrote.
+Reviews changes for quality. Best run in a **fresh context** (delegate to the **`code-reviewer`** sub-agent or runtime equivalent) so the review isn't biased toward code it just wrote.
 
 ## Orchestration (consult first)
-Per **`dispatch-strategy`**: prefer a fresh-context **sub-agent** (`code-reviewer`) that sees only the diff + criteria, not the authoring reasoning.
+Per **`dispatch-strategy`** and `docs/runtime-adapter.md`: prefer a fresh-context specialist (`code-reviewer`) that sees only the diff + criteria, not the authoring reasoning. If the runtime supports a fresh-context specialist, use it. If it does not, record `Delegation Degraded: fresh-context specialist unavailable`, perform the pass in the main loop, and mark the result non-independent.
 
 ## Review areas
 - **Readability** — is intent clear on first read?

@@ -14,8 +14,9 @@ This document is the **component-by-component reference** for a developer who ha
 |---|---|---|
 | **Claude Code** | Native `Skill`, `Workflow`, `Agent` tools; `hooks/hooks.json` | Full JavaScript Workflow runtime (`spec-plan-draft`, `skill-draft`). Hook paths resolve via `${CLAUDE_PLUGIN_ROOT}`. |
 | **Codex** | Activated skill instructions + available tools; `hooks/hooks-codex.json` | No Claude Workflow runtime. `agentic-sdlc-pipeline` uses an **embedded author/critic adapter** for spec/plan phases. Hook paths resolve via `${PLUGIN_ROOT}`. |
+| **OpenCode / Kimi Code / similar Agent Skills runtimes** | Standard `SKILL.md` directories plus runtime-native skill/agent/task mechanisms | Supported through the portable adapter when the runtime can provide equivalent tool evidence or a documented degraded path. Hook wiring is runtime-specific and not native-packaged in this repo. |
 
-Other harnesses (Cursor, Gemini, OpenCode, Kimi, Grok, GLM…) are intentionally deferred.
+See [`runtime-adapter.md`](./runtime-adapter.md) for portable capability names and runtime-specific equivalents.
 
 ---
 
@@ -45,7 +46,7 @@ Plugin metadata lives at the repo root:
 
 | Requirement | Why it is needed |
 |---|---|
-| Claude Code **or** Codex | The supported agent runtimes. |
+| Claude Code or Codex | Native packaged agent runtimes. OpenCode/Kimi Code-style Agent Skills runtimes use `runtime-adapter.md`. |
 | Node.js | Hook scripts are `.mjs` and run via `node`. |
 | Python 3 | Deterministic scripts, validators, eval helpers, and the local gate. |
 | Git | Branch guard, diff review, review packages, commit/PR flow. |
@@ -118,9 +119,9 @@ Escalate to `agentic-sdlc-pipeline` only for end-to-end implementation or high-r
 | 1 | Update main (git) | pipeline · git | clean tree |
 | 2 | Create branch | pipeline · git | off updated main |
 | 3 | Analyze code & problem (`detect_context.py` picks `explore_mode`) | pipeline + `context-analyst` | problem + affected files stated |
-| 4 | **Spec phase** (WHAT) — Claude: `spec-plan-draft` workflow; Codex: embedded adapter | pipeline | testable criteria, no HOW-leak |
+| 4 | **Spec phase** (WHAT) — Claude Code: `spec-plan-draft` workflow; non-Claude runtimes: embedded adapter | pipeline | testable criteria, no HOW-leak |
 | — | *Spec Review gate* | pipeline + user | decision points resolved, spec approved |
-| 5 | **Plan phase** (HOW) — Claude: `spec-plan-draft` workflow; Codex: embedded adapter | pipeline | each criterion → a task |
+| 5 | **Plan phase** (HOW) — Claude Code: `spec-plan-draft` workflow; non-Claude runtimes: embedded adapter | pipeline | each criterion → a task |
 | — | *Plan Review gate* | pipeline + user | plan approved |
 | 6 | Context7 doc verification (WebSearch fallback if quota out) | pipeline | API/versions confirmed |
 | 7 | Risk & scope lock (`/goal`) | pipeline | files in/out listed |
@@ -203,8 +204,8 @@ All agents are **read-only contracts** under `agents/*.md`, used to keep the mai
 | `implementation-auditor` | Verify a completed change followed the required flow. | Read-only; structured verdict; blocks final if critical gaps exist. | `implementasyon-control`. |
 | `software-architect` | Validate structural decisions; flag unnecessary abstractions. | Read-only; recommends simpler alternatives. | Large changes, `agentic-sdlc-pipeline`. |
 | `test-engineer` | Design test strategy and audit existing test meaning. | Analysis only; does not write tests. | `test-authoring`. |
-| `spec-plan-author` | Produce a deep spec or plan draft. | Returns draft + decision points; does not write files directly. | `spec-plan-draft` workflow, Codex embedded adapter. |
-| `spec-plan-critic` | Adversarially audit a spec/plan draft for completeness/contradictions. | Returns structured critique. | `spec-plan-draft` workflow, Codex embedded adapter. |
+| `spec-plan-author` | Produce a deep spec or plan draft. | Returns draft + decision points; does not write files directly. | `spec-plan-draft` workflow, non-Claude embedded adapter. |
+| `spec-plan-critic` | Adversarially audit a spec/plan draft for completeness/contradictions. | Returns structured critique. | `spec-plan-draft` workflow, non-Claude embedded adapter. |
 
 ---
 
@@ -221,7 +222,7 @@ All agents are **read-only contracts** under `agents/*.md`, used to keep the mai
   3. `agent()` call with `agentType: 'agentic-sdlc:spec-plan-author'` to produce the draft.
   4. Up to `maxRevisionRounds` critic rounds with `agentType: 'agentic-sdlc:spec-plan-critic'`.
   5. Closing audit; returns draft markdown + decision points + residual critic notes.
-- **Claude vs Codex:** Claude Code only. In Codex the same author/critic discipline runs **inside** `agentic-sdlc-pipeline` through the embedded adapter.
+- **Claude Code vs non-Claude runtimes:** Claude Code only. In Codex, OpenCode, Kimi Code, and similar runtimes the same author/critic discipline runs **inside** `agentic-sdlc-pipeline` through the embedded adapter.
 
 ### `workflows/skill-draft.js` — name `skill-draft`
 
@@ -232,7 +233,7 @@ All agents are **read-only contracts** under `agents/*.md`, used to keep the mai
   3. Author draft.
   4. Up to 2 critic rounds checking description framing, trigger boundaries, length, examples, frontmatter validity.
   5. Closing audit; returns full `SKILL.md` draft + description + decision points.
-- **Claude vs Codex:** intended for Claude Code's Workflow runtime; Codex skill authoring follows the same method with available tools directly.
+- **Claude Code vs non-Claude runtimes:** intended for Claude Code's Workflow runtime; non-Claude skill authoring follows the same method with available tools directly.
 
 ---
 
@@ -263,7 +264,7 @@ It runs `git status`, `git diff --stat`, `git diff`, `git log --oneline -n 10`, 
 | `destructive-command-guard.mjs` | `PreToolUse` (`Bash`) | Blocks deterministic destructive commands (`git reset --hard`, forceful `git clean`, `rm -rf`, `Remove-Item -Recurse -Force`). | **Block** |
 | `secret-patterns.mjs` | shared library | Generic secret patterns + scanner used by the scan hooks. No standalone event. | n/a |
 
-All hook scripts are generic (no shell for git — argument arrays), path-normalized, skip-listed, and **fail-open on error** so a hook fault does not break the agent session. Claude Code wires via `${CLAUDE_PLUGIN_ROOT}`; Codex via `${PLUGIN_ROOT}`.
+All hook scripts are generic (no shell for git — argument arrays), path-normalized, skip-listed, and **fail-open on error** so a hook fault does not break the agent session. Claude Code wires via `${CLAUDE_PLUGIN_ROOT}`; Codex via `${PLUGIN_ROOT}`; other runtimes need their own hook wiring or a documented degraded path.
 
 ### Conceptual hooks (judgment-based, enforced by skills/contracts)
 
@@ -364,7 +365,7 @@ Optional: `pre-commit run --all-files`.
 - `validate_artifacts.py` performs **structural** checks; it cannot prove a spec is semantically correct for the requested work (a quick human/semantic topic-match check is recommended at the Spec Review gate).
 - Deterministic tests verify wiring and fixture health, **not** live model obedience.
 - The repo gate accepts additional Claude Code frontmatter keys (`user-invocable`, `argument-hint`) that a stricter external `skill-creator` validator may reject.
-- Codex has no Claude Workflow runtime; `agentic-sdlc-pipeline` uses an embedded adapter for spec/plan phases.
+- Non-Claude runtimes have no Claude Workflow runtime; `agentic-sdlc-pipeline` uses an embedded adapter for spec/plan phases and must leave equivalent transcript evidence or a documented degraded path.
 - `spec-authoring` and `plan-authoring` are standalone prompt routes; the pipeline does **not** invoke them internally.
 
 ---

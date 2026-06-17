@@ -11,7 +11,7 @@ argument-hint: "<file/dir — defaults to current git diff>"
 Systematically audits changes for vulnerabilities and reports findings safely.
 
 ## Orchestration (consult first)
-Per **`dispatch-strategy`**: multiple independent lenses (injection / authz-IDOR / secrets / auth) fan out to a **dynamic-workflow** (parallel lenses) or, for interactive multi-angle review, an **agent-team**. Heavy single-lens analysis can go to the **`security-reviewer`** sub-agent.
+Per **`dispatch-strategy`** and `docs/runtime-adapter.md`: multiple independent lenses (injection / authz-IDOR / secrets / auth) fan out to a dynamic-workflow, agent-team, subagents, or the runtime's parallel equivalent. Heavy single-lens analysis should use a fresh-context `security-reviewer` specialist when available. If the runtime lacks a fresh-context specialist, record `Delegation Degraded: fresh-context specialist unavailable`, perform the pass in the main loop, and mark the result non-independent.
 
 ## Review areas
 1. **Input validation** — all external input validated/sanitized.

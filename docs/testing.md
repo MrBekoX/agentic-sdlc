@@ -65,6 +65,7 @@ python3 -m unittest discover -s tests -v
 python3 scripts/run_behavior_eval.py --eval-set tests/skills/behavior/completion-claim-gate.json --dry-run
 python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --dry-run
 python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-pass.jsonl
+python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-codex-adapter-pass.jsonl
 ```
 
 Optional: `pre-commit run --all-files` (wired in `.pre-commit-config.yaml` to run `check_all.py` + the harness).
@@ -131,7 +132,7 @@ The deterministic layer is driven by checked-in references and fixtures under `t
 | `tests/skills/fixtures/safety.json` | Seven unsafe-instruction scenarios. Each points to `guardrail_evidence`: repo files + substrings that prove the guardrail is wired. | `{ "scenarios": [{ "id", "prompt", "category", "expected_behavior", "guardrail_evidence": [{"file": "...", "contains": "..."}] }] }` |
 | `tests/skills/evals/<skill>.json` | Live trigger eval fixtures shared by the Claude and Codex runners. | `{ "queries": [{ "query": "...", "should_trigger": true\|false }] }` |
 | `tests/skills/behavior/<case>.json` | Behavior eval seeds. Each case gives a prompt and required/forbidden regex patterns. | `{ "cases": [{ "id", "prompt", "required_patterns": [...], "forbidden_patterns": [...] }] }` |
-| `tests/skills/procedure/<case>.json` | Procedure eval seeds (see format below). | `{ "cases": [{ "id", "prompt", "fixture_dir?", "required_skills": [...], "required_workflows": [...], "required_commands": [...], "required_artifacts": [...], "forbidden_commands": [...], "required_patterns": [...], "forbidden_patterns": [...] }] }` |
+| `tests/skills/procedure/<case>.json` | Procedure eval seeds (see format below). | `{ "cases": [{ "id", "prompt", "fixture_dir?", "required_skills": [...], "required_workflows": [...], "required_runtime_adapters": [...], "required_commands": [...], "required_artifacts": [...], "forbidden_commands": [...], "required_patterns": [...], "forbidden_patterns": [...] }] }` |
 | `tests/fixtures/transcripts/*.jsonl` | Sample Claude Code stream-json transcripts for deterministic procedure-eval testing. | One JSON object per line — typically `assistant`, `stream_event`, and `result` events. |
 
 ---
@@ -272,7 +273,7 @@ Behavior evals should move toward **transcript JSONL** checks for evidence such 
 
 ## Procedure evals
 
-`scripts/run_procedure_eval.py` checks more than "did the skill trigger?" It inspects stream-json tool use and optional filesystem artifacts to verify that a workflow used required skills, commands, workflows, and artifacts and did **not** run forbidden commands.
+`scripts/run_procedure_eval.py` checks more than "did the skill trigger?" It inspects stream-json tool use and optional filesystem artifacts to verify that a workflow used required skills, commands, workflows, and artifacts and did **not** run forbidden commands. For non-Claude runtimes, a fixture can also provide runtime-adapter evidence patterns proving equivalent author -> critic -> revise behavior, artifact save, validator execution, and delegate-skill activation.
 
 ### Modes
 
@@ -290,8 +291,9 @@ For each case, the evaluator parses the transcript into a trace and checks:
 
 | Check | Mechanism |
 |---|---|
-| Required skills | A `Skill` tool invocation whose payload contains the expected skill name (aliases such as the unqualified name are accepted). |
-| Required workflows | A `Workflow` tool invocation whose payload contains the expected workflow name. |
+| Required skills | A `Skill` tool invocation whose payload contains the expected skill name, a mapped specialist `Agent`/`Task`, or a `required_runtime_adapters[].satisfies` entry with all adapter patterns present. |
+| Required workflows | A `Workflow` tool invocation whose payload contains the expected workflow name, or a `required_runtime_adapters[].satisfies` entry with all adapter patterns present. |
+| Runtime adapter evidence | Regex patterns in `required_runtime_adapters[].required_patterns` proving the runtime-equivalent path, such as `Workflow unavailable`, `spec-plan-author`, `spec-plan-critic`, `docs/specs/`, `docs/plans/`, and activated delegate-skill instructions. |
 | Required commands | A regex match against the `command` field of any tool invocation recorded in the trace. |
 | Required artifacts | Either a `Write` tool `file_path` matching the pattern, or an existing file glob under the case working directory. |
 | Forbidden commands | A regex match against recorded `command` fields; if any match, the case fails. |
@@ -311,6 +313,14 @@ For each case, the evaluator parses the transcript into a trace and checks:
       "prompt": "user prompt",
       "required_skills": ["agentic-sdlc:agentic-sdlc-pipeline"],
       "required_workflows": ["agentic-sdlc:spec-plan-draft"],
+      "required_runtime_adapters": [
+        {
+          "runtime": "non-claude",
+          "capability": "spec-plan-author-critic",
+          "satisfies": ["workflow:agentic-sdlc:spec-plan-draft"],
+          "required_patterns": ["Workflow unavailable|embedded author/critic adapter", "spec-plan-author", "spec-plan-critic"]
+        }
+      ],
       "required_commands": ["detect_context\\.py", "validate_artifacts\\.py"],
       "required_artifacts": ["docs/specs/", "docs/plans/"],
       "forbidden_commands": ["\\bgit\\s+commit\\b", "\\bgit\\s+push\\b", "\\bgit\\s+merge\\b"],

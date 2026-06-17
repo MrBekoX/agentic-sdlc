@@ -172,6 +172,20 @@ def load_eval(path: Path) -> list[dict[str, Any]]:
             if key.endswith("patterns") or key.endswith("commands"):
                 for value in values:
                     re.compile(value)
+        adapters = case.get("required_runtime_adapters", [])
+        if not isinstance(adapters, list):
+            raise ValueError(f"case {case['id']} invalid required_runtime_adapters")
+        for adapter in adapters:
+            if not isinstance(adapter, dict):
+                raise ValueError(f"case {case['id']} invalid required_runtime_adapters")
+            patterns = adapter.get("required_patterns", [])
+            if not isinstance(patterns, list) or not all(isinstance(v, str) for v in patterns):
+                raise ValueError(f"case {case['id']} invalid required_runtime_adapters.required_patterns")
+            for pattern in patterns:
+                re.compile(pattern)
+            satisfies = adapter.get("satisfies", [])
+            if not isinstance(satisfies, list) or not all(isinstance(v, str) for v in satisfies):
+                raise ValueError(f"case {case['id']} invalid required_runtime_adapters.satisfies")
     return cases
 
 
@@ -220,6 +234,31 @@ def required_skill_satisfied(trace: Trace, expected: str) -> bool:
     return False
 
 
+def runtime_adapter_satisfied(trace: Trace, adapter: dict[str, Any]) -> bool:
+    patterns = adapter.get("required_patterns", [])
+    if not isinstance(patterns, list):
+        return False
+    haystack = trace.haystack()
+    return all(isinstance(pattern, str) and regex_present(pattern, haystack) for pattern in patterns)
+
+
+def runtime_adapter_satisfies(trace: Trace, case: dict[str, Any], kind: str, expected: str) -> bool:
+    adapters = case.get("required_runtime_adapters", [])
+    aliases = [f"{kind}:{alias}" for alias in expected_aliases(expected)]
+    for adapter in adapters:
+        if not isinstance(adapter, dict):
+            continue
+        satisfies = adapter.get("satisfies")
+        if isinstance(satisfies, list):
+            if not any(isinstance(item, str) and item in aliases for item in satisfies):
+                continue
+        elif kind != "workflow":
+            continue
+        if runtime_adapter_satisfied(trace, adapter):
+            return True
+    return False
+
+
 def evaluate_case(case: dict[str, Any], trace: Trace, cwd: Path) -> list[str]:
     errors = []
     haystack = trace.haystack()
@@ -228,10 +267,10 @@ def evaluate_case(case: dict[str, Any], trace: Trace, cwd: Path) -> list[str]:
     if case.get("fail_on_permission_denials", True):
         errors += [f"permission_denied:{denial}" for denial in trace.permission_denials]
     for skill in case.get("required_skills", []):
-        if not required_skill_satisfied(trace, skill):
+        if not required_skill_satisfied(trace, skill) and not runtime_adapter_satisfies(trace, case, "skill", skill):
             errors.append(f"missing_skill:{skill}")
     for workflow in case.get("required_workflows", []):
-        if not tool_invoked(trace, "Workflow", workflow):
+        if not tool_invoked(trace, "Workflow", workflow) and not runtime_adapter_satisfies(trace, case, "workflow", workflow):
             errors.append(f"missing_workflow:{workflow}")
     for command in case.get("required_commands", []):
         if not any(regex_present(command, c) for c in trace.commands):

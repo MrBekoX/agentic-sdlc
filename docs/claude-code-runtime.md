@@ -2,11 +2,11 @@
 
 ## Scope
 
-AGENTIC-SDLC currently targets Claude Code and Codex. Cursor, Kimi, OpenCode, Gemini, Pi, and other harnesses are deferred.
+AGENTIC-SDLC has native packaging for Claude Code and Codex. OpenCode, Kimi Code, and other Agent Skills runtimes are supported through the portable runtime adapter in [`runtime-adapter.md`](./runtime-adapter.md) when they can load standard `SKILL.md` directories and provide equivalent tool evidence or a documented degraded path.
 
 ## Plugin Shape
 
-The expected runtime shape is a local/development Claude Code and Codex plugin. The metadata here does not publish the plugin by itself. No CI workflow is configured for now; publishing requires a separate, explicit manual release process.
+The expected native runtime shape is a local/development Claude Code and Codex plugin. Other Agent Skills runtimes consume the same `skills/` content through the adapter model rather than Claude-specific plugin metadata. The metadata here does not publish the plugin by itself. No CI workflow is configured for now; publishing requires a separate, explicit manual release process.
 
 ```text
 .claude-plugin/plugin.json
@@ -54,21 +54,21 @@ Runtime concepts used by the skills:
 |---|---|
 | Load a skill | Claude Code skill invocation |
 | Dispatch subagent | Agent / Task facility when available |
-| Dynamic workflow | Claude Code Workflow facility when available; in Codex, map to subagent fan-out, parallel local tools, cloud delegation, or a documented degraded main-loop path |
+| Dynamic workflow | Claude Code Workflow facility when available; in Codex/OpenCode/Kimi Code, map to subagent fan-out, parallel local tools, cloud delegation, native agent mechanisms, or a documented degraded main-loop path |
 | Slash command | `commands/*.md` |
 | Plugin hook | `hooks/hooks.json` |
-| Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}` in Claude Code; `${PLUGIN_ROOT}` in Codex |
+| Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}` in Claude Code; `${PLUGIN_ROOT}` in Codex; configured plugin/skill root in OpenCode/Kimi Code |
 
 If a runtime capability is unavailable in the current version/configuration, fall back to the nearest supported mechanism and state the fallback in the final report.
 
 ## Spec/Plan Runtime Split
 
-Claude Code can run `workflows/spec-plan-draft.js` as a JavaScript dynamic workflow. Codex does not use that runtime. Therefore:
+Claude Code can run `workflows/spec-plan-draft.js` as a JavaScript dynamic workflow. Non-Claude Agent Skills runtimes do not use that runtime. Therefore:
 
 - `spec-authoring` and `plan-authoring` remain standalone prompt-level entry skills.
 - `agentic-sdlc-pipeline` must not call `spec-authoring` or `plan-authoring` for its internal steps 4-5.
 - In Claude Code, `agentic-sdlc-pipeline` uses `spec-plan-draft`.
-- In Codex, `agentic-sdlc-pipeline` uses its embedded author/critic adapter: main-loop draft, fresh-context subagent critic when available, revise, save artifact, validate.
+- In Codex, OpenCode, Kimi Code, and similar runtimes, `agentic-sdlc-pipeline` uses its embedded author/critic adapter: main-loop draft, fresh-context critic when available, revise, save artifact, validate.
 
 ## Skill Frontmatter Policy
 

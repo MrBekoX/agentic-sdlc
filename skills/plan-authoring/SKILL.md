@@ -18,11 +18,13 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 - **Contracts:** Apply the runtime-local contract files as the primary behavior contract:
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/contracts/skills/03-plan-mode.md`
   - Codex: `${PLUGIN_ROOT}/contracts/skills/03-plan-mode.md`
+  - OpenCode/Kimi Code: configured plugin or skill root.
   Use `02-spec-driven-development.md` from the same runtime root only as the source-WHAT coverage contract; do not rewrite the spec.
-- **Agents:** `spec-plan-draft` calls `spec-plan-author` to draft and `spec-plan-critic` to audit the plan. If the workflow/agent runtime is unavailable, draft manually in the main loop and explicitly mark the degraded path.
+- **Agents:** Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex, OpenCode, Kimi Code, or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
 - **Validator:** Saved plans use the runtime-local validator with `--mode plan`:
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py`
   - Codex: `${PLUGIN_ROOT}/scripts/validate_artifacts.py`
+  - OpenCode/Kimi Code: `<runtime-root>/scripts/validate_artifacts.py`
 
 ## Route First
 
@@ -34,9 +36,9 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 
 1. Locate the approved spec, ticket, design, or explicit WHAT in the current session or files.
 2. Refuse to invent missing behavior. If the WHAT is absent or contradictory, stop and ask for clarification or route to `spec-authoring`.
-3. Invoke the named workflow `spec-plan-draft` with `mode:"plan"` and the approved WHAT as non-empty context. In Claude Code, use the Workflow tool. In Codex or a degraded runtime, draft manually and state that workflow invocation was unavailable.
+3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex, OpenCode, Kimi Code, or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
 4. If a durable artifact is requested or the work is substantial, save the plan as `docs/plans/<name>.md`.
-5. Validate saved plans with `python "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/plans/<name>.md --spec docs/specs/<name>.md --strict`, resolving `<runtime-root>` as `${CLAUDE_PLUGIN_ROOT}` in Claude Code and `${PLUGIN_ROOT}` in Codex.
+5. Validate saved plans with `python "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/plans/<name>.md --spec docs/specs/<name>.md --strict`, resolving `<runtime-root>` from the active runtime as described in `docs/runtime-adapter.md`.
 6. Present open decisions and stop. Do not implement unless the user asks.
 
 ## Output
