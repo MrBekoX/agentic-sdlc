@@ -1,4 +1,4 @@
-# Rule 01 — Context First
+# Contract 01 — Context First
 
 ## Purpose
 Avoid solving the wrong problem. Understand before you change.

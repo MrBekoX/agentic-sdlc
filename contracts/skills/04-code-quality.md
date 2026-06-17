@@ -1,4 +1,4 @@
-# Rule 04 — Code Quality
+# Contract 04 — Code Quality
 
 ## Purpose
 Keep changes simple, surgical, and consistent with the codebase.

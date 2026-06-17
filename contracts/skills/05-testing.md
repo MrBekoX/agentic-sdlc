@@ -1,4 +1,4 @@
-# Rule 05 — Testing
+# Contract 05 — Testing
 
 ## Purpose
 Tests are the verification loop. They prove behavior and catch regressions.

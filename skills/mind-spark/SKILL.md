@@ -150,7 +150,7 @@ into the spec-driven flow and stop here — do not start implementing and do not
 
 - Inside **`dev-flow`**: the approved intent feeds its Spec phase directly — return control.
 - Standalone: invoke the **`spec-plan-draft`** workflow with `mode=spec` to turn the intent into
-  testable acceptance criteria (rule 02), then its plan phase (`mode=plan`). Record the spec when the
+  testable acceptance criteria (contract 02), then its plan phase (`mode=plan`). Record the spec when the
   work is substantial.
 
 This skill produces intent + an approved design. The spec (the testable WHAT) and the plan (the HOW)

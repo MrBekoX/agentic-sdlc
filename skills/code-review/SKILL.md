@@ -6,7 +6,7 @@ argument-hint: "<file/dir — defaults to current git diff>"
 
 # Skill: code-review
 
-> **Argument:** `/code-review $ARGUMENTS` — a file/dir, or empty for the current `git diff`. Reply in Turkish.
+> **Argument:** `/code-review $ARGUMENTS` — a file/dir, or empty for the current `git diff`. Match the user's language.
 
 Reviews changes for quality. Best run in a **fresh context** (delegate to the **`code-reviewer`** sub-agent) so the review isn't biased toward code it just wrote.
 

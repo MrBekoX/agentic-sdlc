@@ -1,7 +1,7 @@
-"""Deterministic skill/agent/workflow/hook/rule validation harness.
+"""Deterministic skill/agent/workflow/hook/contract validation harness.
 
 Why this exists: the repo had script-level tests (detect_context, validate_artifacts)
-but nothing that machine-checked the SKILL.md / agent / workflow / hook / rule layer —
+but nothing that machine-checked the SKILL.md / agent / workflow / hook / contract layer —
 the part most likely to rot silently (a renamed agent, a broken `references/` link, a
 hooks.json path pointing at a deleted .mjs, a flow skill that stops referencing the
 work-flow it delegates to). This module is the deterministic counterpart: it parses the
@@ -15,7 +15,7 @@ Design constraints (mirroring scripts/check_all.py and scripts/validate_artifact
 What it is NOT: this harness cannot prove a skill *triggers* or that the model *obeys* a
 guardrail at runtime — that needs a live model (see scripts/run_trigger_eval.py and the
 fixtures under fixtures/ + evals/). It proves the static substrate those evals stand on:
-structure is valid, every cross-reference resolves, every guardrail text is actually wired.
+structure is valid, every cross-reference resolves, every contract/guardrail text is actually wired.
 
 Two severities, like check_all.py:
 - error  -> gating (a broken reference that would actually break the flow at runtime).
@@ -33,7 +33,7 @@ AGENTS_DIR = REPO / "agents"
 WORKFLOWS_DIR = REPO / "workflows"
 COMMANDS_DIR = REPO / "commands"
 HOOKS_DIR = REPO / "hooks"
-RULES_DIR = REPO / "rules"
+SKILL_CONTRACTS_DIR = REPO / "contracts" / "skills"
 SCRIPTS_DIR = REPO / "scripts"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
@@ -48,7 +48,7 @@ ALLOWED_SKILL_KEYS = {
 }
 ALLOWED_AGENT_KEYS = {"name", "description", "tools", "model"}
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-PLUGIN_ROOT_REF_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_./-]+)")
+PLUGIN_ROOT_REF_RE = re.compile(r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}/([A-Za-z0-9_./-]+)")
 
 
 # ---------------------------------------------------------------------------
@@ -156,12 +156,12 @@ def script_names():
     return {p.name for p in SCRIPTS_DIR.glob("*.py")}
 
 
-def rule_numbers():
-    """Set of two-digit rule prefixes present, e.g. {'00','01',...,'10'}."""
-    if not RULES_DIR.is_dir():
+def skill_contract_numbers():
+    """Set of two-digit skill contract prefixes present, e.g. {'00','01',...,'10'}."""
+    if not SKILL_CONTRACTS_DIR.is_dir():
         return set()
     out = set()
-    for p in RULES_DIR.glob("*.md"):
+    for p in SKILL_CONTRACTS_DIR.glob("*.md"):
         m = re.match(r"^(\d{2})-", p.name)
         if m:
             out.add(m.group(1))
@@ -293,7 +293,7 @@ def validate_plugin_root_refs():
     dangling one breaks the flow silently at runtime. (errors, warnings)
     """
     errors, warnings = [], []
-    sources = list(SKILLS_DIR.rglob("*.md")) + [HOOKS_DIR / "hooks.json"]
+    sources = list(SKILLS_DIR.rglob("*.md")) + [HOOKS_DIR / "hooks.json", HOOKS_DIR / "hooks-codex.json"]
     for src in sources:
         if not src.exists():
             continue
@@ -304,28 +304,35 @@ def validate_plugin_root_refs():
     return errors, warnings
 
 
+def _json_strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _json_strings(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _json_strings(item)
+
+
 def validate_hooks_json():
-    """hooks.json must be valid JSON and every referenced script must exist. (errors, warnings)."""
+    """Hook JSON files must be valid JSON and every referenced plugin-root path must exist. (errors, warnings)."""
     errors, warnings = [], []
-    hj = HOOKS_DIR / "hooks.json"
-    if not hj.exists():
-        errors.append("hooks_json_missing")
-        return errors, warnings
-    try:
-        data = json.loads(hj.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, ValueError) as e:
-        errors.append(f"hooks_json_invalid:{type(e).__name__}")
-        return errors, warnings
-    # Walk every hook entry's args for ${CLAUDE_PLUGIN_ROOT}/... script paths.
-    refs = []
-    for _event, groups in data.get("hooks", {}).items():
-        for group in groups:
-            for hook in group.get("hooks", []):
-                for arg in hook.get("args", []):
-                    refs += PLUGIN_ROOT_REF_RE.findall(str(arg))
-    for rel in refs:
-        if not (REPO / rel).exists():
-            errors.append(f"hook_script_missing:{rel}")
+    for hj in (HOOKS_DIR / "hooks.json", HOOKS_DIR / "hooks-codex.json"):
+        if not hj.exists():
+            errors.append(f"hooks_json_missing:{hj.name}")
+            continue
+        try:
+            data = json.loads(hj.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError) as e:
+            errors.append(f"hooks_json_invalid:{hj.name}:{type(e).__name__}")
+            continue
+        refs = []
+        for text in _json_strings(data):
+            refs += PLUGIN_ROOT_REF_RE.findall(text)
+        for rel in refs:
+            if not (REPO / rel).exists():
+                errors.append(f"hook_script_missing:{hj.name}:{rel}")
     return errors, warnings
 
 
@@ -382,7 +389,7 @@ def load_trigger_evalset(skill):
 def validate_safety_guardrails():
     """Each safety scenario's guardrail evidence must actually exist in the repo. (errors, warnings).
 
-    This proves the guardrail is WIRED (the rule/skill/hook text is present), not that the
+    This proves the guardrail is WIRED (the contract/skill/hook text is present), not that the
     model will obey it at runtime — that is a live behavioral eval.
     """
     errors, warnings = [], []
@@ -468,7 +475,7 @@ def run_all():
         "skills_checked": len(skills),
         "agents_checked": len(reg["agent"]),
         "workflows_checked": len(reg["workflow"]),
-        "rules_checked": len(rule_numbers()),
+        "skill_contracts_checked": len(skill_contract_numbers()),
     }
     return errors, warnings, metrics
 

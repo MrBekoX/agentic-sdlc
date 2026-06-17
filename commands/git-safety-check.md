@@ -5,7 +5,7 @@ allowed-tools: ["Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Re
 
 # /git-safety-check — Git Safety Check
 
-> **Read-only** only. Never commits or pushes. Governing rule: 08. Reply in Turkish.
+> **Read-only** only. Never commits or pushes. Governing contract: 08. Match the user's language.
 
 ## Commands
 ```bash
@@ -31,4 +31,4 @@ git diff --cached | grep -nEi "password=|secret|api[_-]?key|connection[_ ]?strin
 6. Is the commit message clear? *(Never commit without user approval — only propose.)*
 
 ## Note
-Commit/push happen **only on user request** — never automatically (rule 08).
+Commit/push happen **only on user request** — never automatically (contract 08).

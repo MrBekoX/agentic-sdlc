@@ -33,7 +33,7 @@ const forcePush = /\bpush\b[\s\S]*(--force\b|--force-with-lease\b|-f\b)/.test(cm
 
 if (branch && PROTECTED.test(branch)) {
   const msg =
-    `Protected branch '${branch}': commit/push directly to ${branch} is risky (rule 08 — git-safety). ` +
+    `Protected branch '${branch}': commit/push directly to ${branch} is risky (contract 08 — git-safety). ` +
     `Prefer a feature branch and a reviewed PR.` + (forcePush ? ' FORCE-PUSH detected — extra caution.' : '');
   if (BLOCK) {
     process.stdout.write(JSON.stringify({

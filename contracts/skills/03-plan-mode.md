@@ -1,4 +1,4 @@
-# Rule 03 — Plan Before Code
+# Contract 03 — Plan Before Code
 
 ## Purpose
 Separate planning from implementation so you don't build the wrong thing. The plan is the **HOW**.

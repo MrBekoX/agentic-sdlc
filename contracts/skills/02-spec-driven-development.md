@@ -1,4 +1,4 @@
-# Rule 02 — Spec-Driven Development
+# Contract 02 — Spec-Driven Development
 
 ## Purpose
 A spec turns a vague request into testable, agreed-upon criteria before code is written.
@@ -19,7 +19,7 @@ For deeper specs, the `spec-plan-author` → `spec-plan-critic` loop (workflow `
 
 ## Forbidden
 - Large implementation without a spec.
-- Leaking the **HOW** (files/tasks/code) into the spec — that belongs in the plan (rule 03).
+- Leaking the **HOW** (files/tasks/code) into the spec — that belongs in the plan (contract 03).
 - Unfalsifiable acceptance criteria.
 
 ## Checklist

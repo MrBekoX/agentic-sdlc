@@ -19,8 +19,8 @@ between *finishing the edit* and *finishing the work*. The edit feels like the e
 fires before anything confirms it. The fix is a small reflex: when you are about to assert
 success, treat that impulse as the trigger to run the proof first.
 
-This complements the lab's evidence rules rather than restating them. Rule 00 ("show real
-evidence before claiming success") and rule 05 (TDD: see RED, then GREEN, show the output) define
+This complements the lab's evidence contracts rather than restating them. Contract 00 ("show real
+evidence before claiming success") and contract 05 (TDD: see RED, then GREEN, show the output) define
 *what counts as evidence* for code and tests. `implementasyon-control` audits the *whole flow*
 once, at the very end. This skill is the per-claim, same-turn micro-gate in front of every
 individual "done/passing/works" — including mid-flow claims, claims about a subagent's report,
@@ -106,7 +106,7 @@ without your change. To show the fix is real:
 3. For certainty the test guards the fix: revert the fix, confirm the test fails again, restore
    the fix, confirm it passes. Then the test is a genuine regression guard, not a passenger.
 
-(This is rule 05's RED→GREEN applied to *proving a fix*; lean on that rule for the general TDD
+(This is contract 05's RED→GREEN applied to *proving a fix*; lean on that contract for the general TDD
 loop.)
 
 ## Rationalizations — and why they don't hold
@@ -124,7 +124,7 @@ Each is the moment to run the gate, not skip it.
 
 ## Reply-language note
 
-User-facing communication is in Turkish, concise and direct. Keep formal artifact headings (e.g.
+Match the user's language unless they request otherwise. Keep formal artifact headings (e.g.
 "Implementation Control Report") in English. The evidence itself — commands and output — is shown
 verbatim regardless of language.
 

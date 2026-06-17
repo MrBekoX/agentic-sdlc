@@ -1,4 +1,4 @@
-# Rule 09 — Documentation
+# Contract 09 — Documentation
 
 ## Purpose
 Keep just enough documentation accurate and useful — no more.

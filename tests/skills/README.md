@@ -1,4 +1,4 @@
-# Skill / agent / workflow / hook / rule test harness
+# Skill / agent / workflow / hook / contract test harness
 
 Deterministic, stdlib-only validation for the *artifact wiring* layer (the part the
 script tests under `tests/test_detect_context.py` / `tests/test_validate_artifacts.py` do
@@ -11,7 +11,7 @@ not cover). It checks structure and cross-references — **not** runtime model b
 | Structure (A) | frontmatter valid, name == dir, allowed keys, description present | — |
 | Trigger (B) | eval-set well-formedness, target skill exists, pos+neg present | whether a skill actually triggers → `run_trigger_eval.py` |
 | Procedure (C) | core flow skills reference their steps/work-flows (via golden) | step *ordering at runtime* |
-| Safety (D) | each scenario's guardrail text is **wired** in a rule/skill/hook | whether the model *obeys* the guardrail |
+| Safety (D) | each scenario's guardrail text is **wired** in a contract/skill/hook | whether the model *obeys* the guardrail |
 | Tool-use (E) | hook `.mjs` + workflow `.js` parse (`node --check`) | runtime tool decisions |
 | Integration (F) | every cross-reference + `${CLAUDE_PLUGIN_ROOT}` path resolves | — |
 | Regression (G) | golden baseline: name + description keywords + must_reference | — |
@@ -71,4 +71,4 @@ unauthenticated, treat the result as **skipped/blocked**, not passed.
   fails until you do) and, if collision-prone, an `evals/<skill>.json`.
 - New cross-reference contract → add it to that skill's `must_reference`.
 - New safety guardrail → add a scenario to `fixtures/safety.json` with `guardrail_evidence`
-  pointing at the real rule/skill/hook text that wires it.
+  pointing at the real contract/skill/hook text that wires it.

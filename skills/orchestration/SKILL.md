@@ -25,7 +25,7 @@ user-invocable: true
 
 > **Context-bloat heuristic (always apply):** if a task will produce many intermediate tool-calls/reads/builds you won't need later → **delegate** (sub-agent or workflow). Don't do it serially in the main loop.
 
-## Mandatory gates (rules)
+## Mandatory gates (contracts)
 - **Delegation required:** an **independent** piece whose intermediate work you don't need to keep (exploration, reference analysis, N-file fixed-pattern generation, multi-file verification) → **sub-agent**. Doing it serially in the main loop is forbidden.
 - **Fan-out required:** ≈3+ similar **verification/research** items → **dynamic-workflow** (don't do them one-by-one inline).
 - **All three can write code:** sub-agent, workflow (worktree-isolated parallel), and agent-team all write code. Choose by the **shape of the work**, not by authority. Use worktree isolation to avoid collisions in parallel writes.

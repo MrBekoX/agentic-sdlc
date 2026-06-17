@@ -1,4 +1,4 @@
-# Rule 08 — Git Safety
+# Contract 08 — Git Safety
 
 ## Purpose
 Prevent accidental, destructive, or secret-leaking git operations.

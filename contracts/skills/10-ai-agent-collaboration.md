@@ -1,4 +1,4 @@
-# Rule 10 — AI Agent Collaboration
+# Contract 10 — AI Agent Collaboration
 
 ## Purpose
 Use delegation and orchestration so the main context stays clean and work parallelizes.

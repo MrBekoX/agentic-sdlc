@@ -6,7 +6,7 @@ argument-hint: "<bug description or issue id>"
 
 # Skill: fix-flow
 
-> **Argument:** `/fix-flow $ARGUMENTS` — if `$ARGUMENTS` is given, that is the target bug/issue; otherwise ask the user what the problem is. Reply in Turkish.
+> **Argument:** `/fix-flow $ARGUMENTS` — if `$ARGUMENTS` is given, that is the target bug/issue; otherwise ask the user what the problem is. Match the user's language.
 
 The primary fix workflow. Resolves a problem at its **root cause**, with the smallest change, verified by tests and a double security pass, and audited before the final answer. It is a **gated, looped** flow — don't skip steps; a red gate means go back, not forward.
 
@@ -21,18 +21,18 @@ State: what is the bug; expected behavior; actual behavior; how to reproduce; af
 ### 2. Context Gathering
 Read the relevant code, tests, logs, and config. Check for prior patches/refactors in the area. (If heavy/independent → delegate to a **sub-agent**; intermediate reads stay in its context.)
 
-### 3. Spec (the WHAT — code-independent) — rule 02
+### 3. Spec (the WHAT — code-independent) — contract 02
 Problem definition · acceptance criteria (each testable) · edge cases · definition of done · **must-not-change behaviors**. For deep specs use `spec-plan-author` → `spec-plan-critic` (workflow `spec-plan-draft`).
 **Gate:** spec exists and criteria are testable.
 
-### 4. Plan (the HOW) — rule 03
+### 4. Plan (the HOW) — contract 03
 Break into small single-purpose tasks; each maps to acceptance criteria, each is testable; name files + TDD points; flag risky steps; request approval if the fix is large/architectural.
 **Gate:** every acceptance criterion has a task.
 
 ### 5. Goal lock — built-in `/goal`
 Run the built-in **`/goal`** with a measurable end-state (e.g. *"the failing test in X passes, full suite green, no other behavior changed"*). This locks scope and keeps a fresh evaluator checking the condition each turn, preventing scope creep. (If `/goal` is unavailable, do it manually: restate the goal, lock scope, re-confirm acceptance criteria, list non-goals.) Use the **Goal Lock** template below.
 
-### 6. TDD / Regression test (RED) — rule 05
+### 6. TDD / Regression test (RED) — contract 05
 Write a failing test that reproduces the bug. **Confirm it actually fails** (show output) before writing any fix.
 
 ### 7. Implementation (GREEN)
@@ -42,11 +42,11 @@ Minimal code to pass the test. Only files in plan scope. No unrelated refactor, 
 Run the targeted test, then the full suite where feasible. **Show real output.**
 **Loop A — test fail:** analyze → fix → retest. Manage with built-in **`/loop`** (or manually) using the **Loop Iteration** template. Don't proceed while red.
 
-### 9. Security Analysis (#1) — rule 06
+### 9. Security Analysis (#1) — contract 06
 Review the diff: input validation, auth/authorization (incl. IDOR), secret leakage, injection, race conditions, data-loss risk, permission issues, dependency risk. Mask any secret (`***MASKED***`).
 **Loop B — finding:** fix → re-run security analysis → re-run tests.
 
-### 10. Refactor — rule 07
+### 10. Refactor — contract 07
 Only necessary cleanup; behavior unchanged; improve readability, reduce duplication/complexity.
 
 ### 11. Retest
@@ -92,4 +92,4 @@ Report: what was fixed · which files changed · which tests ran (with result) �
 
 ## Limits
 - One bug = one change set. No scope expansion; a new finding becomes a new task.
-- Commit/push/merge only on user request (rule 08). Security findings: mask, never print real values.
+- Commit/push/merge only on user request (contract 08). Security findings: mask, never print real values.

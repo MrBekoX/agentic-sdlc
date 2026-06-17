@@ -1,4 +1,4 @@
-# Rule 07 — Refactoring
+# Contract 07 — Refactoring
 
 ## Purpose
 Improve structure without changing behavior — safely and reversibly.
@@ -16,7 +16,7 @@ When code needs restructuring for readability/maintainability, or during step 9 
 - Refactoring without a passing test safety net.
 - Mixing behavior changes into a refactor commit.
 - Large architectural changes without approval.
-- "Drive-by" refactors bundled into an unrelated task (rule 04).
+- "Drive-by" refactors bundled into an unrelated task (contract 04).
 
 ## Checklist
 - [ ] Tests green before refactor.

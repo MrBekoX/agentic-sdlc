@@ -6,7 +6,7 @@ argument-hint: "<what was implemented — optional>"
 
 # Skill: implementasyon-control
 
-> **Argument:** `/implementasyon-control $ARGUMENTS`. Reply in Turkish; keep the report headings in English. This skill **audits**, it does not implement.
+> **Argument:** `/implementasyon-control $ARGUMENTS`. Match the user's language; keep the report headings in English. This skill **audits**, it does not implement.
 
 Runs before the final response of any implementation flow to confirm the work was done properly — not just that code exists. For a thorough audit it delegates to the **`implementation-auditor`** agent (fresh context, sees the diff and the spec/plan, not the reasoning that produced them).
 

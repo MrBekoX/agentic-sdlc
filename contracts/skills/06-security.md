@@ -1,4 +1,4 @@
-# Rule 06 — Security
+# Contract 06 — Security
 
 ## Purpose
 Catch vulnerabilities and secret leaks before they ship. No final answer without a security pass.
@@ -16,7 +16,7 @@ Review the changed diff for:
 - Logging hygiene (no secrets/PII in logs); error handling that doesn't leak internals.
 - Rate limiting on auth-sensitive endpoints; permission boundaries.
 
-Secret reporting rule: **never print a real secret value.** Mask it (`***MASKED***`) and report only `file:line` + risk type. Classify findings by severity.
+Secret reporting requirement: **never print a real secret value.** Mask it (`***MASKED***`) and report only `file:line` + risk type. Classify findings by severity.
 
 ## Forbidden
 - Finalizing without a security analysis.

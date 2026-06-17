@@ -6,7 +6,7 @@ argument-hint: "<target module/area>"
 
 # Skill: refactor-flow
 
-> **Argument:** `/refactor-flow $ARGUMENTS`. Reply in Turkish. Governing rule: 07.
+> **Argument:** `/refactor-flow $ARGUMENTS`. Match the user's language. Governing contract: 07.
 
 Improves structure while **preserving behavior**.
 
@@ -19,7 +19,7 @@ Per **`orchestration`**: large multi-file refactors fan out to a **dynamic-workf
 3. **Approval gate** — for large/architectural refactors, get user approval before starting.
 4. **Small steps** — one structural change at a time (extract, rename, dedupe, simplify). After **each** step run the relevant tests and **show output**. Loop fail→fix→retest with `/loop`.
 5. **No behavior change** — if a "refactor" alters behavior, stop: that is a feature/fix, not a refactor.
-6. **Security re-check** (rule 06) if the refactor touches auth/config/data paths.
+6. **Security re-check** (contract 06) if the refactor touches auth/config/data paths.
 7. **Implementation control** — run **`implementasyon-control`** before finalizing.
 
 ## Final Response

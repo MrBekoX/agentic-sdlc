@@ -6,7 +6,7 @@ argument-hint: "<area or test target>"
 
 # Skill: test-flow
 
-> **Argument:** `/test-flow $ARGUMENTS`. Reply in Turkish. Governing rule: 05.
+> **Argument:** `/test-flow $ARGUMENTS`. Match the user's language. Governing contract: 05.
 
 Designs and writes meaningful tests, or repairs broken ones.
 

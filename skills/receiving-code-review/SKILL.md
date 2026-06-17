@@ -49,7 +49,7 @@ reasoning (see "Evaluate-only" below).
      checks: simplicity, duplication, overengineering, architecture consistency). A suggestion
      idiomatic in another stack, or right for a library but wrong for this app, fails here.
    - **Spec/scope:** a suggestion can be correct yet land outside the agreed spec or
-     contradict a must-not-change behavior (rule 02/03 scope-lock). Sound-but-out-of-scope
+     contradict a must-not-change behavior (contracts 02/03 scope-lock). Sound-but-out-of-scope
      feedback becomes a new-task / raise-with-author item, not a silent diff expansion. The
      same applies when two accepted items conflict — surface the conflict rather than guessing.
 5. **RESPOND** — Acknowledge technically, or push back with a reason. State *what* you plan to
@@ -65,7 +65,7 @@ reasoning (see "Evaluate-only" below).
 Sometimes the user wants a judgment, not an implementation: "is this review feedback sound?",
 "is the reviewer right here?". Run READ → EVALUATE, then stop and report the verdict and the
 reasoning. Don't roll into RESPOND-as-commitment or IMPLEMENT — applying an edit the user
-didn't request is scope creep (rule 04). If the verdict is "sound and worth doing", say so and
+didn't request is scope creep (contract 04). If the verdict is "sound and worth doing", say so and
 let them decide whether to apply it.
 
 ## When you can't ask
@@ -114,7 +114,7 @@ all cases", "add proper error handling everywhere" — are the highest-risk clas
 agreeing feels responsible while the result is overengineering the codebase didn't ask for.
 Before implementing one, find the *concrete present need*: grep for the actual callers, the
 real inputs, the failure that's actually reachable. No reachable failure, no second caller,
-no real requirement → say so and skip it. This is rule 04 (code quality) and the
+no real requirement → say so and skip it. This is contract 04 (code quality) and the
 overengineering lens of `code-review` applied to *incoming* suggestions.
 
 **Example**

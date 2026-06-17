@@ -6,7 +6,7 @@ argument-hint: "<file/dir — defaults to current git diff>"
 
 # Skill: security-review
 
-> **Argument:** `/security-review $ARGUMENTS` — a file/dir to scan, or empty for the current `git diff`. Reply in Turkish. Governing rule: 06.
+> **Argument:** `/security-review $ARGUMENTS` — a file/dir to scan, or empty for the current `git diff`. Match the user's language. Governing contract: 06.
 
 Systematically audits changes for vulnerabilities and reports findings safely.
 

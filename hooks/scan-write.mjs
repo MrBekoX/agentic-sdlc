@@ -33,7 +33,7 @@ const findings = scanLines(text, BROAD);
 if (findings.length) {
   const labels = [...new Set(findings.map((f) => f.label))].join(', ');
   process.stdout.write(JSON.stringify({
-    systemMessage: `⚠️ secret scan: possible secret written → ${file} (${labels}). Mask the value / move it to env (rule 06 — security).`,
+    systemMessage: `⚠️ secret scan: possible secret written → ${file} (${labels}). Mask the value / move it to env (contract 06 — security).`,
   }));
 }
 
