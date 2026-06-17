@@ -200,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--model", default="gpt-5.4-mini")
     parser.add_argument("--reasoning-effort", default="low")
-    parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument("--runs", type=int, default=3, help="Runs per query for majority voting (rate = matches/runs vs --threshold). Default 3 so run-to-run flakiness is measured, not masked; --smoke forces 1.")
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--query-limit", type=int, default=0)

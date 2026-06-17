@@ -1,9 +1,9 @@
 {
-  "_comment": "Live trigger eval-set for security-audit. Positives = explicit single-skill activation smoke for security audit; negatives = general quality review, bug fix, or feature work.",
+  "_comment": "Live trigger eval-set for security-audit. Positives = natural-language security audit requests; negatives = general quality review, bug fix, or feature work.",
   "queries": [
-    {"query": "Call the Skill tool for agentic-sdlc:security-audit: GET /users/:id endpoint'ini auth ve IDOR acisindan denetle.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:security-audit to audit this diff for secret leaks and SQL injection before merge.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:security-audit: yeni eklenen password login akisinda guvenlik acigi var mi incele.", "should_trigger": true},
+    {"query": "GET /users/:id endpoint'ini auth ve IDOR acisindan denetle.", "should_trigger": true},
+    {"query": "Audit this diff for secret leaks and SQL injection before merge.", "should_trigger": true},
+    {"query": "Yeni eklenen password login akisinda guvenlik acigi var mi incele.", "should_trigger": true},
     {"query": "Bu kodu okunabilirlik ve isimlendirme acisindan gozden gecir.", "should_trigger": false},
     {"query": "Login bug'ini duzelt.", "should_trigger": false},
     {"query": "Yeni bir ayarlar sayfasi ekle.", "should_trigger": false}

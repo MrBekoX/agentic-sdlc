@@ -203,6 +203,17 @@ python3 scripts/run_all_trigger_evals.py --runtime both   --smoke          # bot
 python3 scripts/run_all_trigger_evals.py --runtime both --skill spec-authoring --smoke  # single skill
 ```
 
+#### Runs and majority voting
+
+`--runs` defaults to **3**: each query is sampled three times and `rate = matches / runs` is compared to `--threshold` (0.5), so a positive needs ≥2/3 and a negative needs ≤1/3. This is deliberate — trigger selection is **nondeterministic**, and a single sample (`--runs 1`) reports a noisy 0/1 that hides run-to-run flakiness. Use `--runs 1` (or `--smoke`, which forces 1) only for cheap probes, not for evidence you intend to publish.
+
+#### Reading the matrix honestly (single-run vs best-of-N)
+
+The matrix continues after failures so one invocation returns the **full** picture — read `matrix_passed=N/16` and the per-query `rate` lines, not just the final `trigger_matrix=` flag. Two anti-patterns to avoid when summarizing results:
+
+- **Best-of-N / "run until green".** Re-running only the failing skills and then stitching each skill's best-passing round into one "16/16" summary is **selection bias**: with single-sample queries and enough reruns it converges to all-green even on a noisy classifier. If you assemble a summary across reruns, state that it is a composite and from which rounds, and also report the **single-run** matrix result.
+- **Cross-runtime comparison.** Claude and Codex numbers are **not** on the same scale. The Claude runner measures real `Skill`/`Read` tool activation in a live session; the Codex runner is a route-classifier proxy (Codex exposes no comparable Skill-tool event). Compare each runtime against itself over time, not against the other.
+
 ### Trigger fixture format
 
 ```json
@@ -405,6 +416,7 @@ Live evals spend real tokens and time. Apply these controls:
 | `permission_denied` in procedure eval | A safe-looking command was denied by the runtime. | The eval treats denials as failures for executed procedure steps. Check whether `--permission-mode auto` is appropriate or whether the command needs broader permissions. |
 | `node not available` | `node` is not on PATH. | Install Node.js to enable `test_static_node.py`; the test skips rather than passes. |
 | `claude=missing` | The `claude` CLI is not installed or not on PATH. | Install/authenticate Claude Code to run live evals; deterministic checks still pass. |
+| Codex transcripts contain `WARN codex_core_plugins`/`codex_core_skills` lines (`defaultPrompt[0] must be at most 128 characters`, `icon path with '..'`) | `codex exec` loads **all** plugins installed in your user environment; these warnings come from **other** plugins (e.g. `ngs-analysis`, `chatgpt-apps`), not this repo — its `.codex-plugin/plugin.json` uses short `defaultPrompt` strings and declares no icon paths. | Harmless noise; ignore for trigger-eval results. The Codex route classifier passes skill names+descriptions inline in the prompt, so it does not depend on this repo's plugin actually loading. |
 
 ---
 

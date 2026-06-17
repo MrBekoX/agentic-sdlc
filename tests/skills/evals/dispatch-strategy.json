@@ -1,9 +1,9 @@
 {
-  "_comment": "Live trigger eval-set for dispatch-strategy. Positives = decide execution mode across main loop/subagent/workflow/team; negatives = already-specific skill requests.",
+  "_comment": "Live trigger eval-set for dispatch-strategy. Positives = natural-language requests to decide execution mode across main loop/subagent/workflow/team; negatives = already-specific skill requests.",
   "queries": [
-    {"query": "Call the Skill tool for agentic-sdlc:dispatch-strategy: tum skill trigger eval batch isini main loop mu sub-agent mi workflow mu ile yapmaliyiz karar ver.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:dispatch-strategy: uc bagimsiz modul ayni anda incelenecek; nasil orkestre edecegimizi sec.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:dispatch-strategy to choose whether the 16-skill trigger matrix should run as a single session, subagents, or a dynamic workflow.", "should_trigger": true},
+    {"query": "Tum skill trigger eval batch isini main loop'ta mi, sub-agent'la mi, yoksa workflow ile mi calistirmaliyiz karar ver.", "should_trigger": true},
+    {"query": "Uc bagimsiz modul ayni anda incelenecek; bu isi nasil orkestre edecegimizi sec.", "should_trigger": true},
+    {"query": "Decide whether the 16-skill trigger matrix should run as a single session, subagents, or a dynamic workflow.", "should_trigger": true},
     {"query": "Yeni endpoint'i feature-build ile gelistir.", "should_trigger": false},
     {"query": "Bu bug icin root-cause-fix baslat.", "should_trigger": false},
     {"query": "Sadece bu dosyanin code review'unu yap.", "should_trigger": false}

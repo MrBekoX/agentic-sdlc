@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evals-dir", type=Path, default=EVALS_DIR)
     parser.add_argument("--transcript-dir", type=Path, default=REPO / "tests" / "artifacts" / "trigger-matrix")
     parser.add_argument("--skill", help="Run only one skill by name.")
-    parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument("--runs", type=int, default=3, help="Runs per query for majority voting (rate = matches/runs vs --threshold). Default 3 so run-to-run flakiness is measured, not masked; --smoke forces 1.")
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--timeout", type=int, default=90)
     parser.add_argument("--query-limit", type=int, default=0)

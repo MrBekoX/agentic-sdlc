@@ -1,9 +1,9 @@
 {
-  "_comment": "Live trigger eval-set for feature-build. Positives = explicit single-skill activation smoke for focused new feature work; negatives = bug/test/refactor near-misses.",
+  "_comment": "Live trigger eval-set for feature-build. Positives = natural-language focused new-feature requests (no full SDLC envelope); negatives = bug/test/refactor near-misses.",
   "queries": [
-    {"query": "Call the Skill tool for agentic-sdlc:feature-build: kullanicilar icin yeni bir export-to-CSV endpoint'i ekle.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:feature-build: yeni password-reset flow ozelligini ekle.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:feature-build: profil sayfasina yeni bir avatar yukleme ozelligi ekle.", "should_trigger": true},
+    {"query": "Kullanicilar icin yeni bir export-to-CSV endpoint'i ekle.", "should_trigger": true},
+    {"query": "Yeni password-reset flow ozelligini ekle.", "should_trigger": true},
+    {"query": "Profil sayfasina yeni bir avatar yukleme ozelligi ekle.", "should_trigger": true},
     {"query": "Var olan login bug'ini duzelt.", "should_trigger": false},
     {"query": "Sadece eksik testleri yaz, davranis degismesin.", "should_trigger": false},
     {"query": "Bu modulu okunabilirlik icin refactor et.", "should_trigger": false}

@@ -1,9 +1,9 @@
 {
-  "_comment": "Live trigger eval-set for root-cause-fix. Positives = explicit single-skill activation smoke for bug/root-cause fixes; negatives = feature/refactor/review-feedback near misses.",
+  "_comment": "Live trigger eval-set for root-cause-fix. Positives = natural-language bug/root-cause fix requests; negatives = feature/refactor/review-feedback near misses.",
   "queries": [
-    {"query": "Call the Skill tool for agentic-sdlc:root-cause-fix: login sayfasinda null reference hatasi aliyorum, root cause bulup duzelt.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:root-cause-fix: production'da odeme webhook'u bazen cift kayit atiyor; kok nedeni bul ve fix'le.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:root-cause-fix to find and fix the expired-token failing test bug.", "should_trigger": true},
+    {"query": "Login sayfasinda null reference hatasi aliyorum; root cause'u bulup duzelt.", "should_trigger": true},
+    {"query": "Production'da odeme webhook'u bazen cift kayit atiyor; kok nedeni bul ve duzelt.", "should_trigger": true},
+    {"query": "Find and fix the expired-token failing test bug at its root cause.", "should_trigger": true},
     {"query": "Sifirdan bir bildirim ayarlari ekrani ekle.", "should_trigger": false},
     {"query": "order.py modulunu okunabilirlik icin yeniden yapilandir, davranis degismesin.", "should_trigger": false},
     {"query": "Bu PR yorumlarini uygula.", "should_trigger": false}

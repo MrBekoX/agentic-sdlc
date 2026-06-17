@@ -1,9 +1,9 @@
 {
-  "_comment": "Live trigger eval-set for mind-spark. Positives = explicit single-skill activation smoke for ambiguous design/pre-spec exploration; negatives = clear bug/test/review work.",
+  "_comment": "Live trigger eval-set for mind-spark. Positives = natural-language ambiguous design/pre-spec exploration; negatives = clear bug/test/review work.",
   "queries": [
-    {"query": "Call the Skill tool for agentic-sdlc:mind-spark: musteriler icin daha iyi bir dashboard yapalim ama nasil olmali emin degilim.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:mind-spark: yeni bir agentic workflow tasarlamak istiyorum, once secenekleri birlikte netlestirelim.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:mind-spark: let's design a new developer tool experience before writing the spec.", "should_trigger": true},
+    {"query": "Musteriler icin daha iyi bir dashboard yapalim ama nasil olmali emin degilim.", "should_trigger": true},
+    {"query": "Yeni bir agentic workflow tasarlamak istiyorum; once secenekleri birlikte netlestirelim.", "should_trigger": true},
+    {"query": "Let's design a new developer tool experience before writing the spec.", "should_trigger": true},
     {"query": "Login null reference bug'ini root cause ile duzelt.", "should_trigger": false},
     {"query": "Bu diff'i security review et.", "should_trigger": false},
     {"query": "Sadece mevcut testleri calistir ve sonucu raporla.", "should_trigger": false}

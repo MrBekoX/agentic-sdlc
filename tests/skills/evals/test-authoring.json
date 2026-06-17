@@ -1,9 +1,9 @@
 {
-  "_comment": "Live trigger eval-set for test-authoring. Positives = test writing/fixing with meaningful assertions; negatives = feature/fix/refactor ownership.",
+  "_comment": "Live trigger eval-set for test-authoring. Positives = natural-language test writing/fixing with meaningful assertions; negatives = feature/fix/refactor ownership.",
   "queries": [
-    {"query": "Call the Skill tool for agentic-sdlc:test-authoring: bu servis icin eksik unit ve regression testlerini yaz.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:test-authoring: flaky e2e testini anlamli assertionlarla duzelt.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:test-authoring to add integration tests for POST /api/export without changing production behavior.", "should_trigger": true},
+    {"query": "Bu servis icin eksik unit ve regression testlerini yaz.", "should_trigger": true},
+    {"query": "Flaky e2e testini anlamli assertionlarla duzelt.", "should_trigger": true},
+    {"query": "Add integration tests for POST /api/export without changing production behavior.", "should_trigger": true},
     {"query": "Yeni bir kullanici ayarlari ozelligi ekle.", "should_trigger": false},
     {"query": "Production bug'inin root cause'unu bul ve duzelt.", "should_trigger": false},
     {"query": "Bu modulu behavior-preserving refactor et.", "should_trigger": false}

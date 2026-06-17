@@ -1,9 +1,9 @@
 {
-  "_comment": "Live trigger eval-set for implementasyon-control. Positives = pre-final audit that required implementation flow was followed; negatives = starting implementation or review feedback.",
+  "_comment": "Live trigger eval-set for implementasyon-control. Positives = natural-language pre-final audit that the required implementation flow was followed; negatives = starting implementation or review feedback.",
   "queries": [
-    {"query": "Call the Skill tool for agentic-sdlc:implementasyon-control: this branch implementation flow icin spec, plan, TDD, security ve test kaniti gercekten var mi kontrol et.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:implementasyon-control and verify the implementation followed the required flow.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:implementasyon-control: completion claim oncesi required workflow actually followed mi audit et.", "should_trigger": true},
+    {"query": "Bu branch'in implementation flow'u icin spec, plan, TDD, security ve test kaniti gercekten var mi kontrol et.", "should_trigger": true},
+    {"query": "Verify the implementation actually followed the required spec/plan/TDD/security flow before the final answer.", "should_trigger": true},
+    {"query": "Completion claim oncesi required workflow gercekten takip edilmis mi audit et.", "should_trigger": true},
     {"query": "Yeni bir feature icin ilk spec'i yaz.", "should_trigger": false},
     {"query": "Bu PR yorumunu uygula.", "should_trigger": false},
     {"query": "Sadece guvenlik aciklarini listele.", "should_trigger": false}
