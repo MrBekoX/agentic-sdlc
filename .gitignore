@@ -10,6 +10,11 @@ venv/
 # Node
 node_modules/
 
+# Test artifacts / generated eval outputs — never the tracked fixtures/evals/source.
+# Live trigger/procedure/behavior eval runs write here (matrices, transcripts, reruns).
+tests/artifacts/
+tests/**/__pycache__/
+
 # Documentation: track plugin docs; keep generated audit reports local unless intentionally added.
 docs/*
 !docs/plugin-readme.md
@@ -29,7 +34,6 @@ scheduled_tasks.lock
 .handoffs/
 .sdd/
 .worktrees/
-tests/artifacts/
 .tmp-superpowers-compare/
 _tmp_superpowers_benchmark/
 
