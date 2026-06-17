@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3 - 2026-06-17
+
+- Standardized `SKILL.md` runtime-root path guidance so Claude Code uses `${CLAUDE_PLUGIN_ROOT}` and Codex uses `${PLUGIN_ROOT}` for contracts and scripts.
+
 ## 0.2.2 - 2026-06-17
 
 - Adapted `dev-flow` spec/plan phases for Codex by defining an embedded author/critic adapter instead of requiring Claude Code dynamic workflows.
