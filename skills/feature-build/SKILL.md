@@ -1,6 +1,6 @@
 ---
 name: feature-build
-description: This skill should be used first when the user asks to add or build a new feature, endpoint, screen, flow, or capability and has not requested the full agentic-sdlc-pipeline SDLC envelope. Use for focused new functionality through implementation-control; do not use for bug/root-cause fixes, test-only work, behavior-preserving refactors, or explicit spec+plan+TDD+security+PR-ready agentic-sdlc-pipeline requests.
+description: Use first to add a new feature, endpoint, screen, or capability without the full agentic-sdlc-pipeline envelope, via implementation-control. Not for bug/root-cause fixes, test-only work, or behavior-preserving refactors.
 argument-hint: "<feature name or id>"
 ---
 

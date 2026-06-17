@@ -1,6 +1,6 @@
 ---
 name: spec-authoring
-description: This skill should be used first before answering or asking clarifying questions when the user explicitly asks only to write or extract a spec, acceptance criteria, requirements contract, WHAT document, problem/business rules/edge cases/definition of done, or a behavior-change requirements summary such as "problem ... definition of done cikar"; do not use for implementation task breakdown, HOW, plan, sequencing, code, tests, execution, or ambiguous design/brainstorming prompts like "nasil olmali" or "birlikte netlestirelim" unless a spec/requirements artifact is explicitly requested.
+description: Use first when the user asks only to write or extract a spec, acceptance criteria, requirements contract, WHAT document, or problem/business rules/edge cases/definition of done. Not for plan/HOW, code, tests, or ambiguous design exploration.
 argument-hint: "<thing to specify>"
 ---
 

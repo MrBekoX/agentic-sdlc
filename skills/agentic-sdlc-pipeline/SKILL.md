@@ -1,6 +1,6 @@
 ---
 name: agentic-sdlc-pipeline
-description: This skill should be used first before answering, asking clarifying questions, or routing to feature-build/root-cause-fix when the user asks to implement work end-to-end with the full gated SDLC envelope: spec, plan, TDD, tests, security review, final audit, and release/PR readiness. Full-envelope, disciplined SDLC, PR-ready, API contract, auth, payment, database, or production-impacting requests override focused feature-build/root-cause-fix/safe-refactor/test-authoring routing.
+description: Use first for end-to-end implementation with the full gated SDLC envelope (spec, plan, TDD, tests, security review, final audit, PR readiness). Production-impacting, API contract, auth, payment, or database work overrides focused feature-build/root-cause-fix/safe-refactor/test-authoring routing.
 user-invocable: true
 argument-hint: "<what to build or fix>"
 ---

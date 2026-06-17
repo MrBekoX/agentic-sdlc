@@ -1,6 +1,6 @@
 ---
 name: completion-claim-gate
-description: This skill should be used first as an evidence gate before answering evidence-gate questions or before saying work is done, fixed, passing, complete, working, ready, verified, all green, or safe to claim. Use for the agent's own success claims, relayed subagent claims, and questions like "what evidence should I show before claiming this is done"; skip future plans or third-party claims you are not endorsing.
+description: Evidence gate before saying work is done, fixed, passing, complete, ready, verified, or safe to claim. Use for the agent's own success claims and relayed subagent claims; skip future plans or third-party claims you are not endorsing.
 ---
 
 # Skill: completion-claim-gate

@@ -1,6 +1,6 @@
 ---
 name: test-authoring
-description: This skill should be used first before answering, asking which target, or invoking generic debugging when the user asks to write, add, repair, or design tests: unit, integration, regression, e2e, flaky tests, failing tests, meaningful assertions, test coverage, test doubles, or test strategy. Use for test-only work that must not change production behavior; do not use for feature implementation, bug fixes, or refactors.
+description: Use first to write, add, repair, or design tests: unit, integration, regression, e2e, flaky/failing tests, meaningful assertions, coverage, test doubles, or test strategy. Test-only work that must not change production behavior; not for features, fixes, or refactors.
 argument-hint: "<area or test target>"
 ---
 

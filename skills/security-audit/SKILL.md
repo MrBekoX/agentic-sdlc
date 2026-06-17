@@ -1,6 +1,6 @@
 ---
 name: security-audit
-description: This skill should be used first before answering, reading git diff, or asking for code when the user asks to audit or review code, a diff, endpoint, login flow, or feature for security: input validation, auth, authorization, IDOR, secrets, injection, dependencies, data exposure, logging, rate limiting, permission boundaries, or vulnerability risk. Do not use for general code-quality review, bug fixing, or feature implementation.
+description: Use first to audit code, a diff, endpoint, or login flow for security: input validation, auth, authorization, IDOR, secrets, injection, dependencies, data exposure, rate limiting, or vulnerability risk. Not for general code-quality review or bug fixing.
 argument-hint: "<file/dir — defaults to current git diff>"
 ---
 

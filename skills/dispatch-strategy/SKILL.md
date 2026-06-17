@@ -1,6 +1,6 @@
 ---
 name: dispatch-strategy
-description: This skill should be used first before answering execution-mechanism questions or asking for missing task context when the user asks whether work should run in the main loop, a sub-agent, dynamic-workflow, workflow, or agent-team. MUST consult when work has 2+ independent parts, heavy exploration, verification/research fan-out, multi-file generation, or multi-angle review/audit.
+description: Use first to decide whether work runs in the main loop, a sub-agent, a dynamic-workflow, or an agent-team. Consult when work has 2+ independent parts, heavy exploration, verification/research fan-out, multi-file generation, or multi-angle review/audit.
 user-invocable: true
 ---
 

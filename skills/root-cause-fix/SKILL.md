@@ -1,6 +1,6 @@
 ---
 name: root-cause-fix
-description: This skill should be used first before answering or using generic debugging when the user asks to fix a bug, error, broken behavior, failing test, production issue, incident, regression, or user-reported problem; includes root-cause/root cause, reproduce, find and fix, double insert, null reference, webhook, and expired-token failures. Do not use for new features, pure refactors, or review feedback.
+description: Use first to fix a bug, error, broken behavior, failing test, production issue, regression, or incident at its root-cause (reproduce, find and fix). Not for new features, pure refactors, or review feedback.
 argument-hint: "<bug description or issue id>"
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: safe-refactor
-description: This skill should be used first before answering or asking which module when the user asks to refactor, restructure, clean up, simplify, improve readability/maintainability, reduce duplication, or change architecture without changing behavior. Includes characterization tests and approval for broad scope; do not use for bug fixes, new features, or test-only work.
+description: Use first to refactor, restructure, clean up, simplify, or reduce duplication without changing behavior. Includes characterization tests and approval for broad scope. Not for bug fixes, new features, or test-only work.
 argument-hint: "<target module/area>"
 ---
 

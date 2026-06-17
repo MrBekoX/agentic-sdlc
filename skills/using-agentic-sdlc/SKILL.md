@@ -1,6 +1,6 @@
 ---
 name: using-agentic-sdlc
-description: This skill should be used first for meta-routing prompts: explicit AGENTIC-SDLC routing questions, quoted prompts that ask which project skill owns the work, session-local scope shifts, or choosing whether agentic-sdlc-pipeline is needed when no clearer focused skill directly applies. Use it instead of the quoted target skill when the user asks to choose, select, route, or evaluate the right skill. It routes to the smallest sufficient skill and escalates to agentic-sdlc-pipeline only for full SDLC work; direct done/fixed/passing/ready evidence-before-claim gates belong to completion-claim-gate.
+description: Use first for meta-routing: explicit AGENTIC-SDLC routing questions, quoted prompts asking which project skill owns the work, or session-local scope shifts. Routes to the smallest sufficient skill and escalates to agentic-sdlc-pipeline only for full SDLC; evidence-before-claim done/fixed/passing gates belong to completion-claim-gate.
 ---
 
 <SUBAGENT-STOP>

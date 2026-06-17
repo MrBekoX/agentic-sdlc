@@ -1,6 +1,6 @@
 ---
 name: feedback-triage
-description: This skill should be used first before answering or asking for PR details when review feedback has been received on the user's own change and must be verified, answered, judged, or implemented. Covers CodeRabbit comments, reviewer comments, PR/MR feedback, bot/linter/CI review output, "make this more robust" suggestions, and questionable feedback; not for writing a fresh code-quality-review of someone else's change.
+description: Use first when review feedback has been received on the user's own change and must be verified, judged, or applied: CodeRabbit/reviewer/PR comments, bot/linter/CI review output, questionable suggestions. Not for a fresh code-quality-review of someone else's change.
 ---
 
 # Skill: feedback-triage

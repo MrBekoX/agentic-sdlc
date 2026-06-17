@@ -1,0 +1,19 @@
+{
+  "_comment": "Routing eval for the using-agentic-sdlc meta-router. Each scenario is a natural user prompt; `expected` is the focused skill it should route to. `escalation: true` marks the only prompt that should reach agentic-sdlc-pipeline. For every non-escalation scenario the focused skill must be reachable INDEPENDENTLY: agentic-sdlc-pipeline must NOT be routed (it is only for end-to-end/full-envelope work).",
+  "scenarios": [
+    {"prompt": "Merhaba, projede X ozelligi icin ne yapsak emin degilim; once birlikte fikir alisverisi yapalim.", "expected": "mind-spark", "escalation": false},
+    {"prompt": "Su login bug'i icin dogrudan duzeltme degil, once adim adim bir cozum plani (HOW) cikar; kod yazma.", "expected": "plan-authoring", "escalation": false},
+    {"prompt": "Sadece yeni rapor-export ozelligi icin acceptance criteria ve WHAT spec yaz; plana veya koda gecme.", "expected": "spec-authoring", "escalation": false},
+    {"prompt": "Kullanicilar icin yeni bir CSV export endpoint'i ekle.", "expected": "feature-build", "escalation": false},
+    {"prompt": "Login sayfasindaki null reference hatasini root cause'una inip duzelt.", "expected": "root-cause-fix", "escalation": false},
+    {"prompt": "order.py modulunu davranisi degistirmeden okunabilirlik icin refactor et.", "expected": "safe-refactor", "escalation": false},
+    {"prompt": "Bu servis icin eksik unit ve regression testlerini yaz; production davranisi degismesin.", "expected": "test-authoring", "escalation": false},
+    {"prompt": "Bu diff'i auth, IDOR ve secret sizintisi acisindan guvenlik denetimi yap.", "expected": "security-audit", "escalation": false},
+    {"prompt": "Bu branch'teki diff'i merge oncesi kod kalitesi acisindan gozden gecir.", "expected": "code-quality-review", "escalation": false},
+    {"prompt": "CodeRabbit'in PR'da biraktigi yorumlari degerlendirip ele al.", "expected": "feedback-triage", "escalation": false},
+    {"prompt": "Bu 16-skill eval isini main loop'ta mi, subagent'larla mi yoksa workflow ile mi kosalim, karar ver.", "expected": "dispatch-strategy", "escalation": false},
+    {"prompt": "Final cevaptan once spec/plan/TDD/guvenlik akisinin gercekten takip edildigini denetle.", "expected": "implementasyon-control", "escalation": false},
+    {"prompt": "Uretimi etkileyen yeni odeme akisini uctan uca spec, plan, TDD, guvenlik review ve final audit ile gelistir.", "expected": "agentic-sdlc-pipeline", "escalation": true},
+    {"prompt": "Su webhook cift-kayit bug'ini sadece bul ve duzelt.", "expected": "root-cause-fix", "escalation": false}
+  ]
+}

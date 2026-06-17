@@ -1,6 +1,6 @@
 ---
 name: code-quality-review
-description: This skill should be used first before answering or asking clarifying questions when the user asks to review a diff, file, PR, or change for code quality before merge in a fresh context: readability, maintainability, simplicity, duplication, overengineering, naming, error handling, performance, architecture consistency, or testability. Do not use for CodeRabbit/reviewer feedback on the user's own change; use feedback-triage for that.
+description: Use first to review a diff, file, or PR for code quality in a fresh context: readability, maintainability, duplication, overengineering, naming, error handling, performance, testability. Not for CodeRabbit/reviewer feedback on the user's own change (use feedback-triage).
 argument-hint: "<file/dir — defaults to current git diff>"
 ---
 
