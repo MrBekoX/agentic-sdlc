@@ -1,6 +1,6 @@
 {
   "name": "agentic-sdlc",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Gated SDLC skills for spec, plan, TDD, security review, implementation control, and evidence-backed delivery.",
   "author": {
     "name": "Beko"

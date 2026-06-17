@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.5 - 2026-06-17
+
+- Split live trigger evaluation by runtime: Claude keeps tool-event trigger checks, while Codex gets a separate route-classifier harness over shared skill eval fixtures.
+- Added Claude `--bare` trigger smoke support to isolate project context from plugin trigger behavior.
+
 ## 0.2.4 - 2026-06-17
 
 - Added a safe live trigger smoke mode with single-query execution, process-tree cleanup, plugin-dir loading, transcript capture, and budget controls.
