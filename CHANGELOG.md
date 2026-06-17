@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4 - 2026-06-17
+
+- Added a safe live trigger smoke mode with single-query execution, process-tree cleanup, plugin-dir loading, transcript capture, and budget controls.
+
 ## 0.2.3 - 2026-06-17
 
 - Standardized `SKILL.md` runtime-root path guidance so Claude Code uses `${CLAUDE_PLUGIN_ROOT}` and Codex uses `${PLUGIN_ROOT}` for contracts and scripts.
