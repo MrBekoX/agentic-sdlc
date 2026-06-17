@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.6 - 2026-06-17
+
+- Stabilized Claude `spec-flow` live trigger evaluation by narrowing router/workflow trigger metadata and allowing harmless prelude reads in the trigger detector without counting command files as skill activation.
+- Added trigger detector unit coverage for AGENTS/memory prelude reads, generated command-file reads, real skill-file reads, and replay behavior.
+
 ## 0.2.5 - 2026-06-17
 
 - Split live trigger evaluation by runtime: Claude keeps tool-event trigger checks, while Codex gets a separate route-classifier harness over shared skill eval fixtures.
