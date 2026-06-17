@@ -33,7 +33,12 @@ No CI workflow is configured for now. Use the fast local gate above before makin
 
 Trigger eval fixtures live in `tests/skills/evals/*.json`. Each skill has positive and negative prompts.
 
-Run a live trigger eval when Claude CLI/runtime support is available:
+Claude Code and Codex use separate live runners. The fixture JSON is shared, but runtime evidence is different:
+
+- Claude Code runner inspects stream-json tool evidence for `Skill` / `Read` trigger behavior.
+- Codex runner is a route-classifier sanity check over local skill descriptions because `codex exec --json` does not expose a Claude-style `Skill` tool event.
+
+Run a live Claude trigger eval when Claude CLI/runtime support is available:
 
 ```bash
 python scripts/run_trigger_eval.py --skill-path skills/dev-flow --eval-set tests/skills/evals/dev-flow.json
@@ -45,7 +50,21 @@ Prefer a safe smoke first. It runs one query once, records a transcript, loads t
 python scripts/run_trigger_eval.py --skill-path skills/spec-flow --eval-set tests/skills/evals/spec-flow.json --smoke --model haiku --max-budget-usd 0.10 --timeout 60 --plugin-dir . --transcript-dir tests/artifacts/trigger
 ```
 
-These evals check whether the skill triggers. They do not yet judge procedure compliance.
+Use `--bare` to isolate Claude plugin-trigger behavior from project context such as `AGENTS.md`:
+
+```bash
+python scripts/run_trigger_eval.py --skill-path skills/spec-flow --eval-set tests/skills/evals/spec-flow.json --smoke --bare --model haiku --max-budget-usd 0.10 --timeout 60 --plugin-dir . --transcript-dir tests/artifacts/trigger
+```
+
+Claude `--bare` mode does not use OAuth/keychain auth. It requires `ANTHROPIC_API_KEY` or an apiKeyHelper-backed setting; otherwise the run is blocked by auth rather than proving a trigger failure.
+
+Run a Codex route smoke with the lowest-cost local default model profile:
+
+```bash
+python scripts/run_codex_trigger_eval.py --skill-path skills/spec-flow --eval-set tests/skills/evals/spec-flow.json --smoke --model gpt-5.4-mini --reasoning-effort low --transcript-dir tests/artifacts/codex-trigger
+```
+
+These evals check trigger/route selection. They do not yet judge procedure compliance.
 
 ## Future Claude Behavior Evals
 

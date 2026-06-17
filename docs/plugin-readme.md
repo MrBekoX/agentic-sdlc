@@ -188,6 +188,7 @@ Judgment gerektiren guardrail'ler hook scriptleriyle değil, skill contract ve s
 | `validate_artifacts.py` | Spec/plan yapı doğrulama, placeholder/secret scan, AC coverage. |
 | `detect_context.py` | Workspace sınıflandırma, dependency/toolchain probe. |
 | `run_trigger_eval.py` | Windows-safe live Claude trigger eval runner. |
+| `run_codex_trigger_eval.py` | Codex route-classifier trigger eval runner. |
 | `run_behavior_eval.py` | Behavior fixture dry-run/live validator. |
 | `run_procedure_eval.py` | Transcript/live procedure evaluator. |
 | `bump_version.py` | `VERSION`, plugin manifest ve marketplace version senkronizasyonu. |
@@ -267,6 +268,12 @@ Claude CLI/auth varsa opsiyonel live check:
 ```powershell
 python scripts\run_trigger_eval.py --skill-path skills\dev-flow --eval-set tests\skills\evals\dev-flow.json --runs 3
 python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\dev-flow.json --live --max-budget-usd 2.00
+```
+
+Codex auth varsa opsiyonel route-classifier check:
+
+```powershell
+python scripts\run_codex_trigger_eval.py --skill-path skills\spec-flow --eval-set tests\skills\evals\spec-flow.json --smoke --model gpt-5.4-mini --reasoning-effort low
 ```
 
 ## Bilinen Sınırlar
