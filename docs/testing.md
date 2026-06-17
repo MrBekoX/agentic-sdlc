@@ -39,6 +39,12 @@ Run a live trigger eval when Claude CLI/runtime support is available:
 python scripts/run_trigger_eval.py --skill-path skills/dev-flow --eval-set tests/skills/evals/dev-flow.json
 ```
 
+Prefer a safe smoke first. It runs one query once, records a transcript, loads the local plugin explicitly, and kills the process tree as soon as the trigger decision is known or the timeout expires:
+
+```bash
+python scripts/run_trigger_eval.py --skill-path skills/spec-flow --eval-set tests/skills/evals/spec-flow.json --smoke --model haiku --max-budget-usd 0.10 --timeout 60 --plugin-dir . --transcript-dir tests/artifacts/trigger
+```
+
 These evals check whether the skill triggers. They do not yet judge procedure compliance.
 
 ## Future Claude Behavior Evals
