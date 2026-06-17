@@ -1,15 +1,15 @@
 ---
 name: dev-flow
-description: Use when implementing any production-impacting code change end-to-end: bug fix, new feature, refactor, security fix, migration, API contract, auth, payment, permission, user-data, token/session, or database work that needs the full gated SDLC rather than a small local edit.
+description: Use only when implementing production-impacting work end-to-end with the full gated SDLC envelope: spec, plan, TDD, security review, final audit, and release/PR readiness; especially for API contract, auth, payment, permission, user-data, token/session, database, migration, or other high-risk changes.
 user-invocable: true
 argument-hint: "<what to build or fix>"
 ---
 
-# Skill: dev-flow (the Onion-center SDLC orchestrator)
+# Skill: dev-flow (the full-envelope SDLC orchestrator)
 
-> **Argument:** `/dev-flow $ARGUMENTS` — if given, that is the target work; otherwise ask. **Reply in Turkish.**
+> **Argument:** `/dev-flow $ARGUMENTS` — if given, that is the target work; otherwise ask. Match the user's language.
 
-The single entry point for a production-impacting code change. dev-flow does **not** re-implement the inner work — it **owns the outer envelope** (git lifecycle, Spec & Plan phases, doc-verification, scope-lock, quality gates, task-tracking, parallel orchestration) and **delegates the implementation core** (TDD → security → refactor → control) to the matching work-flow skill, handing it the approved spec/plan files. It is a **gated, looped, task-tracked** flow: a red gate means go back, not forward.
+The full-envelope entry point for production-impacting work. dev-flow is not the default for every feature, fix, test, or refactor request; use the focused skill unless the user asks for end-to-end implementation or the work needs the whole SDLC envelope. dev-flow does **not** re-implement the inner work — it **owns the outer envelope** (git lifecycle, Spec & Plan phases, doc-verification, scope-lock, quality gates, task-tracking, parallel orchestration) and **delegates the implementation core** (TDD → security → refactor → control) to the matching work-flow skill, handing it the approved spec/plan files. It is a **gated, looped, task-tracked** flow: a red gate means go back, not forward.
 
 ## Onion rule (skill architecture)
 - **dev-flow knows the step-skills and calls them.** Step-skills must **not** call dev-flow and stay maximally unaware of each other. A step-skill calls another step-skill only when its own flow genuinely needs it.
@@ -62,7 +62,7 @@ These fire on their own triggers across the flow — invoke them with the `Skill
 | 4 | Spec phase (WHAT) — `spec-plan-draft` workflow `mode=spec` (author⇄critic, 2 steps) | dev-flow · workflow | testable criteria, no HOW-leak | — |
 | — | **Spec Review gate** | dev-flow + user | decision points resolved, spec approved | — |
 | 5 | Plan phase (HOW) — `spec-plan-draft` workflow `mode=plan` (author⇄critic, 2 steps) | dev-flow · workflow | each criterion → a task | — |
-| — | **Plan Review gate** | dev-flow + user | plan approved (rule 03) | — |
+| — | **Plan Review gate** | dev-flow + user | plan approved (contract 03) | — |
 | 6 | Context7 doc verification (→ WebSearch fallback if quota out) | dev-flow | API/versions confirmed | ⇉ per library |
 | 7 | Risk & scope lock | dev-flow | files in/out listed | — |
 | — | **Goal lock** | built-in **`/goal`** | end-state locked | — |
@@ -79,7 +79,7 @@ These fire on their own triggers across the flow — invoke them with the `Skill
 | 17 | Commit | dev-flow · git | user approved | — |
 | 18 | Push branch | dev-flow · git | user approved, not main | — |
 | 19 | Open PR/MR | dev-flow · git | template filled | — |
-| 20 | Merge after review | dev-flow · git | CI + review green, user approved | — |
+| 20 | Merge after review | dev-flow · git | review + local gates green, user approved | — |
 | 21 | Re-sync local main | dev-flow · git | tree clean | — |
 
 **Parallel (⇉):** dispatch concurrently via `orchestration` — e.g. step 6 fans Context7 checks across N libraries (workflow), steps 11/14 fan security lenses (workflow/agent-team), step 15 runs lint+typecheck+build+secret-scan in parallel (workflow). Gated sequence (4→5→8→9→10) stays strictly ordered.
@@ -99,7 +99,7 @@ Detail per step → `playbook.md`. The Spec/Plan author⇄critic phases (4–5) 
 **Core handoff gate:** after the plan validator passes, invoke the selected core work-flow Skill before any implementation edit or test write. For a feature request, that is `Skill` -> `agentic-sdlc:feature-flow`. The core work-flow may then guide RED/GREEN/security/refactor/retest, but loading it is mandatory evidence that dev-flow delegated instead of silently inlining the implementation.
 
 ## Git gating (steps 1–2, 17–21)
-- **Approval-gated.** Commit / push / PR / merge happen **only on explicit user request** (rule 08). Propose, don't auto-run.
+- **Approval-gated.** Commit / push / PR / merge happen **only on explicit user request** (contract 08). Propose, don't auto-run.
 - **No-op when not a git repo.** If there is no repo, skip git steps, say so, and offer `git init`. Never operate destructively on `main`/`master`; work on a `fix/* | feature/* | refactor/* | security/* | chore/*` branch.
 - Secrets: mask (`***MASKED***`), report only `file:line` + risk; never commit/log real values.
 

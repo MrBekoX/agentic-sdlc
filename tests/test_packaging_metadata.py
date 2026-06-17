@@ -9,15 +9,20 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class TestClaudePackagingMetadata(unittest.TestCase):
-    def test_claude_plugin_manifest_exists_and_matches_version(self):
+    def test_plugin_manifests_exist_and_match_version(self):
         version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
         plugin = json.loads((REPO / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         marketplace = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        codex_plugin = json.loads((REPO / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(plugin["name"], "agentic-sdlc")
         self.assertEqual(plugin["version"], version)
         self.assertEqual(marketplace["plugins"][0]["name"], "agentic-sdlc")
         self.assertEqual(marketplace["plugins"][0]["version"], version)
         self.assertEqual(marketplace["plugins"][0]["source"], "./")
+        self.assertEqual(codex_plugin["name"], "agentic-sdlc")
+        self.assertEqual(codex_plugin["version"], version)
+        self.assertEqual(codex_plugin["skills"], "./skills/")
+        self.assertEqual(codex_plugin["hooks"], "./hooks/hooks-codex.json")
 
     def test_version_check_script_passes(self):
         proc = subprocess.run(

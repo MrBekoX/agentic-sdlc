@@ -24,12 +24,14 @@ const bootstrap = [
   '<AGENTIC_SDLC_BOOTSTRAP>',
   'You are in the AGENTIC-SDLC Claude Code skill plugin.',
   'Use root skills/ as the skill source; do not assume .claude/skills/.',
-  'For production-impacting work, prefer dev-flow: spec -> plan -> TDD -> security -> review -> implementation-control.',
+  'Bootstrap skill: using-agentic-sdlc. Apply it as the session-local router before choosing a project skill.',
+  'Use the smallest sufficient skill for the current prompt; dev-flow is only for full-envelope end-to-end SDLC work.',
+  'Track session-local routing memory: active intent, selected skill, known spec/plan/test artifacts, scope shifts, and escalation signals.',
   'For ambiguous build/design requests, use mind-spark before spec.',
   'For 2+ independent workstreams, use orchestration and sub-agents/workflows instead of bloating the main context.',
   'Before any completion claim, require fresh evidence: command output, test result, diff, transcript, or explicit skip reason.',
   'Commit/push/merge/delete only on explicit user request. Secrets must stay masked.',
-  'Reply in Turkish unless the user asks otherwise.',
+  'Match the user language unless the user asks otherwise.',
   '</AGENTIC_SDLC_BOOTSTRAP>',
 ].join('\n');
 

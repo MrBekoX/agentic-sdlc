@@ -1,10 +1,13 @@
 # Skill Boundaries
 
-This document is the source-of-truth map for when the current Claude Code skills should own a request.
+This document is the source-of-truth map for when the current Claude Code and Codex skills should own a request.
 
 | Skill | Owns | Does Not Own |
 |---|---|---|
-| `dev-flow` | Production-impacting end-to-end work requiring spec, plan, TDD, security, review, and final audit. | Narrow bug fix, test-only change, simple code review. |
+| `using-agentic-sdlc` | Session-local routing, smallest-sufficient-skill selection, scope-shift tracking, and evidence-before-claim discipline. | Performing implementation, review, or audit work itself. |
+| `dev-flow` | Full-envelope end-to-end implementation requiring spec, plan, TDD, security, review, final audit, and release/PR readiness. | Focused feature, fix, test, spec, plan, or review requests that do not need the full envelope. |
+| `spec-flow` | Spec-only WHAT work: requirements, acceptance criteria, behavior contract, edge cases, definition of done. | Planning HOW tasks or implementing the change. |
+| `plan-flow` | Plan-only HOW work: task breakdown, sequencing, affected surfaces, TDD points, verification plan. | Inventing missing WHAT or implementing the plan. |
 | `feature-flow` | New feature or endpoint with implementation and tests. | Existing broken behavior root cause. |
 | `fix-flow` | Bug fix or failing behavior requiring root cause and regression test. | Net-new product capability. |
 | `refactor-flow` | Behavior-preserving restructure guarded by characterization tests. | Behavior-changing feature/fix work. |
@@ -22,7 +25,7 @@ This document is the source-of-truth map for when the current Claude Code skills
 
 | Layer | Owns |
 |---|---|
-| `rules/` | Durable policy and behavioral contract. |
+| `contracts/skills/` | Durable skill behavior contracts. |
 | `hooks/` | Deterministic enforcement and warnings. |
 | `skills/` | Procedure and agentic workflow. |
 | `agents/` | Review, audit, and specialist roles. |

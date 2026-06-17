@@ -88,3 +88,7 @@ class TestSessionStartHook(unittest.TestCase):
         context = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("AGENTIC_SDLC_BOOTSTRAP", context)
         self.assertIn("root skills/", context)
+        self.assertIn("using-agentic-sdlc", context)
+        self.assertIn("smallest sufficient skill", context)
+        self.assertIn("session-local routing memory", context)
+        self.assertIn("dev-flow is only for full-envelope", context)

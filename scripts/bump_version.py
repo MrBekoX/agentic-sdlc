@@ -1,11 +1,10 @@
-"""Update the local Claude Code plugin version metadata.
+"""Update local plugin version metadata.
 
 Usage:
   python scripts/bump_version.py 0.2.0
   python scripts/bump_version.py --check
 
-This intentionally updates only the Claude Code packaging files. Codex and other
-harness manifests are out of scope until those integrations are added.
+This updates the shared VERSION plus Claude Code and Codex plugin manifests.
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ REPO = Path(__file__).resolve().parents[1]
 VERSION_FILE = REPO / "VERSION"
 PLUGIN_JSON = REPO / ".claude-plugin" / "plugin.json"
 MARKETPLACE_JSON = REPO / ".claude-plugin" / "marketplace.json"
+CODEX_PLUGIN_JSON = REPO / ".codex-plugin" / "plugin.json"
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 
 
@@ -34,10 +34,12 @@ def write_json(path: Path, data: dict) -> None:
 def current_versions() -> dict[str, str]:
     plugin = read_json(PLUGIN_JSON)
     marketplace = read_json(MARKETPLACE_JSON)
+    codex_plugin = read_json(CODEX_PLUGIN_JSON)
     return {
         "VERSION": VERSION_FILE.read_text(encoding="utf-8").strip(),
         ".claude-plugin/plugin.json": plugin.get("version", ""),
         ".claude-plugin/marketplace.json": marketplace["plugins"][0].get("version", ""),
+        ".codex-plugin/plugin.json": codex_plugin.get("version", ""),
     }
 
 
@@ -59,11 +61,14 @@ def bump(version: str) -> int:
         return 2
     plugin = read_json(PLUGIN_JSON)
     marketplace = read_json(MARKETPLACE_JSON)
+    codex_plugin = read_json(CODEX_PLUGIN_JSON)
     plugin["version"] = version
     marketplace["plugins"][0]["version"] = version
+    codex_plugin["version"] = version
     VERSION_FILE.write_text(version + "\n", encoding="utf-8")
     write_json(PLUGIN_JSON, plugin)
     write_json(MARKETPLACE_JSON, marketplace)
+    write_json(CODEX_PLUGIN_JSON, codex_plugin)
     print(f"version={version}")
     return 0
 

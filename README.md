@@ -1,43 +1,51 @@
 # agentic-sdlc
 
-A disciplined SDLC skill library for [Claude Code](https://claude.com/claude-code). It turns production-impacting work into a gated **spec -> plan -> TDD -> security -> review** flow instead of an unstructured edit.
+A disciplined SDLC skill library for Claude Code and Codex. It routes each prompt to the smallest useful skill, and reserves the full **spec -> plan -> TDD -> security -> review** envelope for work that actually needs it.
 
-Current scope: **Claude Code only**. Codex and other harness integrations are intentionally deferred.
+Current scope: Claude Code and Codex plugin metadata share the root `skills/` source. Other harness integrations are intentionally deferred.
 
-The centerpiece is **`dev-flow`**, an Onion orchestrator that owns the outer envelope: git lifecycle, Spec and Plan phases, documentation verification, scope lock, quality gates, and final audit. It delegates implementation to the matching work-flow skill.
+The entry point is **`using-agentic-sdlc`**, a session-local router. It tracks the current intent, selected skill, known artifacts, and scope shifts in the conversation. **`dev-flow`** is the escalation path for end-to-end implementation, not the default route for every feature, spec, plan, test, or review request.
 
 ## Install
 
-This repo is now shaped as a **local/development Claude Code plugin**. The repository metadata is for local installation and validation; CI does not publish the plugin or create releases.
+This repo is now shaped as a **local/development Claude Code and Codex plugin**. The repository metadata is for local installation and validation. No CI workflow is configured for now; publishing or release work must stay manual and explicit.
 
 ```text
 .claude-plugin/plugin.json
 .claude-plugin/marketplace.json
+.codex-plugin/plugin.json
 hooks/hooks.json
+hooks/hooks-codex.json
 skills/
 agents/
 workflows/
 commands/
-rules/
+contracts/skills/
 scripts/
 tests/
 ```
 
-Add this repository as a local marketplace/plugin source in Claude Code, then invoke a skill such as:
+Add this repository as a local marketplace/plugin source in Claude Code, then invoke a focused skill or let the bootstrap router choose from a natural prompt:
 
 ```text
-/dev-flow <what to build or fix>
+/spec-flow <what to specify>
+/plan-flow <what to plan>
+/feature-flow <what to add>
+/dev-flow <end-to-end production-ready change>
 ```
 
 Skills live in root `skills/`, not in `.claude/skills/`. The `.claude/` directory is only for local workspace settings.
 
-Hook paths use `${CLAUDE_PLUGIN_ROOT}`, so plugin installation is the expected runtime model.
+Claude hook paths use `${CLAUDE_PLUGIN_ROOT}`. Codex hook paths use `${PLUGIN_ROOT}` through `.codex-plugin/plugin.json`, so plugin installation is the expected runtime model.
 
 ## Skills
 
 | Skill | Purpose |
 |---|---|
-| `dev-flow` | Onion-center SDLC orchestrator; owns the gated envelope and delegates the core. |
+| `using-agentic-sdlc` | Session-local router; chooses the smallest sufficient skill, tracks scope shifts, and gates evidence-before-claim discipline. |
+| `dev-flow` | Full-envelope SDLC orchestrator for end-to-end implementation; owns the gated envelope and delegates the core. |
+| `spec-flow` | Spec-only WHAT flow for requirements, acceptance criteria, and behavior contracts. |
+| `plan-flow` | Plan-only HOW flow for task breakdown, sequencing, and verification strategy. |
 | `fix-flow` | Bug / broken-behavior fix via root cause, spec, plan, TDD, security, and verification. |
 | `feature-flow` | New feature or endpoint end-to-end with a final implementation-control audit. |
 | `refactor-flow` | Behavior-preserving restructure guarded by characterization tests. |
@@ -57,6 +65,7 @@ Responsibility boundaries are enforced by the skill bodies, integration tests, a
 
 ```text
 .claude-plugin/   Claude Code plugin metadata and local marketplace metadata
+.codex-plugin/    Codex plugin metadata
 skills/           one folder per skill (SKILL.md + bundled references/scripts)
 agents/           sub-agent role contracts
 commands/         slash commands such as git-safety-check
@@ -64,7 +73,7 @@ workflows/        dynamic workflow scripts
 hooks/            secret scan, branch guard, destructive command guard, session start
 scripts/          deterministic helpers and subagent handoff utilities
 tests/            stdlib unittest suites, skill fixtures, and static checks
-rules/            generic engineering rules (00..10)
+contracts/skills/ skill behavior contracts (00..10)
 docs/             plugin documentation, runtime notes, and example specs/plans
 CLAUDE.md         operating model for this skill-development repo
 ```

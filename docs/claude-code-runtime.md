@@ -2,29 +2,31 @@
 
 ## Scope
 
-AGENTIC-SDLC currently targets Claude Code only. Codex, Cursor, Kimi, OpenCode, Gemini, Pi, and other harnesses are deferred.
+AGENTIC-SDLC currently targets Claude Code and Codex. Cursor, Kimi, OpenCode, Gemini, Pi, and other harnesses are deferred.
 
 ## Plugin Shape
 
-The expected runtime shape is a local/development Claude Code plugin. The metadata here does not publish the plugin by itself; publishing requires a separate, explicit release process that is not present in CI.
+The expected runtime shape is a local/development Claude Code and Codex plugin. The metadata here does not publish the plugin by itself. No CI workflow is configured for now; publishing requires a separate, explicit manual release process.
 
 ```text
 .claude-plugin/plugin.json
 .claude-plugin/marketplace.json
+.codex-plugin/plugin.json
 hooks/hooks.json
+hooks/hooks-codex.json
 skills/
 agents/
 commands/
 workflows/
-rules/
+contracts/skills/
 scripts/
 ```
 
-Skills are intentionally stored in root `skills/`. Do not move them to `.claude/skills/`; that would duplicate the source of truth and break the repo tests.
+Skills are intentionally stored in root `skills/`. Do not move them to `.claude/skills/` or `.codex/skills/`; that would duplicate the source of truth and break the repo tests.
 
 ## Hook Runtime
 
-`hooks/hooks.json` uses `${CLAUDE_PLUGIN_ROOT}` for portable paths. Claude Code resolves this variable to the installed plugin directory.
+`hooks/hooks.json` uses `${CLAUDE_PLUGIN_ROOT}` for portable Claude paths. `hooks/hooks-codex.json` uses `${PLUGIN_ROOT}` for portable Codex paths.
 
 Requirements:
 
@@ -46,18 +48,18 @@ Some flows are git-aware. In a non-git workspace:
 
 ## Tool Mapping
 
-Claude Code concepts used by the skills:
+Runtime concepts used by the skills:
 
-| Concept | Claude Code Mechanism |
+| Concept | Runtime Mechanism |
 |---|---|
 | Load a skill | Claude Code skill invocation |
 | Dispatch subagent | Agent / Task facility when available |
 | Dynamic workflow | Workflow facility when available |
 | Slash command | `commands/*.md` |
 | Plugin hook | `hooks/hooks.json` |
-| Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}` |
+| Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}` in Claude Code; `${PLUGIN_ROOT}` in Codex |
 
-If a Claude Code capability is unavailable in the current version/configuration, fall back to the nearest supported mechanism and state the fallback in the final report.
+If a runtime capability is unavailable in the current version/configuration, fall back to the nearest supported mechanism and state the fallback in the final report.
 
 ## Skill Frontmatter Policy
 

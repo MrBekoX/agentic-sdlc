@@ -59,7 +59,7 @@ Use the named workflow. Do not create an ad hoc Workflow script for spec draftin
 ### 5. Plan phase (HOW) — dev-flow runs `spec-plan-draft` workflow, `mode=plan`
 After the spec file is approved, invoke the **`Workflow` tool** for **`agentic-sdlc:spec-plan-draft`** with `args:{ mode:'plan', context:<approved spec> }` — same 2-step author⇄critic conversation. Returns the technical task list (Task 1..N), file-level change map, dependency order, and per-behavior RED-test points, covering **every** acceptance criterion of the spec.
 Use the named workflow. Do not create an ad hoc Workflow script for plan drafting.
-**Plan Review gate:** user approval (rule 03); large/architectural plans need explicit approval. On approval, **write the plan to `docs/plans/<kebab-name>.md`** (same base name as the spec), then run `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode plan --file docs/plans/<kebab-name>.md --spec docs/specs/<kebab-name>.md --strict`. The validator must pass before implementation starts, including automated smoke evals. From here the implementation phase follows **`docs/specs/<name>.md` + `docs/plans/<name>.md` faithfully** — no scope drift, no undocumented change; a new finding becomes a new task appended to the plan file, not a silent diff.
+**Plan Review gate:** user approval (contract 03); large/architectural plans need explicit approval. On approval, **write the plan to `docs/plans/<kebab-name>.md`** (same base name as the spec), then run `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode plan --file docs/plans/<kebab-name>.md --spec docs/specs/<kebab-name>.md --strict`. The validator must pass before implementation starts, including automated smoke evals. From here the implementation phase follows **`docs/specs/<name>.md` + `docs/plans/<name>.md` faithfully** — no scope drift, no undocumented change; a new finding becomes a new task appended to the plan file, not a silent diff.
 
 ### 6. Context7 doc verification — dev-flow, fan-out per library
 **Mandatory** for: new package, working against an existing package API, framework upgrade, RN/Expo native change, Supabase Auth/RLS/Edge/Realtime/Storage, EF Core migration/query, Next/React/Node/TS config, JWT/OAuth/session/cookie, any security-sensitive dependency. List affected libraries → detect the version in use → verify against current docs via **Context7** (`resolve-library-id` → `query-docs`): method names, parameter order, async behavior, deprecations, security notes, breaking changes, env-var/config names, platform (Android/iOS) and server/client splits. **⇉ fan out across N libraries via a dynamic-workflow.** **Fallback:** if Context7 is unavailable or its quota is exhausted (rate-limit / error), fall back to Claude Code's **WebSearch + WebFetch** against the library's **official** docs (version-matched site/repo — not random blogs/SO), and note in the report that the source was the web-search fallback. Output: **Documentation Verification** report. Never invent an API or trust an old blog/SO answer over verified docs.
@@ -87,7 +87,7 @@ Run the **`implementasyon-control`** skill as the master pre-final audit (the co
 - **17 Commit:** only after gates green + diff reviewed + user approval. Conventional Commits: `fix(auth): validate duplicate email on registration`. No Claude co-author trailer unless asked. No `git add -A` blanket staging — stage reviewed files. Report hash + message.
 - **18 Push:** `git push -u origin <branch>`. Confirm correct branch, not main, no secret warnings.
 - **19 PR/MR:** fill the **PR description** template (`templates.md`): summary, problem, solution, changes, tests, security, risk, rollback, checklist.
-- **20 Merge:** only after review + CI green, no conflicts, branch current with main, **explicit user approval** for production-impacting merges. Strategy per team standard (squash / merge / rebase).
+- **20 Merge:** only after review + local gates green, no conflicts, branch current with main, **explicit user approval** for production-impacting merges. Strategy per team standard (squash / merge / rebase).
 - **21 Re-sync local main:** `git checkout <main>` → `git pull --ff-only`. Optional branch cleanup only if team standard allows. Output: **Final Sync** in the report.
 
 ### Branch finishing checkpoint
@@ -97,9 +97,9 @@ Before cleanup, present the actual state: branch name, commits, changed files, t
 
 ## Delegated core steps (8,9,10,11,12,13)
 These belong to the chosen work-flow skill, which dev-flow invokes through the `Skill` tool with the approved `docs/specs/<name>.md` + `docs/plans/<name>.md` paths. The core work-flow implements **faithfully** to them; dev-flow only ensures they happen and their gates pass:
-- **8 RED / 9 GREEN / 10 loop** — TDD: failing test first (show RED) → minimal code (GREEN) → `/loop` test→fix→test until green (rule 05).
-- **11 Security #1** — diff-level security pass (rule 06).
-- **12 Refactor / 13 Retest** — behavior unchanged, full suite green with output (rule 07).
+- **8 RED / 9 GREEN / 10 loop** — TDD: failing test first (show RED) → minimal code (GREEN) → `/loop` test→fix→test until green (contract 05).
+- **11 Security #1** — diff-level security pass (contract 06).
+- **12 Refactor / 13 Retest** — behavior unchanged, full suite green with output (contract 07).
 - **Fidelity:** any divergence from the spec/plan files is a finding — append a new task to the plan file, never an undocumented diff.
 - **Test-runner gotcha (Node):** `node --test <dir>` can treat the path as a single *module* and silently discover nothing — pass a glob instead, e.g. `node --test "**/*.test.js"` (quote it so the shell doesn't pre-expand). Confirm the runner actually collected tests (a "0 tests" run is a red flag, not a pass).
 

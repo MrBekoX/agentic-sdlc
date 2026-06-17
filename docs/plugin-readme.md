@@ -1,12 +1,12 @@
-# AGENTIC-SDLC Claude Code Plugin README
+# AGENTIC-SDLC Claude Code / Codex Plugin README
 
 ## Kısa Tanım
 
-AGENTIC-SDLC, Claude Code için geliştirilmiş yerel/geliştirme amaçlı bir skill pluginidir. Amacı, üretim etkisi olan işleri rastgele edit akışından çıkarıp disiplinli bir **spec -> plan -> TDD -> security -> review** yaşam döngüsüne bağlamaktır.
+AGENTIC-SDLC, Claude Code ve Codex için geliştirilmiş yerel/geliştirme amaçlı bir skill pluginidir. Amacı, üretim etkisi olan işleri rastgele edit akışından çıkarıp disiplinli bir **spec -> plan -> TDD -> security -> review** yaşam döngüsüne bağlamaktır.
 
-Bu plugin şu an **Claude Code only** çalışır. Codex, Cursor, Kimi, OpenCode, Gemini, Pi ve diğer harness entegrasyonları bilinçli olarak ertelenmiştir.
+Bu plugin şu an Claude Code ve Codex manifestleriyle çalışacak şekilde modellenmiştir. Cursor, Kimi, OpenCode, Gemini, Pi ve diğer harness entegrasyonları bilinçli olarak ertelenmiştir.
 
-Önemli sınır: Bu repo bir yayınlama pipeline'ı değildir. `.claude-plugin/` metadata'sı lokal geliştirme ve doğrulama içindir. CI push sırasında plugin yayınlamaz, release oluşturmaz, commit atmaz ve repository'ye yazmaz.
+Önemli sınır: Bu repo bir yayınlama pipeline'ı değildir. `.claude-plugin/` metadata'sı lokal geliştirme ve doğrulama içindir. Şimdilik CI workflow yoktur; plugin yayınlama, release oluşturma, commit/push otomasyonu ve marketplace yayını yalnızca açık kullanıcı isteğiyle manuel yapılır.
 
 ## Ne Sağlar?
 
@@ -18,11 +18,12 @@ Plugin, Claude Code içinde tekrarlanabilir agentic SDLC davranışı üretmek i
 | `agents/` | Fresh-context uzman rolleri: analiz, test, security, audit, review. |
 | `workflows/` | Tekrarlanabilir author/critic multi-agent döngüleri. |
 | `hooks/` | Deterministik güvenlik ve runtime guardrail'leri. |
-| `rules/` | Kalıcı davranış politikası. |
+| `contracts/skills/` | Skill davranış sözleşmeleri. |
 | `commands/` | Manuel çağrılan kontrol komutları. |
 | `scripts/` | Makineyle doğrulanabilir yardımcılar ve eval runner'ları. |
 | `tests/` | Deterministik test, fixture, golden ve procedure eval altyapısı. |
 | `.claude-plugin/` | Claude Code plugin metadata ve local marketplace tanımı. |
+| `.codex-plugin/` | Codex plugin metadata ve hook tanımı. |
 
 ## Kurulum Modeli
 
@@ -30,6 +31,7 @@ Plugin metadata:
 
 - `.claude-plugin/plugin.json`
 - `.claude-plugin/marketplace.json`
+- `.codex-plugin/plugin.json`
 
 `marketplace.json`, plugin kaynağını repo root'u olarak tanımlar:
 
@@ -37,15 +39,15 @@ Plugin metadata:
 "source": "./"
 ```
 
-Claude Code tarafında bu repo lokal marketplace/plugin source olarak eklenir. Skill'ler root `skills/` altındadır; `.claude/skills/` kullanılmaz. `.claude/` sadece lokal workspace ayarları içindir.
+Claude Code tarafında bu repo lokal marketplace/plugin source olarak eklenir. Codex tarafında `.codex-plugin/plugin.json` root `skills/` ve `hooks/hooks-codex.json` dosyalarını işaret eder. Skill'ler root `skills/` altındadır; `.claude/skills/` veya `.codex/skills/` kullanılmaz.
 
-Runtime path'leri `${CLAUDE_PLUGIN_ROOT}` üzerinden çözülür. Bu yüzden hook'ların beklenen çalışma modeli, repo'nun Claude Code plugin olarak yüklenmesidir.
+Claude runtime path'leri `${CLAUDE_PLUGIN_ROOT}`, Codex runtime path'leri `${PLUGIN_ROOT}` üzerinden çözülür. Bu yüzden hook'ların beklenen çalışma modeli, repo'nun plugin olarak yüklenmesidir.
 
 ## Runtime Gereksinimleri
 
 | Gereksinim | Neden Gerekli? |
 |---|---|
-| Claude Code | Desteklenen tek runtime. |
+| Claude Code / Codex | Desteklenen runtime'lar. |
 | Node.js | Hook scriptleri `.mjs` olarak çalışır. |
 | Python | Test, validator ve eval helper scriptleri için. |
 | Git | Branch guard, diff review, review package, commit/PR akışları için. |
@@ -54,9 +56,25 @@ Non-git workspace içinde bazı akışlar çalışmaya devam eder, ancak branch,
 
 ## Ana Kullanım Akışları
 
+### `using-agentic-sdlc`
+
+Plugin'in session-local router girişidir. Her kullanıcı prompt'unda en küçük yeterli skill'i seçer, konuşma içindeki aktif intent/artifact/scope shift sinyalini takip eder ve yalnızca full-envelope end-to-end SDLC gerektiğinde `dev-flow`'a yükseltir.
+
+Router ilkesi:
+
+- fikir / belirsiz tasarım -> `mind-spark`
+- sadece spec -> `spec-flow`
+- sadece plan -> `plan-flow`
+- yeni feature -> `feature-flow`
+- bug fix -> `fix-flow`
+- sadece test -> `test-flow`
+- refactor -> `refactor-flow`
+- review/security/final claim -> ilgili focused skill
+- end-to-end production-ready SDLC -> `dev-flow`
+
 ### `dev-flow`
 
-Plugin'in merkezidir. Üretim etkisi olan işleri uçtan uca yönetir.
+Full-envelope escalation path'tir. Üretim etkisi olan işleri ancak uçtan uca spec, plan, TDD, security, review ve final audit gerektiğinde yönetir.
 
 Full Mode akışı:
 
@@ -83,6 +101,8 @@ Full Mode akışı:
 
 | Skill | Ne Zaman Kullanılır? |
 |---|---|
+| `spec-flow` | Sadece WHAT/spec, acceptance criteria veya requirements contract istendiğinde. |
+| `plan-flow` | Sadece HOW/implementation plan, task breakdown veya sequencing istendiğinde. |
 | `fix-flow` | Bug, prod issue, broken behavior, failing test. |
 | `feature-flow` | Yeni feature, endpoint, capability. |
 | `refactor-flow` | Davranış değişmeden yeniden yapılandırma. |
@@ -150,11 +170,11 @@ Runtime hook'ları [hooks/hooks.json](../hooks/hooks.json) üzerinden bağlanır
 | `session-start.mjs` | Git status ve AGENTIC-SDLC bootstrap context'i session'a enjekte eder. |
 | `secret-patterns.mjs` | Ortak scanner; secret değerini yazmaz, sadece label ve line bilgisi verir. |
 
-Judgment gerektiren guardrail'ler hook scriptleriyle değil, rule ve skill gate'leriyle uygulanır:
+Judgment gerektiren guardrail'ler hook scriptleriyle değil, skill contract ve skill gate'leriyle uygulanır:
 
-- `rules/05-testing.md`
-- `rules/06-security.md`
-- `rules/08-git-safety.md`
+- `contracts/skills/05-testing.md`
+- `contracts/skills/06-security.md`
+- `contracts/skills/08-git-safety.md`
 - `skills/completion-claim-gate/SKILL.md`
 - `skills/implementasyon-control/SKILL.md`
 
@@ -177,12 +197,11 @@ Judgment gerektiren guardrail'ler hook scriptleriyle değil, rule ve skill gate'
 Yerel deterministik test stack'i şunları kapsar:
 
 - Skill frontmatter ve isim uyumu
-- Agent/workflow/hook/rule/script referansları
+- Agent/workflow/hook/skill contract/script referansları
 - Golden description drift
 - Safety fixture evidence
 - Hook/workflow JavaScript syntax
 - Plugin metadata/version consistency
-- CI publish policy
 - Artifact validator testleri
 - Procedure evaluator fixture testleri
 
@@ -208,29 +227,17 @@ python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\dev-flow.
 python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\dev-flow.json --transcript tests\fixtures\transcripts\dev-flow-procedure-pass.jsonl
 ```
 
-Live eval'lar Claude CLI/auth/runtime gerektirir ve normal CI gate'inin parçası değildir.
+Live eval'lar Claude CLI/auth/runtime gerektirir ve normal lokal gate'in parçası değildir.
 
-## CI Politikası
+## Otomasyon Politikası
 
-CI workflow:
+Şimdilik CI workflow yoktur. Sağlık kontrolü lokal komutlarla yapılır:
 
-- `push` ve `pull_request` üzerinde çalışır.
-- `permissions: contents: read` kullanır.
-- Python ve Node kurar.
-- Şu komutları çalıştırır:
-  - `python scripts/check_all.py`
-  - `python tests/skills/harness.py`
-  - `python -m unittest discover -s tests -v`
+- `python scripts/check_all.py`
+- `python tests/skills/harness.py`
+- `python -m unittest discover -s tests -v`
 
-CI şunları yapmaz:
-
-- Plugin yayınlama
-- GitHub release oluşturma
-- Commit atma
-- Push yapma
-- Repository'ye yazma
-
-Bu politika `tests/test_ci_policy.py` ile korunur. Test, workflow run satırlarında `gh release`, `npm publish`, `git push`, `plugin publish`, `claude ... publish` gibi komutları reddeder.
+Yayınlama, release, otomatik commit/push ve marketplace/plugin publication bu repo içinde otomatikleşmemiştir. Bunlar yalnızca açık kullanıcı isteğiyle, ayrı ve manuel bir işlem olarak yapılmalıdır.
 
 ## Push Öncesi Kontrol Listesi
 
@@ -263,7 +270,7 @@ python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\dev-flow.
 ## Bilinen Sınırlar
 
 - Plugin şu an `0.1.0` ve unreleased durumdadır.
-- CI validation-only kalmalıdır; publish ayrı ve explicit bir release fazı olmalıdır.
+- CI workflow yoktur; publish ayrı ve explicit bir manuel release fazı olmalıdır.
 - Hook çalışması Claude Code'un `${CLAUDE_PLUGIN_ROOT}` çözmesine ve Node.js'in PATH'te olmasına bağlıdır.
 - Bazı hook'lar hata durumunda fail-open davranır.
 - `scan-write` uyarır ama block etmez.
@@ -280,6 +287,6 @@ AGENTIC-SDLC plugin'i, Claude Code içinde production-impacting değişiklikleri
 - Spec/plan/TDD/security/review omurgası
 - Fresh-context agent ve workflow ayrımı
 - Deterministik test ve eval altyapısı
-- CI publish yapmayan, validation-only güvenli push politikası
+- Lokal gate ve manuel yayınlama ayrımı
 
 Bu dosya GitHub'a push öncesi plugin'in ne olduğunu, ne olmadığını ve hangi bileşenlerden oluştuğunu hızlıca anlamak için ana teknik referanstır.
