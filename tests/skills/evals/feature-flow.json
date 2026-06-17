@@ -1,0 +1,11 @@
+{
+  "_comment": "Live trigger eval-set for feature-flow. Positives = new feature/endpoint; negatives = bug fix (fix-flow) / test-only (test-flow) / refactor (refactor-flow).",
+  "queries": [
+    {"query": "Kullanicilar icin yeni bir export-to-CSV endpoint'i ekle.", "should_trigger": true},
+    {"query": "Add a new password-reset flow to the app end-to-end.", "should_trigger": true},
+    {"query": "feature-flow ile profil sayfasina yeni bir avatar yukleme ozelligi ekle.", "should_trigger": true},
+    {"query": "Var olan login bug'ini duzelt.", "should_trigger": false},
+    {"query": "Sadece eksik testleri yaz, davranis degismesin.", "should_trigger": false},
+    {"query": "Bu modulu okunabilirlik icin refactor et.", "should_trigger": false}
+  ]
+}

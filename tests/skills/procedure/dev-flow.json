@@ -1,0 +1,34 @@
+{
+  "_comment": "Procedure eval for dev-flow. This verifies transcript evidence for required skills, workflow, commands, artifacts, and forbidden git publishing commands.",
+  "cases": [
+    {
+      "id": "dev-flow-feature-no-commit",
+      "fixture_dir": "tests/fixtures/dev-flow-basic",
+      "prompt": "Use /dev-flow to add a small production-impacting feature to this fixture: expose a new greeting suffix behavior in greeting.py. This is an automated smoke eval: when calling spec-plan-draft, pass depth:\"smoke\" and maxRevisionRounds:0; after saving the spec and plan, treat the Spec Review and Plan Review gates as approved so you can continue. Follow spec, plan, TDD, security review, implementation control, and do not commit, push, or merge.",
+      "required_skills": [
+        "agentic-sdlc:dev-flow",
+        "agentic-sdlc:orchestration",
+        "agentic-sdlc:feature-flow",
+        "agentic-sdlc:security-review",
+        "agentic-sdlc:implementasyon-control",
+        "agentic-sdlc:completion-claim-gate"
+      ],
+      "required_workflows": [
+        "agentic-sdlc:spec-plan-draft"
+      ],
+      "required_commands": [
+        "detect_context\\.py",
+        "validate_artifacts\\.py"
+      ],
+      "required_artifacts": [
+        "docs/specs/",
+        "docs/plans/"
+      ],
+      "forbidden_commands": [
+        "\\bgit\\s+commit\\b",
+        "\\bgit\\s+push\\b",
+        "\\bgit\\s+merge\\b"
+      ]
+    }
+  ]
+}

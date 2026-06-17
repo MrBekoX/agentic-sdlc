@@ -1,0 +1,11 @@
+{
+  "_comment": "Live trigger eval-set for dev-flow. Positives = production-impacting end-to-end/full-envelope work; negatives = narrow review/test/refactor requests.",
+  "queries": [
+    {"query": "dev-flow ile production etkisi olan yeni odeme akisini spec, plan, TDD, security ve review ile uctan uca gelistir.", "should_trigger": true},
+    {"query": "dev-flow skill'ini kullan: musteri-facing CSV export ayari degisikligini disciplined SDLC akisi ile bastan sona uygula.", "should_trigger": true},
+    {"query": "Use dev-flow to add a backend audit-log export feature with spec, plan, tests, security review, and PR-ready diff.", "should_trigger": true},
+    {"query": "Sadece bu diff icin code review yap.", "should_trigger": false},
+    {"query": "Sadece eksik regression testlerini yaz.", "should_trigger": false},
+    {"query": "Bu kucuk typo'yu duzelt.", "should_trigger": false}
+  ]
+}
