@@ -13,9 +13,9 @@ python -m unittest discover -s tests -v
 What this proves:
 
 - Skill frontmatter and naming are valid.
-- Agent, workflow, hook, rule, and script references resolve.
+- Agent, workflow, hook, skill contract, and script references resolve.
 - Golden skill cross-references have not drifted.
-- Safety fixture evidence is wired to real rules, skills, or hooks.
+- Safety fixture evidence is wired to real skill contracts, skills, or hooks.
 - Hook and workflow JavaScript parses when `node` is available.
 - Python helper scripts pass their deterministic unit tests.
 
@@ -25,9 +25,9 @@ What this does not prove:
 - The model followed every step in a skill body.
 - A human-facing workflow succeeded end-to-end.
 
-## CI Publish Policy
+## Automation Policy
 
-`.github/workflows/ci.yml` is validation-only. It uses read-only repository permissions and must not publish a Claude plugin, create a release, push commits, or write to the repository. `tests/test_ci_policy.py` enforces this policy.
+No CI workflow is configured for now. Use the fast local gate above before making health claims. Publishing, release creation, pushing generated commits, or marketplace/plugin publication must remain a manual, explicit user-requested step.
 
 ## Trigger Evals
 
@@ -43,7 +43,7 @@ These evals check whether the skill triggers. They do not yet judge procedure co
 
 ## Future Claude Behavior Evals
 
-The procedure eval layer starts with `scripts/run_behavior_eval.py`. CI can validate fixture shape without live Claude:
+The procedure eval layer starts with `scripts/run_behavior_eval.py`. You can validate fixture shape without live Claude:
 
 ```bash
 python scripts/run_behavior_eval.py --eval-set tests/skills/behavior/completion-claim-gate.json --dry-run

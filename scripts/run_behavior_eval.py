@@ -1,7 +1,7 @@
 """Run or validate Claude behavior eval fixtures.
 
 This is the procedure layer above trigger evals. It can run `claude -p` when the
-CLI is available, but also supports `--dry-run` so CI can validate fixture shape
+CLI is available, but also supports `--dry-run` so local automation can validate fixture shape
 without requiring a live model.
 
 Eval-set JSON:
