@@ -118,6 +118,21 @@ class TestProcedureEvalHarness(unittest.TestCase):
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:completion-claim-gate"})
         self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:completion-claim-gate"))
 
+    def test_dispatch_strategy_satisfied_by_delegation(self):
+        # Dispatching a sub-agent IS the mechanism decision dispatch-strategy makes.
+        trace = procedure_eval.Trace()
+        procedure_eval._record_tool(trace, "Agent", {"subagent_type": "Explore", "description": "scan"})
+        self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:dispatch-strategy"))
+
+    def test_dispatch_strategy_not_satisfied_without_delegation(self):
+        # All-inline work with no dispatch and no Skill call still fails the gate.
+        trace = procedure_eval.Trace()
+        procedure_eval._record_tool(trace, "Read", {"file_path": "greeting.py"})
+        procedure_eval._record_tool(trace, "Workflow", {"name": "agentic-sdlc:spec-plan-draft"})
+        self.assertFalse(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:dispatch-strategy"))
+        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:dispatch-strategy"})
+        self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:dispatch-strategy"))
+
     def test_live_fixture_has_baseline_commit_before_claude_runs(self):
         case = {
             "id": "agentic-sdlc-pipeline-feature-no-commit",

@@ -42,6 +42,12 @@ SKILL_AGENT_EQUIVALENTS: dict[str, list[str]] = {
     "test-authoring": ["test-engineer"],
 }
 
+# Decision skills whose intent (choosing the execution mechanism) is satisfied by actually
+# dispatching a sub-agent — dispatch-strategy decides "main loop vs sub-agent vs workflow vs team",
+# so a real Agent/Task dispatch IS that decision exercised. A model that does everything inline with
+# no dispatch still fails the gate (no Agent call), so this credits delegation without trivializing it.
+DELEGATION_SATISFIES: set[str] = {"dispatch-strategy"}
+
 
 @dataclass
 class Trace:
@@ -231,6 +237,8 @@ def required_skill_satisfied(trace: Trace, expected: str) -> bool:
     for agent in SKILL_AGENT_EQUIVALENTS.get(short, []):
         if tool_invoked(trace, "Agent", agent) or tool_invoked(trace, "Task", agent):
             return True
+    if short in DELEGATION_SATISFIES and ("Agent" in trace.tools or "Task" in trace.tools):
+        return True
     return False
 
 

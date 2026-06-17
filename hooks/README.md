@@ -14,6 +14,7 @@ Two kinds of guard live here:
 | `scan-commit.mjs` | PreToolUse (Bash · git commit) | Scans added diff lines for high-confidence secrets; **blocks** the commit. |
 | `branch-guard.mjs` | PreToolUse (Bash · git commit/push) | Warns on commit/push to `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. |
 | `destructive-command-guard.mjs` | PreToolUse (Bash) | Blocks deterministic high-risk destructive commands such as `git reset --hard`, forceful `git clean`, `rm -rf`, and `Remove-Item -Recurse -Force`. |
+| `completion-claim-guard.mjs` | Stop | Deterministic backstop for `completion-claim-gate`: if the final message makes a strong done/complete/passing/ready claim **and** the transcript shows no completion-claim-gate invocation, **warns** (non-blocking); **blocks** the stop when `AGENTIC_COMPLETION_GATE_BLOCK=true`. Complements (does not replace) the judgment gate. |
 | `secret-patterns.mjs` | — (shared lib) | Generic secret patterns + scanner used by the scan hooks. No real secrets embedded. |
 
 All scripts are generic: no shell (git via argument array), path-normalized skip lists, fail-open on error.
@@ -33,7 +34,7 @@ These are the seven requested checkpoints. They require judgment, so they live a
 | `post-test-result-check` (output actually read? fail root-caused? no false "passed"?) | contract 05 (show real output); root-cause-fix step 8 + Loop A |
 | `security-sensitive-change-check` (auth/permission/config/secret/migration/data-loss?) | contract 06; `security-audit` skill; root-cause-fix steps 9 & 11 |
 | `pre-git-operation-check` (status/diff reviewed? branch? secrets? tests? approval?) | contract 08; `/git-safety-check` command; `scan-commit.mjs` + `branch-guard.mjs` |
-| `final-response-verification` (work verified? test output? security done? control run? gaps stated?) | `implementasyon-control` skill (mandatory pre-final) + `implementation-auditor` agent |
+| `final-response-verification` (work verified? test output? security done? control run? gaps stated?) | `implementasyon-control` skill (mandatory pre-final) + `implementation-auditor` agent; deterministic backstop in `completion-claim-guard.mjs` (Stop) catches a final completion claim made with no completion-claim-gate invocation |
 
 > Why not all scripts? Per Claude Code docs, hooks are for **deterministic** actions. A check like "was the test output actually understood?" needs a model's judgment — so it is a prompt-level gate in a skill, backed where possible by a deterministic script (e.g. secret scanning, branch guarding).
 
