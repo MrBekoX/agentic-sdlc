@@ -124,6 +124,10 @@ Update Claude Code plugin version metadata:
 python scripts/bump_version.py 0.2.0
 ```
 
+## Contributors
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md). Built by [@MrBekoX](https://github.com/MrBekoX), pair-programmed with [Claude Code](https://claude.com/claude-code).
+
 ## License
 
 MIT - see [LICENSE](LICENSE).
