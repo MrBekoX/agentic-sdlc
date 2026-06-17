@@ -17,7 +17,7 @@ class TestProcedureEvalHarness(unittest.TestCase):
                 sys.executable,
                 "scripts/run_procedure_eval.py",
                 "--eval-set",
-                "tests/skills/procedure/dev-flow.json",
+                "tests/skills/procedure/agentic-sdlc-pipeline.json",
                 "--dry-run",
             ],
             cwd=REPO,
@@ -33,9 +33,9 @@ class TestProcedureEvalHarness(unittest.TestCase):
                 sys.executable,
                 "scripts/run_procedure_eval.py",
                 "--eval-set",
-                "tests/skills/procedure/dev-flow.json",
+                "tests/skills/procedure/agentic-sdlc-pipeline.json",
                 "--transcript",
-                "tests/fixtures/transcripts/dev-flow-procedure-pass.jsonl",
+                "tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-pass.jsonl",
             ],
             cwd=REPO,
             capture_output=True,
@@ -50,9 +50,9 @@ class TestProcedureEvalHarness(unittest.TestCase):
                 sys.executable,
                 "scripts/run_procedure_eval.py",
                 "--eval-set",
-                "tests/skills/procedure/dev-flow.json",
+                "tests/skills/procedure/agentic-sdlc-pipeline.json",
                 "--transcript",
-                "tests/fixtures/transcripts/dev-flow-procedure-runtime-error.jsonl",
+                "tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-runtime-error.jsonl",
             ],
             cwd=REPO,
             capture_output=True,
@@ -68,9 +68,9 @@ class TestProcedureEvalHarness(unittest.TestCase):
                 sys.executable,
                 "scripts/run_procedure_eval.py",
                 "--eval-set",
-                "tests/skills/procedure/dev-flow.json",
+                "tests/skills/procedure/agentic-sdlc-pipeline.json",
                 "--transcript",
-                "tests/fixtures/transcripts/dev-flow-procedure-permission-denied.jsonl",
+                "tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-permission-denied.jsonl",
             ],
             cwd=REPO,
             capture_output=True,
@@ -82,8 +82,8 @@ class TestProcedureEvalHarness(unittest.TestCase):
 
     def test_live_fixture_has_baseline_commit_before_claude_runs(self):
         case = {
-            "id": "dev-flow-feature-no-commit",
-            "fixture_dir": "tests/fixtures/dev-flow-basic",
+            "id": "agentic-sdlc-pipeline-feature-no-commit",
+            "fixture_dir": "tests/fixtures/agentic-sdlc-pipeline-basic",
         }
         with tempfile.TemporaryDirectory() as td:
             cwd = procedure_eval.copy_fixture(case, Path(td))

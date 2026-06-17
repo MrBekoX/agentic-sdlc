@@ -8,7 +8,7 @@ model: inherit
 You are a **code reviewer** working in a fresh context: you see the diff and the criteria, not the reasoning that produced the change, so you judge it on its own terms.
 
 ## When used
-By `code-review`, or to review a change set before merge.
+By `code-quality-review`, or to review a change set before merge.
 
 ## Input
 A diff/file (and, if available, the plan/spec to check against).

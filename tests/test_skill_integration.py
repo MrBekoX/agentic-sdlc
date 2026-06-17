@@ -2,7 +2,7 @@
 
 Asserts the wiring between skills/agents/workflows/commands/hooks/scripts is intact:
 - golden must_reference entries both APPEAR in the SKILL.md and RESOLVE to a real component
-  (e.g. dev-flow -> fix-flow/feature-flow/refactor-flow/test-flow, implementasyon-control ->
+  (e.g. agentic-sdlc-pipeline -> root-cause-fix/feature-build/safe-refactor/test-authoring, implementasyon-control ->
   implementation-auditor, spec-plan-draft workflow -> spec-plan-author/critic agents).
 - every ${CLAUDE_PLUGIN_ROOT}/<path> referenced in skills/hooks resolves to a real repo file.
 - hooks.json is valid JSON and each referenced .mjs exists.
@@ -46,13 +46,13 @@ class TestSkillCrossReferences(unittest.TestCase):
         self.assertEqual(failures, {}, f"cross-reference errors: {failures}")
 
     def test_dev_flow_delegates_to_four_work_flows(self):
-        # The Onion-center contract: dev-flow must reference the four core work-flows it delegates to.
-        text = (h.SKILLS_DIR / "dev-flow" / "SKILL.md").read_text(encoding="utf-8")
-        for flow in ("fix-flow", "feature-flow", "refactor-flow", "test-flow"):
-            self.assertIn(flow, text, f"dev-flow no longer references {flow}")
+        # The Onion-center contract: agentic-sdlc-pipeline must reference the four core work-flows it delegates to.
+        text = (h.SKILLS_DIR / "agentic-sdlc-pipeline" / "SKILL.md").read_text(encoding="utf-8")
+        for flow in ("root-cause-fix", "feature-build", "safe-refactor", "test-authoring"):
+            self.assertIn(flow, text, f"agentic-sdlc-pipeline no longer references {flow}")
 
     def test_dev_flow_forbids_manual_substitutes_for_eval_gates(self):
-        text = (h.SKILLS_DIR / "dev-flow" / "SKILL.md").read_text(encoding="utf-8")
+        text = (h.SKILLS_DIR / "agentic-sdlc-pipeline" / "SKILL.md").read_text(encoding="utf-8")
         for phrase in (
             "Manual Read/Glob/ls exploration does not replace detect_context.py.",
             "Manual review text does not replace validate_artifacts.py.",
@@ -66,7 +66,7 @@ class TestSkillCrossReferences(unittest.TestCase):
         self.assertIn("implementation-auditor", h.agent_names())
 
     def test_standalone_spec_plan_descriptions_do_not_trigger_internal_workflow(self):
-        for skill in ("spec-flow", "plan-flow"):
+        for skill in ("spec-authoring", "plan-authoring"):
             art = h.load_markdown_artifact(h.SKILLS_DIR / skill / "SKILL.md")
             desc = h.frontmatter_value(art["frontmatter"], "description")
             self.assertNotIn("spec-plan-draft", desc)

@@ -1,6 +1,6 @@
-"""Deterministic dev-flow context probe.
+"""Deterministic agentic-sdlc-pipeline context probe.
 
-Why this exists: dev-flow Step 3 needs to know whether a workspace is
+Why this exists: agentic-sdlc-pipeline Step 3 needs to know whether a workspace is
 greenfield or brownfield and how many recognisable architectural layers it has,
 so Claude can choose the right exploration strategy without reading every file.
 Steps 6 and 15 need the same probe extended to dependency manifests and build
@@ -411,7 +411,7 @@ def emit(fields):
 
 def build_parser():
     p = argparse.ArgumentParser(
-        description="Deterministic dev-flow context probe (stdlib only)."
+        description="Deterministic agentic-sdlc-pipeline context probe (stdlib only)."
     )
     p.add_argument(
         "--path",

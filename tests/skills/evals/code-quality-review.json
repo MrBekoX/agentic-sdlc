@@ -1,0 +1,11 @@
+{
+  "_comment": "Live trigger eval-set for code-quality-review. Positives = explicit single-skill activation smoke for code-quality review; negatives = receiving feedback, security audit, or build/fix near-misses.",
+  "queries": [
+    {"query": "Call the Skill tool for agentic-sdlc:code-quality-review: bu branch'teki diff'i merge'den once kalite acisindan gozden gecir.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:code-quality-review to review skills/code-quality-review/SKILL.md for readability, duplication and overengineering.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:code-quality-review: arkadasimin PR diff'i bu branch'teki staged olmayan degisiklikler; kalite sorunlarini isaretle.", "should_trigger": true},
+    {"query": "CodeRabbit'in biraktigi yorumlari uygula.", "should_trigger": false},
+    {"query": "Bu endpoint'i IDOR ve secret sizintisi acisindan denetle.", "should_trigger": false},
+    {"query": "Sifirdan yeni bir dashboard ekrani olustur.", "should_trigger": false}
+  ]
+}

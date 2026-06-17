@@ -41,19 +41,19 @@ Claude Code and Codex use separate live runners. The fixture JSON is shared, but
 Run a live Claude trigger eval when Claude CLI/runtime support is available:
 
 ```bash
-python scripts/run_trigger_eval.py --skill-path skills/dev-flow --eval-set tests/skills/evals/dev-flow.json
+python scripts/run_trigger_eval.py --skill-path skills/agentic-sdlc-pipeline --eval-set tests/skills/evals/agentic-sdlc-pipeline.json
 ```
 
 Prefer a safe smoke first. It runs one query once, records a transcript, loads the local plugin explicitly, and kills the process tree as soon as the trigger decision is known or the timeout expires:
 
 ```bash
-python scripts/run_trigger_eval.py --skill-path skills/spec-flow --eval-set tests/skills/evals/spec-flow.json --smoke --model haiku --max-budget-usd 0.10 --timeout 60 --plugin-dir . --transcript-dir tests/artifacts/trigger
+python scripts/run_trigger_eval.py --skill-path skills/spec-authoring --eval-set tests/skills/evals/spec-authoring.json --smoke --model haiku --max-budget-usd 0.10 --timeout 60 --plugin-dir . --transcript-dir tests/artifacts/trigger
 ```
 
 Use `--bare` to isolate Claude plugin-trigger behavior from project context such as `AGENTS.md`:
 
 ```bash
-python scripts/run_trigger_eval.py --skill-path skills/spec-flow --eval-set tests/skills/evals/spec-flow.json --smoke --bare --model haiku --max-budget-usd 0.10 --timeout 60 --plugin-dir . --transcript-dir tests/artifacts/trigger
+python scripts/run_trigger_eval.py --skill-path skills/spec-authoring --eval-set tests/skills/evals/spec-authoring.json --smoke --bare --model haiku --max-budget-usd 0.10 --timeout 60 --plugin-dir . --transcript-dir tests/artifacts/trigger
 ```
 
 Claude `--bare` mode does not use OAuth/keychain auth. It requires `ANTHROPIC_API_KEY` or an apiKeyHelper-backed setting; otherwise the run is blocked by auth rather than proving a trigger failure.
@@ -61,7 +61,7 @@ Claude `--bare` mode does not use OAuth/keychain auth. It requires `ANTHROPIC_AP
 Run a Codex route smoke with the lowest-cost local default model profile:
 
 ```bash
-python scripts/run_codex_trigger_eval.py --skill-path skills/spec-flow --eval-set tests/skills/evals/spec-flow.json --smoke --model gpt-5.4-mini --reasoning-effort low --transcript-dir tests/artifacts/codex-trigger
+python scripts/run_codex_trigger_eval.py --skill-path skills/spec-authoring --eval-set tests/skills/evals/spec-authoring.json --smoke --model gpt-5.4-mini --reasoning-effort low --transcript-dir tests/artifacts/codex-trigger
 ```
 
 These evals check trigger/route selection. They do not yet judge procedure compliance.
@@ -91,30 +91,30 @@ Do not trust final prose alone; parse transcript/tool evidence where possible.
 
 ## Dev-Flow Procedure Evals
 
-`dev-flow` needs a stricter transcript-based check because triggering the skill is not enough. Use:
+`agentic-sdlc-pipeline` needs a stricter transcript-based check because triggering the skill is not enough. Use:
 
 ```bash
-python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/dev-flow.json --dry-run
+python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --dry-run
 ```
 
 To validate evaluator logic against a deterministic sample transcript:
 
 ```bash
-python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/dev-flow.json --transcript tests/fixtures/transcripts/dev-flow-procedure-pass.jsonl
+python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-pass.jsonl
 ```
 
 To run a live Claude Code eval in an isolated copied fixture:
 
 ```bash
-python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/dev-flow.json --live --max-budget-usd 2.00
+python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live --max-budget-usd 2.00
 ```
 
 Live mode defaults to `--permission-mode auto` so safe headless commands can run without an interactive prompt. Override it only when intentionally auditing permission behavior.
 
 This live eval is a Claude Code transcript check. It inspects stream-json tool use for:
 
-- required skill invocations such as `agentic-sdlc:dev-flow`, `orchestration`, `feature-flow`, `security-review`, `implementasyon-control`, and `completion-claim-gate`
-- `agentic-sdlc:spec-plan-draft` workflow use in Claude Code; Codex dev-flow uses the embedded adapter instead
+- required skill invocations such as `agentic-sdlc:agentic-sdlc-pipeline`, `dispatch-strategy`, `feature-build`, `security-audit`, `implementasyon-control`, and `completion-claim-gate`
+- `agentic-sdlc:spec-plan-draft` workflow use in Claude Code; Codex agentic-sdlc-pipeline uses the embedded adapter instead
 - `detect_context.py` and `validate_artifacts.py` commands
 - spec/plan artifacts under `docs/specs/` and `docs/plans/`
 - absence of forbidden publish commands such as `git commit`, `git push`, and `git merge`

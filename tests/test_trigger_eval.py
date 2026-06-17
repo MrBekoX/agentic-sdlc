@@ -28,7 +28,7 @@ def result_event():
 class TestTriggerDetector(unittest.TestCase):
     def setUp(self):
         self.clean = "spec-flow-skill-abcd1234"
-        self.skill = "spec-flow"
+        self.skill = "spec-authoring"
 
     def test_allows_agents_prelude_before_skill(self):
         detector = runner.TriggerDetector(self.clean, self.skill)
@@ -36,7 +36,7 @@ class TestTriggerDetector(unittest.TestCase):
         self.assertIsNone(decision)
         self.assertIsNone(detector.feed(result_event()))
 
-        decision = detector.feed(assistant_tool("Skill", {"skill": "agentic-sdlc:spec-flow"}))
+        decision = detector.feed(assistant_tool("Skill", {"skill": "agentic-sdlc:spec-authoring"}))
         self.assertTrue(decision)
 
     def test_allows_claude_project_memory_prelude_before_skill(self):
@@ -48,7 +48,7 @@ class TestTriggerDetector(unittest.TestCase):
         self.assertIsNone(decision)
         self.assertIsNone(detector.feed(result_event()))
 
-        decision = detector.feed(assistant_tool("Skill", {"skill": "agentic-sdlc:spec-flow"}))
+        decision = detector.feed(assistant_tool("Skill", {"skill": "agentic-sdlc:spec-authoring"}))
         self.assertTrue(decision)
 
     def test_command_file_read_is_not_a_skill_trigger(self):
@@ -58,12 +58,12 @@ class TestTriggerDetector(unittest.TestCase):
 
     def test_real_skill_file_read_counts_as_trigger(self):
         detector = runner.TriggerDetector(self.clean, self.skill)
-        decision = detector.feed(assistant_tool("Read", {"file_path": r"C:\repo\agentic-sdlc\skills\spec-flow\SKILL.md"}))
+        decision = detector.feed(assistant_tool("Read", {"file_path": r"C:\repo\agentic-sdlc\skills\spec-authoring\SKILL.md"}))
         self.assertTrue(decision)
 
     def test_other_first_read_blocks_trigger(self):
         detector = runner.TriggerDetector(self.clean, self.skill)
-        decision = detector.feed(assistant_tool("Read", {"file_path": r"C:\repo\agentic-sdlc\skills\plan-flow\SKILL.md"}))
+        decision = detector.feed(assistant_tool("Read", {"file_path": r"C:\repo\agentic-sdlc\skills\plan-authoring\SKILL.md"}))
         self.assertFalse(decision)
 
     def test_streaming_command_file_read_does_not_match_mid_delta(self):
@@ -96,14 +96,14 @@ class TestDetectTriggerReplay(unittest.TestCase):
         lines = [
             assistant_tool("Read", {"file_path": r"C:\repo\agentic-sdlc\AGENTS.md"}),
             result_event(),
-            assistant_tool("Skill", {"skill": "agentic-sdlc:spec-flow"}),
+            assistant_tool("Skill", {"skill": "agentic-sdlc:spec-authoring"}),
         ]
-        self.assertTrue(runner.detect_trigger(lines, clean, "spec-flow"))
+        self.assertTrue(runner.detect_trigger(lines, clean, "spec-authoring"))
 
     def test_replay_does_not_count_command_file_read(self):
         clean = "spec-flow-skill-abcd1234"
         lines = [assistant_tool("Read", {"file_path": rf"C:\repo\agentic-sdlc\commands\{clean}.md"})]
-        self.assertFalse(runner.detect_trigger(lines, clean, "spec-flow"))
+        self.assertFalse(runner.detect_trigger(lines, clean, "spec-authoring"))
 
 
 if __name__ == "__main__":

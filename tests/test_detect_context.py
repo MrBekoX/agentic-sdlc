@@ -1,4 +1,4 @@
-"""Tests for detect_context.py — deterministic dev-flow context probe.
+"""Tests for detect_context.py — deterministic agentic-sdlc-pipeline context probe.
 
 Each behavior is asserted BOTH in-process (call the functions directly) AND via
 the subprocess CLI (exit code + exact key=value substrings). Stdlib `unittest`

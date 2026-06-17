@@ -7,10 +7,10 @@ Use delegation and orchestration so the main context stays clean and work parall
 When a task has independent/parallelizable parts, heavy exploration, multi-file generation, or multi-lens review.
 
 ## Required
-- Let the **`orchestration`** skill choose the mechanism — it is the single decision authority.
+- Let the **`dispatch-strategy`** skill choose the mechanism — it is the single decision authority.
 - Mechanisms: **main loop** (interdependent code, design/ordering decisions, small single-file work); **sub-agent** (one independent piece: exploration, fixed-pattern multi-file generation, multi-file verification); **dynamic-workflow** (≈3+ similar verification/research/codegen, parallel via worktree isolation); **agent-team** (interactive multi-angle review — not in headless/CI).
 - Keep intermediate work (reads, build output) inside the delegate; only the result returns to the main loop.
-- Use a fresh-context reviewer (subagent / `code-review`) to check a diff the implementer just wrote.
+- Use a fresh-context reviewer (subagent / `code-quality-review`) to check a diff the implementer just wrote.
 - Use built-in **`/goal`** to hold a verifiable end-state across turns; built-in **`/loop`** to re-run on an interval.
 
 ## Forbidden
@@ -19,7 +19,7 @@ When a task has independent/parallelizable parts, heavy exploration, multi-file 
 - Agent-team in headless/automated runs.
 
 ## Checklist
-- [ ] Did `orchestration` pick the mechanism?
+- [ ] Did `dispatch-strategy` pick the mechanism?
 - [ ] Is heavy/independent work delegated, not inline?
 - [ ] Smallest sufficient mechanism chosen?
 - [ ] Fresh-context review used for the final diff?

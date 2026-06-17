@@ -1,6 +1,6 @@
 ---
 name: spec-plan-author
-description: Produces a deep spec OR plan DRAFT (no file writing; returns markdown + decision points). Called by the spec-plan-draft workflow during the spec/plan steps of fix-flow and feature-flow. Technology-agnostic.
+description: Produces a deep spec OR plan DRAFT (no file writing; returns markdown + decision points). Called by the spec-plan-draft workflow during the spec/plan steps of root-cause-fix and feature-build. Technology-agnostic.
 model: inherit
 tools: Glob, Grep, Read, NotebookRead, WebFetch, WebSearch
 ---

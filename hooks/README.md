@@ -27,11 +27,11 @@ These are the seven requested checkpoints. They require judgment, so they live a
 
 | Conceptual hook | Enforced by |
 |---|---|
-| `pre-edit-context-check` (file read? spec/plan exists? in scope?) | contracts 01 and 03; fix-flow/feature-flow steps 1–4 |
-| `post-edit-diff-check` (which files changed? unnecessary changes? diff too big?) | contracts 04 and 08; `code-review` skill; fix-flow step 12 |
-| `pre-test-command-check` (right test command? right scope?) | contract 05; `test-flow` skill |
-| `post-test-result-check` (output actually read? fail root-caused? no false "passed"?) | contract 05 (show real output); fix-flow step 8 + Loop A |
-| `security-sensitive-change-check` (auth/permission/config/secret/migration/data-loss?) | contract 06; `security-review` skill; fix-flow steps 9 & 11 |
+| `pre-edit-context-check` (file read? spec/plan exists? in scope?) | contracts 01 and 03; root-cause-fix/feature-build steps 1–4 |
+| `post-edit-diff-check` (which files changed? unnecessary changes? diff too big?) | contracts 04 and 08; `code-quality-review` skill; root-cause-fix step 12 |
+| `pre-test-command-check` (right test command? right scope?) | contract 05; `test-authoring` skill |
+| `post-test-result-check` (output actually read? fail root-caused? no false "passed"?) | contract 05 (show real output); root-cause-fix step 8 + Loop A |
+| `security-sensitive-change-check` (auth/permission/config/secret/migration/data-loss?) | contract 06; `security-audit` skill; root-cause-fix steps 9 & 11 |
 | `pre-git-operation-check` (status/diff reviewed? branch? secrets? tests? approval?) | contract 08; `/git-safety-check` command; `scan-commit.mjs` + `branch-guard.mjs` |
 | `final-response-verification` (work verified? test output? security done? control run? gaps stated?) | `implementasyon-control` skill (mandatory pre-final) + `implementation-auditor` agent |
 

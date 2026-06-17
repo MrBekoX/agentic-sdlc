@@ -58,7 +58,7 @@ python tests/skills/harness.py
 
 ```bash
 python scripts/run_trigger_eval.py \
-  --skill-path skills/fix-flow --eval-set tests/skills/evals/fix-flow.json --runs 3
+  --skill-path skills/root-cause-fix --eval-set tests/skills/evals/root-cause-fix.json --runs 3
 ```
 
 Needs the `claude` CLI + auth. It is a real token/time cost (queries × runs), so run it

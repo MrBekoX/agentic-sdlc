@@ -1,9 +1,9 @@
 {
   "_comment": "Live trigger eval-set for using-agentic-sdlc. Positives = explicit routing/session-local scope-shift decisions; negatives = clear focused prompts that should go directly to another skill.",
   "queries": [
-    {"query": "Call the Skill tool for agentic-sdlc:using-agentic-sdlc: once plan-flow ile basladik ama kullanici simdi sadece test strategy istiyor; scope shift'i ve smallest next skill'i degerlendir.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:using-agentic-sdlc: once spec-flow ile basladik ama kullanici simdi end-to-end implementasyon istiyor; scope shift'i degerlendir.", "should_trigger": true},
-    {"query": "Call the Skill tool for agentic-sdlc:using-agentic-sdlc because no clearer focused skill applies; route request 'bunu daha iyi hale getirelim' and decide whether dev-flow is needed.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:using-agentic-sdlc: once plan-authoring ile basladik ama kullanici simdi sadece test strategy istiyor; scope shift'i ve smallest next skill'i degerlendir.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:using-agentic-sdlc: once spec-authoring ile basladik ama kullanici simdi end-to-end implementasyon istiyor; scope shift'i degerlendir.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:using-agentic-sdlc because no clearer focused skill applies; route request 'bunu daha iyi hale getirelim' and decide whether agentic-sdlc-pipeline is needed.", "should_trigger": true},
     {"query": "Sadece yeni export ozelligi icin acceptance criteria ve WHAT spec yaz.", "should_trigger": false},
     {"query": "Login null reference bug'ini root cause ile duzelt.", "should_trigger": false},
     {"query": "Bu diff'i security review et.", "should_trigger": false}

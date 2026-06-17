@@ -27,13 +27,13 @@ unexamined; the cure is to decompose before you refine.
 
 Reach for this at the *start* of any creative change where the design isn't settled: a new feature,
 component, endpoint, screen, job, or a "change how X behaves" request. It runs before the spec — it
-produces the agreed intent the spec then makes testable. It composes with `dev-flow` rather than
-competing: when dev-flow kicks off a production change, this runs first and feeds the approved intent
-into dev-flow's Spec phase.
+produces the agreed intent the spec then makes testable. It composes with `agentic-sdlc-pipeline` rather than
+competing: when agentic-sdlc-pipeline kicks off a production change, this runs first and feeds the approved intent
+into agentic-sdlc-pipeline's Spec phase.
 
 **The one decision test for a fix/refactor request:** does the request already carry a testable
 definition of done — a spec, a ticket with acceptance criteria, or a bug whose correct behavior is
-clearly described? **Yes** → this skill does not fire; route to `fix-flow` / `refactor-flow`, which own
+clearly described? **Yes** → this skill does not fire; route to `root-cause-fix` / `safe-refactor`, which own
 already-specified work. **No** → the missing definition *is* the design question; stay here. This single
 test resolves the boundary both ways: don't grab a clearly-specified fix, and don't wave an
 underspecified one through as "just a fix".
@@ -48,7 +48,7 @@ underspecified one through as "just a fix".
 design you still confirm, never silence.
 
 > If superpowers' intent/design-gate skill is also installed, this house skill supersedes it: use the house
-> register and hand off to `spec-plan-draft` / `dev-flow`, not the superpowers planning path.
+> register and hand off to `spec-plan-draft` / `agentic-sdlc-pipeline`, not the superpowers planning path.
 
 ## "This is too simple to need a design"
 
@@ -148,7 +148,7 @@ The terminal step is the handoff, not the build. Once the design is approved, pa
 into the spec-driven flow and stop here — do not start implementing and do not invoke a build skill
 (frontend, API scaffolding, etc.) yourself.
 
-- Inside **`dev-flow`**: the approved intent feeds its Spec phase directly — return control.
+- Inside **`agentic-sdlc-pipeline`**: the approved intent feeds its Spec phase directly — return control.
 - Standalone: invoke the **`spec-plan-draft`** workflow with `mode=spec` to turn the intent into
   testable acceptance criteria (contract 02), then its plan phase (`mode=plan`). Record the spec when the
   work is substantial.
@@ -176,8 +176,8 @@ Keep it as short as the task allows — this is the agreed intent, not the spec.
 - Writing code, scaffolding, or invoking a build skill **before** the design was approved.
 - Treating an explicit build instruction ("just build it") as design approval — it isn't; still confirm.
 - Deciding something is "too simple" to confirm — that's the trap, not an exception.
-- Routing an underspecified bug fix to fix-flow as "already specified" when "fixed" isn't defined yet.
-- Re-opening design on a fix that already carries acceptance criteria — that's fix-flow's, not yours.
+- Routing an underspecified bug fix to root-cause-fix as "already specified" when "fixed" isn't defined yet.
+- Re-opening design on a fix that already carries acceptance criteria — that's root-cause-fix's, not yours.
 - Refining details of a request that is really several subsystems — decompose first.
 - Firing multiple questions in one message, or open-ended ones where a multiple-choice would do.
 - Presenting one approach with no alternatives and no recommendation.
@@ -187,10 +187,10 @@ Keep it as short as the task allows — this is the agreed intent, not the spec.
 ## Checklist
 
 - [ ] Existing context (files, docs, commits, patterns) read before questioning.
-- [ ] Fix/refactor decision test applied — already-specified work routed to fix-flow/refactor-flow, not grabbed.
+- [ ] Fix/refactor decision test applied — already-specified work routed to root-cause-fix/safe-refactor, not grabbed.
 - [ ] Scope checked; oversized requests decomposed, first sub-project chosen.
 - [ ] Questions asked one at a time, multiple-choice preferred.
 - [ ] 2-3 approaches offered with trade-offs and a recommendation.
 - [ ] Design presented in scaled sections, approved section by section.
 - [ ] No code / scaffold / build skill before the design was approved (explicit build instruction is not approval).
-- [ ] Handed off to the spec-driven flow (dev-flow Spec phase / `spec-plan-draft` `mode=spec`); spec & plan left downstream.
+- [ ] Handed off to the spec-driven flow (agentic-sdlc-pipeline Spec phase / `spec-plan-draft` `mode=spec`); spec & plan left downstream.

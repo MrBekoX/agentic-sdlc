@@ -65,10 +65,10 @@ If a runtime capability is unavailable in the current version/configuration, fal
 
 Claude Code can run `workflows/spec-plan-draft.js` as a JavaScript dynamic workflow. Codex does not use that runtime. Therefore:
 
-- `spec-flow` and `plan-flow` remain standalone prompt-level entry skills.
-- `dev-flow` must not call `spec-flow` or `plan-flow` for its internal steps 4-5.
-- In Claude Code, `dev-flow` uses `spec-plan-draft`.
-- In Codex, `dev-flow` uses its embedded author/critic adapter: main-loop draft, fresh-context subagent critic when available, revise, save artifact, validate.
+- `spec-authoring` and `plan-authoring` remain standalone prompt-level entry skills.
+- `agentic-sdlc-pipeline` must not call `spec-authoring` or `plan-authoring` for its internal steps 4-5.
+- In Claude Code, `agentic-sdlc-pipeline` uses `spec-plan-draft`.
+- In Codex, `agentic-sdlc-pipeline` uses its embedded author/critic adapter: main-loop draft, fresh-context subagent critic when available, revise, save artifact, validate.
 
 ## Skill Frontmatter Policy
 

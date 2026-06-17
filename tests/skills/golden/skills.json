@@ -2,37 +2,37 @@
   "_comment": "Golden/regression baseline per skill. 'description_must_include' = core trigger keywords that must survive any description edit (lowercased substring match). 'must_reference' = cross-references that must both APPEAR in SKILL.md and RESOLVE to a real component/file. kinds: skill|agent|workflow|command|script|file|contract|hook (file = path relative to the skill dir; contract = contracts/skills; hook = hooks). Update deliberately when a skill's contract legitimately changes.",
   "skills": {
     "using-agentic-sdlc": {
-      "description_must_include": ["route", "smallest sufficient skill", "dev-flow", "evidence-before-claim"],
+      "description_must_include": ["route", "smallest sufficient skill", "agentic-sdlc-pipeline", "evidence-before-claim"],
       "must_reference": [
-        {"ref": "dev-flow", "kind": "skill"},
-        {"ref": "spec-flow", "kind": "skill"},
-        {"ref": "plan-flow", "kind": "skill"},
-        {"ref": "fix-flow", "kind": "skill"},
-        {"ref": "feature-flow", "kind": "skill"},
-        {"ref": "refactor-flow", "kind": "skill"},
-        {"ref": "test-flow", "kind": "skill"},
-        {"ref": "security-review", "kind": "skill"},
-        {"ref": "code-review", "kind": "skill"},
-        {"ref": "receiving-code-review", "kind": "skill"},
+        {"ref": "agentic-sdlc-pipeline", "kind": "skill"},
+        {"ref": "spec-authoring", "kind": "skill"},
+        {"ref": "plan-authoring", "kind": "skill"},
+        {"ref": "root-cause-fix", "kind": "skill"},
+        {"ref": "feature-build", "kind": "skill"},
+        {"ref": "safe-refactor", "kind": "skill"},
+        {"ref": "test-authoring", "kind": "skill"},
+        {"ref": "security-audit", "kind": "skill"},
+        {"ref": "code-quality-review", "kind": "skill"},
+        {"ref": "feedback-triage", "kind": "skill"},
         {"ref": "mind-spark", "kind": "skill"},
-        {"ref": "orchestration", "kind": "skill"},
+        {"ref": "dispatch-strategy", "kind": "skill"},
         {"ref": "implementasyon-control", "kind": "skill"},
         {"ref": "completion-claim-gate", "kind": "skill"}
       ]
     },
-    "dev-flow": {
+    "agentic-sdlc-pipeline": {
       "description_must_include": ["production-impacting", "api contract", "auth", "database"],
       "must_reference": [
-        {"ref": "fix-flow", "kind": "skill"},
-        {"ref": "feature-flow", "kind": "skill"},
-        {"ref": "refactor-flow", "kind": "skill"},
-        {"ref": "test-flow", "kind": "skill"},
-        {"ref": "orchestration", "kind": "skill"},
+        {"ref": "root-cause-fix", "kind": "skill"},
+        {"ref": "feature-build", "kind": "skill"},
+        {"ref": "safe-refactor", "kind": "skill"},
+        {"ref": "test-authoring", "kind": "skill"},
+        {"ref": "dispatch-strategy", "kind": "skill"},
         {"ref": "implementasyon-control", "kind": "skill"},
         {"ref": "mind-spark", "kind": "skill"},
         {"ref": "completion-claim-gate", "kind": "skill"},
-        {"ref": "receiving-code-review", "kind": "skill"},
-        {"ref": "security-review", "kind": "skill"},
+        {"ref": "feedback-triage", "kind": "skill"},
+        {"ref": "security-audit", "kind": "skill"},
         {"ref": "context-analyst", "kind": "agent"},
         {"ref": "spec-plan-draft", "kind": "workflow"},
         {"ref": "git-safety-check", "kind": "command"},
@@ -43,12 +43,12 @@
         {"ref": "templates.md", "kind": "file"}
       ]
     },
-    "spec-flow": {
+    "spec-authoring": {
       "description_must_include": ["spec", "acceptance criteria", "what"],
       "must_reference": [
         {"ref": "mind-spark", "kind": "skill"},
-        {"ref": "plan-flow", "kind": "skill"},
-        {"ref": "dev-flow", "kind": "skill"},
+        {"ref": "plan-authoring", "kind": "skill"},
+        {"ref": "agentic-sdlc-pipeline", "kind": "skill"},
         {"ref": "spec-plan-author", "kind": "agent"},
         {"ref": "spec-plan-critic", "kind": "agent"},
         {"ref": "spec-plan-draft", "kind": "workflow"},
@@ -59,16 +59,16 @@
         {"ref": "session-start.mjs", "kind": "hook"}
       ]
     },
-    "plan-flow": {
+    "plan-authoring": {
       "description_must_include": ["implementation plan", "task breakdown", "how"],
       "must_reference": [
-        {"ref": "spec-flow", "kind": "skill"},
+        {"ref": "spec-authoring", "kind": "skill"},
         {"ref": "mind-spark", "kind": "skill"},
-        {"ref": "dev-flow", "kind": "skill"},
-        {"ref": "feature-flow", "kind": "skill"},
-        {"ref": "fix-flow", "kind": "skill"},
-        {"ref": "refactor-flow", "kind": "skill"},
-        {"ref": "test-flow", "kind": "skill"},
+        {"ref": "agentic-sdlc-pipeline", "kind": "skill"},
+        {"ref": "feature-build", "kind": "skill"},
+        {"ref": "root-cause-fix", "kind": "skill"},
+        {"ref": "safe-refactor", "kind": "skill"},
+        {"ref": "test-authoring", "kind": "skill"},
         {"ref": "spec-plan-author", "kind": "agent"},
         {"ref": "spec-plan-critic", "kind": "agent"},
         {"ref": "spec-plan-draft", "kind": "workflow"},
@@ -78,62 +78,62 @@
         {"ref": "session-start.mjs", "kind": "hook"}
       ]
     },
-    "fix-flow": {
+    "root-cause-fix": {
       "description_must_include": ["bug", "root-cause", "failing test"],
       "must_reference": [
-        {"ref": "orchestration", "kind": "skill"},
+        {"ref": "dispatch-strategy", "kind": "skill"},
         {"ref": "implementasyon-control", "kind": "skill"},
         {"ref": "spec-plan-draft", "kind": "workflow"},
         {"ref": "spec-plan-author", "kind": "agent"},
         {"ref": "spec-plan-critic", "kind": "agent"}
       ]
     },
-    "feature-flow": {
+    "feature-build": {
       "description_must_include": ["new feature", "endpoint", "implementation-control"],
       "must_reference": [
-        {"ref": "orchestration", "kind": "skill"},
+        {"ref": "dispatch-strategy", "kind": "skill"},
         {"ref": "implementasyon-control", "kind": "skill"},
         {"ref": "spec-plan-author", "kind": "agent"},
         {"ref": "spec-plan-critic", "kind": "agent"}
       ]
     },
-    "refactor-flow": {
+    "safe-refactor": {
       "description_must_include": ["refactor", "without changing behavior", "approval"],
       "must_reference": [
-        {"ref": "orchestration", "kind": "skill"},
+        {"ref": "dispatch-strategy", "kind": "skill"},
         {"ref": "implementasyon-control", "kind": "skill"}
       ]
     },
-    "test-flow": {
+    "test-authoring": {
       "description_must_include": ["regression", "e2e", "meaningful assertions"],
       "must_reference": []
     },
-    "orchestration": {
-      "_note": "orchestration references the work-SKILLS (not the reviewer agents directly; those are referenced by code-review/security-review themselves).",
+    "dispatch-strategy": {
+      "_note": "dispatch-strategy references the work-SKILLS (not the reviewer agents directly; those are referenced by code-quality-review/security-audit themselves).",
       "description_must_include": ["sub-agent", "dynamic-workflow", "agent-team", "main loop"],
       "must_reference": [
-        {"ref": "fix-flow", "kind": "skill"},
-        {"ref": "feature-flow", "kind": "skill"},
-        {"ref": "refactor-flow", "kind": "skill"},
-        {"ref": "test-flow", "kind": "skill"},
-        {"ref": "security-review", "kind": "skill"},
-        {"ref": "code-review", "kind": "skill"},
+        {"ref": "root-cause-fix", "kind": "skill"},
+        {"ref": "feature-build", "kind": "skill"},
+        {"ref": "safe-refactor", "kind": "skill"},
+        {"ref": "test-authoring", "kind": "skill"},
+        {"ref": "security-audit", "kind": "skill"},
+        {"ref": "code-quality-review", "kind": "skill"},
         {"ref": "spec-plan-draft", "kind": "workflow"}
       ]
     },
-    "security-review": {
+    "security-audit": {
       "description_must_include": ["input validation", "auth", "secrets", "injection"],
       "must_reference": [
-        {"ref": "orchestration", "kind": "skill"},
-        {"ref": "fix-flow", "kind": "skill"},
-        {"ref": "feature-flow", "kind": "skill"},
+        {"ref": "dispatch-strategy", "kind": "skill"},
+        {"ref": "root-cause-fix", "kind": "skill"},
+        {"ref": "feature-build", "kind": "skill"},
         {"ref": "security-reviewer", "kind": "agent"}
       ]
     },
-    "code-review": {
+    "code-quality-review": {
       "description_must_include": ["readability", "duplication", "fresh context"],
       "must_reference": [
-        {"ref": "orchestration", "kind": "skill"},
+        {"ref": "dispatch-strategy", "kind": "skill"},
         {"ref": "code-reviewer", "kind": "agent"}
       ]
     },
@@ -152,21 +152,21 @@
     "mind-spark": {
       "description_must_include": ["pre-spec intent gate", "design", "build"],
       "must_reference": [
-        {"ref": "dev-flow", "kind": "skill"},
-        {"ref": "fix-flow", "kind": "skill"},
-        {"ref": "refactor-flow", "kind": "skill"},
+        {"ref": "agentic-sdlc-pipeline", "kind": "skill"},
+        {"ref": "root-cause-fix", "kind": "skill"},
+        {"ref": "safe-refactor", "kind": "skill"},
         {"ref": "spec-plan-draft", "kind": "workflow"}
       ]
     },
-    "receiving-code-review": {
+    "feedback-triage": {
       "description_must_include": ["review", "feedback", "received"],
       "must_reference": [
-        {"ref": "code-review", "kind": "skill"},
-        {"ref": "test-flow", "kind": "skill"},
-        {"ref": "fix-flow", "kind": "skill"}
+        {"ref": "code-quality-review", "kind": "skill"},
+        {"ref": "test-authoring", "kind": "skill"},
+        {"ref": "root-cause-fix", "kind": "skill"}
       ]
     },
-    "writing-skills": {
+    "skill-authoring": {
       "description_must_include": ["skill", "skill.md", "eval"],
       "must_reference": [
         {"ref": "references/house-notes.md", "kind": "file"}

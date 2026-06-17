@@ -4,7 +4,7 @@ A disciplined SDLC skill library for Claude Code and Codex. It routes each promp
 
 Current scope: Claude Code and Codex plugin metadata share the root `skills/` source. Other harness integrations are intentionally deferred.
 
-The entry point is **`using-agentic-sdlc`**, a session-local router. It tracks the current intent, selected skill, known artifacts, and scope shifts in the conversation. **`dev-flow`** is the escalation path for end-to-end implementation, not the default route for every feature, spec, plan, test, or review request.
+The entry point is **`using-agentic-sdlc`**, a session-local router. It tracks the current intent, selected skill, known artifacts, and scope shifts in the conversation. **`agentic-sdlc-pipeline`** is the escalation path for end-to-end implementation, not the default route for every feature, spec, plan, test, or review request.
 
 ## Install
 
@@ -28,10 +28,10 @@ tests/
 Add this repository as a local marketplace/plugin source in Claude Code, then invoke a focused skill or let the bootstrap router choose from a natural prompt:
 
 ```text
-/spec-flow <what to specify>
-/plan-flow <what to plan>
-/feature-flow <what to add>
-/dev-flow <end-to-end production-ready change>
+/spec-authoring <what to specify>
+/plan-authoring <what to plan>
+/feature-build <what to add>
+/agentic-sdlc-pipeline <end-to-end production-ready change>
 ```
 
 Skills live in root `skills/`, not in `.claude/skills/`. The `.claude/` directory is only for local workspace settings.
@@ -43,21 +43,21 @@ Claude hook paths use `${CLAUDE_PLUGIN_ROOT}`. Codex hook paths use `${PLUGIN_RO
 | Skill | Purpose |
 |---|---|
 | `using-agentic-sdlc` | Session-local router; chooses the smallest sufficient skill, tracks scope shifts, and gates evidence-before-claim discipline. |
-| `dev-flow` | Full-envelope SDLC orchestrator for end-to-end implementation; owns the gated envelope and delegates the core. Claude uses `spec-plan-draft`; Codex uses dev-flow's embedded author/critic adapter. |
-| `spec-flow` | Spec-only WHAT flow for requirements, acceptance criteria, and behavior contracts. |
-| `plan-flow` | Plan-only HOW flow for task breakdown, sequencing, and verification strategy. |
-| `fix-flow` | Bug / broken-behavior fix via root cause, spec, plan, TDD, security, and verification. |
-| `feature-flow` | New feature or endpoint end-to-end with a final implementation-control audit. |
-| `refactor-flow` | Behavior-preserving restructure guarded by characterization tests. |
-| `test-flow` | Write/fix unit, integration, regression, and e2e tests with meaningful assertions. |
-| `orchestration` | Decide how to run work: main loop, sub-agent, dynamic workflow, or agent-team. |
-| `security-review` | Input/auth/secrets/injection/dependency review with masked findings. |
-| `code-review` | Technology-agnostic quality review of a diff or file. |
+| `agentic-sdlc-pipeline` | Full-envelope SDLC orchestrator for end-to-end implementation; owns the gated envelope and delegates the core. Claude uses `spec-plan-draft`; Codex uses agentic-sdlc-pipeline's embedded author/critic adapter. |
+| `spec-authoring` | Spec-only WHAT flow for requirements, acceptance criteria, and behavior contracts. |
+| `plan-authoring` | Plan-only HOW flow for task breakdown, sequencing, and verification strategy. |
+| `root-cause-fix` | Bug / broken-behavior fix via root cause, spec, plan, TDD, security, and verification. |
+| `feature-build` | New feature or endpoint end-to-end with a final implementation-control audit. |
+| `safe-refactor` | Behavior-preserving restructure guarded by characterization tests. |
+| `test-authoring` | Write/fix unit, integration, regression, and e2e tests with meaningful assertions. |
+| `dispatch-strategy` | Decide how to run work: main loop, sub-agent, dynamic workflow, or agent-team. |
+| `security-audit` | Input/auth/secrets/injection/dependency review with masked findings. |
+| `code-quality-review` | Technology-agnostic quality review of a diff or file. |
 | `implementasyon-control` | Mandatory pre-final audit that the required flow was actually followed. |
 | `completion-claim-gate` | Same-turn evidence gate before any "done / passing / fixed" claim. |
 | `mind-spark` | Pre-spec intent gate for build/design requests whose shape is not settled. |
-| `receiving-code-review` | Verify reviewer feedback against the code before applying it. |
-| `writing-skills` | Author, eval, and package Claude Code skills with a test-first loop. |
+| `feedback-triage` | Verify reviewer feedback against the code before applying it. |
+| `skill-authoring` | Author, eval, and package Claude Code skills with a test-first loop. |
 
 Responsibility boundaries are enforced by the skill bodies, integration tests, and golden cross-reference fixtures under `tests/skills/`.
 
@@ -106,7 +106,7 @@ The plugin wires deterministic Claude Code hooks from [hooks/hooks.json](hooks/h
 
 ## Runtime Note
 
-`spec-flow` and `plan-flow` are standalone routes for spec-only and plan-only prompts. They are not internal `dev-flow` substeps. Codex does not use Claude Code's JavaScript Workflow runtime, so `dev-flow` maps its spec/plan author-critic loop to a Codex-friendly embedded adapter.
+`spec-authoring` and `plan-authoring` are standalone routes for spec-only and plan-only prompts. They are not internal `agentic-sdlc-pipeline` substeps. Codex does not use Claude Code's JavaScript Workflow runtime, so `agentic-sdlc-pipeline` maps its spec/plan author-critic loop to a Codex-friendly embedded adapter.
 
 ## Versioning
 

@@ -28,7 +28,7 @@ Runs before the final response of any implementation flow to confirm the work wa
 2. **Delegate to the `implementation-auditor` agent** for an independent fresh-context pass (mandatory — self-attestation by the implementer is not an audit; F6). The audit verdict comes from that agent. The **only** allowed exception: the agent is genuinely unavailable in this Claude Code configuration — then say so explicitly in the report, do the pass in the main loop, and flag it as a degraded (non-independent) audit.
 3. Map evidence to the checklist below; mark each step PASS / PARTIAL / FAIL with the evidence (or its absence).
 4. Emit the **Implementation Control Report**.
-5. If any **critical** step is missing → do not allow the final answer; complete the step (or escalate to the user), then re-run this skill (**Loop C** in fix-flow).
+5. If any **critical** step is missing → do not allow the final answer; complete the step (or escalate to the user), then re-run this skill (**Loop C** in root-cause-fix).
 
 ## Output — Implementation Control Report
 ```md

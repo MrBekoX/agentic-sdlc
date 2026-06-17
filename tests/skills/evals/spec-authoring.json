@@ -1,0 +1,11 @@
+{
+  "_comment": "Live trigger eval-set for spec-authoring. Positives = explicit single-skill activation smoke for spec/WHAT-only requests; negatives = plan, implementation, test, or ambiguous design requests.",
+  "queries": [
+    {"query": "Call the Skill tool for agentic-sdlc:spec-authoring: sadece kullanicinin raporu CSV olarak indirdigi yeni export ozelligi icin acceptance criteria ve WHAT spec yaz, implementasyona gecme.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:spec-authoring to write a requirements contract for password reset; no plan or code yet.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:spec-authoring: davranis degisikligi expired session kullaniciyi login'e yonlendirir; problem, business rules, edge cases ve definition of done cikar.", "should_trigger": true},
+    {"query": "Bu spec'e gore implementation task breakdown hazirla.", "should_trigger": false},
+    {"query": "Yeni avatar upload feature'ini ekle ve test et.", "should_trigger": false},
+    {"query": "Dashboard nasil olmali birlikte netlestirelim.", "should_trigger": false}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "_comment": "Live trigger eval-set for safe-refactor. Positives = explicit single-skill activation smoke for behavior-preserving refactor; negatives = bug fix/new feature/test-only.",
+  "queries": [
+    {"query": "Call the Skill tool for agentic-sdlc:safe-refactor: scripts/run_all_trigger_evals.py modulunu davranis degismeden daha okunabilir hale getir.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:safe-refactor: Payment service'i characterization testleriyle guvenceye alip refactor et.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:safe-refactor to refactor the trigger matrix runner component without changing behavior and ask approval for broad scope.", "should_trigger": true},
+    {"query": "Webhook duplicate insert bug'ini duzelt.", "should_trigger": false},
+    {"query": "Yeni raporlama endpoint'i ekle.", "should_trigger": false},
+    {"query": "Sadece eksik unit testleri yaz.", "should_trigger": false}
+  ]
+}

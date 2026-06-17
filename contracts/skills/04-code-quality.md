@@ -17,7 +17,7 @@ Whenever writing or editing code.
 - Speculative features, configurability, or flexibility that wasn't asked for.
 - Abstractions for single-use code; error handling for impossible scenarios.
 - "Improving" adjacent code, comments, or formatting unrelated to the task.
-- Refactoring things that aren't broken (do that via `refactor-flow` with approval).
+- Refactoring things that aren't broken (do that via `safe-refactor` with approval).
 - Deleting pre-existing dead code unless asked — mention it instead.
 - Duplicating what a linter/formatter enforces deterministically.
 

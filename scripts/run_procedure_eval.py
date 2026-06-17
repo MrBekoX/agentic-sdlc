@@ -5,13 +5,13 @@ and optional filesystem artifacts to verify that a workflow used required skills
 commands, workflows, and did not run forbidden commands.
 
 Dry/schema mode:
-  python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/dev-flow.json --dry-run
+  python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --dry-run
 
 Analyze an existing transcript:
-  python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/dev-flow.json --transcript transcript.jsonl
+  python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript transcript.jsonl
 
 Live mode:
-  python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/dev-flow.json --live
+  python scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live
 """
 
 from __future__ import annotations

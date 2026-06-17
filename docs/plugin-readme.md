@@ -58,31 +58,31 @@ Non-git workspace içinde bazı akışlar çalışmaya devam eder, ancak branch,
 
 ### `using-agentic-sdlc`
 
-Plugin'in session-local router girişidir. Her kullanıcı prompt'unda en küçük yeterli skill'i seçer, konuşma içindeki aktif intent/artifact/scope shift sinyalini takip eder ve yalnızca full-envelope end-to-end SDLC gerektiğinde `dev-flow`'a yükseltir.
+Plugin'in session-local router girişidir. Her kullanıcı prompt'unda en küçük yeterli skill'i seçer, konuşma içindeki aktif intent/artifact/scope shift sinyalini takip eder ve yalnızca full-envelope end-to-end SDLC gerektiğinde `agentic-sdlc-pipeline`'a yükseltir.
 
 Router ilkesi:
 
 - fikir / belirsiz tasarım -> `mind-spark`
-- sadece spec -> `spec-flow`
-- sadece plan -> `plan-flow`
-- yeni feature -> `feature-flow`
-- bug fix -> `fix-flow`
-- sadece test -> `test-flow`
-- refactor -> `refactor-flow`
+- sadece spec -> `spec-authoring`
+- sadece plan -> `plan-authoring`
+- yeni feature -> `feature-build`
+- bug fix -> `root-cause-fix`
+- sadece test -> `test-authoring`
+- refactor -> `safe-refactor`
 - review/security/final claim -> ilgili focused skill
-- end-to-end production-ready SDLC -> `dev-flow`
+- end-to-end production-ready SDLC -> `agentic-sdlc-pipeline`
 
-### `dev-flow`
+### `agentic-sdlc-pipeline`
 
 Full-envelope escalation path'tir. Üretim etkisi olan işleri ancak uçtan uca spec, plan, TDD, security, review ve final audit gerektiğinde yönetir.
 
 Full Mode akışı:
 
-1. `orchestration` ile yürütme mekanizmasını seçer.
+1. `dispatch-strategy` ile yürütme mekanizmasını seçer.
 2. `detect_context.py` ile workspace'i deterministik sınıflandırır.
-3. Claude Code'da `spec-plan-draft` workflow ile, Codex'te dev-flow embedded author/critic adapter ile spec taslağı üretir.
+3. Claude Code'da `spec-plan-draft` workflow ile, Codex'te agentic-sdlc-pipeline embedded author/critic adapter ile spec taslağı üretir.
 4. Spec'i `validate_artifacts.py` ile doğrular.
-5. Claude Code'da `spec-plan-draft` workflow ile, Codex'te dev-flow embedded author/critic adapter ile plan üretir.
+5. Claude Code'da `spec-plan-draft` workflow ile, Codex'te agentic-sdlc-pipeline embedded author/critic adapter ile plan üretir.
 6. Planı strict mode'da doğrular.
 7. Uygulama çekirdeğini uygun flow skill'e delege eder.
 8. Security review gate'lerini çalıştırır.
@@ -90,33 +90,33 @@ Full Mode akışı:
 10. `implementasyon-control` ile pre-final audit yapar.
 11. Final başarı iddiasından hemen önce `completion-claim-gate` çalıştırır.
 
-`dev-flow` outer envelope sahibidir. Uygulamanın çekirdeğini kendisi yapmaz; işi şu skill'lerden birine devreder:
+`agentic-sdlc-pipeline` outer envelope sahibidir. Uygulamanın çekirdeğini kendisi yapmaz; işi şu skill'lerden birine devreder:
 
-- `fix-flow`
-- `feature-flow`
-- `refactor-flow`
-- `test-flow`
+- `root-cause-fix`
+- `feature-build`
+- `safe-refactor`
+- `test-authoring`
 
-`spec-flow` ve `plan-flow` sadece bağımsız prompt girişleri içindir. `dev-flow`, kendi step 4-5 fazlarında bu iki skill'i çağırmaz.
+`spec-authoring` ve `plan-authoring` sadece bağımsız prompt girişleri içindir. `agentic-sdlc-pipeline`, kendi step 4-5 fazlarında bu iki skill'i çağırmaz.
 
 ### Dar Kapsamlı Skill'ler
 
 | Skill | Ne Zaman Kullanılır? |
 |---|---|
-| `spec-flow` | Sadece WHAT/spec, acceptance criteria veya requirements contract istendiğinde. |
-| `plan-flow` | Sadece HOW/implementation plan, task breakdown veya sequencing istendiğinde. |
-| `fix-flow` | Bug, prod issue, broken behavior, failing test. |
-| `feature-flow` | Yeni feature, endpoint, capability. |
-| `refactor-flow` | Davranış değişmeden yeniden yapılandırma. |
-| `test-flow` | Test-only çalışma, regression/e2e/unit/integration testleri. |
-| `security-review` | Security lens: auth, IDOR, injection, secrets, data exposure. |
-| `code-review` | Fresh-context kalite review'u. |
-| `receiving-code-review` | Alınmış PR/MR/bot review yorumlarını doğrulayıp uygulama. |
+| `spec-authoring` | Sadece WHAT/spec, acceptance criteria veya requirements contract istendiğinde. |
+| `plan-authoring` | Sadece HOW/implementation plan, task breakdown veya sequencing istendiğinde. |
+| `root-cause-fix` | Bug, prod issue, broken behavior, failing test. |
+| `feature-build` | Yeni feature, endpoint, capability. |
+| `safe-refactor` | Davranış değişmeden yeniden yapılandırma. |
+| `test-authoring` | Test-only çalışma, regression/e2e/unit/integration testleri. |
+| `security-audit` | Security lens: auth, IDOR, injection, secrets, data exposure. |
+| `code-quality-review` | Fresh-context kalite review'u. |
+| `feedback-triage` | Alınmış PR/MR/bot review yorumlarını doğrulayıp uygulama. |
 | `mind-spark` | Belirsiz build/design isteği öncesi intent netleştirme. |
-| `writing-skills` | Skill yazma, düzenleme, eval, packaging. |
+| `skill-authoring` | Skill yazma, düzenleme, eval, packaging. |
 | `implementasyon-control` | Final öncesi akışın gerçekten izlendiğini audit etme. |
 | `completion-claim-gate` | "done/fixed/passing/ready" demeden önce kanıt kontrolü. |
-| `orchestration` | Main loop/subagent/workflow/agent-team karar otoritesi. |
+| `dispatch-strategy` | Main loop/subagent/workflow/agent-team karar otoritesi. |
 
 Gerçek skill adı `implementasyon-control` olarak kalmıştır. İsim karışık dilli olsa da mevcut invocation ve testler bu adı kullanır.
 
@@ -145,7 +145,7 @@ Bu roller ana context'i kirletmeden bağımsız analiz, review, audit veya draft
 | `spec-plan-draft.js` | Spec/plan için author -> critic -> revise döngüsü. |
 | `skill-draft.js` | Skill yazımı için author/critic döngüsü. |
 
-`spec-plan-draft.js`, eksik context durumunda fail-loud davranır ve Claude Code işlerinde ad hoc workflow yerine bu named workflow kullanılmalıdır. Codex'te Claude Workflow runtime yoktur; aynı author/critic disiplin dev-flow'un embedded adapter'ı ile uygulanır.
+`spec-plan-draft.js`, eksik context durumunda fail-loud davranır ve Claude Code işlerinde ad hoc workflow yerine bu named workflow kullanılmalıdır. Codex'te Claude Workflow runtime yoktur; aynı author/critic disiplin agentic-sdlc-pipeline'un embedded adapter'ı ile uygulanır.
 
 ## Commands
 
@@ -226,8 +226,8 @@ Behavior/procedure dry-run:
 
 ```powershell
 python scripts\run_behavior_eval.py --eval-set tests\skills\behavior\completion-claim-gate.json --dry-run
-python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\dev-flow.json --dry-run
-python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\dev-flow.json --transcript tests\fixtures\transcripts\dev-flow-procedure-pass.jsonl
+python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\agentic-sdlc-pipeline.json --dry-run
+python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\agentic-sdlc-pipeline.json --transcript tests\fixtures\transcripts\agentic-sdlc-pipeline-procedure-pass.jsonl
 ```
 
 Live eval'lar Claude CLI/auth/runtime gerektirir ve normal lokal gate'in parçası değildir.
@@ -253,8 +253,8 @@ python scripts\check_all.py
 python tests\skills\harness.py
 python -m unittest discover -s tests -v
 python scripts\run_behavior_eval.py --eval-set tests\skills\behavior\completion-claim-gate.json --dry-run
-python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\dev-flow.json --dry-run
-python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\dev-flow.json --transcript tests\fixtures\transcripts\dev-flow-procedure-pass.jsonl
+python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\agentic-sdlc-pipeline.json --dry-run
+python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\agentic-sdlc-pipeline.json --transcript tests\fixtures\transcripts\agentic-sdlc-pipeline-procedure-pass.jsonl
 ```
 
 Opsiyonel:
@@ -266,14 +266,14 @@ pre-commit run --all-files
 Claude CLI/auth varsa opsiyonel live check:
 
 ```powershell
-python scripts\run_trigger_eval.py --skill-path skills\dev-flow --eval-set tests\skills\evals\dev-flow.json --runs 3
-python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\dev-flow.json --live --max-budget-usd 2.00
+python scripts\run_trigger_eval.py --skill-path skills\agentic-sdlc-pipeline --eval-set tests\skills\evals\agentic-sdlc-pipeline.json --runs 3
+python scripts\run_procedure_eval.py --eval-set tests\skills\procedure\agentic-sdlc-pipeline.json --live --max-budget-usd 2.00
 ```
 
 Codex auth varsa opsiyonel route-classifier check:
 
 ```powershell
-python scripts\run_codex_trigger_eval.py --skill-path skills\spec-flow --eval-set tests\skills\evals\spec-flow.json --smoke --model gpt-5.4-mini --reasoning-effort low
+python scripts\run_codex_trigger_eval.py --skill-path skills\spec-authoring --eval-set tests\skills\evals\spec-authoring.json --smoke --model gpt-5.4-mini --reasoning-effort low
 ```
 
 ## Bilinen Sınırlar

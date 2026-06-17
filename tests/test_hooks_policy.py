@@ -91,4 +91,4 @@ class TestSessionStartHook(unittest.TestCase):
         self.assertIn("using-agentic-sdlc", context)
         self.assertIn("smallest sufficient skill", context)
         self.assertIn("session-local routing memory", context)
-        self.assertIn("dev-flow is only for full-envelope", context)
+        self.assertIn("agentic-sdlc-pipeline is only for full-envelope", context)
