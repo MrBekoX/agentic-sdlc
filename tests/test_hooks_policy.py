@@ -75,6 +75,66 @@ class TestBranchGuard(unittest.TestCase):
 
 
 @unittest.skipIf(NODE is None, "node not available")
+class TestCompletionClaimGuard(unittest.TestCase):
+    HOOK = REPO / "hooks" / "completion-claim-guard.mjs"
+
+    def _transcript(self, td, lines):
+        path = Path(td) / "transcript.jsonl"
+        path.write_text("\n".join(json.dumps(o) for o in lines), encoding="utf-8")
+        return path
+
+    def run_hook(self, lines, *, block=False, stop_active=False):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = self._transcript(td, lines)
+            env = os.environ.copy()
+            if block:
+                env["AGENTIC_COMPLETION_GATE_BLOCK"] = "true"
+            proc = subprocess.run(
+                [NODE, str(self.HOOK)],
+                env=env,
+                input=json.dumps({"transcript_path": str(tpath), "stop_hook_active": stop_active}),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = (proc.stdout or "").strip()
+            return json.loads(out) if out else {}
+
+    @staticmethod
+    def _assistant(text):
+        return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+
+    @staticmethod
+    def _gate_call():
+        return {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Skill", "input": {"skill": "agentic-sdlc:completion-claim-gate"}}]}}
+
+    def test_warns_on_claim_without_gate(self):
+        out = self.run_hook([self._assistant("Feature complete. All tests passing.")])
+        self.assertIn("systemMessage", out)
+        self.assertNotIn("decision", out)
+
+    def test_blocks_on_claim_without_gate_when_strict(self):
+        out = self.run_hook([self._assistant("Implementation complete and ready to merge.")], block=True)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("completion-claim-gate", out.get("reason", ""))
+
+    def test_silent_when_gate_invoked(self):
+        out = self.run_hook([self._gate_call(), self._assistant("Feature complete. All tests passing.")], block=True)
+        self.assertEqual(out, {})
+
+    def test_silent_without_claim(self):
+        out = self.run_hook([self._assistant("Here is the current state; a couple of tests still fail.")], block=True)
+        self.assertEqual(out, {})
+
+    def test_loop_guard_allows_when_stop_hook_active(self):
+        out = self.run_hook([self._assistant("Feature complete. All tests passing.")], block=True, stop_active=True)
+        self.assertEqual(out, {})
+
+
+@unittest.skipIf(NODE is None, "node not available")
 class TestSessionStartHook(unittest.TestCase):
     def test_injects_agentic_sdlc_bootstrap(self):
         proc = subprocess.run(

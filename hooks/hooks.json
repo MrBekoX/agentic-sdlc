@@ -64,6 +64,19 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/completion-claim-guard.mjs"],
+            "timeout": 15,
+            "statusMessage": "Completion-claim guard..."
+          }
+        ]
+      }
     ]
   }
 }
