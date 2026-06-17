@@ -39,12 +39,30 @@ def read_skill(skill_path):
             desc.group(1).strip() if desc else "")
 
 
+def matches_trigger(value, clean_name, skill_name):
+    value = value or ""
+    return clean_name in value or skill_name in value
+
+
+def is_target_skill_read(value, skill_name):
+    value = (value or "").replace("\\", "/")
+    return f"skills/{skill_name}/SKILL.md" in value
+
+
+def is_allowed_prelude_read(value, clean_name):
+    value = (value or "").replace("\\", "/")
+    return (
+        value.endswith("/AGENTS.md")
+        or value.endswith("/memory/MEMORY.md")
+        or f"commands/{clean_name}.md" in value
+    )
+
+
 def detect_trigger(lines, clean_name, skill_name):
     """Replay run_eval's stream state machine over the full output (no select)."""
-    def matches(s):
-        return clean_name in (s or "") or skill_name in (s or "")
     pending = None
     acc = ""
+    skipping_prelude_result = False
     for line in lines:
         line = line.strip()
         if not line:
@@ -69,11 +87,24 @@ def detect_trigger(lines, clean_name, skill_name):
                 d = se.get("delta", {})
                 if d.get("type") == "input_json_delta":
                     acc += d.get("partial_json", "")
-                    if matches(acc):
+                    if pending == "Skill" and matches_trigger(acc, clean_name, skill_name):
+                        return True
+                    if pending == "Read" and is_target_skill_read(acc, skill_name):
                         return True
             elif st in ("content_block_stop", "message_stop"):
                 if pending:
-                    return matches(acc)
+                    if pending == "Skill":
+                        return matches_trigger(acc, clean_name, skill_name)
+                    if pending == "Read":
+                        if is_target_skill_read(acc, skill_name):
+                            return True
+                        if is_allowed_prelude_read(acc, clean_name):
+                            pending, acc = None, ""
+                            skipping_prelude_result = True
+                            continue
+                        return False
+                if skipping_prelude_result and st == "message_stop":
+                    continue
                 if st == "message_stop":
                     return False
         elif t == "assistant":
@@ -81,12 +112,20 @@ def detect_trigger(lines, clean_name, skill_name):
                 if ci.get("type") != "tool_use":
                     continue
                 nm, inp = ci.get("name", ""), ci.get("input", {})
-                if nm == "Skill" and matches(inp.get("skill", "")):
+                if nm == "Skill" and matches_trigger(inp.get("skill", ""), clean_name, skill_name):
                     return True
-                if nm == "Read" and matches(inp.get("file_path", "")):
-                    return True
+                if nm == "Read":
+                    path = inp.get("file_path", "")
+                    if is_target_skill_read(path, skill_name):
+                        return True
+                    if is_allowed_prelude_read(path, clean_name):
+                        skipping_prelude_result = True
+                        continue
                 return False  # first tool action wasn't this skill
         elif t == "result":
+            if skipping_prelude_result:
+                skipping_prelude_result = False
+                continue
             return False
     return False
 
@@ -97,10 +136,16 @@ class TriggerDetector:
         self.skill_name = skill_name
         self.pending = None
         self.acc = ""
+        self.skipping_prelude_result = False
 
     def matches(self, value):
-        value = value or ""
-        return self.clean_name in value or self.skill_name in value
+        return matches_trigger(value, self.clean_name, self.skill_name)
+
+    def is_target_skill_read(self, value):
+        return is_target_skill_read(value, self.skill_name)
+
+    def is_allowed_prelude_read(self, value):
+        return is_allowed_prelude_read(value, self.clean_name)
 
     def feed(self, line):
         line = line.strip()
@@ -126,11 +171,24 @@ class TriggerDetector:
                 d = se.get("delta", {})
                 if d.get("type") == "input_json_delta":
                     self.acc += d.get("partial_json", "")
-                    if self.matches(self.acc):
+                    if self.pending == "Skill" and self.matches(self.acc):
+                        return True
+                    if self.pending == "Read" and self.is_target_skill_read(self.acc):
                         return True
             elif st in ("content_block_stop", "message_stop"):
                 if self.pending:
-                    return self.matches(self.acc)
+                    if self.pending == "Skill":
+                        return self.matches(self.acc)
+                    if self.pending == "Read":
+                        if self.is_target_skill_read(self.acc):
+                            return True
+                        if self.is_allowed_prelude_read(self.acc):
+                            self.pending, self.acc = None, ""
+                            self.skipping_prelude_result = True
+                            return None
+                        return False
+                if self.skipping_prelude_result and st == "message_stop":
+                    return None
                 if st == "message_stop":
                     return False
         elif t == "assistant":
@@ -140,10 +198,18 @@ class TriggerDetector:
                 nm, inp = ci.get("name", ""), ci.get("input", {})
                 if nm == "Skill" and self.matches(inp.get("skill", "")):
                     return True
-                if nm == "Read" and self.matches(inp.get("file_path", "")):
-                    return True
+                if nm == "Read":
+                    path = inp.get("file_path", "")
+                    if self.is_target_skill_read(path):
+                        return True
+                    if self.is_allowed_prelude_read(path):
+                        self.skipping_prelude_result = True
+                        continue
                 return False
         elif t == "result":
+            if self.skipping_prelude_result:
+                self.skipping_prelude_result = False
+                return None
             return False
         return None
 

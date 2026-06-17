@@ -1,6 +1,6 @@
 export const meta = {
   name: 'spec-plan-draft',
-  description: 'Deep spec/plan draft: author -> critic -> revise loop (max 2 revision rounds + closing audit); returns a polished draft + decision points',
+  description: 'Internal workflow for an already-selected AGENTIC-SDLC flow: author -> critic -> revise loop for spec/plan artifacts; not a standalone user entry point',
   phases: [{ title: 'Draft' }],
 }
 // args: { mode: 'spec'|'plan', context: <obj>, depth?: 'full'|'smoke', maxRevisionRounds?: number }

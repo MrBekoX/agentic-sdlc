@@ -1,6 +1,6 @@
 ---
 name: using-agentic-sdlc
-description: Use when starting any AGENTIC-SDLC session or before deciding which project skill should handle a request; acts as the session-local router that chooses the smallest sufficient skill, escalates to dev-flow only for full SDLC work, and enforces evidence-before-claim behavior.
+description: Use when the user asks to route an AGENTIC-SDLC request, a prior focused skill changes scope, or no clearer focused skill applies; chooses the smallest sufficient skill, escalates to dev-flow only for full SDLC work, and applies evidence-before-claim behavior.
 ---
 
 <SUBAGENT-STOP>

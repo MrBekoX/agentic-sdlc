@@ -1,6 +1,6 @@
 ---
 name: plan-flow
-description: Use when the user asks only for an implementation plan, task breakdown, HOW document, sequencing, or execution steps without asking to implement; requires an approved spec or clear WHAT and uses spec-plan-draft in plan mode.
+description: Use when the user asks only for an implementation plan, task breakdown, HOW document, sequencing, or execution steps without asking to write code or run implementation.
 argument-hint: "<thing to plan>"
 ---
 

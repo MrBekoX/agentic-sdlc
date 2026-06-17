@@ -1,6 +1,6 @@
 ---
 name: spec-flow
-description: Use when the user asks only for a spec, acceptance criteria, requirements contract, or WHAT document without asking for a plan or implementation; routes unclear design intent to mind-spark and uses spec-plan-draft in spec mode.
+description: This skill should be used first before answering or asking clarifying questions when the user asks only to write or extract a spec, acceptance criteria, requirements contract, WHAT document, problem/business rules/edge cases/definition of done, or a behavior-change requirements summary such as "problem ... definition of done cikar"; do not use for implementation task breakdown, HOW, plan, sequencing, code, tests, or execution.
 argument-hint: "<thing to specify>"
 ---
 
@@ -27,6 +27,7 @@ This is a standalone entry skill. `dev-flow` owns its own end-to-end Spec phase 
 ## Route First
 
 - If the design intent is ambiguous, use `mind-spark` first and turn the approved design into the spec input.
+- If the user asks to extract problem, business rules, edge cases, or definition of done but the target behavior is missing, stay in `spec-flow` and ask for the missing behavior/change context before drafting.
 - If the user asks for HOW, tasks, implementation steps, or sequencing, use `plan-flow` instead.
 - If the user asks to build, fix, test, secure, and finalize end-to-end, return to `using-agentic-sdlc` routing and escalate to `dev-flow` only when the full envelope is needed.
 

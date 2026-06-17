@@ -65,6 +65,12 @@ class TestSkillCrossReferences(unittest.TestCase):
         self.assertIn("implementation-auditor", text)
         self.assertIn("implementation-auditor", h.agent_names())
 
+    def test_standalone_spec_plan_descriptions_do_not_trigger_internal_workflow(self):
+        for skill in ("spec-flow", "plan-flow"):
+            art = h.load_markdown_artifact(h.SKILLS_DIR / skill / "SKILL.md")
+            desc = h.frontmatter_value(art["frontmatter"], "description")
+            self.assertNotIn("spec-plan-draft", desc)
+
 
 class TestRuntimePaths(unittest.TestCase):
     def test_all_plugin_root_refs_resolve(self):
