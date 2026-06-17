@@ -15,10 +15,14 @@ This is a standalone entry skill. `dev-flow` owns its own end-to-end Spec phase 
 ## Runtime Bindings
 
 - **Hook:** `session-start.mjs` injects `using-agentic-sdlc` as the session-local router. That hook may route directly to `spec-flow` for WHAT-only prompts; this does not require `dev-flow`.
-- **Contracts:** Apply `${CLAUDE_PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md` as the primary behavior contract. Use `${CLAUDE_PLUGIN_ROOT}/contracts/skills/00-global-behavior.md` and `${CLAUDE_PLUGIN_ROOT}/contracts/skills/01-context-first.md` for evidence and context discipline when available.
+- **Contracts:** Apply the runtime-local contract files as the primary behavior contract:
+  - Claude Code: `${CLAUDE_PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md`
+  - Codex: `${PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md`
+  Also use `00-global-behavior.md` and `01-context-first.md` from the same runtime root for evidence and context discipline when available.
 - **Agents:** `spec-plan-draft` calls `spec-plan-author` to draft and `spec-plan-critic` to audit the spec. If the workflow/agent runtime is unavailable, draft manually in the main loop and explicitly mark the degraded path.
-- **Validator:** Saved specs use `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py` with `--mode spec`.
-- In Codex plugin contexts, resolve the same plugin-root paths with `${PLUGIN_ROOT}`.
+- **Validator:** Saved specs use the runtime-local validator with `--mode spec`:
+  - Claude Code: `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py`
+  - Codex: `${PLUGIN_ROOT}/scripts/validate_artifacts.py`
 
 ## Route First
 
@@ -32,7 +36,7 @@ This is a standalone entry skill. `dev-flow` owns its own end-to-end Spec phase 
 2. Read only the local context needed to avoid an off-target spec.
 3. Invoke the named workflow `spec-plan-draft` with `mode:"spec"` and non-empty context. In Claude Code, use the Workflow tool. In Codex or a degraded runtime, draft manually and state that workflow invocation was unavailable.
 4. If a durable artifact is requested or the work is substantial, save the spec as `docs/specs/<name>.md`.
-5. Validate saved specs with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode spec --file docs/specs/<name>.md` when that path is available. In Codex plugin contexts, use the equivalent `${PLUGIN_ROOT}` path if needed.
+5. Validate saved specs with `python "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/specs/<name>.md`, resolving `<runtime-root>` as `${CLAUDE_PLUGIN_ROOT}` in Claude Code and `${PLUGIN_ROOT}` in Codex.
 6. Present decision points and stop. Do not continue to plan or implementation unless the user asks.
 
 ## Output

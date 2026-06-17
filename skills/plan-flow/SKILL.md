@@ -15,10 +15,14 @@ This is a standalone entry skill. `dev-flow` owns its own end-to-end Plan phase 
 ## Runtime Bindings
 
 - **Hook:** `session-start.mjs` injects `using-agentic-sdlc` as the session-local router. That hook may route directly to `plan-flow` for HOW-only prompts; this does not require `dev-flow`.
-- **Contracts:** Apply `${CLAUDE_PLUGIN_ROOT}/contracts/skills/03-plan-mode.md` as the primary behavior contract. Use `${CLAUDE_PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md` only as the source-WHAT coverage contract; do not rewrite the spec.
+- **Contracts:** Apply the runtime-local contract files as the primary behavior contract:
+  - Claude Code: `${CLAUDE_PLUGIN_ROOT}/contracts/skills/03-plan-mode.md`
+  - Codex: `${PLUGIN_ROOT}/contracts/skills/03-plan-mode.md`
+  Use `02-spec-driven-development.md` from the same runtime root only as the source-WHAT coverage contract; do not rewrite the spec.
 - **Agents:** `spec-plan-draft` calls `spec-plan-author` to draft and `spec-plan-critic` to audit the plan. If the workflow/agent runtime is unavailable, draft manually in the main loop and explicitly mark the degraded path.
-- **Validator:** Saved plans use `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py` with `--mode plan`.
-- In Codex plugin contexts, resolve the same plugin-root paths with `${PLUGIN_ROOT}`.
+- **Validator:** Saved plans use the runtime-local validator with `--mode plan`:
+  - Claude Code: `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py`
+  - Codex: `${PLUGIN_ROOT}/scripts/validate_artifacts.py`
 
 ## Route First
 
@@ -32,7 +36,7 @@ This is a standalone entry skill. `dev-flow` owns its own end-to-end Plan phase 
 2. Refuse to invent missing behavior. If the WHAT is absent or contradictory, stop and ask for clarification or route to `spec-flow`.
 3. Invoke the named workflow `spec-plan-draft` with `mode:"plan"` and the approved WHAT as non-empty context. In Claude Code, use the Workflow tool. In Codex or a degraded runtime, draft manually and state that workflow invocation was unavailable.
 4. If a durable artifact is requested or the work is substantial, save the plan as `docs/plans/<name>.md`.
-5. Validate saved plans with `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode plan --file docs/plans/<name>.md --spec docs/specs/<name>.md --strict` when a spec file exists and that path is available. In Codex plugin contexts, use the equivalent `${PLUGIN_ROOT}` path if needed.
+5. Validate saved plans with `python "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/plans/<name>.md --spec docs/specs/<name>.md --strict`, resolving `<runtime-root>` as `${CLAUDE_PLUGIN_ROOT}` in Claude Code and `${PLUGIN_ROOT}` in Codex.
 6. Present open decisions and stop. Do not implement unless the user asks.
 
 ## Output

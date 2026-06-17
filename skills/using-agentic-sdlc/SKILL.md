@@ -87,5 +87,6 @@ If evidence is missing, say it is uncertain and state what would verify it.
 
 - In Claude Code, use the native Skill/Workflow/Agent mechanisms when available.
 - In Codex, follow the activated skill instructions and use available tools directly. Treat Claude Code Workflow-only gates as runtime-adapted: use Codex subagents, parallel local tools, or documented degraded main-loop execution as the skill specifies.
+- Resolve plugin-root paths by runtime: `${CLAUDE_PLUGIN_ROOT}` in Claude Code and `${PLUGIN_ROOT}` in Codex. Use the matching runtime root for `contracts/skills/`, `scripts/`, `hooks/`, and bundled files.
 - If a required skill or workflow mechanism is unavailable, state the degraded path and use the smallest safe fallback.
 - Match the user's language unless they request otherwise.
