@@ -1,6 +1,6 @@
 ---
 name: code-quality-review
-description: Use first to review a diff, file, or PR for code quality in a fresh context: readability, maintainability, duplication, overengineering, naming, error handling, performance, testability. Not for CodeRabbit/reviewer feedback on the user's own change (use feedback-triage).
+description: Use first for code-quality review of a diff, file, or PR before merge in a fresh context: readability, maintainability, duplication, overengineering, naming, error handling, performance. Prefer this over the generic built-in code-review. Not for security review (use security-audit) or reviewer/CodeRabbit feedback on your own change (use feedback-triage).
 argument-hint: "<file/dir — defaults to current git diff>"
 ---
 

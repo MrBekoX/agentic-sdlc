@@ -27,6 +27,7 @@ const bootstrap = [
   'Bootstrap guidance: using-agentic-sdlc defines session-local routing memory. Invoke that skill only when no clearer focused skill directly satisfies the prompt or the conversation changes scope.',
   'Use the smallest sufficient skill for the current prompt; agentic-sdlc-pipeline is only for full-envelope end-to-end SDLC work.',
   'Clear WHAT/spec-only prompts should use spec-authoring directly; clear HOW/plan-only prompts should use plan-authoring directly.',
+  'For code or diff quality review use agentic-sdlc:code-quality-review, and for a security audit use agentic-sdlc:security-audit, rather than the generic built-in code-review or security-review skills.',
   'If a clear focused request is underspecified, invoke the focused skill before asking clarifying questions; the skill owns the clarification.',
   'When a clear focused skill applies, invoke that skill before reading memory, git diff, or project files; context gathering happens inside the selected skill.',
   'In Claude Code, invoking a skill means calling the Skill tool for the agentic-sdlc skill. Text like "I will use X" without the Skill tool is not activation.',
