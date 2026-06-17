@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 - 2026-06-17
+
+- Defined explicit runtime bindings for `spec-flow` and `plan-flow`: router hook, skill contracts, author/critic agents, workflow, and validator.
+- Updated spec/plan agents to enforce `contracts/skills/02-spec-driven-development.md` and `contracts/skills/03-plan-mode.md`.
+- Extended the skill harness golden references with resolvable `contract` and `hook` kinds.
+
 ## 0.2.0 - 2026-06-17
 
 - Added Codex plugin manifest and Codex session-start hook wiring.
