@@ -1,9 +1,9 @@
 {
   "_comment": "Live trigger eval-set for completion-claim-gate. Positives = evidence gate before done/passing/fixed claims; negatives = ordinary implementation or planning.",
   "queries": [
-    {"query": "completion-claim-gate skill'ini calistir: final claim yazmadan once evidence gate uygula.", "should_trigger": true},
-    {"query": "Bu bug fix tamamlandi demeden once completion-claim-gate ile hangi kaniti gostermeliyim?", "should_trigger": true},
-    {"query": "Use the completion-claim-gate skill first before any build-is-passing claim; verify the proof before answering.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:completion-claim-gate: 'python tests\\\\skills\\\\harness.py passed' claim'i yapmadan once evidence gate uygula.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:completion-claim-gate: 'login bug fix is complete' claim'ini yazmadan once evidence gate uygula.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:completion-claim-gate: 'build is passing' claim'ini yazmadan once evidence gate uygula.", "should_trigger": true},
     {"query": "Yeni bir export endpoint'i icin spec yaz.", "should_trigger": false},
     {"query": "Bu dosyayi refactor et ama davranis degismesin.", "should_trigger": false},
     {"query": "Kod incelemesi yap, bulgulari sirala.", "should_trigger": false}

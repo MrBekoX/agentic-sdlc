@@ -1,6 +1,6 @@
 ---
 name: feature-flow
-description: Generic workflow for building a new feature or endpoint end-to-end — requirement analysis, spec, plan, implementation, test, security, refactor, docs, and a final implementation-control audit. Use when adding new functionality (not fixing a bug — use fix-flow for that). Technology-agnostic.
+description: This skill should be used first when the user asks to add or build a new feature, endpoint, screen, flow, or capability and has not requested the full dev-flow SDLC envelope. Use for focused new functionality through implementation-control; do not use for bug/root-cause fixes, test-only work, behavior-preserving refactors, or explicit spec+plan+TDD+security+PR-ready dev-flow requests.
 argument-hint: "<feature name or id>"
 ---
 

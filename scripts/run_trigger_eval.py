@@ -279,14 +279,16 @@ def run_streaming(cmd, project_root, env, timeout, detector, transcript_path=Non
         kill_process_tree(proc)
 
 
-def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_budget_usd, plugin_dir, transcript_dir, bare):
+def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_budget_usd, plugin_dir, transcript_dir, bare, command_shim):
     uid = uuid.uuid4().hex[:8]
-    clean = f"{skill_name}-skill-{uid}"
-    cdir = Path(project_root) / "commands"
-    cdir.mkdir(parents=True, exist_ok=True)
-    cf = cdir / f"{clean}.md"
-    indented = "\n  ".join(skill_desc.split("\n"))
-    cf.write_text(f"---\ndescription: |\n  {indented}\n---\n\n# {skill_name}\n\nThis skill handles: {skill_desc}\n", encoding="utf-8")
+    clean = f"{skill_name}-skill-{uid}" if command_shim else f"{skill_name}-live-{uid}"
+    cf = None
+    if command_shim:
+        cdir = Path(project_root) / "commands"
+        cdir.mkdir(parents=True, exist_ok=True)
+        cf = cdir / f"{clean}.md"
+        indented = "\n  ".join(skill_desc.split("\n"))
+        cf.write_text(f"---\ndescription: |\n  {indented}\n---\n\n# {skill_name}\n\nThis skill handles: {skill_desc}\n", encoding="utf-8")
     try:
         cmd = [
             "claude", "-p", query,
@@ -310,7 +312,7 @@ def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_bu
             transcript_path = Path(transcript_dir) / f"{clean}.jsonl"
         return run_streaming(cmd, project_root, env, timeout, TriggerDetector(clean, skill_name), transcript_path)
     finally:
-        if cf.exists():
+        if cf and cf.exists():
             cf.unlink()
 
 
@@ -328,6 +330,7 @@ def main(argv=None):
     p.add_argument("--plugin-dir", default=None)
     p.add_argument("--transcript-dir", default=None)
     p.add_argument("--bare", action="store_true", help="Run Claude Code in bare mode to isolate plugin trigger behavior from project context; requires ANTHROPIC_API_KEY or apiKeyHelper auth.")
+    p.add_argument("--no-command-shim", action="store_true", help="Do not plant commands/<skill>-skill-*.md; use real plugin skills only. Prefer with --plugin-dir when testing this repo's installed plugin.")
     p.add_argument("--project-root", default=str(Path(__file__).resolve().parents[1]))
     args = p.parse_args(argv)
 
@@ -343,7 +346,7 @@ def main(argv=None):
     errors, fields = [], {"skill": skill_name, "runs_per_query": args.runs}
     passed = 0
     for i, q in enumerate(queries):
-        triggers = sum(run_once(q["query"], skill_name, skill_desc, args.project_root, args.timeout, args.model, args.max_budget_usd, args.plugin_dir, args.transcript_dir, args.bare)
+        triggers = sum(run_once(q["query"], skill_name, skill_desc, args.project_root, args.timeout, args.model, args.max_budget_usd, args.plugin_dir, args.transcript_dir, args.bare, not args.no_command_shim)
                        for _ in range(args.runs))
         rate = triggers / args.runs
         ok = (rate >= args.threshold) if q["should_trigger"] else (rate < args.threshold)

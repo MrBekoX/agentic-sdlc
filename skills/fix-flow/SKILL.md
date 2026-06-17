@@ -1,6 +1,6 @@
 ---
 name: fix-flow
-description: Main workflow for fixing a bug, error, broken behavior, failing test, production issue, or any user-reported problem. Use when something is wrong and needs a root-cause fix delivered through spec → plan → TDD → security → verification. Technology-agnostic.
+description: This skill should be used first before answering or using generic debugging when the user asks to fix a bug, error, broken behavior, failing test, production issue, incident, regression, or user-reported problem; includes root-cause/root cause, reproduce, find and fix, double insert, null reference, webhook, and expired-token failures. Do not use for new features, pure refactors, or review feedback.
 argument-hint: "<bug description or issue id>"
 ---
 

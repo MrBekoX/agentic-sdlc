@@ -1,6 +1,6 @@
 ---
 name: receiving-code-review
-description: Use when review feedback has been received on the user's own change and must be verified, answered, or implemented. Covers PR/MR comments, bot/linter/CI review output, and questionable suggestions; not for writing a fresh code-review.
+description: This skill should be used first before answering or asking for PR details when review feedback has been received on the user's own change and must be verified, answered, judged, or implemented. Covers CodeRabbit comments, reviewer comments, PR/MR feedback, bot/linter/CI review output, "make this more robust" suggestions, and questionable feedback; not for writing a fresh code-review of someone else's change.
 ---
 
 # Skill: receiving-code-review

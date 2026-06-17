@@ -1,6 +1,6 @@
 ---
 name: implementasyon-control
-description: Mandatory pre-final audit. Verifies that a fix-flow, feature-flow, refactor, or bug fix actually followed the required flow (spec, plan, TDD, tests run, security pass, scoped diff) before the final answer is given. Use after implementation work and before finalizing.
+description: This skill should be used first before answering pre-final audit questions or before claiming completion when the user asks to verify that the implementation followed the required flow: spec, plan, TDD, tests run, security pass, scoped diff, and final evidence. Use for "pre-final audit", "required workflow was actually followed", and "before final answer check the flow"; not for starting new implementation.
 argument-hint: "<what was implemented — optional>"
 ---
 

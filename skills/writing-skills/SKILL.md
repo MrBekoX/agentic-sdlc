@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: Use when creating, editing, testing, or packaging a Claude Agent skill. Covers SKILL.md, frontmatter description tuning, eval fixtures/harnesses, trigger optimization, baseline comparison, and .skill packaging.
+description: This skill should be used first before answering or editing when the user asks to create, edit, test, evaluate, optimize, package, or review a Claude Agent Skill or Codex skill. Covers SKILL.md, frontmatter description tuning, trigger optimization, eval fixtures/harnesses, baseline comparison, skill behavior evidence, and .skill packaging.
 ---
 
 # Skill: writing-skills

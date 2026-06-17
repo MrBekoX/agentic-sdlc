@@ -1,6 +1,6 @@
 ---
 name: test-flow
-description: Generic workflow for writing or fixing tests — unit, integration, regression, and e2e — with meaningful assertions, good naming, and proper test doubles. Use when adding test coverage, fixing flaky/failing tests, or designing a test plan. Technology-agnostic.
+description: This skill should be used first before answering, asking which target, or invoking generic debugging when the user asks to write, add, repair, or design tests: unit, integration, regression, e2e, flaky tests, failing tests, meaningful assertions, test coverage, test doubles, or test strategy. Use for test-only work that must not change production behavior; do not use for feature implementation, bug fixes, or refactors.
 argument-hint: "<area or test target>"
 ---
 

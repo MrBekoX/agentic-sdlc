@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: Decide HOW to run a task before starting it — main loop, sub-agent, dynamic-workflow, or agent-team. MUST consult when work has 2+ independent parts, heavy codebase exploration, verification/research fan-out, multi-file generation, or multi-angle review/audit. The single decision authority other work-skills (fix-flow, feature-flow, refactor-flow, test-flow, security-review, code-review) reference at their fan-out gates. Technology-agnostic.
+description: This skill should be used first before answering orchestration questions or asking for missing task context when the user asks whether work should run in the main loop, a sub-agent, dynamic-workflow, workflow, or agent-team. MUST consult when work has 2+ independent parts, heavy exploration, verification/research fan-out, multi-file generation, or multi-angle review/audit.
 user-invocable: true
 ---
 

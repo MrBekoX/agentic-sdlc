@@ -1,6 +1,6 @@
 ---
 name: plan-flow
-description: Use when the user asks only for an implementation plan, task breakdown, HOW document, sequencing, or execution steps without asking to write code or run implementation.
+description: This skill should be used first before answering or asking clarifying questions when the user asks only for an implementation plan, task breakdown, HOW document, sequencing, execution steps, ordered implementation steps, verification tasks, TDD points, risk list, or sequence plan without asking to write code or run implementation. Do not use for spec-only, test-only, code implementation, or ambiguous design exploration.
 argument-hint: "<thing to plan>"
 ---
 

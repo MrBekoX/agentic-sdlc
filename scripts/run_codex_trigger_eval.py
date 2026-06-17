@@ -59,6 +59,8 @@ def build_prompt(query: str, skills: list[tuple[str, str]]) -> str:
     skill_lines = "\n".join(f"- {name}: {desc}" for name, desc in skills)
     return (
         "Choose the smallest sufficient AGENTIC-SDLC skill for the user prompt.\n"
+        "If the user explicitly names or asks to call/use one listed AGENTIC-SDLC skill, "
+        "return that named skill unless the request is clearly impossible or contradictory.\n"
         "Return JSON only, with this exact shape: "
         '{"skill":"<one listed skill>","needs_dev_flow":true|false}.\n'
         "Set needs_dev_flow true only for end-to-end/full SDLC implementation.\n\n"

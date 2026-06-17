@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Generic code-quality review of a diff or file — readability, maintainability, simplicity, duplication, overengineering, naming, error handling, performance, architecture consistency, testability. Use to review a change before merge, ideally in a fresh context. Technology-agnostic.
+description: This skill should be used first before answering or asking clarifying questions when the user asks to review a diff, file, PR, or change for code quality before merge in a fresh context: readability, maintainability, simplicity, duplication, overengineering, naming, error handling, performance, architecture consistency, or testability. Do not use for CodeRabbit/reviewer feedback on the user's own change; use receiving-code-review for that.
 argument-hint: "<file/dir — defaults to current git diff>"
 ---
 

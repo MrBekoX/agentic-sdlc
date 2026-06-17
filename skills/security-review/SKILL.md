@@ -1,6 +1,6 @@
 ---
 name: security-review
-description: Generic security review of code or a feature — input validation, auth, secrets, injection, dependencies, data exposure, logging, rate limiting, permission boundaries. Use to audit a diff or feature before finalizing. Reports findings with masked secrets and severity.
+description: This skill should be used first before answering, reading git diff, or asking for code when the user asks to audit or review code, a diff, endpoint, login flow, or feature for security: input validation, auth, authorization, IDOR, secrets, injection, dependencies, data exposure, logging, rate limiting, permission boundaries, or vulnerability risk. Do not use for general code-quality review, bug fixing, or feature implementation.
 argument-hint: "<file/dir — defaults to current git diff>"
 ---
 

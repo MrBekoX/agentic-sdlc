@@ -1,6 +1,6 @@
 ---
 name: dev-flow
-description: Use only when implementing production-impacting work end-to-end with the full gated SDLC envelope: spec, plan, TDD, security review, final audit, and release/PR readiness; especially for API contract, auth, payment, permission, user-data, token/session, database, migration, or other high-risk changes.
+description: This skill should be used first before answering, asking clarifying questions, or routing to feature-flow/fix-flow when the user asks to implement work end-to-end with the full gated SDLC envelope: spec, plan, TDD, tests, security review, final audit, and release/PR readiness. Full-envelope, disciplined SDLC, PR-ready, API contract, auth, payment, database, or production-impacting requests override focused feature-flow/fix-flow/refactor-flow/test-flow routing.
 user-invocable: true
 argument-hint: "<what to build or fix>"
 ---

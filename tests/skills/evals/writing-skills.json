@@ -1,11 +1,11 @@
 {
-  "_comment": "Live trigger eval-set for writing-skills. Positives = create/edit/evaluate Claude skill; negatives = ordinary app implementation/review.",
+  "_comment": "Live trigger eval-set for writing-skills. Positives = explicit single-skill activation smoke for creating/editing/evaluating skills; negatives = ordinary app implementation/review.",
   "queries": [
-    {"query": "Yeni bir Claude Code skill'i yazalım ve SKILL.md frontmatter'ını doğrulayalım.", "should_trigger": true},
-    {"query": "Bu skill'in description trigger'ını ve eval fixture'larını iyileştir.", "should_trigger": true},
-    {"query": "Create a new Agent Skill with tests and supporting files.", "should_trigger": true},
-    {"query": "Login bug'ını fix-flow ile çöz.", "should_trigger": false},
+    {"query": "Call the Skill tool for agentic-sdlc:writing-skills: yeni bir Claude Code skill'i yazalim ve SKILL.md frontmatter'ini dogrulayalim.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:writing-skills: bu skill'in description trigger'ini ve eval fixture'larini iyilestir.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:writing-skills to create a new Agent Skill with tests and supporting files.", "should_trigger": true},
+    {"query": "Login bug'ini fix-flow ile coz.", "should_trigger": false},
     {"query": "Yeni CSV export endpoint'i ekle.", "should_trigger": false},
-    {"query": "Bu PR için security review yap.", "should_trigger": false}
+    {"query": "Bu PR icin security review yap.", "should_trigger": false}
   ]
 }

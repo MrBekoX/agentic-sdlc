@@ -29,6 +29,8 @@ const bootstrap = [
   'Clear WHAT/spec-only prompts should use spec-flow directly; clear HOW/plan-only prompts should use plan-flow directly.',
   'If a clear focused request is underspecified, invoke the focused skill before asking clarifying questions; the skill owns the clarification.',
   'When a clear focused skill applies, invoke that skill before reading memory, git diff, or project files; context gathering happens inside the selected skill.',
+  'In Claude Code, invoking a skill means calling the Skill tool for the agentic-sdlc skill. Text like "I will use X" without the Skill tool is not activation.',
+  'Do not read generated commands/*-skill-*.md files as a substitute for invoking the matching Skill tool.',
   'Track session-local routing memory: active intent, selected skill, known spec/plan/test artifacts, scope shifts, and escalation signals.',
   'For ambiguous build/design requests, use mind-spark before spec.',
   'For 2+ independent workstreams, use orchestration and sub-agents/workflows instead of bloating the main context.',

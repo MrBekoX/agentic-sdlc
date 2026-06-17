@@ -1,9 +1,9 @@
 {
   "_comment": "Live trigger eval-set for plan-flow. Positives = plan/HOW-only requests with concrete WHAT input; negatives = spec-only, implementation, test, or ambiguous design requests.",
   "queries": [
-    {"query": "plan-flow ile onayli export spec'ine gore implementation plan ve task breakdown hazirla, kod yazma.", "should_trigger": true},
-    {"query": "Use plan-flow to turn acceptance criteria 'user can export CSV and errors are reported' into ordered implementation steps and verification tasks.", "should_trigger": true},
-    {"query": "plan-flow skill'i ile WHAT dokumani 'kullanici raporu CSV indirir' icin TDD noktalari, riskler ve sira planini cikar.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:plan-flow: onayli export spec'ine gore implementation plan ve task breakdown hazirla, kod yazma.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:plan-flow to turn acceptance criteria 'user can export CSV and errors are reported' into ordered implementation steps and verification tasks.", "should_trigger": true},
+    {"query": "Call the Skill tool for agentic-sdlc:plan-flow: WHAT dokumani 'kullanici raporu CSV indirir' icin TDD noktalari, riskler ve sira planini cikar.", "should_trigger": true},
     {"query": "Sadece bu feature icin acceptance criteria ve spec yaz.", "should_trigger": false},
     {"query": "Bu plani simdi uygula ve feature'i ekle.", "should_trigger": false},
     {"query": "Sadece eksik regression testlerini yaz.", "should_trigger": false}
