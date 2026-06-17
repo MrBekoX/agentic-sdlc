@@ -65,9 +65,13 @@ hooks/            secret scan, branch guard, destructive command guard, session 
 scripts/          deterministic helpers and subagent handoff utilities
 tests/            stdlib unittest suites, skill fixtures, and static checks
 rules/            generic engineering rules (00..10)
-docs/             local-only ignored runtime notes, specs, plans, and audit reports
+docs/             plugin documentation, runtime notes, and example specs/plans
 CLAUDE.md         operating model for this skill-development repo
 ```
+
+## Detailed Plugin Documentation
+
+For a component-by-component explanation of the Claude Code plugin, guardrails, skills, agents, workflows, tests, and pre-push checklist, see [docs/plugin-readme.md](docs/plugin-readme.md).
 
 ## Quality Gate
 

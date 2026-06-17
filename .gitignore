@@ -7,12 +7,19 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-# Docs / local reports
-docs/
-mcps/
-
 # Node
 node_modules/
+
+# Documentation: track plugin docs; keep generated audit reports local unless intentionally added.
+docs/*
+!docs/plugin-readme.md
+!docs/claude-code-runtime.md
+!docs/testing.md
+!docs/troubleshooting.md
+!docs/skill-boundaries.md
+
+# Optional tool reference snapshots
+mcps/
 
 # Claude Code local / runtime
 .claude/
