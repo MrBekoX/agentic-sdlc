@@ -1,7 +1,7 @@
 """Self-contained repo quality gate (the `make check` target).
 
 Why this exists: a prod-ready skill lab needs one command that fails loudly on a broken
-skill or a red validator test — the CI signal CodexQB had and we lacked. It is deliberately
+skill or a red validator test — the CI signal a mature benchmark should have. It is deliberately
 self-contained (stdlib only, no skill-creator dependency) so it runs on a clean machine / CI
 without the marketplace plugin present. It mirrors quick_validate's frontmatter rules rather
 than importing them, so the check ships with the repo.
