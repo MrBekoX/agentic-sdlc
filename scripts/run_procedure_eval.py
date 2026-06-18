@@ -365,7 +365,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--model")
     parser.add_argument("--permission-mode", default="auto")
-    parser.add_argument("--max-budget-usd", default="2.00")
+    parser.add_argument(
+        "--max-budget-usd",
+        default="5.00",
+        help="Per-run model-spend ceiling. Default 5.00: a full Full-mode pipeline on a strong "
+        "model (sonnet/opus) routinely exceeds 2.00 and would otherwise be cut off mid-run, "
+        "masking late gates (completion-claim-gate) as failures. Haiku typically finishes well "
+        "under 2.00, so the higher ceiling does not change its cost.",
+    )
     args = parser.parse_args(argv)
 
     try:

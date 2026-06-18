@@ -409,6 +409,52 @@ Live evals spend real tokens and time. Apply these controls:
 
 ---
 
+## Live eval findings (2026-06-18 — Haiku + Sonnet sweep)
+
+A full live sweep on Claude Code (`claude -p`, OAuth/subscription auth) over every skill and the
+pipeline run-time. Detailed transcripts live under `tests/artifacts/` (gitignored); this section is
+the **durable summary** plus the eval-infrastructure fixes it motivated.
+
+### Headline lesson: separate model-capacity floor from description/skill debt
+
+Haiku triggers/routes **abstract, meta, gate, and audit** skills unreliably and with high run-to-run
+variance (a skill left **untouched** swung 0.40↔1.00 across N=5/10/20). The **same descriptions** score
+**0.80–1.00 on Sonnet**. Before "fixing" a low Haiku number, re-run on Sonnet: if Sonnet is high, it is
+the model floor — document it, do not inflate the description. Use `--runs ≥3` so variance is measured,
+not masked by a lucky single draw.
+
+### Router + focused-skill routing (`run_routing_eval.py --runtime claude --model haiku`)
+
+| Finding | Result | Action |
+|---|---|---|
+| `implementasyon-control` skipped its `Skill` call (~20%), diving into `git diff` or deferring to the user | first-tool **0.80 → 1.00** (N=10) | call-order guard added to skill + router (genuine bug, fixed) |
+| Routing eval scored a correct route as a timeout when its skill ran a long auditor pass | fixed | `run_routing_eval.py` early-stops once the route is observed |
+| `runs=1` is unreliable on Haiku — two full sweeps gave 15/15 (q11 outlier) and 14/15 (q13 outlier) from variance alone | n/a | `run_routing_eval.py` default `--runs 1 → 3` (strict threshold kept) |
+| Router trigger eval-set asked the router to route to a child skill (structurally under-credits it) | **Sonnet 6/6** after rework | `tests/skills/evals/using-agentic-sdlc.json` reworked to test the router's own "which skill owns this?" surface |
+
+### Full 16-skill trigger matrix (`run_all_trigger_evals.py`, command-shim smoke + real-plugin re-check)
+
+- **10/16 clean** on the command-shim smoke. Flagged skills were re-checked with `--no-command-shim --plugin-dir .` (real plugin) before any conclusion.
+- `feature-build` q1: command-shim 0.00 but **real-plugin 1.00** → command-shim artifact, not a defect.
+- `safe-refactor`, `skill-authoring`, `completion-claim-gate`: added activation guards ("first action; announcing/inlining is not invoking"). Marginal lift on Haiku; **Sonnet 0.80–1.00** confirms the descriptions are sound.
+- `completion-claim-gate` is weakest on Haiku (~0.13); under weak models it relies on the deterministic Stop hook `hooks/completion-claim-guard.mjs` backstop (12 policy tests).
+
+### Pipeline run-time procedure (`run_procedure_eval.py --live`, `bypassPermissions`, isolated fixture)
+
+Question: do the pipeline's feeder skills fire at the right step, and does it run as designed?
+
+| Model / budget | Result | Notes |
+|---|---|---|
+| Haiku N=3 @ `$2` | **1/3** full PASS | core gates 3/3 (detect_context, validate_artifacts, feature-build, security-audit, implementasyon-control); each run drops a different gate — variance/floor. Haiku-only deviations SKILL.md already forbids: ad hoc `Workflow({script})` instead of named `spec-plan-draft`; shell/branch before the `dispatch-strategy` call-order guard. |
+| Sonnet N=3 @ `$2` | 0/3 (artifact) | all hit `Reached maximum budget ($2)` mid-run — $2 cut off a strong-model pipeline and masked late gates. |
+| Sonnet N=2 @ `$6` | **2/2** full PASS | all 8 gates each run, named workflow, call-order respected, no forbidden git, no budget hit. |
+
+**Both success criteria met:** feeder skills fire at the right step (Sonnet 8/8 gates 2/2; Haiku core 3/3 + dispatch 3/3), and the pipeline runs as designed (Sonnet 2/2 in correct phase order). The Haiku 1/3 is the model floor, not a pipeline defect — SKILL.md guards (call-order, named-workflow-only) hold on a capable model.
+
+**Eval-infra fix:** `run_procedure_eval.py` default `--max-budget-usd` raised `2.00 → 5.00` so a strong-model Full-mode pipeline is not cut off mid-run (Haiku finishes under $2, unaffected). Verify the pipeline on Sonnet at budget ≥5, not Haiku at $2.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | What to do |
