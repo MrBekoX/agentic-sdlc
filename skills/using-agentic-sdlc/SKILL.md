@@ -25,6 +25,15 @@ Before acting, ask which AGENTIC-SDLC skill owns the request.
 
 Use the smallest skill that satisfies the user's current prompt.
 
+Resolve conflicts by user intent words before domain nouns:
+
+- Brainstorming, "fikir alisverisi", or "ne yapsak emin degilim" -> `mind-spark`, not generic `brainstorming` or an implementation skill.
+- Plan-only, HOW, task breakdown, "kod yazma", or "dogrudan duzeltme degil" -> `plan-authoring`, even when the prompt mentions a bug, failing behavior, or fix.
+- Test-only requests such as missing unit/regression/e2e tests, coverage, or test strategy -> `test-authoring`, before reading files.
+- Final audit, process audit, or "Final cevaptan once spec/plan/TDD/guvenlik akisinin takip edildigini denetle" -> `implementasyon-control`. Treat it as an active audit task, not a passive session preference.
+- Implementation skills apply when the user asks to change files, fix behavior, add a feature, refactor, or write tests now.
+- If the selected focused skill is underspecified, invoke it anyway before clarifying. Do not defer activation by saying you will use the skill after the user provides details.
+
 - Ambiguous idea, design, or build intent -> `mind-spark`.
 - Spec, acceptance criteria, WHAT document, or requirements contract only -> `spec-authoring`.
 - Plan, task breakdown, HOW document, or implementation steps only -> `plan-authoring`.
@@ -36,7 +45,7 @@ Use the smallest skill that satisfies the user's current prompt.
 - Code/diff quality review -> `code-quality-review`.
 - Received review feedback -> `feedback-triage`.
 - Parallelism/delegation decision -> `dispatch-strategy`.
-- Final implementation audit -> `implementasyon-control`.
+- Final implementation or process audit -> `implementasyon-control`.
 - Any done/fixed/passing/ready claim -> `completion-claim-gate` first.
 
 Escalate to `agentic-sdlc-pipeline` only when the user asks for end-to-end implementation or the work needs the full SDLC envelope: spec, plan, implementation, tests, security review, final audit, and release/PR readiness. High-risk areas such as auth, payment, database migration, API contract, permissions, user data, token/session, or RLS also qualify when implementation is requested.

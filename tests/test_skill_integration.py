@@ -94,6 +94,44 @@ class TestSkillCrossReferences(unittest.TestCase):
             desc = h.frontmatter_value(art["frontmatter"], "description")
             self.assertNotIn("spec-plan-draft", desc)
 
+    def test_using_router_prioritizes_intent_over_domain_nouns(self):
+        text = (h.SKILLS_DIR / "using-agentic-sdlc" / "SKILL.md").read_text(encoding="utf-8")
+        for phrase in (
+            "user intent words before domain nouns",
+            "fikir alisverisi",
+            "not generic `brainstorming`",
+            "even when the prompt mentions a bug",
+            "Test-only requests",
+            "before reading files",
+            "Final cevaptan once spec/plan/TDD/guvenlik akisinin takip edildigini denetle",
+            "not a passive session preference",
+            "invoke it anyway before clarifying",
+        ):
+            self.assertIn(phrase, text)
+
+    def test_plan_authoring_handles_underspecified_plan_only_prompts_after_activation(self):
+        text = (h.SKILLS_DIR / "plan-authoring" / "SKILL.md").read_text(encoding="utf-8")
+        art = h.load_markdown_artifact(h.SKILLS_DIR / "plan-authoring" / "SKILL.md")
+        desc = h.frontmatter_value(art["frontmatter"], "description")
+        self.assertIn("underspecified plan-only prompts", desc)
+        self.assertIn("stay in `plan-authoring`", text)
+        self.assertIn("do not defer activation", text)
+
+    def test_implementasyon_control_description_covers_final_flow_audit_prompts(self):
+        art = h.load_markdown_artifact(h.SKILLS_DIR / "implementasyon-control" / "SKILL.md")
+        desc = h.frontmatter_value(art["frontmatter"], "description")
+        self.assertIn("pre-final audit", desc)
+        self.assertIn("denetle/audit", desc)
+        self.assertIn("spec-plan-TDD-security flow", desc)
+        self.assertIn("not a passive session preference", desc)
+        self.assertIn("report missing evidence", desc)
+
+    def test_test_authoring_description_requires_activation_before_file_reads(self):
+        art = h.load_markdown_artifact(h.SKILLS_DIR / "test-authoring" / "SKILL.md")
+        desc = h.frontmatter_value(art["frontmatter"], "description")
+        self.assertIn("before inspecting code", desc)
+        self.assertIn("test-only prompts", desc)
+
 
 class TestRuntimePaths(unittest.TestCase):
     def test_all_plugin_root_refs_resolve(self):

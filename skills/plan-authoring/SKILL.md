@@ -1,6 +1,6 @@
 ---
 name: plan-authoring
-description: Use first when the user asks only for an implementation plan, task breakdown, HOW document, sequencing, ordered steps, or verification/TDD points without writing code. Not for spec-only, test-only, code implementation, or ambiguous design exploration.
+description: Use first when the user asks only for an implementation plan, task breakdown, HOW document, sequencing, ordered steps, or verification/TDD points without writing code, including underspecified plan-only prompts that need clarification before planning. Not for spec-only, test-only, code implementation, or ambiguous design exploration.
 argument-hint: "<thing to plan>"
 ---
 
@@ -28,6 +28,7 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 
 ## Route First
 
+- If a HOW-only prompt is underspecified, stay in `plan-authoring` and ask for the missing WHAT, ticket, bug details, or acceptance criteria here; do not defer activation until after clarification.
 - If there is no approved spec, ticket, or clear WHAT, use `spec-authoring` first or ask for the missing behavior contract.
 - If the user is still exploring direction, use `mind-spark` before spec or plan work.
 - If the user asks to execute the plan, return to `using-agentic-sdlc` routing. Use `agentic-sdlc-pipeline` only for full-envelope end-to-end implementation; otherwise use the focused implementation skill such as `feature-build`, `root-cause-fix`, `safe-refactor`, or `test-authoring`.

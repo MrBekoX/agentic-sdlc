@@ -1,6 +1,6 @@
 ---
 name: test-authoring
-description: Use first to write, add, repair, or design tests: unit, integration, regression, e2e, flaky/failing tests, meaningful assertions, coverage, test doubles, or test strategy. Test-only work that must not change production behavior; not for features, fixes, or refactors.
+description: Use first to write, add, repair, or design tests before inspecting code for test-only prompts: unit, integration, regression, e2e, flaky/failing tests, meaningful assertions, coverage, test doubles, or test strategy. Test-only work that must not change production behavior; not for features, fixes, or refactors.
 argument-hint: "<area or test target>"
 ---
 
