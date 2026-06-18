@@ -223,7 +223,13 @@ def kill_process_tree(proc: subprocess.Popen) -> None:
         proc.kill()
 
 
-def run_claude(prompt: str, args: argparse.Namespace, transcript_path: Path | None) -> tuple[list[str], str | None]:
+def run_claude(
+    prompt: str,
+    args: argparse.Namespace,
+    transcript_path: Path | None,
+    expected_skill: str = "",
+    escalation: bool = False,
+) -> tuple[list[str], str | None]:
     cmd = [
         "claude",
         "-p",
@@ -274,6 +280,7 @@ def run_claude(prompt: str, args: argparse.Namespace, transcript_path: Path | No
     captured: list[str] = []
     timed_out = False
     deadline = time.monotonic() + args.timeout
+    norm_expected = normalize_skill(expected_skill)
     try:
         while True:
             if time.monotonic() > deadline:
@@ -281,9 +288,23 @@ def run_claude(prompt: str, args: argparse.Namespace, transcript_path: Path | No
                 kill_process_tree(proc)
                 break
             try:
-                captured.append(lines.get(timeout=0.1))
+                line = lines.get(timeout=0.1)
             except queue.Empty:
                 if proc.poll() is not None:
+                    break
+                continue
+            captured.append(line)
+            # Early stop once the routing decision is observable, so a correct route whose
+            # skill then runs a long auditor/agent pass is not misread as a timeout. The
+            # routing eval measures the route decision, not full skill execution. Only the
+            # Skill/Read tool events carry route signal, so skip the per-line parse otherwise.
+            if "Skill" in line or "SKILL.md" in line:
+                routes = collect_claude_routes(captured)
+                if routes and (
+                    (not escalation and PIPELINE in routes)  # over-escalation: decided (fails later)
+                    or (norm_expected and norm_expected in routes)  # expected feeder reached
+                ):
+                    kill_process_tree(proc)
                     break
     finally:
         kill_process_tree(proc)
@@ -489,7 +510,13 @@ def route_once(
         transcript_path = args.transcript_dir / f"scenario-{scenario_index}-run{run_index}.jsonl"
 
     if args.runtime == "claude":
-        lines, error = run_claude(scenario["prompt"], args, transcript_path)
+        lines, error = run_claude(
+            scenario["prompt"],
+            args,
+            transcript_path,
+            expected_skill=scenario.get("expected", ""),
+            escalation=bool(scenario.get("escalation", False)),
+        )
         return collect_claude_routes(lines), {}, error
 
     prompt = build_codex_prompt(scenario["prompt"], skills)
@@ -508,7 +535,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime", choices=("codex", "claude"), default="codex")
     parser.add_argument("--model")
     parser.add_argument("--reasoning-effort", default="high")
-    parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=3,
+        help="Runs per scenario. Default 3 so per-run model variance is measured, not masked: "
+        "haiku routing swings ~0.6-1.0 between runs, so a single draw (runs=1) can read 15/15 "
+        "by luck. Strict threshold (1.0) then requires every run to route correctly. --smoke forces 1.",
+    )
     parser.add_argument("--threshold", type=float, default=1.0)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--max-turns", type=int, default=3)

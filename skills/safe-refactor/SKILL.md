@@ -1,6 +1,6 @@
 ---
 name: safe-refactor
-description: Use first in any language to refactor, restructure, clean up, simplify, or reduce duplication without changing behavior. Includes characterization tests and approval for broad scope. Not for bug fixes, new features, or test-only work.
+description: Use first in any language to refactor, restructure, clean up, simplify, or reduce duplication without changing behavior. Activate this skill as the first action, before Glob/Read or file-existence checks and even for broad scope needing approval; announcing you will refactor is not the same as invoking it. Includes characterization tests and approval for broad scope. Not for bug fixes, new features, or test-only work.
 argument-hint: "<target module/area>"
 ---
 

@@ -1,9 +1,9 @@
 {
-  "_comment": "Live trigger eval-set for using-agentic-sdlc. Positives = natural-language meta-routing / session-local scope-shift decisions; negatives = clear focused prompts that should go directly to another skill.",
+  "_comment": "Live trigger eval-set for using-agentic-sdlc (the router). Positives target the router's OWN trigger surface per its description: explicit AGENTIC-SDLC routing questions / 'which project skill owns this work' prompts. The router's child-routing ACCURACY (does a scope shift land on the right focused skill) is covered by the ROUTING eval at tests/skills/routing/using-agentic-sdlc.json, not here: asking the router to 'evaluate the scope shift and pick the next skill' makes the model route to that child skill, which structurally under-credits the router in a first-tool trigger eval. Note: the router is also SessionStart-bootstrapped, so on weaker models it may answer a routing question inline instead of re-invoking the Skill; treat low haiku numbers here as a model-capacity floor and rely on the routing eval for the router's real behavior. Negatives = clear focused prompts that go straight to another skill, not a routing question.",
   "queries": [
-    {"query": "Plan-authoring ile basladik ama kullanici simdi sadece test strategy istiyor; scope shift'i degerlendir ve bir sonraki en kucuk skill'i sec.", "should_trigger": true},
-    {"query": "Spec-authoring ile basladik ama kullanici simdi end-to-end implementasyon istiyor; scope shift'i degerlendir ve dogru skill'e route et.", "should_trigger": true},
-    {"query": "Net bir odakli skill yok; 'bunu daha iyi hale getirelim' istegini route et ve agentic-sdlc-pipeline gerekli mi karar ver.", "should_trigger": true},
+    {"query": "AGENTIC-SDLC plugin'inde 'kullanicilar icin yeni bir export endpoint ekle' istegini hangi proje skill'i sahiplenir? Once routing kararini ver.", "should_trigger": true},
+    {"query": "AGENTIC-SDLC plugin'inde 'odeme akisinda bir sorun var, ne yapsak emin degilim' istegini hangi proje skill'i sahiplenir? Once routing kararini ver.", "should_trigger": true},
+    {"query": "Bu AGENTIC-SDLC reposunda hangi skill'in hangi isi sahiplendigine nasil karar veriyorsun? 'bunu daha iyi hale getirelim' istegi icin dogru skill'i belirle.", "should_trigger": true},
     {"query": "Sadece yeni export ozelligi icin acceptance criteria ve WHAT spec yaz.", "should_trigger": false},
     {"query": "Login null reference bug'ini root cause ile duzelt.", "should_trigger": false},
     {"query": "Bu diff'i security review et.", "should_trigger": false}

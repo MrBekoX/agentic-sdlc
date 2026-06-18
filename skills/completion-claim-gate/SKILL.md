@@ -1,6 +1,6 @@
 ---
 name: completion-claim-gate
-description: Use first in any language as the evidence gate before saying work is done, fixed, passing, complete, ready, verified, or safe to claim. Use for the agent's own success claims and relayed subagent claims; skip future plans or third-party claims you are not endorsing.
+description: Use first in any language as the evidence gate before saying work is done, fixed, passing, complete, ready, verified, or safe to claim. Invoke this skill as the first action and run the gate; listing or describing the evidence inline is not a substitute for invoking it. Use for the agent's own success claims and relayed subagent claims; skip future plans or third-party claims you are not endorsing.
 ---
 
 # Skill: completion-claim-gate

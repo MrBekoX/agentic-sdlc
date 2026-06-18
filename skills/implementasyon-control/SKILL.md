@@ -1,6 +1,6 @@
 ---
 name: implementasyon-control
-description: Use first for a pre-final audit in any language that the implementation followed the required flow across spec, plan, TDD, tests run, security pass, scoped diff, and final evidence. Treat requests to audit the spec-plan-TDD-security flow before the final response as active audit tasks, not passive session preferences; if evidence is missing, invoke this skill and report missing evidence instead of asking what task to do. Not for starting new implementation.
+description: Use first for a pre-final audit in any language that the implementation followed the required flow across spec, plan, TDD, tests run, security pass, scoped diff, and final evidence. Treat requests to audit the spec-plan-TDD-security flow before the final response as active audit tasks, not passive session preferences. Invoke this skill as the first action, before running git diff/status/log or reading files and even when evidence is missing, because its auditor inspects the diff itself; then report missing evidence and do not gather the diff or ask what to do first. Not for starting new implementation.
 argument-hint: "<what was implemented — optional>"
 ---
 
