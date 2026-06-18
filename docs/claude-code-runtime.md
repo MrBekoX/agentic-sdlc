@@ -1,78 +1,64 @@
 # Claude Code Runtime
 
-## Scope
+This file records Claude Code-specific assumptions. For the user-facing runtime guide, see [`../.claude-plugin/README.md`](../.claude-plugin/README.md). For Codex behavior, see [`../.codex-plugin/README.md`](../.codex-plugin/README.md).
 
-AGENTIC-SDLC has native packaging for Claude Code and Codex. OpenCode, Kimi Code, and other Agent Skills runtimes are supported through the portable runtime adapter in [`runtime-adapter.md`](./runtime-adapter.md) when they can load standard `SKILL.md` directories and provide equivalent tool evidence or a documented degraded path.
+## Native Shape
 
-## Plugin Shape
-
-The expected native runtime shape is a local/development Claude Code and Codex plugin. Other Agent Skills runtimes consume the same `skills/` content through the adapter model rather than Claude-specific plugin metadata. The metadata here does not publish the plugin by itself. No CI workflow is configured for now; publishing requires a separate, explicit manual release process.
+Claude Code is a supported release runtime for `agentic-sdlc`. The plugin shape is:
 
 ```text
 .claude-plugin/plugin.json
 .claude-plugin/marketplace.json
-.codex-plugin/plugin.json
-hooks/hooks.json
-hooks/hooks-codex.json
 skills/
 agents/
-commands/
 workflows/
+hooks/hooks.json
+commands/
 contracts/skills/
 scripts/
 ```
 
-Skills are intentionally stored in root `skills/`. Do not move them to `.claude/skills/` or `.codex/skills/`; that would duplicate the source of truth and break the repo tests.
+Skills are intentionally stored in root `skills/`. Do not duplicate them into `.claude/skills/`; that would create two sources of truth and break the repository tests.
 
-## Hook Runtime
+## Runtime Mechanisms
 
-`hooks/hooks.json` uses `${CLAUDE_PLUGIN_ROOT}` for portable Claude paths. `hooks/hooks-codex.json` uses `${PLUGIN_ROOT}` for portable Codex paths.
+| Concept | Claude Code mechanism |
+|---|---|
+| Load a skill | Native `Skill` invocation. |
+| Dispatch a fresh-context specialist | `Agent` / `Task` facility when available. |
+| Run spec/plan author-critic loop | Native `Workflow` invocation of `agentic-sdlc:spec-plan-draft`. |
+| Manual safety command | `commands/*.md`, especially `/git-safety-check`. |
+| Hook wiring | `hooks/hooks.json`. |
+| Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}`. |
 
-Requirements:
+## Pipeline Contract
 
-- `node` must be available on `PATH` for hook execution.
-- `python` must be available for local quality gates.
-- Git-dependent flows should run inside a real git checkout.
+In Claude Code, `agentic-sdlc-pipeline` must use the named Workflow `agentic-sdlc:spec-plan-draft` for its internal Spec and Plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for steps 4-5.
+
+The full-mode transcript must show native calls for the pipeline gates: `Skill`, `Workflow`, and, when used, `Agent`/`Task`. Manual prose does not replace a tool call when the runtime supports that tool.
+
+## Hooks
+
+Claude Code wires the full hook set through `hooks/hooks.json`:
+
+- `PreToolUse`: commit secret scan, destructive-command guard, branch guard.
+- `PostToolUse`: write secret scan.
+- `SessionStart`: AGENTIC-SDLC bootstrap and git status summary.
+- `Stop`: completion-claim guard.
+
+All paths resolve through `${CLAUDE_PLUGIN_ROOT}`. `node` must be on `PATH`.
 
 ## Local `.claude/`
 
-The repo may contain `.claude/settings.json` for local workspace settings. This is not the skill source. It should not contain a duplicate skill tree.
+The repo may contain `.claude/settings.json` for local workspace settings. That file is not the skill source and should not contain duplicate skills.
 
-## Non-Git Workspace Behavior
+## Non-Git Workspaces
 
-Some flows are git-aware. In a non-git workspace:
+Git-aware flows should skip branch, commit, PR, release, and worktree steps with an explicit note when the active workspace is not a git checkout. Deterministic probes and artifact validators still work.
 
-- `detect_context.py` and validator tests still work.
-- Branch guards cannot determine the current branch.
-- Commit, PR, release, and worktree steps must be skipped with an explicit note.
+## Frontmatter Policy
 
-## Tool Mapping
-
-Runtime concepts used by the skills:
-
-| Concept | Runtime Mechanism |
-|---|---|
-| Load a skill | Claude Code skill invocation |
-| Dispatch subagent | Agent / Task facility when available |
-| Dynamic workflow | Claude Code Workflow facility when available; in Codex/OpenCode/Kimi Code, map to subagent fan-out, parallel local tools, cloud delegation, native agent mechanisms, or a documented degraded main-loop path |
-| Slash command | `commands/*.md` |
-| Plugin hook | `hooks/hooks.json` |
-| Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}` in Claude Code; `${PLUGIN_ROOT}` in Codex; configured plugin/skill root in OpenCode/Kimi Code |
-
-If a runtime capability is unavailable in the current version/configuration, fall back to the nearest supported mechanism and state the fallback in the final report.
-
-## Spec/Plan Runtime Split
-
-Claude Code can run `workflows/spec-plan-draft.js` as a JavaScript dynamic workflow. Non-Claude Agent Skills runtimes do not use that runtime. Therefore:
-
-- `spec-authoring` and `plan-authoring` remain standalone prompt-level entry skills.
-- `agentic-sdlc-pipeline` must not call `spec-authoring` or `plan-authoring` for its internal steps 4-5.
-- In Claude Code, `agentic-sdlc-pipeline` uses `spec-plan-draft`.
-- In Codex, OpenCode, Kimi Code, and similar runtimes, `agentic-sdlc-pipeline` uses its embedded author/critic adapter: main-loop draft, fresh-context critic when available, revise, save artifact, validate.
-
-## Skill Frontmatter Policy
-
-The repo gate intentionally accepts the frontmatter keys used by this lab:
+The repo gate accepts the frontmatter keys used by this lab:
 
 - `name`
 - `description`

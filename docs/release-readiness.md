@@ -59,7 +59,7 @@ Scan staged and unstaged diffs for tokens, private keys, connection strings, and
 
 - Live routing is model-dependent and can vary by runtime, model, plugin list, and prompt shape. Treat live eval output as evidence for that exact run, not a permanent guarantee.
 - Claude Code has native `Skill`, `Workflow`, and `Agent` transcript events. Codex uses activated skill instructions and equivalent transcript/procedure evidence; it does not emit the same Claude-native workflow events.
-- `agentic-sdlc-pipeline` owns internal spec/plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for pipeline steps 4-5; non-Claude runtimes use the embedded author/critic adapter.
+- `agentic-sdlc-pipeline` owns internal spec/plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for pipeline steps 4-5; Codex uses the embedded author/critic adapter.
 - Hooks are local runtime guardrails. Some warn or fail open by design, so they complement but do not replace diff review, test output, and secret scanning.
 - `0.2.7` is publishable for Claude Code and Codex when the local gate and current live evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
 

@@ -4,7 +4,7 @@
 
 This project is a disciplined SDLC skill library for Claude Code and Codex. A **skill** is a runnable procedure (`SKILL.md` plus optional `scripts/`, `references/`, `assets/`). The **contracts** in `contracts/skills/` are the durable behavior layer; the skills are the runnable procedure layer. This document is about the procedure layer's *boundaries*.
 
-For the component reference see [`plugin-readme.md`](./plugin-readme.md); for testing see [`testing.md`](./testing.md).
+For the component reference see [`plugin-readme.md`](./plugin-readme.md); for runtime-specific usage see [Claude Code](../.claude-plugin/README.md) and [Codex](../.codex-plugin/README.md); for testing see [`testing.md`](./testing.md).
 
 ---
 
@@ -219,7 +219,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 When `agentic-sdlc-pipeline` needs spec and plan artifacts:
 
 - **Claude Code:** use the named `Workflow` `spec-plan-draft` (author → critic → revise, ≤2 rounds + closing audit).
-- **Non-Claude Agent Skills runtimes:** use `agentic-sdlc-pipeline`'s **embedded author/critic adapter** as described in [`runtime-adapter.md`](./runtime-adapter.md). Do **not** call standalone `spec-authoring` or `plan-authoring` from inside the pipeline.
+- **Codex:** use `agentic-sdlc-pipeline`'s **embedded author/critic adapter** as described in [`runtime-adapter.md`](./runtime-adapter.md). Do **not** call standalone `spec-authoring` or `plan-authoring` from inside the pipeline. Other non-Claude runtimes are deferred adapter targets, not supported release runtimes.
 
 Standalone `spec-authoring` / `plan-authoring` may still use `spec-plan-draft` and the same validator (`validate_artifacts.py`), but they are entry points for single-artifact requests, not phases of a full pipeline run.
 
@@ -293,6 +293,8 @@ Interactive, collaborative, continuous parallel work where peers talk and a live
 ## Cross-references
 
 - Project overview and install: [`README.md`](../README.md)
+- Claude Code runtime README: [`../.claude-plugin/README.md`](../.claude-plugin/README.md)
+- Codex runtime README: [`../.codex-plugin/README.md`](../.codex-plugin/README.md)
 - Component-by-component plugin documentation: [`plugin-readme.md`](./plugin-readme.md)
 - Repository operating model for agents: [`AGENTS.md`](../AGENTS.md)
 - Skill behavior contracts: [`contracts/skills/`](../contracts/skills/)

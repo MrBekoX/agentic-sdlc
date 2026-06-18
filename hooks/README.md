@@ -1,44 +1,51 @@
-# Hooks — Deterministic Guards + Conceptual Checklists
+# Hooks - Deterministic Guards + Conceptual Checklists
 
 Two kinds of guard live here:
 
-1. **Real hooks** — executable `.mjs` scripts wired in `hooks.json` (this directory). They run automatically and can warn or block. Use these for things that must happen every time (contracts 06, 08).
-2. **Conceptual hooks** — judgment-based checkpoints that a hook script can't decide deterministically. These are enforced inside **skill contracts** and **skills** (the flow gates), not as scripts. The table below maps each requested conceptual hook to where it is actually enforced.
+1. **Real hooks** - executable `.mjs` scripts wired by a runtime hook config.
+2. **Conceptual hooks** - judgment-based checkpoints enforced by skills and contracts, not scripts.
 
-## Real hooks (scripts, wired in hooks.json / hooks-codex.json)
+## Runtime Wiring
 
-| Script | Event | Behavior |
+| Runtime | Config | Wired events in this release |
 |---|---|---|
-| `session-start.mjs` | SessionStart | Injects a git status summary + AGENTIC-SDLC bootstrap reminder into context. |
-| `scan-write.mjs` | PostToolUse (Write/Edit/MultiEdit) | Scans newly written text for secrets; **warns** (non-blocking). |
-| `scan-commit.mjs` | PreToolUse (Bash · git commit) | Scans added diff lines for high-confidence secrets; **blocks** the commit. |
-| `branch-guard.mjs` | PreToolUse (Bash · git commit/push) | Warns on commit/push to `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. |
-| `destructive-command-guard.mjs` | PreToolUse (Bash) | Blocks deterministic high-risk destructive commands such as `git reset --hard`, forceful `git clean`, `rm -rf`, and `Remove-Item -Recurse -Force`. |
-| `completion-claim-guard.mjs` | Stop | Deterministic backstop for `completion-claim-gate`: if the final message makes a strong done/complete/passing/ready claim **and** the transcript shows no completion-claim-gate invocation, **warns** (non-blocking); **blocks** the stop when `AGENTIC_COMPLETION_GATE_BLOCK=true`. Complements (does not replace) the judgment gate. |
-| `secret-patterns.mjs` | — (shared lib) | Generic secret patterns + scanner used by the scan hooks. No real secrets embedded. |
+| Claude Code | `hooks/hooks.json` | `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop` |
+| Codex | `hooks/hooks-codex.json` | `SessionStart` only |
 
-All scripts are generic: no shell (git via argument array), path-normalized skip lists, fail-open on error.
+The hook scripts are shared in this directory, but being present as a script is not the same as being wired by every runtime.
 
-Claude Code wires hooks through `hooks/hooks.json` using `${CLAUDE_PLUGIN_ROOT}`.
-Codex wires the startup bootstrap through `hooks/hooks-codex.json` using `${PLUGIN_ROOT}`.
+Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve through `${PLUGIN_ROOT}`.
 
-## Conceptual hooks → where enforced
+## Real Hook Scripts
 
-These are the seven requested checkpoints. They require judgment, so they live as **flow gates** in skill contracts/skills rather than as deterministic scripts.
+| Script | Claude Code event | Codex event | Behavior |
+|---|---|---|---|
+| `session-start.mjs` | `SessionStart` | `SessionStart` | Injects git status summary and AGENTIC-SDLC bootstrap reminder. |
+| `scan-write.mjs` | `PostToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | Scans newly written text for secrets; warns only. |
+| `scan-commit.mjs` | `PreToolUse` (`git commit*`) | Not wired | Scans added diff lines for high-confidence secrets; blocks commit. |
+| `branch-guard.mjs` | `PreToolUse` (`git commit*` / `git push*`) | Not wired | Warns on `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. |
+| `destructive-command-guard.mjs` | `PreToolUse` shell command | Not wired | Blocks deterministic destructive commands such as `git reset --hard`, forceful `git clean`, `rm -rf`, and `Remove-Item -Recurse -Force`. |
+| `completion-claim-guard.mjs` | `Stop` | Not wired | Warns when a final completion claim appears without `completion-claim-gate`; blocks when `AGENTIC_COMPLETION_GATE_BLOCK=true`. |
+| `secret-patterns.mjs` | Shared library | Shared library | Secret-pattern scanner used by the scan hooks. |
+
+All scripts are generic: no shell for git operations, path-normalized skip lists, no embedded real secrets, and fail-open behavior on hook errors.
+
+## Conceptual Hooks
+
+These checkpoints require model judgment, so they live as flow gates in skills and contracts.
 
 | Conceptual hook | Enforced by |
 |---|---|
-| `pre-edit-context-check` (file read? spec/plan exists? in scope?) | contracts 01 and 03; root-cause-fix/feature-build steps 1–4 |
-| `post-edit-diff-check` (which files changed? unnecessary changes? diff too big?) | contracts 04 and 08; `code-quality-review` skill; root-cause-fix step 12 |
-| `pre-test-command-check` (right test command? right scope?) | contract 05; `test-authoring` skill |
-| `post-test-result-check` (output actually read? fail root-caused? no false "passed"?) | contract 05 (show real output); root-cause-fix step 8 + Loop A |
-| `security-sensitive-change-check` (auth/permission/config/secret/migration/data-loss?) | contract 06; `security-audit` skill; root-cause-fix steps 9 & 11 |
-| `pre-git-operation-check` (status/diff reviewed? branch? secrets? tests? approval?) | contract 08; `/git-safety-check` command; `scan-commit.mjs` + `branch-guard.mjs` |
-| `final-response-verification` (work verified? test output? security done? control run? gaps stated?) | `implementasyon-control` skill (mandatory pre-final) + `implementation-auditor` agent; deterministic backstop in `completion-claim-guard.mjs` (Stop) catches a final completion claim made with no completion-claim-gate invocation |
+| `pre-edit-context-check` | contracts `01-context-first`, `03-plan-mode`; early steps in `root-cause-fix` and `feature-build`. |
+| `post-edit-diff-check` | contracts `04-code-quality`, `08-git-safety`; `code-quality-review`; diff review steps. |
+| `pre-test-command-check` | contract `05-testing`; `test-authoring`. |
+| `post-test-result-check` | contract `05-testing`; TDD loops in implementation skills. |
+| `security-sensitive-change-check` | contract `06-security`; `security-audit`. |
+| `pre-git-operation-check` | contract `08-git-safety`; `/git-safety-check`; `scan-commit.mjs`; `branch-guard.mjs`. |
+| `final-response-verification` | `implementasyon-control` plus `completion-claim-gate`; Claude `completion-claim-guard.mjs` is only a deterministic backstop. |
 
-> Why not all scripts? Per Claude Code docs, hooks are for **deterministic** actions. A check like "was the test output actually understood?" needs a model's judgment — so it is a prompt-level gate in a skill, backed where possible by a deterministic script (e.g. secret scanning, branch guarding).
+## Adding Or Disabling Hooks
 
-## Adding / disabling hooks
-- Wire a new script under the matching event in `hooks.json` (`PreToolUse`, `PostToolUse`, `SessionStart`, `Stop`, …).
-- Use `/hooks` in a session to browse/temporarily disable.
-- `${CLAUDE_PLUGIN_ROOT}` resolves to this plugin's install directory for portable paths (as used by every entry in `hooks.json`).
+- Add new scripts under the matching event in `hooks/hooks.json` for Claude Code or `hooks/hooks-codex.json` for Codex when that runtime supports the event.
+- Use runtime hook controls to browse or temporarily disable hooks.
+- Keep scripts deterministic. Checks that need judgment belong in skills/contracts.

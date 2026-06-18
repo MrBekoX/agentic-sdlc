@@ -6,7 +6,7 @@ This project uses a **deterministic-gates-first** model. Deterministic tests are
 
 > **Never claim a skill "works" or "triggers" without running the relevant eval and capturing its output or a transcript.** (Contract `00` — evidence before claim.)
 
-For the component reference see [`plugin-readme.md`](./plugin-readme.md); for skill responsibilities see [`skill-boundaries.md`](./skill-boundaries.md).
+For runtime-specific behavior see the [Claude Code README](../.claude-plugin/README.md) and [Codex README](../.codex-plugin/README.md). For the component reference see [`plugin-readme.md`](./plugin-readme.md); for skill responsibilities see [`skill-boundaries.md`](./skill-boundaries.md).
 
 ---
 
@@ -275,7 +275,7 @@ Behavior evals should move toward **transcript JSONL** checks for evidence such 
 
 ## Procedure evals
 
-`scripts/run_procedure_eval.py` checks more than "did the skill trigger?" It inspects stream-json tool use and optional filesystem artifacts to verify that a workflow used required skills, commands, workflows, and artifacts and did **not** run forbidden commands. For non-Claude runtimes, a fixture can also provide runtime-adapter evidence patterns proving equivalent author -> critic -> revise behavior, artifact save, validator execution, and delegate-skill activation.
+`scripts/run_procedure_eval.py` checks more than "did the skill trigger?" It inspects stream-json tool use and optional filesystem artifacts to verify that a workflow used required skills, commands, workflows, and artifacts and did **not** run forbidden commands. For Codex and deferred adapter targets, a fixture can also provide runtime-adapter evidence patterns proving equivalent author -> critic -> revise behavior, artifact save, validator execution, and delegate-skill activation.
 
 ### Modes
 
@@ -435,6 +435,8 @@ Live evals spend real tokens and time. Apply these controls:
 ## Cross-references
 
 - [README.md](../README.md) — project overview, install model, and quality gate.
+- [Claude Code runtime README](../.claude-plugin/README.md) — Claude plugin loading, hooks, and native transcript gates.
+- [Codex runtime README](../.codex-plugin/README.md) — Codex plugin loading, startup hook, and embedded adapter behavior.
 - [docs/plugin-readme.md](plugin-readme.md) — component-by-component plugin documentation, pre-push checklist, and known limitations.
 - [docs/skill-boundaries.md](skill-boundaries.md) — ownership map for every skill and layer.
 - [AGENTS.md](../AGENTS.md) — operating model, evidence rules, sub-agent/workflow policy, and skill-development workflow.
