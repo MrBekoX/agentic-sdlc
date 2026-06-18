@@ -1,8 +1,6 @@
 ---
 name: agentic-sdlc-pipeline
 description: Use first in any language for end-to-end implementation with the full gated SDLC envelope (spec, plan, TDD, tests, security review, final audit, PR readiness). Production-impacting, API contract, auth, payment, or database work overrides focused feature-build/root-cause-fix/safe-refactor/test-authoring routing.
-user-invocable: true
-argument-hint: "<what to build or fix>"
 ---
 
 # Skill: agentic-sdlc-pipeline (the full-envelope SDLC orchestrator)

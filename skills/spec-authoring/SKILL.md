@@ -1,7 +1,6 @@
 ---
 name: spec-authoring
 description: Use first in any language when the user asks only to write or extract a spec, acceptance criteria, requirements contract, WHAT document, or problem/business rules/edge cases/definition of done. Not for plan/HOW, code, tests, or ambiguous design exploration.
-argument-hint: "<thing to specify>"
 ---
 
 # Skill: spec-authoring

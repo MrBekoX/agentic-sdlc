@@ -2,7 +2,8 @@
   "name": "agentic-sdlc-dev",
   "description": "Development marketplace for the AGENTIC-SDLC Claude Code skill library",
   "owner": {
-    "name": "Beko"
+    "name": "Beko",
+    "url": "https://github.com/MrBekoX"
   },
   "plugins": [
     {
@@ -11,7 +12,8 @@
       "version": "0.2.7",
       "source": "./",
       "author": {
-        "name": "Beko"
+        "name": "Beko",
+        "url": "https://github.com/MrBekoX"
       }
     }
   ]

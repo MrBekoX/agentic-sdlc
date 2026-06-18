@@ -1,7 +1,6 @@
 ---
 name: security-audit
 description: Use first in any language to audit code, a diff, endpoint, or login flow for security covering input validation, auth, authorization, IDOR, secrets, injection, dependencies, data exposure, rate limiting, or vulnerability risk. Not for general code-quality review or bug fixing.
-argument-hint: "<file/dir — defaults to current git diff>"
 ---
 
 # Skill: security-audit

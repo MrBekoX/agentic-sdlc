@@ -1,7 +1,6 @@
 ---
 name: feature-build
 description: Use first in any language to add a new feature, endpoint, screen, or capability without the full agentic-sdlc-pipeline envelope, via implementation-control. Not for bug/root-cause fixes, test-only work, or behavior-preserving refactors.
-argument-hint: "<feature name or id>"
 ---
 
 # Skill: feature-build

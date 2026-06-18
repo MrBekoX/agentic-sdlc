@@ -17,6 +17,29 @@ This repository supports two runtimes:
 
 Other harnesses are intentionally deferred. [`docs/runtime-adapter.md`](docs/runtime-adapter.md) may mention adapter concepts for future or experimental portability, but Claude Code and Codex are the supported release targets.
 
+## Install
+
+### Claude Code
+
+Add this repository as a plugin marketplace, then install the plugin:
+
+```text
+/plugin marketplace add MrBekoX/agentic-sdlc
+/plugin install agentic-sdlc@agentic-sdlc-dev
+```
+
+For local development from a clone, point Claude Code at the repo root instead:
+
+```text
+claude --plugin-dir /path/to/agentic-sdlc
+```
+
+After install, the `using-agentic-sdlc` router activates automatically and the user-invokable skills (e.g. `/agentic-sdlc-pipeline`, `/spec-authoring`) appear in `/help`.
+
+### Codex
+
+Clone the repository and load the Codex plugin from [`.codex-plugin/`](.codex-plugin/README.md) per its README. The same skills run through the embedded author/critic adapter where Claude-only Workflow/Skill tooling is unavailable.
+
 ## What It Is
 
 | It is | It is not |

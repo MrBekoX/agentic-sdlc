@@ -1,7 +1,6 @@
 ---
 name: root-cause-fix
 description: Use first in any language to fix a bug, error, broken behavior, failing test, production issue, regression, or incident at its root-cause (reproduce, find and fix). Not for new features, pure refactors, or review feedback.
-argument-hint: "<bug description or issue id>"
 ---
 
 # Skill: root-cause-fix
