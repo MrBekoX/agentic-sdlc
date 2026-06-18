@@ -133,6 +133,38 @@ class TestProcedureEvalHarness(unittest.TestCase):
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:dispatch-strategy"})
         self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:dispatch-strategy"))
 
+    def test_pipeline_case_fails_when_relevant_core_workflow_skill_is_missing(self):
+        case = procedure_eval.load_eval(REPO / "tests/skills/procedure/agentic-sdlc-pipeline.json")[0]
+        trace = procedure_eval.Trace()
+        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:dispatch-strategy"})
+        procedure_eval._record_tool(trace, "Workflow", {"name": "agentic-sdlc:spec-plan-draft"})
+        procedure_eval._record_tool(
+            trace,
+            "shell_command",
+            {"command": "python ${PLUGIN_ROOT}/scripts/detect_context.py --path ."},
+        )
+        procedure_eval._record_tool(trace, "write_file", {"file_path": "docs/specs/greeting-suffix.md"})
+        procedure_eval._record_tool(
+            trace,
+            "shell_command",
+            {"command": "python ${PLUGIN_ROOT}/scripts/validate_artifacts.py --mode spec --file docs/specs/greeting-suffix.md"},
+        )
+        procedure_eval._record_tool(trace, "write_file", {"file_path": "docs/plans/greeting-suffix.md"})
+        procedure_eval._record_tool(
+            trace,
+            "shell_command",
+            {"command": "python ${PLUGIN_ROOT}/scripts/validate_artifacts.py --mode plan --file docs/plans/greeting-suffix.md --spec docs/specs/greeting-suffix.md --strict"},
+        )
+        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:security-audit"})
+        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:implementasyon-control"})
+        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:completion-claim-gate"})
+
+        errors = procedure_eval.evaluate_case(case, trace, REPO)
+
+        self.assertIn("missing_skill:agentic-sdlc:feature-build", errors)
+        self.assertNotIn("missing_skill:agentic-sdlc:security-audit", errors)
+        self.assertNotIn("missing_workflow:agentic-sdlc:spec-plan-draft", errors)
+
     def test_live_fixture_has_baseline_commit_before_claude_runs(self):
         case = {
             "id": "agentic-sdlc-pipeline-feature-no-commit",
