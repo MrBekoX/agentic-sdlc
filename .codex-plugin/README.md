@@ -1,6 +1,6 @@
 # AGENTIC-SDLC For Codex
 
-This plugin packages AGENTIC-SDLC for Codex using the shared root `skills/` tree, a Codex manifest, Codex interface metadata, and Codex-specific hook wiring.
+This plugin packages AGENTIC-SDLC for Codex using the shared root `skills/` tree, a Codex manifest, and Codex interface metadata.
 
 ## Load Model
 
@@ -10,18 +10,27 @@ Codex reads:
 |---|---|
 | `.codex-plugin/plugin.json` | Codex plugin metadata and interface block. |
 | `skills/*/SKILL.md` | Shared skill source. |
-| `hooks/hooks-codex.json` | Codex hook wiring for this release. |
+| `hooks/hooks-codex.json` | Adapter reference for startup bootstrap behavior; not declared in the publishable manifest. |
 
 The manifest points to:
 
 ```json
 {
-  "skills": "./skills/",
-  "hooks": "./hooks/hooks-codex.json"
+  "skills": "./skills/"
 }
 ```
 
 The `interface` block supplies Codex display metadata, capabilities, default prompts, website, privacy policy, and terms links.
+
+## Install
+
+Codex discovers the default personal marketplace at `~/.agents/plugins/marketplace.json`. Its `agentic-sdlc` entry should point at `~/plugins/agentic-sdlc`, which can be a real copy or a symlink/junction to this clone.
+
+```bash
+codex plugin add agentic-sdlc@personal
+```
+
+Start a new Codex thread after install or reinstall so the runtime reloads plugin skills.
 
 ## Runtime Root
 
@@ -79,18 +88,12 @@ Focused skills are independently routable in Codex and also serve as pipeline bu
 
 ## Hooks In Codex
 
-Codex currently wires only the startup bootstrap from `hooks/hooks-codex.json`:
-
-| Event | Script |
-|---|---|
-| `SessionStart` | `session-start.mjs` |
-
-The other hook scripts still exist in `hooks/`, but they are not wired as Codex `PreToolUse`, `PostToolUse`, or `Stop` hooks in this release. Their guardrail behavior is carried by skills, contracts, manual checks, and explicit script runs where appropriate.
+The publishable Codex manifest does not declare hook wiring in this release. `hooks/hooks-codex.json` remains in the repo as an adapter reference for the startup bootstrap shape, but Codex guardrail behavior is carried by skills, contracts, manual checks, and explicit script runs where appropriate.
 
 ## Requirements
 
-- Codex runtime that can load `.codex-plugin/plugin.json`.
-- Node.js on `PATH` for `session-start.mjs`.
+- Codex CLI/runtime with plugin marketplace support.
+- Node.js on `PATH` for manual hook-script checks and local gates.
 - Python 3 for validators, probes, and local gates.
 - Git for branch, diff, commit, PR, and worktree flows.
 
@@ -102,4 +105,4 @@ Use Codex eval output as evidence for Codex routing only. Use procedure transcri
 
 ## Troubleshooting
 
-See [`../docs/troubleshooting.md`](../docs/troubleshooting.md) for plugin loading, `${PLUGIN_ROOT}`, startup hooks, missing Node, Codex eval warnings, and common procedure-eval failures.
+See [`../docs/troubleshooting.md`](../docs/troubleshooting.md) for plugin loading, missing Node, Codex eval warnings, and common procedure-eval failures.

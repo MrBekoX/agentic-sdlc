@@ -91,7 +91,7 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_behavior_eval.py` | eval-runner unit | The behavior eval runner validates fixture shape and matches required/forbidden patterns. |
 | `tests/test_procedure_eval.py` | eval-runner unit | The procedure evaluator parses stream-json transcripts and enforces required/forbidden skills, workflows, commands, artifacts, and patterns. |
 | `tests/test_hooks_policy.py` | policy unit | Hook wiring policy (block vs warn, fail-open, secret-pattern coverage). |
-| `tests/test_packaging_metadata.py` | metadata unit | Plugin manifests and marketplace version consistency, `bump_version.py` behavior. |
+| `tests/test_packaging_metadata.py` | metadata unit | Plugin manifests, publishable Codex schema keys, marketplace version consistency, and `bump_version.py` behavior. |
 | `tests/test_handoff_scripts.py` | script unit | `task_brief.py` and `review_package.py` CLI behavior. |
 
 ---
@@ -482,7 +482,7 @@ Question: do the pipeline's feeder skills fire at the right step, and does it ru
 
 - [README.md](../README.md) — project overview, install model, and quality gate.
 - [Claude Code runtime README](../.claude-plugin/README.md) — Claude plugin loading, hooks, and native transcript gates.
-- [Codex runtime README](../.codex-plugin/README.md) — Codex plugin loading, startup hook, and embedded adapter behavior.
+- [Codex runtime README](../.codex-plugin/README.md) — Codex personal-marketplace loading, publishable manifest shape, and embedded adapter behavior.
 - [docs/plugin-readme.md](plugin-readme.md) — component-by-component plugin documentation, pre-push checklist, and known limitations.
 - [docs/skill-boundaries.md](skill-boundaries.md) — ownership map for every skill and layer.
 - [AGENTS.md](../AGENTS.md) — operating model, evidence rules, sub-agent/workflow policy, and skill-development workflow.

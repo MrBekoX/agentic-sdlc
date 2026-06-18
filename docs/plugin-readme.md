@@ -9,7 +9,7 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 | Runtime | Status | Runtime notes |
 |---|---|---|
 | Claude Code | Supported | Native `Skill`, `Workflow`, `Agent`/`Task`, commands, and full hook wiring. See [`../.claude-plugin/README.md`](../.claude-plugin/README.md). |
-| Codex | Supported | Shared skills, Codex manifest/interface, startup hook, and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
+| Codex | Supported | Shared skills, Codex manifest metadata, personal-marketplace install flow, and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
 | OpenCode / Kimi Code / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.2.7`. |
 
 ## Installation Model
@@ -18,9 +18,9 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 |---|---|---|
 | `.claude-plugin/plugin.json` | Claude Code | Plugin metadata. |
 | `.claude-plugin/marketplace.json` | Claude Code | Local marketplace source; the repo root is the source. |
-| `.codex-plugin/plugin.json` | Codex | Codex plugin metadata, `skills`, `hooks`, and `interface` block. |
+| `.codex-plugin/plugin.json` | Codex | Codex plugin metadata, `skills`, and `interface` block. |
 | `hooks/hooks.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
-| `hooks/hooks-codex.json` | Codex | `SessionStart` bootstrap wiring only in this release. |
+| `hooks/hooks-codex.json` | Codex | Adapter reference only in this release; not declared in the publishable manifest. |
 
 Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Runtime root variables are:
 
@@ -102,7 +102,7 @@ The scripts are shared, but runtime wiring differs.
 
 | Script | Claude Code wiring | Codex wiring | Behavior |
 |---|---|---|---|
-| `session-start.mjs` | `SessionStart` | `SessionStart` | Injects git status and AGENTIC-SDLC bootstrap reminder. |
+| `session-start.mjs` | `SessionStart` | Not wired | Injects git status and AGENTIC-SDLC bootstrap reminder. |
 | `scan-write.mjs` | `PostToolUse` | Not wired | Warns on secret-shaped new content. |
 | `scan-commit.mjs` | `PreToolUse` for `git commit*` | Not wired | Blocks high-confidence secrets in added diff lines. |
 | `branch-guard.mjs` | `PreToolUse` for `git commit*` and `git push*` | Not wired | Warns on protected branches; can block with `AGENTIC_BRANCH_GUARD_BLOCK=true`. |
@@ -154,7 +154,7 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 ## Known Limitations
 
 - `0.2.7` supports Claude Code and Codex only.
-- Codex hook wiring is startup-only in this release.
+- Codex hook wiring is not declared in the publishable manifest in this release.
 - Codex trigger evals are classifier evidence, not Claude-style `Skill` event evidence.
 - Hooks fail open where necessary so a hook fault does not break a session.
 - `validate_artifacts.py` is structural; it cannot prove that a spec is semantically about the requested task.

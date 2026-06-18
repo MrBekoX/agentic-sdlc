@@ -38,7 +38,13 @@ After install, the `using-agentic-sdlc` router activates automatically and the u
 
 ### Codex
 
-Clone the repository and load the Codex plugin from [`.codex-plugin/`](.codex-plugin/README.md) per its README. The same skills run through the embedded author/critic adapter where Claude-only Workflow/Skill tooling is unavailable.
+Codex uses the personal marketplace layout. Put this plugin at `~/plugins/agentic-sdlc` or point that path at this clone, then install it from the personal marketplace:
+
+```bash
+codex plugin add agentic-sdlc@personal
+```
+
+The same skills run through the embedded author/critic adapter where Claude-only Workflow/Skill tooling is unavailable.
 
 ## What It Is
 
@@ -148,7 +154,7 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 | Runtime | Hook wiring |
 |---|---|
 | Claude Code | [`hooks/hooks.json`](hooks/hooks.json): `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. |
-| Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json): `SessionStart` bootstrap only in this release. Other guardrails remain skill/script/manual gates. |
+| Codex | No publishable manifest hook wiring in this release. [`hooks/hooks-codex.json`](hooks/hooks-codex.json) remains an adapter reference; guardrails run through skills, scripts, and manual gates. |
 
 Judgment-based checks, such as whether context was actually read or test output was understood, live in skills and contracts rather than hook scripts. See [`hooks/README.md`](hooks/README.md).
 

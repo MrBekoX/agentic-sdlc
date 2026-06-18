@@ -23,7 +23,7 @@ python3 -m unittest discover -s tests -v
 
 On Windows, `py -3` is an acceptable local substitute for `python3` when `python3` is not on `PATH`.
 
-The local gate proves metadata consistency, static skill wiring, fixture health, hook/workflow syntax, and unit behavior. It does not prove live model routing or live tool-use obedience.
+The local gate proves metadata consistency, Codex manifest shape, static skill wiring, fixture health, hook/workflow syntax, and unit behavior. It does not prove live model routing or live tool-use obedience.
 
 ## Required Live Evidence
 

@@ -14,11 +14,13 @@ Check:
 
 Check:
 
-1. Codex is pointed at `.codex-plugin/plugin.json`.
-2. The manifest contains `"skills": "./skills/"` and `"hooks": "./hooks/hooks-codex.json"`.
-3. Skills are under root `skills/`, not `.codex/skills/`.
-4. `${PLUGIN_ROOT}` resolves to the plugin root in Codex.
-5. The runtime guide in [`../.codex-plugin/README.md`](../.codex-plugin/README.md) matches the installed path.
+1. The personal marketplace exists at `~/.agents/plugins/marketplace.json`.
+2. Its `agentic-sdlc` entry points at `~/plugins/agentic-sdlc`.
+3. `~/plugins/agentic-sdlc` is a real copy or symlink/junction to this plugin root.
+4. The plugin was installed with `codex plugin add agentic-sdlc@personal`.
+5. The manifest contains `"skills": "./skills/"` and no unsupported top-level `hooks` field.
+6. Skills are under root `skills/`, not `.codex/skills/`.
+7. The runtime guide in [`../.codex-plugin/README.md`](../.codex-plugin/README.md) matches the installed path.
 
 ## Claude Hooks Do Not Run
 
@@ -29,16 +31,9 @@ Check:
 3. `${CLAUDE_PLUGIN_ROOT}` resolves in the Claude Code plugin runtime.
 4. The hook event matches the tool invocation. For example, `scan-commit.mjs` only runs for `git commit*`.
 
-## Codex Startup Hook Does Not Run
+## Codex Hooks Are Not Running
 
-Check:
-
-1. `hooks/hooks-codex.json` is referenced by `.codex-plugin/plugin.json`.
-2. `node` is on `PATH`.
-3. `${PLUGIN_ROOT}` resolves in the Codex plugin runtime.
-4. The session start event is one of the configured startup/resume/clear matchers.
-
-Codex only wires the startup hook in this release. Claude `PreToolUse`, `PostToolUse`, and `Stop` guards are not Codex hook events here.
+The publishable Codex manifest does not declare hooks in this release. `hooks/hooks-codex.json` is retained as an adapter reference, but runtime guardrails for Codex rely on skills, contracts, explicit script runs, and final evidence checks rather than manifest hook events.
 
 ## Branch Guard Only Warns
 

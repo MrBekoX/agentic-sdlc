@@ -18,7 +18,6 @@
     "workflow"
   ],
   "skills": "./skills/",
-  "hooks": "./hooks/hooks-codex.json",
   "interface": {
     "displayName": "Agentic SDLC",
     "shortDescription": "Spec, plan, TDD, security, and delivery workflows for coding agents",
