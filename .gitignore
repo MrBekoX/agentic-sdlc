@@ -47,3 +47,7 @@ Thumbs.db
 # Build / dist
 dist/
 build/
+
+# Agent operating model (local; not distributed with the plugin)
+AGENTS.md
+CLAUDE.md
