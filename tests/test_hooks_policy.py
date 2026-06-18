@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -152,13 +153,31 @@ class TestSessionStartHook(unittest.TestCase):
         self.assertIn("smallest sufficient skill", context)
         self.assertIn("session-local routing memory", context)
         self.assertIn("agentic-sdlc-pipeline is only for full-envelope", context)
-        self.assertIn("Route by user intent before domain nouns", context)
+        self.assertIn("Route by semantic intent, not exact keywords or prompt language", context)
         self.assertIn("agentic-sdlc:mind-spark", context)
         self.assertIn("agentic-sdlc:plan-authoring", context)
+        self.assertIn("never ask for bug details first", context)
+        self.assertIn("after details arrive", context)
+        self.assertRegex(
+            context,
+            re.compile(r"Any-language end-to-end/full-envelope.*agentic-sdlc:agentic-sdlc-pipeline"),
+        )
         self.assertIn("agentic-sdlc:test-authoring", context)
+        self.assertRegex(context, re.compile(r"Any-language behavior-preserving refactor.*agentic-sdlc:safe-refactor"))
+        self.assertIn("before Glob/Read/file-existence checks", context)
+        self.assertRegex(context, re.compile(r"Any-language received-review-feedback.*agentic-sdlc:feedback-triage"))
+        self.assertRegex(context, re.compile(r"Any-language orchestration decision.*agentic-sdlc:dispatch-strategy"))
+        self.assertIn("do not choose a mechanism directly without the Skill call", context)
+        self.assertIn("same-purpose skill", context)
+        self.assertIn("Any-language clear implementation prompts", context)
+        self.assertIn("agentic-sdlc:feature-build", context)
+        self.assertIn("ask for the full pipeline", context)
+        self.assertIn("Never replace agentic-sdlc:mind-spark with superpowers:brainstorming", context)
         self.assertIn("agentic-sdlc:implementasyon-control", context)
-        self.assertIn("denetle/audit", context)
+        self.assertIn("do not answer from memory", context)
+        self.assertIn("Any-language prompt asking to audit", context)
         self.assertIn("not a passive session preference", context)
+        self.assertIn("audit intent requires a Skill call", context)
         self.assertIn("report missing evidence", context)
         self.assertIn("before asking clarifying questions", context)
         self.assertIn("do not say you will use the skill later", context)

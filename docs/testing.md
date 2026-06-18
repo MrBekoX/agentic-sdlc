@@ -21,9 +21,10 @@ Deterministic tests verify **wiring and fixture health** — they do **not** pro
 
 ## Fast local gate
 
-Run these three commands before claiming the repo is healthy:
+Run these commands before claiming the repo is healthy:
 
 ```bash
+python3 scripts/bump_version.py --check
 python3 scripts/check_all.py
 python3 tests/skills/harness.py
 python3 -m unittest discover -s tests -v
@@ -33,6 +34,7 @@ python3 -m unittest discover -s tests -v
 
 | Command | Proves |
 |---|---|
+| `python3 scripts/bump_version.py --check` | `VERSION`, Claude plugin metadata, Claude marketplace metadata, and Codex plugin metadata agree. |
 | `python3 scripts/check_all.py` | Every `skills/<name>/SKILL.md` has valid frontmatter; name matches the directory; only allowed keys; description present and free of angle brackets; the discovered `tests/test_*.py` suites pass. |
 | `python3 tests/skills/harness.py` | Skill/agent/workflow/hook/skill-contract references resolve; golden cross-references have not drifted; safety-fixture evidence is wired to real files; `${CLAUDE_PLUGIN_ROOT}` paths and `hooks.json` references resolve. |
 | `python3 -m unittest discover -s tests -v` | `detect_context.py` classifies workspaces correctly; `validate_artifacts.py` enforces spec/plan structure and scans for placeholders/secrets; hook and workflow JavaScript parses under `node --check` (skipped if `node` is missing). |

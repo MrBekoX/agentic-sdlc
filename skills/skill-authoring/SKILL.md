@@ -1,6 +1,6 @@
 ---
 name: skill-authoring
-description: Use first to create, edit, test, evaluate, optimize, or package a Claude Agent Skill or Codex skill. Covers SKILL.md, frontmatter/description tuning, trigger optimization, eval fixtures/harnesses, and .skill packaging.
+description: Use first in any language to create, edit, test, evaluate, optimize, or package a Claude Agent Skill or Codex skill. Covers SKILL.md, frontmatter/description tuning, trigger optimization, eval fixtures/harnesses, and .skill packaging.
 ---
 
 # Skill: skill-authoring

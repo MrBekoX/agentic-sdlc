@@ -13,8 +13,26 @@ class TestRoutingEval(unittest.TestCase):
     def test_load_scenarios_validates_using_agentic_sdlc_fixture(self):
         scenarios = runner.load_scenarios(REPO / "tests/skills/routing/using-agentic-sdlc.json", 0)
         self.assertGreaterEqual(len(scenarios), 2)
-        self.assertEqual(scenarios[0]["expected"], "mind-spark")
-        self.assertFalse(scenarios[0]["escalation"])
+        self.assertEqual(scenarios[0][0], 0)
+        self.assertEqual(scenarios[0][1]["expected"], "mind-spark")
+        self.assertFalse(scenarios[0][1]["escalation"])
+
+    def test_load_scenarios_can_filter_by_index(self):
+        scenarios = runner.load_scenarios(
+            REPO / "tests/skills/routing/using-agentic-sdlc.json",
+            scenario_indexes=[9, 11],
+        )
+        self.assertEqual([index for index, _ in scenarios], [9, 11])
+        self.assertEqual(
+            [scenario["expected"] for _, scenario in scenarios],
+            ["feedback-triage", "implementasyon-control"],
+        )
+
+    def test_fixture_includes_language_independent_mind_spark_case(self):
+        scenarios = runner.load_scenarios(REPO / "tests/skills/routing/using-agentic-sdlc.json", 0)
+        prompts = [scenario["prompt"] for _, scenario in scenarios if scenario["expected"] == "mind-spark"]
+        self.assertGreaterEqual(len(prompts), 2)
+        self.assertTrue(any("I'm not sure what direction" in prompt for prompt in prompts))
 
     def test_evaluate_route_accepts_focused_skill_and_rejects_over_escalation(self):
         ok, reason = runner.evaluate_route("mind-spark", ["mind-spark"], escalation=False)

@@ -84,13 +84,17 @@ def load_skills(skills_dir: Path) -> list[tuple[str, str]]:
     return skills
 
 
-def load_scenarios(eval_set: Path, scenario_limit: int = 0) -> list[dict[str, Any]]:
+def load_scenarios(
+    eval_set: Path,
+    scenario_limit: int = 0,
+    scenario_indexes: list[int] | None = None,
+) -> list[tuple[int, dict[str, Any]]]:
     data = json.loads(eval_set.read_text(encoding="utf-8"))
     scenarios = data.get("scenarios")
     if not isinstance(scenarios, list) or not scenarios:
         raise ValueError("eval set must contain non-empty 'scenarios'")
 
-    loaded: list[dict[str, Any]] = []
+    loaded: list[tuple[int, dict[str, Any]]] = []
     for index, scenario in enumerate(scenarios):
         if not isinstance(scenario, dict):
             raise ValueError(f"scenario {index} must be an object")
@@ -103,11 +107,22 @@ def load_scenarios(eval_set: Path, scenario_limit: int = 0) -> list[dict[str, An
         escalation = scenario.get("escalation", False)
         if not isinstance(escalation, bool):
             raise ValueError(f"scenario {index} invalid escalation")
-        loaded.append({
-            "prompt": prompt.strip(),
-            "expected": normalize_skill(expected),
-            "escalation": escalation,
-        })
+        loaded.append((
+            index,
+            {
+                "prompt": prompt.strip(),
+                "expected": normalize_skill(expected),
+                "escalation": escalation,
+            },
+        ))
+
+    if scenario_indexes:
+        wanted = set(scenario_indexes)
+        available = {index for index, _ in loaded}
+        missing = sorted(wanted - available)
+        if missing:
+            raise ValueError(f"scenario-index out of range: {missing}")
+        loaded = [(index, scenario) for index, scenario in loaded if index in wanted]
 
     if scenario_limit:
         loaded = loaded[:scenario_limit]
@@ -492,12 +507,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-set", required=True, type=Path)
     parser.add_argument("--runtime", choices=("codex", "claude"), default="codex")
     parser.add_argument("--model")
-    parser.add_argument("--reasoning-effort", default="low")
+    parser.add_argument("--reasoning-effort", default="high")
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--threshold", type=float, default=1.0)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--max-budget-usd", default="0.15")
+    parser.add_argument(
+        "--scenario-index",
+        action="append",
+        type=int,
+        default=[],
+        help="Run only this zero-based scenario index; may be repeated.",
+    )
     parser.add_argument("--scenario-limit", type=int, default=0)
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--transcript-dir", type=Path)
@@ -520,7 +542,7 @@ def main(argv: list[str] | None = None) -> int:
     args.model = args.model or runtime_default_model(args.runtime)
 
     try:
-        scenarios = load_scenarios(args.eval_set, args.scenario_limit)
+        scenarios = load_scenarios(args.eval_set, args.scenario_limit, args.scenario_index)
         skills = load_skills(args.skills_dir)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error={type(exc).__name__}:{exc}")
@@ -543,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
     total_output_tokens = 0
     total_reasoning_tokens = 0
 
-    for scenario_index, scenario in enumerate(scenarios):
+    for scenario_index, scenario in scenarios:
         expected = scenario["expected"]
         escalation = bool(scenario["escalation"])
         matches = 0

@@ -1,6 +1,6 @@
 ---
 name: dispatch-strategy
-description: Use first to decide whether work runs in the main loop, a sub-agent, a dynamic-workflow, or an agent-team. Consult when work has 2+ independent parts, heavy exploration, verification/research fan-out, multi-file generation, or multi-angle review/audit.
+description: Use first in any language to decide whether work runs in the main loop, a sub-agent, a dynamic-workflow, or an agent-team, especially when the user asks which orchestration mode to choose. Consult before answering when work has 2+ independent parts, heavy exploration, verification/research fan-out, multi-file generation, or multi-angle review/audit.
 user-invocable: true
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: mind-spark
-description: Pre-spec intent gate for ambiguous build or design work. Use before code when requirements, constraints, success criteria, or direction are not agreed; skip clear fixes, refactors, tests, reviews, and tiny edits.
+description: This skill should be used first as the AGENTIC-SDLC pre-spec intent gate for mind-spark brainstorming in any language when the user wants to explore options, discuss direction, or resolve ambiguous build or design intent before code and before requirements or success criteria are agreed. It supersedes generic brainstorming for this plugin and skips clear fixes, refactors, tests, reviews, and tiny edits.
 ---
 
 # Skill: mind-spark (pre-spec intent gate)

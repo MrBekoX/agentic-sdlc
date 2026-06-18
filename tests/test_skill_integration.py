@@ -97,23 +97,71 @@ class TestSkillCrossReferences(unittest.TestCase):
     def test_using_router_prioritizes_intent_over_domain_nouns(self):
         text = (h.SKILLS_DIR / "using-agentic-sdlc" / "SKILL.md").read_text(encoding="utf-8")
         for phrase in (
-            "user intent words before domain nouns",
-            "fikir alisverisi",
+            "semantic intent before domain nouns",
+            "Do not rely on exact keywords or the prompt language",
+            "Any-language brainstorming",
+            "option exploration",
             "not generic `brainstorming`",
             "even when the prompt mentions a bug",
-            "Test-only requests",
+            "never ask for bug details first",
+            "after details arrive",
+            "Any-language end-to-end/full-envelope prompts",
+            "not `mind-spark`",
+            "Any-language test-only requests",
             "before reading files",
-            "Final cevaptan once spec/plan/TDD/guvenlik akisinin takip edildigini denetle",
+            "Any-language behavior-preserving refactor prompts",
+            "before Glob/Read/file-existence checks",
+            "Any-language received-review-feedback prompts",
+            "not a fresh `code-quality-review`",
+            "Any-language orchestration decision prompts",
+            "`dispatch-strategy` before answering",
+            "Do not choose a mechanism directly",
+            "same-purpose process skill",
+            "superpowers:brainstorming",
+            "Any-language clear implementation prompts",
+            "`feature-build`",
+            "Any-language final audit or process audit prompt",
             "not a passive session preference",
+            "the audit intent requires a Skill call",
+            "do not answer from memory",
             "invoke it anyway before clarifying",
         ):
             self.assertIn(phrase, text)
+
+    def test_dispatch_strategy_description_covers_orchestration_decisions_before_answering(self):
+        art = h.load_markdown_artifact(h.SKILLS_DIR / "dispatch-strategy" / "SKILL.md")
+        desc = h.frontmatter_value(art["frontmatter"], "description")
+        for phrase in (
+            "in any language",
+            "main loop",
+            "sub-agent",
+            "dynamic-workflow",
+            "agent-team",
+            "which orchestration mode to choose",
+            "before answering",
+        ):
+            self.assertIn(phrase, desc)
+
+    def test_mind_spark_description_covers_language_independent_brainstorming_intent(self):
+        art = h.load_markdown_artifact(h.SKILLS_DIR / "mind-spark" / "SKILL.md")
+        desc = h.frontmatter_value(art["frontmatter"], "description")
+        for phrase in (
+            "AGENTIC-SDLC pre-spec intent gate",
+            "mind-spark brainstorming",
+            "in any language",
+            "explore options",
+            "discuss direction",
+            "supersedes generic brainstorming",
+        ):
+            self.assertIn(phrase, desc)
 
     def test_plan_authoring_handles_underspecified_plan_only_prompts_after_activation(self):
         text = (h.SKILLS_DIR / "plan-authoring" / "SKILL.md").read_text(encoding="utf-8")
         art = h.load_markdown_artifact(h.SKILLS_DIR / "plan-authoring" / "SKILL.md")
         desc = h.frontmatter_value(art["frontmatter"], "description")
         self.assertIn("underspecified plan-only prompts", desc)
+        self.assertIn("no-direct-fix prompts", desc)
+        self.assertIn("Activate before asking for missing bug details", desc)
         self.assertIn("stay in `plan-authoring`", text)
         self.assertIn("do not defer activation", text)
 
@@ -121,9 +169,9 @@ class TestSkillCrossReferences(unittest.TestCase):
         art = h.load_markdown_artifact(h.SKILLS_DIR / "implementasyon-control" / "SKILL.md")
         desc = h.frontmatter_value(art["frontmatter"], "description")
         self.assertIn("pre-final audit", desc)
-        self.assertIn("denetle/audit", desc)
+        self.assertIn("in any language", desc)
         self.assertIn("spec-plan-TDD-security flow", desc)
-        self.assertIn("not a passive session preference", desc)
+        self.assertIn("not passive session preferences", desc)
         self.assertIn("report missing evidence", desc)
 
     def test_test_authoring_description_requires_activation_before_file_reads(self):

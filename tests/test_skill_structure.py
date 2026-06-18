@@ -65,6 +65,32 @@ class TestSkillStructure(unittest.TestCase):
             self.assertNotIn("<", desc, f"{name}: angle bracket in description")
             self.assertNotIn(">", desc, f"{name}: angle bracket in description")
 
+    def test_every_skill_description_declares_language_independent_triggering(self):
+        for name in sorted(h.skill_names()):
+            sk = h.SKILLS_DIR / name / "SKILL.md"
+            fm, _ = h.split_frontmatter(sk.read_text(encoding="utf-8"))
+            desc = h.frontmatter_value(fm, "description")
+            self.assertIn(
+                "in any language",
+                desc,
+                f"{name}: trigger description must be semantic, not language-specific",
+            )
+
+    def test_skill_descriptions_avoid_yaml_ambiguous_colon(self):
+        for name in sorted(h.skill_names()):
+            sk = h.SKILLS_DIR / name / "SKILL.md"
+            fm, _ = h.split_frontmatter(sk.read_text(encoding="utf-8"))
+            description_lines = [
+                line for line in fm.splitlines()
+                if line.startswith("description:")
+            ]
+            self.assertEqual(len(description_lines), 1, f"{name}: missing description line")
+            self.assertNotRegex(
+                description_lines[0],
+                r"description: .*: ",
+                f"{name}: unquoted ': ' in description can break Claude Code skill discovery",
+            )
+
 
 class TestAgentStructure(unittest.TestCase):
     def test_every_agent_structure_has_no_errors(self):

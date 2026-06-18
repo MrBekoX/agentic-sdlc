@@ -282,7 +282,7 @@ Some checkpoints require judgment and are therefore enforced inside skills/contr
 
 ---
 
-## 11. Deterministic scripts (11)
+## 11. Deterministic scripts (13)
 
 All scripts are in `scripts/*.py`, pure stdlib unless noted, and emit sorted flat `key=value` lines for easy log parsing.
 
@@ -294,6 +294,8 @@ All scripts are in `scripts/*.py`, pure stdlib unless noted, and emit sorted fla
 | `run_trigger_eval.py` | Windows-safe live Claude Code trigger eval. | `python3 scripts/run_trigger_eval.py --skill-path skills/agentic-sdlc-pipeline --eval-set tests/skills/evals/agentic-sdlc-pipeline.json --runs 3` |
 | `run_codex_trigger_eval.py` | Codex route-classifier trigger eval. | `python3 scripts/run_codex_trigger_eval.py --skill-path skills/spec-authoring --eval-set tests/skills/evals/spec-authoring.json --smoke --model gpt-5.4-mini --reasoning-effort low` |
 | `run_all_trigger_evals.py` | Batch wrapper over Claude and/or Codex trigger evals for every fixture. | `python3 scripts/run_all_trigger_evals.py --runtime both --smoke` |
+| `run_glm_trigger_eval.py` | Experimental OpenCode/GLM trigger eval runner for adapter research. | `python3 scripts/run_glm_trigger_eval.py --help` |
+| `run_routing_eval.py` | Runtime routing eval for `using-agentic-sdlc` prompt-to-skill decisions. | `python3 scripts/run_routing_eval.py --eval-set tests/skills/routing/using-agentic-sdlc.json --runtime codex --reasoning-effort high` |
 | `run_behavior_eval.py` | Behavior fixture dry-run/live validator. | `python3 scripts/run_behavior_eval.py --eval-set tests/skills/behavior/completion-claim-gate.json --dry-run` |
 | `run_procedure_eval.py` | Transcript/live procedure evaluator. | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --dry-run` |
 | `bump_version.py` | Sync `VERSION`, plugin manifest, and marketplace version. | `python3 scripts/bump_version.py --check` |
@@ -373,6 +375,7 @@ Optional: `pre-commit run --all-files`.
 ## 15. Cross-references
 
 - Project overview and install notes: [`README.md`](../README.md)
+- Publish gate and release verdict template: [`release-readiness.md`](./release-readiness.md)
 - Operating model for agents in this repo: [`AGENTS.md`](../AGENTS.md)
 - Skill responsibilities and anti-overlap rules: [`skill-boundaries.md`](./skill-boundaries.md)
 - Testing strategy, fixtures, and harness: [`testing.md`](./testing.md)

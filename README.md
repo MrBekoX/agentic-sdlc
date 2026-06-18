@@ -68,7 +68,7 @@ skills/            16 skills; each is a dir with SKILL.md + optional bundled fil
 agents/            9 read-only sub-agent role contracts
 workflows/         2 Claude Code dynamic workflow scripts (author⇄critic loops)
 hooks/             Deterministic guard scripts + hook-wiring JSON (Claude + Codex)
-scripts/           11 Python helpers: context detection, artifact validation, evals, versioning
+scripts/           13 Python helpers: context detection, artifact validation, evals, versioning
 tests/             unittest suites + skill harness + fixtures + golden references + eval seeds
 contracts/skills/  11 numbered behavior contracts (00 global .. 10 AI-agent collaboration)
 commands/          Slash-command definitions (/git-safety-check)
@@ -169,15 +169,18 @@ Judgment-based checkpoints (was context read? was test output understood? was se
 
 ## Quality gate
 
-Run the three fast local commands before considering a change complete:
+Run the fast local gate before considering a change complete:
 
 ```bash
+python3 scripts/bump_version.py --check
 python3 scripts/check_all.py
 python3 tests/skills/harness.py
 python3 -m unittest discover -s tests -v
 ```
 
 Trigger, behavior, and procedure eval fixtures live under `tests/skills/`. Live evals (Claude/Codex) require the CLI + auth and are **not** part of the normal local gate.
+
+For publish decisions, use [`docs/release-readiness.md`](docs/release-readiness.md) to separate deterministic evidence, live eval evidence, and known limitations.
 
 ## Versioning
 

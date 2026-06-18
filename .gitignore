@@ -23,6 +23,7 @@ docs/*
 !docs/troubleshooting.md
 !docs/skill-boundaries.md
 !docs/runtime-adapter.md
+!docs/release-readiness.md
 
 # Optional tool reference snapshots
 mcps/
