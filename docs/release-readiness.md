@@ -42,6 +42,28 @@ If a live Claude Code run uses a restrictive permission mode and the model is de
 
 For publish evidence, do not use Codex `--reasoning-effort low`. Low-effort runs are acceptable for smoke checks only; release evidence should use `high` unless a model/runtime does not expose that setting.
 
+## Captured evidence — 2026-06-18/19 live sweep
+
+Detailed transcripts under `tests/artifacts/` (gitignored); full writeup in
+[`docs/testing.md`](testing.md#live-eval-findings-2026-06-18--haiku--sonnet-sweep). Model-capacity note:
+**Haiku is a floor** for abstract/meta/gate skills and the pipeline — the same descriptions score
+0.80–1.00 on Sonnet and Codex routes them at high effort. Take publish evidence on Sonnet/Opus (Claude)
+and `gpt-5.3-codex-spark` at `high` (Codex); do not block release on Haiku floor numbers, but do record
+them. Use routing/trigger `--runs ≥3`.
+
+| Evidence | Result | Notes |
+|---|---|---|
+| `using-agentic-sdlc` routing — Claude | Sonnet 6/6 (router eval-set reworked); Haiku floor at `runs=3` (q13 0.60) | router trigger eval measures the router's own surface; child-routing is the routing eval |
+| `using-agentic-sdlc` routing — Codex `high` | **15/15 passed** (`gpt-5.3-codex-spark`, `runs=3`) | satisfies the Codex routing evidence requirement |
+| 16-skill trigger matrix — Codex | **16/16 passed** (`low`, after classifier-prompt fix) | `low` is fix-verification; re-confirm at `high` for publish. Pre-fix 12/16 was an eval-tool gap (trigger classifier prompt lacked the over-escalation/feeder guards the routing classifier has), now aligned |
+| `agentic-sdlc-pipeline` procedure — Claude | Sonnet 2/2 at `--max-budget-usd 6`; Haiku 1/3 (floor) | `$2` default cut strong-model runs off mid-run → default raised to `5.00` |
+| `agentic-sdlc-pipeline` procedure — Codex adapter | **`procedure_eval=passed`** (deterministic transcript) | adapter patterns present: `spec-plan-author/critic`, "Workflow unavailable/embedded adapter", `docs/specs/`, `docs/plans/`, all gates. Live `codex exec` procedure run not executed this session (5h quota); adapter behavior verified deterministically |
+
+Eval-infra fixes made during the sweep (all on `main`): routing-eval early-stop + `runs=3` default;
+implementasyon-control/router call-order guards; `safe-refactor`/`skill-authoring`/`completion-claim-gate`
+activation guards; procedure-eval `--max-budget-usd` default `2.00 → 5.00`; Codex trigger classifier
+prompt aligned with the routing classifier.
+
 ## Secret and Local Path Check
 
 Before any release commit or publish action:
