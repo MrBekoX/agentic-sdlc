@@ -178,7 +178,6 @@ This proves metadata consistency, static skill wiring, fixture health, hook/work
 - [`docs/testing.md`](docs/testing.md) - deterministic gate, live evals, transcript checks.
 - [`docs/troubleshooting.md`](docs/troubleshooting.md) - runtime loading, hooks, evals, and common failures.
 - [`docs/release-readiness.md`](docs/release-readiness.md) - release evidence checklist.
-- [`AGENTS.md`](AGENTS.md) - operating model for agents authoring skills in this repository.
 
 ## Versioning
 

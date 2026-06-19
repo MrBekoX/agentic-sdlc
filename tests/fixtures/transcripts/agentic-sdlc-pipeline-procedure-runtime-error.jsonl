@@ -1,12 +1,12 @@
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"agentic-sdlc:agentic-sdlc-pipeline"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"agentic-sdlc:dispatch-strategy"}}]}}
-{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"python D:/agentic-sdlc/scripts/detect_context.py --path ."}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"python C:/repo/agentic-sdlc/scripts/detect_context.py --path ."}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Workflow","input":{"workflow":"agentic-sdlc:spec-plan-draft","args":{"mode":"spec"}}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"docs/specs/greeting-suffix.md","content":"spec"}}]}}
-{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"python D:/agentic-sdlc/scripts/validate_artifacts.py --mode spec --file docs/specs/greeting-suffix.md"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"python C:/repo/agentic-sdlc/scripts/validate_artifacts.py --mode spec --file docs/specs/greeting-suffix.md"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Workflow","input":{"workflow":"agentic-sdlc:spec-plan-draft","args":{"mode":"plan"}}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"docs/plans/greeting-suffix.md","content":"plan"}}]}}
-{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"python D:/agentic-sdlc/scripts/validate_artifacts.py --mode plan --file docs/plans/greeting-suffix.md --spec docs/specs/greeting-suffix.md --strict"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"python C:/repo/agentic-sdlc/scripts/validate_artifacts.py --mode plan --file docs/plans/greeting-suffix.md --spec docs/specs/greeting-suffix.md --strict"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"agentic-sdlc:feature-build"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"agentic-sdlc:security-audit"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"agentic-sdlc:implementasyon-control"}}]}}

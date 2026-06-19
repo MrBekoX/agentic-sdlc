@@ -296,7 +296,6 @@ Interactive, collaborative, continuous parallel work where peers talk and a live
 - Claude Code runtime README: [`../.claude-plugin/README.md`](../.claude-plugin/README.md)
 - Codex runtime README: [`../.codex-plugin/README.md`](../.codex-plugin/README.md)
 - Component-by-component plugin documentation: [`plugin-readme.md`](./plugin-readme.md)
-- Repository operating model for agents: [`AGENTS.md`](../AGENTS.md)
 - Skill behavior contracts: [`contracts/skills/`](../contracts/skills/)
   - `00-global-behavior.md` · `01-context-first.md` · `02-spec-driven-development.md` · `03-plan-mode.md` · `04-code-quality.md` · `05-testing.md` · `06-security.md` · `07-refactoring.md` · `08-git-safety.md` · `09-documentation.md` · `10-ai-agent-collaboration.md`
 - Golden skill references and trigger keywords: [`tests/skills/golden/skills.json`](../tests/skills/golden/skills.json)

@@ -485,6 +485,5 @@ Question: do the pipeline's feeder skills fire at the right step, and does it ru
 - [Codex runtime README](../.codex-plugin/README.md) — Codex personal-marketplace loading, publishable manifest shape, and embedded adapter behavior.
 - [docs/plugin-readme.md](plugin-readme.md) — component-by-component plugin documentation, pre-push checklist, and known limitations.
 - [docs/skill-boundaries.md](skill-boundaries.md) — ownership map for every skill and layer.
-- [AGENTS.md](../AGENTS.md) — operating model, evidence rules, sub-agent/workflow policy, and skill-development workflow.
 - [contracts/skills/05-testing.md](../contracts/skills/05-testing.md) — the testing behavior contract (test-first, show output, no coverage theater).
 - [tests/skills/README.md](../tests/skills/README.md) — focused guide to the skill harness and how to extend it.
