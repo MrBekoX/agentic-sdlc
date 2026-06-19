@@ -18,15 +18,15 @@ is one copy to keep correct:
 
 - **Degrees of freedom, progressive disclosure (3 levels), context-sensitive optimization (CSO)
   of the description, token budgets, domain-by-reference organization:**
-  `~/.claude/plugins/marketplaces/anthropic-agent-skills/skills/skill-creator/SKILL.md`
-  and its `references/schemas.md` (eval / grading / benchmark JSON shapes).
+  Resolve `skill-creator` with `scripts/resolve_skill_creator.py` and read its `SKILL.md`
+  and `references/schemas.md` at the discovered root (eval / grading / benchmark JSON shapes).
 - **House doctrine** (lean beats long, explain-the-why over caps-MUST stacking, a skill is a
   prompt that runs a million times, the authoring workflow, approval gates):
   `docs/plugin-readme.md`, `docs/testing.md`, `docs/skill-boundaries.md`, and
-  `contracts/skills/00-global-rules.md`.
+  `contracts/skills/00-global-behavior.md`.
 
-This file holds only what those two do *not* cover: our register policy and the corrected,
-host-verified way to run the reused scripts.
+This file holds only what those two do *not* cover: our register policy and the portable way to
+discover and run the reused scripts.
 
 ## 2. Register matrix (house style)
 
@@ -45,12 +45,27 @@ fail without it, and always pair the ask with the reason it exists.
 
 ## 3. skill-creator invocation matrix (corrected for this host)
 
+Resolve the skill-creator root before running any external script:
+
+```bash
+python skills/skill-authoring/scripts/resolve_skill_creator.py
+```
+
+If it prints `skill_creator_status=missing`, run:
+
+```bash
+python skills/skill-authoring/scripts/resolve_skill_creator.py --install
+```
+
+The helper checks `SKILL_CREATOR_ROOT`, `AGENTIC_SDLC_SKILL_CREATOR_ROOT`, Codex skill homes,
+Claude plugin caches, and the legacy Claude marketplace layout. With `--install`, it runs
+`claude plugin install skill-creator@claude-plugins-official` and then resolves again.
+Use the printed `skill_creator_root` as `SC`.
+
 skill-creator scripts split into two call styles, decided by whether the script does a
 package-relative import (`from scripts.*`). Calling a package-relative script by direct path
 fails with `ModuleNotFoundError: No module named 'scripts.utils'`. Verified against the real
-source this session.
-
-Let `SC` = `~/.claude/plugins/marketplaces/anthropic-agent-skills/skills/skill-creator`.
+source.
 
 | Script | Has `from scripts.*`? | How to call | Note |
 |---|---|---|---|
@@ -58,9 +73,9 @@ Let `SC` = `~/.claude/plugins/marketplaces/anthropic-agent-skills/skills/skill-c
 | `run_loop.py` | yes (`scripts.*`) | `python -m scripts.run_loop ...` **from `SC`** | wraps run_eval → also blocked on Windows |
 | `improve_description.py` | yes (`scripts.utils`) | `python -m scripts.improve_description ...` **from `SC`** | |
 | `package_skill.py` | yes (`scripts.quick_validate`) | `python -m scripts.package_skill <skill-path>` **from `SC`** | validates first; excludes `evals/` |
-| `quick_validate.py` | no | `python SC/scripts/quick_validate.py <skill-path>` (direct) | exit 0 = valid |
-| `aggregate_benchmark.py` | no | `python SC/scripts/aggregate_benchmark.py <ws>/iteration-N --skill-name <name>` (direct) | stdlib only |
-| `generate_review.py` | no (`SC/eval-viewer/`) | `python SC/eval-viewer/generate_review.py <ws>/iteration-N --static <out.html>` (direct) | use `--static` on Windows — see §4 |
+| `quick_validate.py` | no | `python <SC>/scripts/quick_validate.py <skill-path>` (direct) | exit 0 = valid |
+| `aggregate_benchmark.py` | no | `python <SC>/scripts/aggregate_benchmark.py <ws>/iteration-N --skill-name <name>` (direct) | stdlib only |
+| `generate_review.py` | no (`SC/eval-viewer/`) | `python <SC>/eval-viewer/generate_review.py <ws>/iteration-N --static <out.html>` (direct) | use `--static` on Windows — see §4 |
 
 `-m` runs from the package root so Python resolves `scripts` as a package; direct path runs the
 file standalone, which only works when it imports nothing from its own package.

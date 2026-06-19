@@ -64,15 +64,28 @@ metaphor or structure usually beats a third narrow patch.
 ## Delegation to skill-creator
 
 This skill does not re-implement evals, the viewer, or packaging — it calls `skill-creator`.
-The call style differs per script, and getting it wrong is the most common time-sink, so use this
-matrix exactly. Let `SC` be the skill-creator skill root
-(`~/.claude/plugins/marketplaces/anthropic-agent-skills/skills/skill-creator`).
+The call style differs per script, and getting it wrong is the most common time-sink.
+Resolve `SC` first; do not assume a fixed Claude or Codex home path:
+
+```bash
+python skills/skill-authoring/scripts/resolve_skill_creator.py
+```
+
+If the output is `skill_creator_status=found`, use `skill_creator_root` as `SC`. If it is
+`missing`, run the same helper with `--install` so it fetches `skill-creator` from the official
+Claude marketplace and resolves again:
+
+```bash
+python skills/skill-authoring/scripts/resolve_skill_creator.py --install
+```
+
+Then use this matrix exactly.
 
 | Task | Script | How to call |
 |---|---|---|
-| Validate skill structure / frontmatter | `quick_validate.py` | direct: `python SC/scripts/quick_validate.py <skill-path>` |
-| Aggregate eval results into a benchmark | `aggregate_benchmark.py` | direct: `python SC/scripts/aggregate_benchmark.py <ws>/iteration-N --skill-name <name>` |
-| Build the review viewer (review before judging) | `generate_review.py` | direct: `python SC/eval-viewer/generate_review.py <ws>/iteration-N --static <out.html>` |
+| Validate skill structure / frontmatter | `quick_validate.py` | direct: `python <SC>/scripts/quick_validate.py <skill-path>` |
+| Aggregate eval results into a benchmark | `aggregate_benchmark.py` | direct: `python <SC>/scripts/aggregate_benchmark.py <ws>/iteration-N --skill-name <name>` |
+| Build the review viewer (review before judging) | `generate_review.py` | direct: `python <SC>/eval-viewer/generate_review.py <ws>/iteration-N --static <out.html>` |
 | Run the triggering eval | `run_eval.py` | package: `python -m scripts.run_eval ...` **from `SC`** |
 | Optimize the description (loop) | `run_loop.py` | package: `python -m scripts.run_loop ...` **from `SC`** |
 | Package the final `.skill` | `package_skill.py` | package: `python -m scripts.package_skill <skill-path>` **from `SC`** |

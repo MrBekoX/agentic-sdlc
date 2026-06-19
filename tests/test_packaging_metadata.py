@@ -67,7 +67,7 @@ class TestPackagingMetadata(unittest.TestCase):
             "skills",
             "workflows",
         ]
-        checked_suffixes = {".json", ".js", ".md", ".mjs"}
+        checked_suffixes = {".json", ".js", ".md", ".mjs", ".py"}
         forbidden = ("AGENTS.md", "CLAUDE.md")
         findings = []
         for root_name in component_roots:
@@ -81,6 +81,42 @@ class TestPackagingMetadata(unittest.TestCase):
                 for token in forbidden:
                     if token in text:
                         findings.append(f"{path.relative_to(REPO)} references {token}")
+        self.assertEqual(findings, [])
+
+    def test_plugin_components_do_not_hardcode_legacy_skill_creator_path(self):
+        component_roots = [
+            ".claude-plugin",
+            ".codex-plugin",
+            "agents",
+            "commands",
+            "contracts",
+            "hooks",
+            "skills",
+            "workflows",
+        ]
+        checked_suffixes = {".json", ".js", ".md", ".mjs", ".py"}
+        legacy_path = "/".join(
+            (
+                "~",
+                ".claude",
+                "plugins",
+                "marketplaces",
+                "anthropic-agent-skills",
+                "skills",
+                "skill-creator",
+            )
+        )
+        findings = []
+        for root_name in component_roots:
+            root = REPO / root_name
+            if not root.exists():
+                continue
+            for path in root.rglob("*"):
+                if not path.is_file() or path.suffix not in checked_suffixes:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if legacy_path in text:
+                    findings.append(f"{path.relative_to(REPO)} references legacy skill-creator path")
         self.assertEqual(findings, [])
 
     def test_version_check_script_passes(self):
