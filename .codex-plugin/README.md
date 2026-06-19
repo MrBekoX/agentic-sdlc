@@ -88,7 +88,7 @@ Focused skills are independently routable in Codex and also serve as pipeline bu
 
 ## Hooks In Codex
 
-The publishable Codex manifest does not declare a top-level `hooks` field. Codex can discover the plugin-default `hooks/hooks.json`, which wires only `SessionStart` to `hooks/session-start-codex.mjs` through `${PLUGIN_ROOT}`. Non-managed plugin-bundled command hooks require Codex review/trust before they run. Command-blocking guardrails remain Claude-only in this release; Codex guardrail behavior is carried by skills, contracts, manual checks, and explicit script runs where appropriate. `hooks/hooks-codex.json` mirrors the Codex startup shape as a runtime reference.
+The publishable Codex manifest does not declare a top-level `hooks` field. Codex can discover the plugin-default `hooks/hooks.json`, which wires only `SessionStart` to `hooks/session-start-codex.mjs` through `${PLUGIN_ROOT}`. Non-managed plugin-bundled command hooks require Codex review/trust before they run. Command-blocking guardrails remain Claude-only in this release; Codex guardrail behavior is carried by skills, contracts, manual checks, and explicit script runs where appropriate.
 
 ## Requirements
 
