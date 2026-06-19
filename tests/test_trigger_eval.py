@@ -30,14 +30,10 @@ class TestTriggerDetector(unittest.TestCase):
         self.clean = "spec-flow-skill-abcd1234"
         self.skill = "spec-authoring"
 
-    def test_allows_agents_prelude_before_skill(self):
+    def test_project_agent_instruction_read_blocks_trigger(self):
         detector = runner.TriggerDetector(self.clean, self.skill)
         decision = detector.feed(assistant_tool("Read", {"file_path": r"C:\repo\agentic-sdlc\AGENTS.md"}))
-        self.assertIsNone(decision)
-        self.assertIsNone(detector.feed(result_event()))
-
-        decision = detector.feed(assistant_tool("Skill", {"skill": "agentic-sdlc:spec-authoring"}))
-        self.assertTrue(decision)
+        self.assertFalse(decision)
 
     def test_allows_claude_project_memory_prelude_before_skill(self):
         detector = runner.TriggerDetector(self.clean, self.skill)
@@ -91,14 +87,14 @@ class TestTriggerDetector(unittest.TestCase):
 
 
 class TestDetectTriggerReplay(unittest.TestCase):
-    def test_replay_continues_after_allowed_prelude(self):
+    def test_replay_blocks_after_project_agent_instruction_read(self):
         clean = "spec-flow-skill-abcd1234"
         lines = [
             assistant_tool("Read", {"file_path": r"C:\repo\agentic-sdlc\AGENTS.md"}),
             result_event(),
             assistant_tool("Skill", {"skill": "agentic-sdlc:spec-authoring"}),
         ]
-        self.assertTrue(runner.detect_trigger(lines, clean, "spec-authoring"))
+        self.assertFalse(runner.detect_trigger(lines, clean, "spec-authoring"))
 
     def test_replay_does_not_count_command_file_read(self):
         clean = "spec-flow-skill-abcd1234"

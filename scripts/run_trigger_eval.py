@@ -52,8 +52,7 @@ def is_target_skill_read(value, skill_name):
 def is_allowed_prelude_read(value, clean_name):
     value = (value or "").replace("\\", "/")
     return (
-        value.endswith("/AGENTS.md")
-        or value.endswith("/memory/MEMORY.md")
+        value.endswith("/memory/MEMORY.md")
         or f"commands/{clean_name}.md" in value
     )
 

@@ -44,6 +44,45 @@ class TestPackagingMetadata(unittest.TestCase):
         }
         self.assertEqual(set(codex_plugin) - allowed_keys, set())
 
+    def test_local_agent_instruction_files_are_not_tracked_plugin_payload(self):
+        proc = subprocess.run(
+            ["git", "ls-files"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        tracked = set(proc.stdout.splitlines())
+        self.assertNotIn("AGENTS.md", tracked)
+        self.assertNotIn("CLAUDE.md", tracked)
+
+    def test_plugin_components_do_not_depend_on_local_agent_instruction_files(self):
+        component_roots = [
+            ".claude-plugin",
+            ".codex-plugin",
+            "agents",
+            "commands",
+            "contracts",
+            "hooks",
+            "skills",
+            "workflows",
+        ]
+        checked_suffixes = {".json", ".js", ".md", ".mjs"}
+        forbidden = ("AGENTS.md", "CLAUDE.md")
+        findings = []
+        for root_name in component_roots:
+            root = REPO / root_name
+            if not root.exists():
+                continue
+            for path in root.rglob("*"):
+                if not path.is_file() or path.suffix not in checked_suffixes:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                for token in forbidden:
+                    if token in text:
+                        findings.append(f"{path.relative_to(REPO)} references {token}")
+        self.assertEqual(findings, [])
+
     def test_version_check_script_passes(self):
         proc = subprocess.run(
             [sys.executable, "scripts/bump_version.py", "--check"],

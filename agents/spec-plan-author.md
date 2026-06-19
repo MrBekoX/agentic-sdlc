@@ -30,7 +30,7 @@ You are a spec/plan **author**. Given the context (scope map, prior spec when in
 
 ## Rules
 - Respect the project's architecture and dependency directions; do not propose violations.
-- Follow this plugin's `contracts/skills/**` behavior contracts and the target project's own guidance files (`AGENTS.md`, `CLAUDE.md`, or equivalent) when present; relate to any tracking IDs if the project uses them.
+- Follow this plugin's `contracts/skills/**` behavior contracts and the target project's own checked-in guidance when present; relate to any tracking IDs if the project uses them.
 - In spec mode, enforce `contracts/skills/02-spec-driven-development.md`: WHAT only, testable criteria, no HOW leakage.
 - In plan mode, enforce `contracts/skills/03-plan-mode.md`: HOW only, every acceptance criterion maps to concrete tasks and verification.
 - **No placeholders** ("TBD / as appropriate / etc." forbidden) — be concrete.

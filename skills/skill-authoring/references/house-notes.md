@@ -11,17 +11,19 @@ new skill, or the exact way to call a skill-creator script on this Windows host.
 
 ## 1. Don't relearn the canon — point to it
 
-The general skill-authoring theory already lives in skill-creator's reference and our
-`CLAUDE.md`. Do not paraphrase or duplicate it here — read it at the source so there is one
-copy to keep correct:
+The general skill-authoring theory already lives in skill-creator's reference. Keep local
+agent operating files out of packaged skill behavior; they are workspace instructions, not
+plugin sources. Read plugin behavior from tracked plugin docs, contracts, and skills so there
+is one copy to keep correct:
 
 - **Degrees of freedom, progressive disclosure (3 levels), context-sensitive optimization (CSO)
   of the description, token budgets, domain-by-reference organization:**
   `~/.claude/plugins/marketplaces/anthropic-agent-skills/skills/skill-creator/SKILL.md`
   and its `references/schemas.md` (eval / grading / benchmark JSON shapes).
 - **House doctrine** (lean beats long, explain-the-why over caps-MUST stacking, a skill is a
-  prompt that runs a million times, the 8-step authoring workflow, approval gates):
-  the repo-root `CLAUDE.md`.
+  prompt that runs a million times, the authoring workflow, approval gates):
+  `docs/plugin-readme.md`, `docs/testing.md`, `docs/skill-boundaries.md`, and
+  `contracts/skills/00-global-rules.md`.
 
 This file holds only what those two do *not* cover: our register policy and the corrected,
 host-verified way to run the reused scripts.

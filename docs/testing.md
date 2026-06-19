@@ -170,7 +170,7 @@ python3 scripts/run_trigger_eval.py \
   --transcript-dir tests/artifacts/trigger
 ```
 
-Isolate plugin-trigger behavior from project context such as `AGENTS.md` (`--bare` does not use OAuth/keychain auth — it requires `ANTHROPIC_API_KEY` or an `apiKeyHelper`-backed setting):
+Isolate plugin-trigger behavior from project-level agent instructions (`--bare` does not use OAuth/keychain auth — it requires `ANTHROPIC_API_KEY` or an `apiKeyHelper`-backed setting):
 
 ```bash
 python3 scripts/run_trigger_eval.py \
