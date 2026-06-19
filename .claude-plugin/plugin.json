@@ -16,5 +16,6 @@
     "tdd",
     "security",
     "code-review"
-  ]
+  ],
+  "hooks": "./hooks/hooks-claude.json"
 }

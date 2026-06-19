@@ -13,7 +13,7 @@ Claude Code reads:
 | `skills/*/SKILL.md` | Shared skill source. |
 | `workflows/*.js` | Claude Code dynamic workflow scripts. |
 | `agents/*.md` | Fresh-context role contracts used by workflows and subagents. |
-| `hooks/hooks.json` | Claude hook wiring. |
+| `hooks/hooks-claude.json` | Claude hook wiring, declared by `.claude-plugin/plugin.json`. |
 | `commands/*.md` | Manual slash commands such as `/git-safety-check`. |
 
 Skills are intentionally stored in root `skills/`, not `.claude/skills/`. The local `.claude/` directory is workspace settings only.
@@ -70,7 +70,7 @@ Focused skills are independently invocable. The pipeline reuses them instead of 
 
 ## Hooks In Claude Code
 
-Claude Code wires the full hook surface in `hooks/hooks.json`:
+Claude Code wires the full hook surface in `hooks/hooks-claude.json`:
 
 | Event | Scripts |
 |---|---|

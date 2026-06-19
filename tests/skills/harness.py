@@ -3,7 +3,7 @@
 Why this exists: the repo had script-level tests (detect_context, validate_artifacts)
 but nothing that machine-checked the SKILL.md / agent / workflow / hook / contract layer —
 the part most likely to rot silently (a renamed agent, a broken `references/` link, a
-hooks.json path pointing at a deleted .mjs, a flow skill that stops referencing the
+hook config path pointing at a deleted .mjs, a flow skill that stops referencing the
 work-flow it delegates to). This module is the deterministic counterpart: it parses the
 artifacts and verifies their *internal wiring*, not their runtime behavior.
 
@@ -33,6 +33,7 @@ AGENTS_DIR = REPO / "agents"
 WORKFLOWS_DIR = REPO / "workflows"
 COMMANDS_DIR = REPO / "commands"
 HOOKS_DIR = REPO / "hooks"
+HOOK_CONFIGS = ("hooks.json", "hooks-codex.json", "hooks-claude.json")
 SKILL_CONTRACTS_DIR = REPO / "contracts" / "skills"
 SCRIPTS_DIR = REPO / "scripts"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
@@ -297,7 +298,7 @@ def validate_plugin_root_refs():
     dangling one breaks the flow silently at runtime. (errors, warnings)
     """
     errors, warnings = [], []
-    sources = list(SKILLS_DIR.rglob("*.md")) + [HOOKS_DIR / "hooks.json", HOOKS_DIR / "hooks-codex.json"]
+    sources = list(SKILLS_DIR.rglob("*.md")) + [HOOKS_DIR / name for name in HOOK_CONFIGS]
     for src in sources:
         if not src.exists():
             continue
@@ -322,7 +323,7 @@ def _json_strings(value):
 def validate_hooks_json():
     """Hook JSON files must be valid JSON and every referenced plugin-root path must exist. (errors, warnings)."""
     errors, warnings = [], []
-    for hj in (HOOKS_DIR / "hooks.json", HOOKS_DIR / "hooks-codex.json"):
+    for hj in (HOOKS_DIR / name for name in HOOK_CONFIGS):
         if not hj.exists():
             errors.append(f"hooks_json_missing:{hj.name}")
             continue

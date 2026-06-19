@@ -34,7 +34,7 @@ For local development from a clone, point Claude Code at the repo root instead:
 claude --plugin-dir /path/to/agentic-sdlc
 ```
 
-After install, the `using-agentic-sdlc` router activates automatically and the user-invokable skills (e.g. `/agentic-sdlc-pipeline`, `/spec-authoring`) appear in `/help`.
+After install, the `using-agentic-sdlc` router is available as a skill. Claude Code slash-command discovery comes from `commands/`; this plugin currently ships `/git-safety-check` as the manual command.
 
 ### Codex
 
@@ -153,8 +153,8 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 
 | Runtime | Hook wiring |
 |---|---|
-| Claude Code | [`hooks/hooks.json`](hooks/hooks.json): `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. |
-| Codex | No publishable manifest hook wiring in this release. [`hooks/hooks-codex.json`](hooks/hooks-codex.json) remains an adapter reference; guardrails run through skills, scripts, and manual gates. |
+| Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. |
+| Codex | [`hooks/hooks.json`](hooks/hooks.json), plugin-default `SessionStart` bootstrap only after Codex hook review/trust. |
 
 Judgment-based checks, such as whether context was actually read or test output was understood, live in skills and contracts rather than hook scripts. See [`hooks/README.md`](hooks/README.md).
 

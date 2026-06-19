@@ -26,14 +26,24 @@ Check:
 
 Check:
 
-1. `hooks/hooks.json` is present in the plugin root.
-2. `node` is on `PATH`.
-3. `${CLAUDE_PLUGIN_ROOT}` resolves in the Claude Code plugin runtime.
-4. The hook event matches the tool invocation. For example, `scan-commit.mjs` only runs for `git commit*`.
+1. `.claude-plugin/plugin.json` declares `"hooks": "./hooks/hooks-claude.json"`.
+2. `hooks/hooks-claude.json` is present in the plugin root.
+3. `node` is on `PATH`.
+4. `${CLAUDE_PLUGIN_ROOT}` resolves in the Claude Code plugin runtime.
+5. The hook event matches the tool invocation. For example, `scan-commit.mjs` only runs for `git commit*`.
 
 ## Codex Hooks Are Not Running
 
-The publishable Codex manifest does not declare hooks in this release. `hooks/hooks-codex.json` is retained as an adapter reference, but runtime guardrails for Codex rely on skills, contracts, explicit script runs, and final evidence checks rather than manifest hook events.
+Check:
+
+1. `hooks/hooks.json` is valid Codex hook JSON and has only the top-level `hooks` object.
+2. The plugin was reinstalled after hook config changes.
+3. Start a new Codex thread so the plugin-default hook config is reloaded.
+4. Open `/hooks` and review/trust the plugin-bundled `SessionStart` command hook if Codex marks it pending review.
+5. `node` is on `PATH`.
+6. `${PLUGIN_ROOT}` resolves in the Codex plugin runtime.
+
+Codex wires only the `SessionStart` bootstrap hook in this release. Runtime guardrails for Codex still rely on skills, contracts, explicit script runs, and final evidence checks rather than command-blocking hook events.
 
 ## Branch Guard Only Warns
 

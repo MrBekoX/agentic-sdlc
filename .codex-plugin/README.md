@@ -10,7 +10,7 @@ Codex reads:
 |---|---|
 | `.codex-plugin/plugin.json` | Codex plugin metadata and interface block. |
 | `skills/*/SKILL.md` | Shared skill source. |
-| `hooks/hooks-codex.json` | Adapter reference for startup bootstrap behavior; not declared in the publishable manifest. |
+| `hooks/hooks.json` | Codex default hook config: SessionStart bootstrap only after hook review/trust. |
 
 The manifest points to:
 
@@ -30,7 +30,7 @@ Codex discovers the default personal marketplace at `~/.agents/plugins/marketpla
 codex plugin add agentic-sdlc@personal
 ```
 
-Start a new Codex thread after install or reinstall so the runtime reloads plugin skills.
+Start a new Codex thread after install or reinstall so the runtime reloads plugin skills. If Codex reports bundled hooks pending review, open `/hooks` and trust the `SessionStart` hook before relying on startup context.
 
 ## Runtime Root
 
@@ -88,7 +88,7 @@ Focused skills are independently routable in Codex and also serve as pipeline bu
 
 ## Hooks In Codex
 
-The publishable Codex manifest does not declare hook wiring in this release. `hooks/hooks-codex.json` remains in the repo as an adapter reference for the startup bootstrap shape, but Codex guardrail behavior is carried by skills, contracts, manual checks, and explicit script runs where appropriate.
+The publishable Codex manifest does not declare a top-level `hooks` field. Codex can discover the plugin-default `hooks/hooks.json`, which wires only `SessionStart` to `hooks/session-start-codex.mjs` through `${PLUGIN_ROOT}`. Non-managed plugin-bundled command hooks require Codex review/trust before they run. Command-blocking guardrails remain Claude-only in this release; Codex guardrail behavior is carried by skills, contracts, manual checks, and explicit script runs where appropriate. `hooks/hooks-codex.json` mirrors the Codex startup shape as a runtime reference.
 
 ## Requirements
 

@@ -16,6 +16,7 @@ class TestPackagingMetadata(unittest.TestCase):
         codex_plugin = json.loads((REPO / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(plugin["name"], "agentic-sdlc")
         self.assertEqual(plugin["version"], version)
+        self.assertEqual(plugin["hooks"], "./hooks/hooks-claude.json")
         self.assertEqual(marketplace["plugins"][0]["name"], "agentic-sdlc")
         self.assertEqual(marketplace["plugins"][0]["version"], version)
         self.assertEqual(marketplace["plugins"][0]["source"], "./")

@@ -181,3 +181,26 @@ class TestSessionStartHook(unittest.TestCase):
         self.assertIn("report missing evidence", context)
         self.assertIn("before asking clarifying questions", context)
         self.assertIn("do not say you will use the skill later", context)
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestCodexSessionStartHook(unittest.TestCase):
+    def test_injects_codex_specific_bootstrap_without_claude_tooling(self):
+        proc = subprocess.run(
+            [NODE, str(REPO / "hooks" / "session-start-codex.mjs")],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout)
+        context = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("AGENTIC_SDLC_CODEX_BOOTSTRAP", context)
+        self.assertIn("AGENTIC-SDLC Codex plugin", context)
+        self.assertIn("root skills/", context)
+        self.assertIn("Codex does not expose Claude Code Skill, Workflow, or Agent transcript events", context)
+        self.assertIn("Codex skill invocation via $skill-name or @agentic-sdlc:skill-name", context)
+        self.assertIn("embedded author -> critic -> revise adapter", context)
+        self.assertIn("completion-claim-gate", context)
+        self.assertNotIn("Skill tool", context)
+        self.assertNotIn("calling the Skill tool", context)

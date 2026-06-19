@@ -12,7 +12,7 @@ Claude Code is a supported release runtime for `agentic-sdlc`. The plugin shape 
 skills/
 agents/
 workflows/
-hooks/hooks.json
+hooks/hooks-claude.json
 commands/
 contracts/skills/
 scripts/
@@ -28,7 +28,7 @@ Skills are intentionally stored in root `skills/`. Do not duplicate them into `.
 | Dispatch a fresh-context specialist | `Agent` / `Task` facility when available. |
 | Run spec/plan author-critic loop | Native `Workflow` invocation of `agentic-sdlc:spec-plan-draft`. |
 | Manual safety command | `commands/*.md`, especially `/git-safety-check`. |
-| Hook wiring | `hooks/hooks.json`. |
+| Hook wiring | `hooks/hooks-claude.json`, declared by `.claude-plugin/plugin.json`. |
 | Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}`. |
 
 ## Pipeline Contract
@@ -39,7 +39,7 @@ The full-mode transcript must show native calls for the pipeline gates: `Skill`,
 
 ## Hooks
 
-Claude Code wires the full hook set through `hooks/hooks.json`:
+Claude Code wires the full hook set through `hooks/hooks-claude.json`:
 
 - `PreToolUse`: commit secret scan, destructive-command guard, branch guard.
 - `PostToolUse`: write secret scan.

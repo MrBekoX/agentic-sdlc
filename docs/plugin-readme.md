@@ -19,8 +19,8 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 | `.claude-plugin/plugin.json` | Claude Code | Plugin metadata. |
 | `.claude-plugin/marketplace.json` | Claude Code | Local marketplace source; the repo root is the source. |
 | `.codex-plugin/plugin.json` | Codex | Codex plugin metadata, `skills`, and `interface` block. |
-| `hooks/hooks.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
-| `hooks/hooks-codex.json` | Codex | Adapter reference only in this release; not declared in the publishable manifest. |
+| `hooks/hooks-claude.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
+| `hooks/hooks.json` | Codex | Plugin-default `SessionStart` bootstrap wiring, subject to Codex hook review/trust. |
 
 Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Runtime root variables are:
 
@@ -102,7 +102,8 @@ The scripts are shared, but runtime wiring differs.
 
 | Script | Claude Code wiring | Codex wiring | Behavior |
 |---|---|---|---|
-| `session-start.mjs` | `SessionStart` | Not wired | Injects git status and AGENTIC-SDLC bootstrap reminder. |
+| `session-start.mjs` | `SessionStart` | Not wired | Injects git status and Claude Code Skill-tool bootstrap reminder. |
+| `session-start-codex.mjs` | Not wired | `SessionStart` | Injects git status and Codex-specific AGENTIC-SDLC bootstrap reminder. |
 | `scan-write.mjs` | `PostToolUse` | Not wired | Warns on secret-shaped new content. |
 | `scan-commit.mjs` | `PreToolUse` for `git commit*` | Not wired | Blocks high-confidence secrets in added diff lines. |
 | `branch-guard.mjs` | `PreToolUse` for `git commit*` and `git push*` | Not wired | Warns on protected branches; can block with `AGENTIC_BRANCH_GUARD_BLOCK=true`. |
@@ -154,7 +155,7 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 ## Known Limitations
 
 - `0.2.7` supports Claude Code and Codex only.
-- Codex hook wiring is not declared in the publishable manifest in this release.
+- Codex hook wiring is discoverable from the plugin-default `hooks/hooks.json`; non-managed plugin-bundled command hooks require Codex review/trust before they run, and the publishable manifest still omits a top-level `hooks` field.
 - Codex trigger evals are classifier evidence, not Claude-style `Skill` event evidence.
 - Hooks fail open where necessary so a hook fault does not break a session.
 - `validate_artifacts.py` is structural; it cannot prove that a spec is semantically about the requested task.

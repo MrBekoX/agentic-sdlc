@@ -9,8 +9,8 @@ Two kinds of guard live here:
 
 | Runtime | Config | Wired events in this release |
 |---|---|---|
-| Claude Code | `hooks/hooks.json` | `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop` |
-| Codex | `hooks/hooks-codex.json` | `SessionStart` only |
+| Claude Code | `hooks/hooks-claude.json` via `.claude-plugin/plugin.json` | `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop` |
+| Codex | `hooks/hooks.json` as the plugin default, after Codex hook review/trust | `SessionStart` only |
 
 The hook scripts are shared in this directory, but being present as a script is not the same as being wired by every runtime.
 
@@ -20,7 +20,8 @@ Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve t
 
 | Script | Claude Code event | Codex event | Behavior |
 |---|---|---|---|
-| `session-start.mjs` | `SessionStart` | `SessionStart` | Injects git status summary and AGENTIC-SDLC bootstrap reminder. |
+| `session-start.mjs` | `SessionStart` | Not wired | Injects git status summary and Claude Code Skill-tool bootstrap reminder. |
+| `session-start-codex.mjs` | Not wired | `SessionStart` | Injects git status summary and Codex-specific AGENTIC-SDLC bootstrap reminder. |
 | `scan-write.mjs` | `PostToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | Scans newly written text for secrets; warns only. |
 | `scan-commit.mjs` | `PreToolUse` (`git commit*`) | Not wired | Scans added diff lines for high-confidence secrets; blocks commit. |
 | `branch-guard.mjs` | `PreToolUse` (`git commit*` / `git push*`) | Not wired | Warns on `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. |
@@ -46,6 +47,6 @@ These checkpoints require model judgment, so they live as flow gates in skills a
 
 ## Adding Or Disabling Hooks
 
-- Add new scripts under the matching event in `hooks/hooks.json` for Claude Code or `hooks/hooks-codex.json` for Codex when that runtime supports the event.
+- Add new scripts under the matching event in `hooks/hooks-claude.json` for Claude Code or `hooks/hooks.json` for Codex when that runtime supports the event.
 - Use runtime hook controls to browse or temporarily disable hooks.
 - Keep scripts deterministic. Checks that need judgment belong in skills/contracts.
