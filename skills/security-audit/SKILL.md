@@ -9,6 +9,23 @@ description: Use first in any language to audit code, a diff, endpoint, or login
 
 Systematically audits changes for vulnerabilities and reports findings safely.
 
+## Invariant
+Every finding carries a concrete location and exploit path, or it is not a finding — and no real secret value is ever printed.
+
+## Tripwires
+- flagging a "possible issue" with no file:line or reproduction
+- about to paste a real secret/token/key into the report
+- scanning only the happy path
+
+## Proof
+Per finding: file:line, the vulnerable input→sink flow, and a masked example. For "clean": the surfaces actually checked.
+
+## Excuse → check
+| Excuse | Check |
+|---|---|
+| "It looks fine." | Looking is not auditing. Trace the untrusted input to the sink. |
+| "It's internal-only." | Internal IDOR/injection still ships and still breaches. |
+
 ## Orchestration (consult first)
 Per **`dispatch-strategy`** and `docs/runtime-adapter.md`: multiple independent lenses (injection / authz-IDOR / secrets / auth) fan out to a dynamic-workflow, agent-team, subagents, or the runtime's parallel equivalent. Heavy single-lens analysis should use a fresh-context `security-reviewer` specialist when available. If the runtime lacks a fresh-context specialist, record `Delegation Degraded: fresh-context specialist unavailable`, perform the pass in the main loop, and mark the result non-independent.
 

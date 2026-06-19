@@ -149,7 +149,7 @@ into the spec-driven flow and stop here — do not start implementing and do not
 (frontend, API scaffolding, etc.) yourself.
 
 - Inside **`agentic-sdlc-pipeline`**: the approved intent feeds its Spec phase directly — return control.
-- Standalone: use **`spec-plan-draft`** only when the runtime exposes the named Claude Code Workflow. In Codex, OpenCode, Kimi Code, or a degraded runtime, run the author -> critic -> revise adapter manually or through available subagents, then state the adapter path used. Record the spec when the work is substantial.
+- Standalone: use **`spec-plan-draft`** only when the runtime exposes the named Claude Code Workflow. In Codex or a degraded runtime, run the author -> critic -> revise adapter manually or through available subagents, then state the adapter path used. Record the spec when the work is substantial.
 
 This skill produces intent + an approved design. The spec (the testable WHAT) and the plan (the HOW)
 are owned downstream — don't duplicate them here.

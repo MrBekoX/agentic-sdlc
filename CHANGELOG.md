@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 - 2026-06-19
+
+- Introduced the original "Assertion contract" skill voice (`Invariant` / `Tripwires` / `Proof` / `Excuse → check`) and applied it to the discipline-bearing skills; removed borrowed `Red Flags`/`Rationalizations` headings from the product surface.
+- Deduplicated both SessionStart bootstraps (`session-start.mjs`, `session-start-codex.mjs`) against the `using-agentic-sdlc` router skill.
+- Narrowed the product surface to Claude Code + Codex; other harnesses are now framed only as future/unsupported work.
+- Renamed the marketplace to `mrbekox` for a public channel (`/plugin install agentic-sdlc@mrbekox`).
+- Added `.github` issue/PR templates and `CONTRIBUTING.md`; started tracking the dogfooding spec/plan under `docs/specs/` and `docs/plans/`.
+- Added `tests/test_house_voice.py` guards locking the house-voice, runtime-scope, and maintenance-file acceptance criteria.
+
 ## 0.2.7 - 2026-06-17
 
 - Added full-project trigger eval batch coverage for Claude and Codex skill routing, including no-command-shim Claude live activation and Codex route-classifier updates.

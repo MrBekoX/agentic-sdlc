@@ -10,6 +10,9 @@ description: Use first in any language as the evidence gate before saying work i
 > the shape of the diff, not the fact that the change "obviously" works. This skill makes the
 > claim wait until that evidence exists.
 
+## Invariant
+A completion claim is only as true as the fresh output you just read — not memory, not the shape of the diff.
+
 ## Why this exists
 
 The expensive failures are confident wrong claims: "fixed" when the bug still reproduces, "tests
@@ -109,7 +112,7 @@ without your change. To show the fix is real:
 (This is contract 05's RED→GREEN applied to *proving a fix*; lean on that contract for the general TDD
 loop.)
 
-## Rationalizations — and why they don't hold
+## Excuse → check
 
 These excuses fire under time pressure (the ones the requirements table doesn't already cover).
 Each is the moment to run the gate, not skip it.

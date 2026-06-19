@@ -9,6 +9,9 @@ If you were dispatched as a subagent for a bounded task, skip this bootstrap unl
 
 # Skill: using-agentic-sdlc
 
+## Invariant
+Every prompt is routed to the smallest sufficient skill before acting — agentic-sdlc-pipeline only for the full envelope.
+
 This is the bootstrap router for the AGENTIC-SDLC skill system.
 
 ## Priority
@@ -84,7 +87,7 @@ Examples:
 - Do not inline another skill's checklist when the runtime can invoke that skill.
 - `agentic-sdlc-pipeline` is the full-envelope escalation path, not the default route.
 - Step skills should not call `agentic-sdlc-pipeline` unless the user is intentionally escalating to the full flow.
-- `spec-authoring` and `plan-authoring` are standalone prompt-level routes. When `agentic-sdlc-pipeline` needs spec/plan artifacts, it uses its own phase logic; in non-Claude Agent Skills runtimes that means agentic-sdlc-pipeline's embedded author/critic adapter, not invoking the standalone spec/plan skills.
+- `spec-authoring` and `plan-authoring` are standalone prompt-level routes. When `agentic-sdlc-pipeline` needs spec/plan artifacts, it uses its own phase logic; in Codex that means agentic-sdlc-pipeline's embedded author/critic adapter, not invoking the standalone spec/plan skills.
 - Use `contracts/skills/` as the durable behavior contract layer; skills remain the runnable procedure layer.
 
 ## Evidence Discipline
@@ -103,7 +106,7 @@ If evidence is missing, say it is uncertain and state what would verify it.
 ## Platform Notes
 
 - In Claude Code, use the native Skill/Workflow/Agent mechanisms when available.
-- In Codex, OpenCode, Kimi Code, and similar Agent Skills runtimes, follow activated skill instructions and the portable capability matrix in `docs/runtime-adapter.md`. Treat Claude Code Workflow-only gates as runtime-adapted: use subagents, parallel local tools, native agent mechanisms, or documented degraded main-loop execution as the skill specifies.
-- Resolve plugin-root paths by runtime: `${CLAUDE_PLUGIN_ROOT}` in Claude Code, `${PLUGIN_ROOT}` in Codex, or the configured plugin/skill root in OpenCode and Kimi Code. Use the matching runtime root for `contracts/skills/`, `scripts/`, `hooks/`, and bundled files.
+- In Codex (the other supported runtime), follow activated skill instructions and the portable capability matrix in `docs/runtime-adapter.md`. Treat Claude Code Workflow-only gates as runtime-adapted: use subagents, parallel local tools, native agent mechanisms, or documented degraded main-loop execution as the skill specifies.
+- Resolve plugin-root paths by runtime: `${CLAUDE_PLUGIN_ROOT}` in Claude Code, `${PLUGIN_ROOT}` in Codex. Use the matching runtime root for `contracts/skills/`, `scripts/`, `hooks/`, and bundled files.
 - If a required skill or workflow mechanism is unavailable, state the degraded path and use the smallest safe fallback.
 - Match the user's language unless they request otherwise.

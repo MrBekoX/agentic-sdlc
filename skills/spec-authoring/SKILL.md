@@ -7,6 +7,9 @@ description: Use first in any language when the user asks only to write or extra
 
 > **Argument:** `/spec-authoring $ARGUMENTS` - if given, that is the target spec; otherwise infer from the latest user prompt. Match the user's language.
 
+## Invariant
+A spec defines WHAT and its acceptance criteria, code-independent — and every criterion must be testable.
+
 Own the WHAT only: problem, business rules, acceptance criteria, edge cases, definition of done, and must-not-change behavior. Do not write an implementation plan and do not edit product code.
 
 This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-end Spec phase and must not call `spec-authoring` as an internal substep.
@@ -17,13 +20,11 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 - **Contracts:** Apply the runtime-local contract files as the primary behavior contract:
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md`
   - Codex: `${PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md`
-  - OpenCode/Kimi Code: configured plugin or skill root.
   Also use `00-global-behavior.md` and `01-context-first.md` from the same runtime root for evidence and context discipline when available.
-- **Agents:** Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex, OpenCode, Kimi Code, or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
+- **Agents:** Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
 - **Validator:** Saved specs use the runtime-local validator with `--mode spec`:
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py`
   - Codex: `${PLUGIN_ROOT}/scripts/validate_artifacts.py`
-  - OpenCode/Kimi Code: `<runtime-root>/scripts/validate_artifacts.py`
 
 ## Route First
 
@@ -36,7 +37,7 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 
 1. Identify the target behavior, audience, constraints, and explicit non-goals from the prompt and available context.
 2. Read only the local context needed to avoid an off-target spec.
-3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex, OpenCode, Kimi Code, or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
+3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
 4. If a durable artifact is requested or the work is substantial, save the spec as `docs/specs/<name>.md`.
 5. Validate saved specs with `python "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/specs/<name>.md`, resolving `<runtime-root>` from the active runtime as described in `docs/runtime-adapter.md`.
 6. Present decision points and stop. Do not continue to plan or implementation unless the user asks.
@@ -50,7 +51,7 @@ Return:
 3. Decision points, if any.
 4. Evidence: context read, contract(s) applied, workflow/degraded path, agent bindings, and validator result if saved.
 
-## Red Flags
+## Tripwires
 
 - Producing HOW/tasks in a spec-only request.
 - Implementing code or writing tests.

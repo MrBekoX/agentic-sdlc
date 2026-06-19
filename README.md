@@ -25,7 +25,7 @@ Add this repository as a plugin marketplace, then install the plugin:
 
 ```text
 /plugin marketplace add MrBekoX/agentic-sdlc
-/plugin install agentic-sdlc@agentic-sdlc-dev
+/plugin install agentic-sdlc@mrbekox
 ```
 
 For local development from a clone, point Claude Code at the repo root instead:

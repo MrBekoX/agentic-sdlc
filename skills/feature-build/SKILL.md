@@ -9,6 +9,23 @@ description: Use first in any language to add a new feature, endpoint, screen, o
 
 Builds a new feature in small, reversible, convention-respecting steps.
 
+## Invariant
+The feature is built to an agreed, testable spec — test-first — and only the agreed scope ships.
+
+## Tripwires
+- writing code before a testable acceptance criterion exists
+- scope creeping past the spec
+- claiming done before exercising the feature path
+
+## Proof
+Acceptance criteria → tests (RED→GREEN), the feature path exercised, full suite green, the diff scoped to plan.
+
+## Excuse → check
+| Excuse | Check |
+|---|---|
+| "The spec is obvious, skip it." | Unwritten specs drift mid-build. Write the criteria first. |
+| "It compiles." | Compiling is not working. Exercise the feature. |
+
 ## Orchestration (consult first)
 Per the **`dispatch-strategy`** skill and `docs/runtime-adapter.md`: delegate codebase scoping/exploration and fixed-pattern multi-file generation to subagents or runtime equivalents; fan out verification (test/lint/security lenses) to a dynamic-workflow or the runtime's parallel/degraded equivalent. Keep design/ordering decisions and interdependent code in the main loop.
 

@@ -24,6 +24,11 @@ docs/*
 !docs/skill-boundaries.md
 !docs/runtime-adapter.md
 !docs/release-readiness.md
+# Tracked dogfooding artifacts (nested un-ignore: dir first, then files).
+!docs/specs/
+!docs/specs/*.md
+!docs/plans/
+!docs/plans/*.md
 
 # Optional tool reference snapshots
 mcps/
