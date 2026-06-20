@@ -79,8 +79,8 @@ The scanners never print secret values. If a warning is false positive:
 
 - `git reset --hard`
 - forceful `git clean`
-- `rm -rf`
-- `Remove-Item -Recurse -Force`
+- recursive `rm` forms such as `rm -r`, `rm -rf`, `rm --recursive`, `/bin/rm -rf`, `sudo rm -rf`, `sudo FOO=bar rm -rf`, `command rm -rf`, `env FOO=bar rm -rf`, and `env -u FOO rm -rf`
+- `Remove-Item -Recurse`, common aliases such as `ri`/`del`/`rd`/`rmdir`, and simple `powershell`/`pwsh -Command` wrappers
 
 Use a scoped, reviewed command and get explicit approval for destructive cleanup.
 

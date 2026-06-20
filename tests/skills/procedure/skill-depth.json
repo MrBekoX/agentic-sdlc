@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "id": "skill-depth-shallow",
+      "prompt": "internal depth regression fixture (shallow)",
+      "check_artifact_depth": true
+    },
+    {
+      "id": "skill-depth-deep",
+      "prompt": "internal depth regression fixture (deep)",
+      "check_artifact_depth": true
+    }
+  ]
+}

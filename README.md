@@ -2,7 +2,7 @@
 
 > A local AGENTIC-SDLC plugin for **Claude Code** and **Codex**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
-> `Version 0.2.7` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
+> `Version 0.3.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
 
 ---
 
@@ -39,6 +39,31 @@ After install, the `using-agentic-sdlc` router is available as a skill. Claude C
 ### Codex
 
 Codex uses the personal marketplace layout. Put this plugin at `~/plugins/agentic-sdlc` or point that path at this clone, then install it from the personal marketplace:
+
+Example `~/.agents/plugins/marketplace.json`:
+
+```json
+{
+  "name": "personal",
+  "interface": {
+    "displayName": "Personal"
+  },
+  "plugins": [
+    {
+      "name": "agentic-sdlc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agentic-sdlc"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
+```
 
 ```bash
 codex plugin add agentic-sdlc@personal
@@ -169,6 +194,8 @@ python3 tests/skills/harness.py
 python3 -m unittest discover -s tests -v
 ```
 
+On Windows, use `py -3` for the same commands when `python3` is not on `PATH`.
+
 This proves metadata consistency, static skill wiring, fixture health, hook/workflow syntax, and unit behavior. It does not prove live model routing or live runtime obedience. Live Claude/Codex evals require the corresponding CLI and auth; do not claim a skill "works" or "triggers" without eval output or a transcript.
 
 ## More Documentation
@@ -181,11 +208,11 @@ This proves metadata consistency, static skill wiring, fixture health, hook/work
 
 ## Versioning
 
-Current version: `0.2.7`.
+Current version: `0.3.0`.
 
 ```bash
 python3 scripts/bump_version.py --check
-python3 scripts/bump_version.py 0.2.8
+python3 scripts/bump_version.py 0.3.1
 ```
 
 ## License

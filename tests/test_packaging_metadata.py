@@ -33,6 +33,27 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertIn("agentic-sdlc@mrbekox", readme)
         self.assertNotIn("agentic-sdlc@agentic-sdlc-dev", readme)
 
+    def test_public_docs_match_current_version(self):
+        version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
+        docs = [
+            REPO / "README.md",
+            REPO / "docs" / "plugin-readme.md",
+            REPO / "docs" / "release-readiness.md",
+        ]
+        for path in docs:
+            text = path.read_text(encoding="utf-8")
+            self.assertIn(version, text, f"{path.relative_to(REPO)} missing current version")
+            self.assertNotIn("0.2.7", text, f"{path.relative_to(REPO)} still references old release")
+
+    def test_runtime_readmes_use_canonical_work_package_paths(self):
+        canonical = "docs/agentic-sdlc/"
+        legacy = ("docs/specs/", "docs/plans/")
+        for rel in (".claude-plugin/README.md", ".codex-plugin/README.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            self.assertIn(canonical, text)
+            for old in legacy:
+                self.assertNotIn(old, text, f"{rel} still uses legacy artifact path {old}")
+
     def test_codex_manifest_uses_publishable_schema_keys(self):
         codex_plugin = json.loads((REPO / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         allowed_keys = {

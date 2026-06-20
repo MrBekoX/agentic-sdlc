@@ -30,7 +30,7 @@ Examples:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/detect_context.py" --path .
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode spec --file docs/specs/example.md
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode spec --file docs/agentic-sdlc/specs/example.md
 ```
 
 Do not hard-code machine-specific absolute paths into skills, hooks, evals, or generated artifacts.

@@ -25,7 +25,7 @@ Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve t
 | `scan-write.mjs` | `PostToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | Scans newly written text for secrets; warns only. |
 | `scan-commit.mjs` | `PreToolUse` (`git commit*`) | Not wired | Scans added diff lines for high-confidence secrets; blocks commit. |
 | `branch-guard.mjs` | `PreToolUse` (`git commit*` / `git push*`) | Not wired | Warns on `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. |
-| `destructive-command-guard.mjs` | `PreToolUse` shell command | Not wired | Blocks deterministic destructive commands such as `git reset --hard`, forceful `git clean`, `rm -rf`, and `Remove-Item -Recurse -Force`. |
+| `destructive-command-guard.mjs` | `PreToolUse` shell command | Not wired | Blocks deterministic destructive commands such as `git reset --hard`, forceful `git clean`, recursive `rm` including wrapper/path forms, and `Remove-Item -Recurse` including common aliases/wrappers. |
 | `completion-claim-guard.mjs` | `Stop` | Not wired | Warns when a final completion claim appears without `completion-claim-gate`; blocks when `AGENTIC_COMPLETION_GATE_BLOCK=true`. |
 | `secret-patterns.mjs` | Shared library | Shared library | Secret-pattern scanner used by the scan hooks. |
 

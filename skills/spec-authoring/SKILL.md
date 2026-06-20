@@ -14,6 +14,22 @@ Own the WHAT only: problem, business rules, acceptance criteria, edge cases, def
 
 This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-end Spec phase and must not call `spec-authoring` as an internal substep.
 
+## Depth contract (proportional — scale rigor to the change)
+For each acceptance criterion give Given/When/Then **and** the failure it guards. For each edge case give the concrete unhandled scenario, not a category name. A security note must cite the input->sink it reasons about, or state "no external input reaches this code, because <reason>" — never a bare "safe".
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "The criteria are obvious." | Then write them as Given/When/Then; obvious behaviour is the cheapest to make testable. |
+| "Security is N/A here." | Then name the input that does NOT reach a sink and why — a one-line dismissal without that is a finding. |
+| "It's a small change." | A small change gets a short spec, not a vague one. Short and concrete, never short and hand-wavy. |
+
+## No placeholders
+Do not ship "TBD", "as appropriate", "out of scope" (without the reason it's out), or a "decide later" section. If a decision is open, list it as a Decision Point with a recommendation.
+
+## Shallow example (reject this)
+A spec whose security section is only "treat as safe string handling only" and whose acceptance criteria are "should work" is shallow — it fills the sections without reasoning. Do not produce it.
+
 ## Runtime Bindings
 
 - **Hook:** `session-start.mjs` injects `using-agentic-sdlc` as the session-local router. That hook may route directly to `spec-authoring` for WHAT-only prompts; this does not require `agentic-sdlc-pipeline`.
@@ -21,7 +37,7 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md`
   - Codex: `${PLUGIN_ROOT}/contracts/skills/02-spec-driven-development.md`
   Also use `00-global-behavior.md` and `01-context-first.md` from the same runtime root for evidence and context discipline when available.
-- **Agents:** Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
+- **Agents:** Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author (`spec-plan-author`) -> critic (`spec-plan-critic`) -> revise adapter. The critic pass is **mandatory and must run in a fresh context** (a separate subagent/specialist) wherever the runtime exposes one; a same-context inline critic is a **degraded** path that must be flagged `Delegation Degraded: fresh-context critic unavailable` and held to extra scrutiny — never presented as an equal substitute. State the adapter path used.
 - **Validator:** Saved specs use the runtime-local validator with `--mode spec`:
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py`
   - Codex: `${PLUGIN_ROOT}/scripts/validate_artifacts.py`
@@ -37,7 +53,7 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 
 1. Identify the target behavior, audience, constraints, and explicit non-goals from the prompt and available context.
 2. Read only the local context needed to avoid an off-target spec.
-3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
+3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author (`spec-plan-author`) -> critic (`spec-plan-critic`) -> revise adapter. The critic pass is **mandatory and must run in a fresh context** (a separate subagent/specialist) wherever the runtime exposes one; a same-context inline critic is a **degraded** path that must be flagged `Delegation Degraded: fresh-context critic unavailable` and held to extra scrutiny — never presented as an equal substitute. State the adapter path used.
 4. If a durable artifact is requested or the work is substantial, save the spec as `docs/agentic-sdlc/specs/<work_id>.md` with `work_id` and `status` frontmatter.
 5. Validate saved specs with `python "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/agentic-sdlc/specs/<work_id>.md`, resolving `<runtime-root>` from the active runtime as described in `docs/runtime-adapter.md`.
 6. Present decision points and stop. Do not continue to plan or implementation unless the user asks.

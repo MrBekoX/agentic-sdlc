@@ -15,7 +15,7 @@ Full Mode is not satisfied by inline summaries of other skills. Use `docs/runtim
 
 In Codex, the other supported runtime, Claude Code `Workflow` calls are not available. Keep `spec-authoring` and `plan-authoring` as independent entry skills; agentic-sdlc-pipeline does not invoke them for steps 4-5. Instead, agentic-sdlc-pipeline runs the embedded adapter:
 - Draft the spec/plan in the main loop using `spec-plan-author` role instructions and contracts 02/03.
-- Run a fresh-context critic pass with the runtime's subagent/specialist mechanism using `spec-plan-critic` instructions when available.
+- Run a fresh-context critic pass with the runtime's subagent/specialist mechanism using `spec-plan-critic` instructions wherever the runtime exposes a subagent mechanism (mandatory there).
 - Revise up to two rounds, save the artifact, then run `validate_artifacts.py`.
 - If fresh-context specialists are unavailable, record `Delegation Degraded: fresh-context specialist unavailable` and perform the critic pass inline.
 

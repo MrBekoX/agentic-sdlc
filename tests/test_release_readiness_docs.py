@@ -21,6 +21,13 @@ class TestReleaseReadinessDocs(unittest.TestCase):
             "run_procedure_eval.py",
             "secret",
             "Known Limitations",
+            "Codex command-blocking guardrails are advisory/manual",
+            "2026-06-20 Codex live low smoke",
+            "docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md",
+            "gpt-5.3-codex-spark",
+            "model_reasoning_effort=\"low\"",
+            "RED->GREEN",
+            "Implementation Control PASS",
             "Release Verdict Template",
         ):
             self.assertIn(required, text)

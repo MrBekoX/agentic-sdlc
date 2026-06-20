@@ -182,6 +182,22 @@ class TestSkillCrossReferences(unittest.TestCase):
         self.assertIn("before inspecting code", desc)
         self.assertIn("test-only prompts", desc)
 
+    def test_critic_has_hard_blockers_and_fresh_context_is_mandatory(self):
+        critic = (h.REPO / "agents" / "spec-plan-critic.md").read_text(encoding="utf-8")
+        self.assertIn("Hard blockers", critic)
+        self.assertIn("external signal", critic)
+        for name in ("spec-authoring", "plan-authoring"):
+            body = (h.SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8")
+            self.assertIn("mandatory and must run in a fresh context", body)
+            self.assertNotIn("manually or through available subagents", body)
+        # The inline-critic loophole must be absent from EVERY skill, not just spec/plan-authoring.
+        leaked = [
+            p.relative_to(h.REPO).as_posix()
+            for p in h.SKILLS_DIR.glob("*/SKILL.md")
+            if "manually or through available subagents" in p.read_text(encoding="utf-8")
+        ]
+        self.assertEqual(leaked, [], f"inline-critic loophole still present in: {leaked}")
+
 
 class TestRuntimePaths(unittest.TestCase):
     def test_all_plugin_root_refs_resolve(self):

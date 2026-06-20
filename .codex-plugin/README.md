@@ -26,6 +26,31 @@ The `interface` block supplies Codex display metadata, capabilities, default pro
 
 Codex discovers the default personal marketplace at `~/.agents/plugins/marketplace.json`. Its `agentic-sdlc` entry should point at `~/plugins/agentic-sdlc`, which can be a real copy or a symlink/junction to this clone.
 
+Example `~/.agents/plugins/marketplace.json`:
+
+```json
+{
+  "name": "personal",
+  "interface": {
+    "displayName": "Personal"
+  },
+  "plugins": [
+    {
+      "name": "agentic-sdlc",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agentic-sdlc"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
+```
+
 ```bash
 codex plugin add agentic-sdlc@personal
 ```
@@ -44,7 +69,7 @@ Examples:
 
 ```bash
 python3 "${PLUGIN_ROOT}/scripts/detect_context.py" --path .
-python3 "${PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode plan --file docs/plans/example.md --spec docs/specs/example.md --strict
+python3 "${PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode plan --file docs/agentic-sdlc/plans/example.md --spec docs/agentic-sdlc/specs/example.md --strict
 ```
 
 Do not use `${CLAUDE_PLUGIN_ROOT}` in Codex-only examples.
@@ -63,9 +88,9 @@ Codex has no Claude Code Workflow runtime. Therefore `agentic-sdlc-pipeline` doe
 2. Run `detect_context.py` through `${PLUGIN_ROOT}`.
 3. Draft the spec inside `agentic-sdlc-pipeline` using the spec contract and `spec-plan-author` role instructions.
 4. Run a fresh-context critic pass with `spec-plan-critic` instructions when Codex subagents are available; otherwise record a degraded inline critic pass.
-5. Save `docs/specs/<name>.md` and run `validate_artifacts.py --mode spec`.
+5. Save `docs/agentic-sdlc/specs/<work_id>.md` and run `validate_artifacts.py --mode spec`.
 6. Draft and critic-review the plan inside `agentic-sdlc-pipeline`.
-7. Save `docs/plans/<name>.md` and run `validate_artifacts.py --mode plan --strict`.
+7. Save `docs/agentic-sdlc/plans/<work_id>.md` and run `validate_artifacts.py --mode plan --strict`.
 8. Activate the selected core workflow skill before implementation edits.
 9. Activate `security-audit`, `implementasyon-control`, and `completion-claim-gate` at their gates.
 

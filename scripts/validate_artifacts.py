@@ -72,6 +72,22 @@ AC_ID_RE = re.compile(r"\bAC\d+\b")
 FILE_REF_RE = re.compile(r"\b(Create|Modify)\b", re.IGNORECASE)
 TDD_MARKER_RE = re.compile(r"\b(TDD|RED|failing test)\b", re.IGNORECASE)
 
+# Quality checks (warnings; --strict promotes to errors). No count floors — these
+# are calibrated by the regression fixtures: a genuinely deep artifact must stay
+# clean, only stubs / deferrals / hand-wave trip them.
+#
+# A task carries a real verification if it shows a runnable signal: a "Run:" /
+# "Verify:" / "Expect:" lead-in, an inline-code command (pytest/python/npm/...),
+# or a fenced code block (the command/RED->GREEN expectation).
+VERIFICATION_RE = re.compile(r"(?im)^\s*(?:run:|verify:|expect:)|`[^`]*\b(?:pytest|python|npm|cargo|go test|make)\b|```")
+# A deferral hand-wave: a "Non-task step" pseudo-task, or "executed later/after ...
+# gates" that pushes real work out of the plan instead of making it a task.
+DEFERRAL_RE = re.compile(r"(?i)\bnon-task step\b|executed (?:later|after)[^.\n]*\bgates?\b")
+# A security section exists when a heading mentions security; it is hand-wave when
+# its body is only a bare dismissal ("no untrusted input", "safe string handling only").
+SECURITY_HEADING_RE = re.compile(r"(?i)\bsecurity\b")
+SECURITY_HANDWAVE_RE = re.compile(r"(?i)\bno untrusted input\b|\bsafe string handling only\b|\btreat (?:it|this|the change) as safe\b")
+
 
 def _normalize_heading(text):
     """Strip leading '\\d+.' numbering and trailing '(...)' parentheticals.
@@ -148,6 +164,16 @@ def check_spec(text):
                 if not TESTABLE_MARKERS.search(stripped):
                     warnings.append(f"untestable_criterion:{index}")
 
+    # Security hand-wave: only when a security section exists AND its short body is
+    # nothing but a bare dismissal. A grounded note (which cites an input->sink, or
+    # explains why no input reaches the code) is longer and does not trip this.
+    for lineno, _raw, norm in headings:
+        if SECURITY_HEADING_RE.search(norm):
+            sec_body = _section_body(text, lineno)
+            if SECURITY_HANDWAVE_RE.search(sec_body) and len("".join(sec_body.split())) < 120:
+                warnings.append("security_handwave")
+            break
+
     return {"errors": errors, "warnings": warnings}
 
 
@@ -159,6 +185,26 @@ def _mask(line):
 def _strip_inline_code(line):
     """Drop `inline code` spans so a placeholder shown as an example doesn't count."""
     return re.sub(r"`[^`]*`", "", line)
+
+
+def _strip_fenced_code(text):
+    """Return `text` with fenced code blocks removed.
+
+    Same rationale as the placeholder scanner: a doc that *describes* or *bans* a
+    pattern inside a ``` fence (e.g. this plan's own "## Non-task step" example, or
+    the skill text that bans the deferral) is illustrative, not an actual deferral.
+    Prose-level checks must not fire on those fenced examples.
+    """
+    out = []
+    in_fence = False
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue  # drop the fence marker line itself
+        if not in_fence:
+            out.append(line)
+    return "\n".join(out)
 
 
 def scan_placeholders_and_secrets(text):
@@ -243,6 +289,18 @@ def check_plan(text, spec_text):
             warnings.append("task_missing_file")
         if not TDD_MARKER_RE.search(block):
             warnings.append("task_missing_tdd")
+        if not VERIFICATION_RE.search(block):
+            warnings.append("task_no_verification")
+    # Deferral scan runs on PROSE only — fenced code blocks AND inline-code spans
+    # stripped, matching the placeholder scanner's illustrative-skip rule. A
+    # "## Non-task step" shown inside a fence, or a `Non-task step` token named in
+    # backticks (as this plan and the skill bodies do to describe/ban the pattern),
+    # is illustrative, not a real deferral, so it must not trip the check.
+    deferral_prose = "\n".join(
+        _strip_inline_code(line) for line in _strip_fenced_code(text).splitlines()
+    )
+    if DEFERRAL_RE.search(deferral_prose):
+        warnings.append("deferred_work")
 
     # Ordering: numbered tasks must be strictly increasing.
     numbers = [n for n, _ in blocks if n is not None]
