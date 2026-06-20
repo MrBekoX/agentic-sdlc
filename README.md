@@ -1,5 +1,7 @@
 # agentic-sdlc
 
+![agentic-sdlc](agentic-sdlc.png)
+
 > A local AGENTIC-SDLC plugin for **Claude Code** and **Codex**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
 > `Version 0.3.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
