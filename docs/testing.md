@@ -30,6 +30,8 @@ python3 tests/skills/harness.py
 python3 -m unittest discover -s tests -v
 ```
 
+On Windows, use `py -3` for the same commands when `python3` is not on `PATH`.
+
 ### What each command proves
 
 | Command | Proves |
@@ -283,7 +285,7 @@ Behavior evals should move toward **transcript JSONL** checks for evidence such 
 |---|---|---|
 | Dry-run / schema | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --dry-run` | Validate the eval fixture without running a model. |
 | Transcript | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-pass.jsonl` | Evaluate a captured transcript deterministically. |
-| Live | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live --max-budget-usd 2.00` | Run the prompt through Claude Code in an isolated copied fixture and evaluate the resulting transcript. |
+| Live | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live --max-budget-usd 5.00` | Run the prompt through Claude Code in an isolated copied fixture and evaluate the resulting transcript. |
 
 Live mode defaults to `--permission-mode auto` so safe headless commands can run without an interactive prompt. Override it only when intentionally auditing permission behavior.
 

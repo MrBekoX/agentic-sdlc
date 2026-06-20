@@ -28,19 +28,81 @@ class TestDestructiveCommandGuard(unittest.TestCase):
         decision = out["hookSpecificOutput"]["permissionDecision"]
         self.assertEqual(decision, "deny")
 
-    def test_blocks_rm_rf(self):
-        out = self.run_hook("rm -rf ./tmp")
-        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertIn("rm-rf", reason)
+    def test_blocks_recursive_rm_forms(self):
+        blocked = [
+            "rm -rf ./tmp",
+            "rm -fr ./tmp",
+            "rm -r -f ./tmp",
+            "rm --recursive --force ./tmp",
+            "rm -r ./tmp",
+            "rm -R ./tmp",
+            "echo before; rm -r ./tmp",
+            "git status && rm --recursive ./tmp",
+            "(rm -rf ./tmp)",
+            "{ rm -rf ./tmp; }",
+            "echo $(rm -rf ./tmp)",
+            "/bin/rm -rf ./tmp",
+            "sudo rm -rf ./tmp",
+            "command rm -rf ./tmp",
+            "git status; sudo rm -rf ./tmp",
+            "sudo -E rm -rf ./tmp",
+            "sudo -u root rm -rf ./tmp",
+            "sudo FOO=bar rm -rf ./tmp",
+            "env FOO=bar rm -rf ./tmp",
+            "env -u FOO rm -rf ./tmp",
+            "rm.exe -rf ./tmp",
+        ]
+        for command in blocked:
+            with self.subTest(command=command):
+                out = self.run_hook(command)
+                reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn("rm-recursive", reason)
+
+    def test_blocks_recursive_remove_item_forms(self):
+        blocked = [
+            "Remove-Item ./tmp -Recurse",
+            "Remove-Item ./tmp -r",
+            "Remove-Item ./tmp -Re",
+            "Remove-Item ./tmp -Rec",
+            "Remove-Item ./tmp -Recurse -Force",
+            "Write-Output ok; Remove-Item ./tmp -Recurse",
+            "ri ./tmp -Recurse",
+            "del ./tmp -Recurse",
+            "erase ./tmp -Recurse",
+            "rd ./tmp -Recurse",
+            "rmdir ./tmp -Recurse",
+            "rm ./tmp -Recurse",
+            "powershell -Command Remove-Item ./tmp -Recurse",
+            "powershell -Command Remove-Item ./tmp -Re",
+            'pwsh -c "Remove-Item ./tmp -Recurse"',
+        ]
+        for command in blocked:
+            with self.subTest(command=command):
+                out = self.run_hook(command)
+                reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn("powershell-remove-item-recurse", reason)
 
     def test_blocks_git_clean_fdx(self):
         out = self.run_hook("git clean -fdx")
         reason = out["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertIn("git-clean-force", reason)
 
-    def test_allows_non_destructive_command(self):
-        out = self.run_hook("git status --short")
-        self.assertEqual(out, {})
+    def test_allows_non_destructive_commands(self):
+        allowed = [
+            "git status --short",
+            "rm -f file.txt",
+            "Remove-Item file.txt -Force",
+            "ls -r",
+            "rm file.txt; ls -r",
+            "Remove-Item file.txt; Get-ChildItem -Recurse",
+            "printf '; rm -rf ./tmp'",
+            'echo "rm -rf ./tmp"',
+            "Write-Output '; Remove-Item ./tmp -Recurse'",
+        ]
+        for command in allowed:
+            with self.subTest(command=command):
+                out = self.run_hook(command)
+                self.assertEqual(out, {})
 
 
 @unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")
