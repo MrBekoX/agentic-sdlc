@@ -7,6 +7,22 @@ description: Use first in any language to decide whether work runs in the main l
 
 > Before any non-trivial work, this skill answers "how should I run this?" Other work-skills reference it at fan-out gates. **Goal:** run parallelizable work in parallel; delegate independent work so the main context stays clean; never do heavy independent work serially in the main loop.
 
+## Depth contract (proportional — scale rigor to the change)
+A dispatch decision names the **property of the work** that selects the mechanism, not just the verdict. State the relevant property: independence (does this part need the main context, or run alone?), similar-item count (≈3+ alike → fan-out), whether the intermediate context is needed later (disposable → delegate), interactivity (peers + live lead → team). One short clause of "why" per decision is enough — this is a routing call, not an essay. If you land on "main loop" for heavy *independent* work, say why it isn't delegable; absent a reason, that default is the bug.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "Just run it in the main loop." | Name whether it's independent and whether its intermediate steps are needed later — independent + disposable is a sub-agent, not the main loop. |
+| "Make it a workflow to be safe." | Count the similar items — under ≈3, a workflow is needless weight; pick the smallest sufficient mechanism. |
+| "Delegate it." | To which mechanism, and why — sub-agent, workflow, or team is selected by the work's shape, not by a vague "delegate". |
+
+## No placeholders
+Do not state a mechanism with no work-shape behind it. Do not say "delegate it" without naming which mechanism and the property that picks it. Do not default to the main loop for heavy independent work — that is the failure this skill exists to catch.
+
+## Shallow example (reject this)
+"Verdict: use a sub-agent." with no reason is not a decision — name the property that picks it ("one independent codebase sweep whose intermediate reads I won't need later → sub-agent").
+
 ## The four options
 
 | Option | Use for | How to invoke | Cost / caveat |

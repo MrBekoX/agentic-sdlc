@@ -26,6 +26,26 @@ Each new test shown failing for the right reason before it passes; for character
 | "It obviously tests X." | Break X and watch the test fail — that is the only proof it tests X. |
 | "Coverage is 100%." | Coverage is lines executed, not regressions caught. Assert behavior. |
 
+## Depth contract (proportional — scale rigor to the change)
+Scale the suite to the surface under test: a pure helper needs less than an auth path, but every test you do write must pin something real.
+- Each test names the specific behaviour it guards **and** the concrete code mutation (flipped comparison, dropped branch, off-by-one) that would turn it red. If no mutation makes it fail, it pins nothing — delete or rewrite it.
+- An edge case is a concrete input, not the phrase "edge cases": the empty/null value, the boundary value on both sides, the actual error or unauthorized path. Name the input.
+- Assert the observable outcome the caller sees — the returned value, the raised error, the persisted state — not that a collaborator was invoked. A test that checks `mock.called` describes the test's own scaffolding.
+- Show the failing run before the passing one; for characterization tests, capture the baseline first.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "The happy path is covered, good enough." | Name the boundary or error input that has no failing test yet, then add it. |
+| "The mock returns X, so it works." | Assert the outcome the caller observes, not that the mock was called. |
+| "I'll mark the edge cases later." | Write the concrete input now — empty, null, the boundary — or it never gets pinned. |
+
+## No placeholders
+Do not ship "covers edge cases" without listing each one as a concrete input. Do not ship a test name that fails to state scenario + expectation (`test_works` names nothing). Do not assert on a mock/spy in place of the behaviour the caller observes.
+
+## Shallow example (reject this)
+A test named `test_works` whose body asserts only `mock.called` pins nothing — flip any real logic and it still passes. Reject it: name the behaviour, name the input that would break it, and watch it go red first.
+
 ## Test types
 - **Unit** — one unit in isolation; fast; dependencies faked.
 - **Integration** — real collaboration across components/boundaries (DB, queue, HTTP).

@@ -26,6 +26,22 @@ Behavior captured as a snapshot before and after the change; the before/after **
 | "Obviously equivalent." | Then the before/after behavior snapshot is identical — capture both and show the empty snapshot diff. |
 | "Tests still pass." | They passed before too. Prove *this* change preserved behavior, not that the suite was already green. |
 
+## Depth contract (proportional — scale rigor to the change)
+Name the specific observable behaviors held invariant — concrete input->output pairs, side effects, and error paths — and the characterization that pins each. "Equivalent" must point at the captured before/after snapshot, never stand alone as a word. For each structural step (extract / rename / dedupe / simplify) state what moved and the evidence its observable behavior is unchanged for the inputs that hit the touched path. Proportional: a small local refactor pins the few behaviors it can perturb; it does not re-characterize the whole module.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "It's a pure rename, nothing to characterize." | Name the call sites and exported surface it touches; renaming an exported name changes behavior for every consumer that imports it. |
+| "Smaller and cleaner, same result." | Show the before/after snapshot is identical for the inputs that hit the changed path — cleaner is not the same as equivalent. |
+| "It's a minor tidy." | Then name the one behavior it *could* shift (an order, a default, an error case) and show that one is held — "minor" is where semantic drift hides. |
+
+## No placeholders
+Don't ship "behavior unchanged" with no captured snapshot, or let "equivalent" / "clean up" / "minor" stand in for a behavior you never characterized while it quietly hides a semantic shift.
+
+## Shallow example (reject this)
+"Refactored for clarity; the suite is green so behavior is preserved." Green before AND after is not proof *this* change preserved behavior — the suite was already green. Reject and capture the before/after snapshot for the inputs the change actually touches.
+
 ## Orchestration (consult first)
 Per **`dispatch-strategy`** and `docs/runtime-adapter.md`: large multi-file refactors fan out to a dynamic-workflow or runtime equivalent (worktree isolation for parallel edits when available); heavy reference analysis goes to a subagent or documented degraded path.
 

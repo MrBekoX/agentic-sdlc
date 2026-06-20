@@ -26,6 +26,23 @@ Per step, the artifact/output that proves it: spec path, plan path, RED→GREEN,
 | "The flow was clearly followed." | Then point to each artifact. If you can't, it wasn't. |
 | "No time to audit." | An unaudited "done" is exactly the failure this skill exists to catch. |
 
+## Depth contract (proportional — scale rigor to the change)
+A step earns **PASS only with its own artifact quoted in the report**: Spec → the spec path plus one acceptance criterion read from it; Plan → the plan path plus the task it maps to; TDD → the RED→GREEN line (the failing assertion, then the passing one); Test Run → the runner's summary line (N passed, 0 failed, 0 skipped); Security Analysis → the note and the input→sink it cleared or the reason none reaches a sink; Git Diff Review → the file/line range you actually read. **PARTIAL/FAIL names the exact artifact that is absent** ("no security note for the new request handler"), never a vague shortfall. "Looks complete" is not a status — the only statuses are PASS / PARTIAL / FAIL, each tied to evidence or its named absence. Proportional: a one-line fix has fewer steps to evidence, but every step you mark PASS still cites the one artifact that backs it.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "The spec was obviously produced." | Quote its path and one acceptance criterion read from it. If you can't, it's FAIL, not PASS. |
+| "Tests obviously ran." | Quote the summary line (N passed, 0 failed, 0 skipped) from the actual output. A remembered run is not evidence. |
+| "The diff is in scope, I can tell." | Then name the file/line range you read and what put it in scope. An unread diff is not a reviewed diff. |
+| "Security wasn't relevant here." | Then name the input that does NOT reach a sink and why. A blank Security step is PARTIAL, not PASS. |
+
+## No placeholders
+Do not mark any step PASS without quoting the artifact that backs it. Do not emit a report whose "Missing Steps" is empty while an artifact is in fact absent — an absent artifact is a missing step. Do not substitute "flow followed" for per-step evidence: the audit grades artifacts, not the implementer's narrative.
+
+## Shallow example (reject this)
+A report that marks every step PASS with the same justification ("flow was followed") and not one quoted spec path, RED→GREEN line, or test-summary line is a rubber-stamp, not an audit. Reject it and re-run with the artifacts in hand.
+
 ## What it checks
 - Was a **spec** produced? A **plan**? Was the plan broken into tasks?
 - Did `resolve_work_package.py` resolve exactly one spec/plan pair?

@@ -9,6 +9,21 @@ description: Use first in any language for end-to-end implementation with the fu
 
 The full-envelope entry point for production-impacting work. agentic-sdlc-pipeline is not the default for every feature, fix, test, or refactor request; use the focused skill unless the user asks for end-to-end implementation or the work needs the whole SDLC envelope. agentic-sdlc-pipeline does **not** re-implement the inner work — it **owns the outer envelope** (git lifecycle, Spec & Plan phases, doc-verification, scope-lock, quality gates, task-tracking, parallel dispatch-strategy) and **delegates the implementation core** (TDD → security → refactor → control) to the matching work-flow skill, handing it the approved spec/plan files. It is a **gated, looped, task-tracked** flow: a red gate means go back, not forward.
 
+## Depth contract (proportional — scale rigor to the change)
+Every gate is satisfied by the **actual tool call or artifact** named in the runtime invocation contract — the `Skill` call, the validator's exit code, the `spec-plan-draft` `Workflow` (or, in Codex, the embedded author/critic adapter draft) — never by a sentence in the final report asserting it happened. "Security reviewed", "spec drafted", "control done" are prose, not gates. The Spec and Plan phases (steps 4–5) run their full author⇄critic depth with a fresh-context critic where the runtime exposes one; a shallow inline draft is the flagged degraded path, never the equal of the workflow. When a mandated mechanism has nothing to act on in this context, it carries its **one-line deterministic skip note** in its report (the Step-1-symmetric rule) — it is never silently dropped. Scale the envelope, not the evidence standard: Lite Mode still produces the real tool calls for the gates it keeps, and the high-risk surfaces (auth/payment/DB migration/API contract/permissions/user data/token-session/RLS) are always Full.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "Security was reviewed." | Point to the `security-audit` Skill call (or the recorded deterministic skip rule) — a final-report sentence is not the gate. |
+| "The spec is fine, I drafted it inline." | The `spec-plan-draft` workflow (or the Codex author/critic adapter) ran with a fresh-context critic; an inline draft is the flagged degraded path, not the gate. |
+| "Validation passed, I read the artifact." | Manual Read does not replace `validate_artifacts.py`; show the validator's zero exit, or the gate stays red. |
+| "Context is clear, I explored manually." | Manual Read/Glob/ls does not replace `detect_context.py`; the transcript needs the detector run or its skip note. |
+| "The step doesn't apply, I dropped it." | A skipped mechanism carries its one-line deterministic skip note in its report — dropping it silently is a failed gate, not a no-op. |
+
+## No placeholders
+No "reviewed / validated / audited / controlled" prose standing in for the tool call it claims. No gated step marked done while its check is red — a red gate means go back, not forward. No mechanism dropped without its deterministic skip note. No shallow inline spec/plan substituted for the author⇄critic phases, and no `Delegation Degraded` note used to quietly downgrade a gate the runtime actually supports — the note names a genuinely missing tool and the smallest safe fallback, nothing more.
+
 ## Onion rule (skill architecture)
 - **agentic-sdlc-pipeline knows the step-skills and calls them.** Step-skills must **not** call agentic-sdlc-pipeline and stay maximally unaware of each other. A step-skill calls another step-skill only when its own flow genuinely needs it.
 - agentic-sdlc-pipeline **delegates the core**, it does not duplicate it. Don't re-write spec/plan/TDD logic here — invoke the work-flow that owns it.

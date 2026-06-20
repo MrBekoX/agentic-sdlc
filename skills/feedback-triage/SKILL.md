@@ -11,6 +11,19 @@ description: Use first in any language when review feedback has been received on
 > reasoning, not agreement theater. This is the receiving counterpart to `code-quality-review`
 > (the giving side); it owns *how you take* feedback, not how you write it.
 
+## Depth contract (proportional — scale rigor to the change)
+Each feedback item earns a verdict carried by the concrete check behind it: the `file:line` you read, the grep you ran, the caller count you counted. A "sound" verdict names what *in the code* confirms it; a "won't fix" names what *in the code* refutes it — never the reviewer's seniority, never a gut read. The RESPOND line states what changes and why, or what stays and why not. One item at a time, each tested before you touch the next. A bigger or riskier suggestion buys more verification, not less; a one-line nit still names the line you looked at.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "The reviewer is right, I'll apply it." | Name the `file:line` you verified before editing — authority isn't verification. |
+| "'Make it robust' — I'll add guards." | Grep the real callers and name the reachable failure, or it's YAGNI bloat. |
+| "Obviously correct, no need to open the file." | Then opening it costs nothing and proves it; an unread claim is an unverified one. |
+
+## No placeholders
+"Good catch" / "you're absolutely right" is praise, not a verdict — it states nothing checked. Applying a suggestion with no verification line, or a "won't fix" with no refuting evidence, is the same gap wearing the opposite mask. Every verdict points at the code that earned it.
+
 ## Why this exists
 
 The cheap failure mode is fast agreement: "You're absolutely right, great catch, let me

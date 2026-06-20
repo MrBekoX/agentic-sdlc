@@ -14,6 +14,20 @@ Every prompt is routed to the smallest sufficient skill before acting — agenti
 
 This is the bootstrap router for the AGENTIC-SDLC skill system.
 
+## Depth contract (proportional — scale rigor to the change)
+Every route names the **semantic intent verb** that selects the skill — explore vs. specify vs. plan vs. implement vs. audit — not a surface noun or keyword the prompt happens to contain. State the intent, then pick the **smallest sufficient** skill and say in one clause why a larger envelope isn't needed (e.g. "fix-now intent, single behavior, no spec/plan artifact asked for -> root-cause-fix; full envelope not requested"). An escalation to `agentic-sdlc-pipeline` must name the **full-envelope signal** that triggered it — an end-to-end ask, or a high-risk surface (auth, payment, DB migration, API contract, permissions, user data, token/session, RLS) with implementation requested — not "this feels big". Scale the routing rationale to the ask: a one-line route for an obvious focused prompt, an explicit intent + scope read when the prompt mixes nouns and intents.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "It mentions a bug, route to root-cause-fix." | Check whether the ask is to FIX now or to PLAN/spec it — intent over nouns. A bug noun under plan-only intent is `plan-authoring`. |
+| "Big task, use the pipeline." | Name the full-envelope signal (end-to-end ask or high-risk surface + implementation). Without it, route the smallest sufficient focused skill. |
+| "Mentions security, so security-audit." | Is the intent to AUDIT now, or to spec/plan/build with a security dimension? Route the verb, not the topic word. |
+| "Unclear, default to the pipeline." | `agentic-sdlc-pipeline` is the full-envelope escalation, never the fallback. If intent is unresolved, name the candidate verb or ask — don't default up. |
+
+## No placeholders
+No route chosen on a keyword alone — every route carries its intent verb. No escalation to `agentic-sdlc-pipeline` as a default or because the work "seems large" without a named full-envelope signal. No "probably `feature-build`" / "likely a plan" without the stated intent that selects it. If the intent is genuinely split, name the two candidate verbs and the smallest skill each implies, then resolve by the dominant intent — don't route to the bigger envelope to be safe.
+
 ## Priority
 
 1. User instructions and repository instructions are highest priority.

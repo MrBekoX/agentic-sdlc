@@ -26,6 +26,22 @@ The regression test shown RED before the fix and GREEN after, plus the full-suit
 | "The fix is obvious." | An obvious fix still needs the failing-then-passing test; obvious fixes mis-target often. |
 | "The suite is slow." | A false "fixed" costs a round-trip plus a second bug. Run it. |
 
+## Depth contract (proportional — scale rigor to the change)
+Trace the actual causal chain for this bug: trigger -> the intermediate state it corrupts -> the specific line or condition that emits the wrong output. Say why your fix lands at that root layer rather than one call up where the bad value merely surfaces. The regression test names the exact wrong behavior it reproduces (the concrete value/effect, not "it breaks"). Each edge case is a concrete input that reaches the faulty line, not a category. Proportional: a one-line bug earns a one-line chain — still trigger->wrong-output, still concrete.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "Added a guard, it's fixed." | Then name what produced the bad value upstream and why guarding *here* is the root layer — not a band-aid catching a defect born elsewhere. |
+| "The root cause is obvious." | Write the chain trigger->...->wrong output in one line. If you can't, you have a symptom, not the cause. |
+| "It's an edge case." | Then state the concrete input that hits the faulty line and the wrong output it yields — a category name proves nothing. |
+
+## No placeholders
+Don't ship "added a defensive check" as the whole root-cause story; an "edge case" with no concrete triggering input; or a "root cause" that just restates the symptom in other words.
+
+## Shallow example (reject this)
+"Root cause: the function returned null. Fix: added a null check." That restates the symptom (null appeared) as if it were the cause. The real root cause names *why* it was null — which upstream path left it unset and under what trigger. Reject and trace it.
+
 ## Orchestration (consult first)
 Before heavy/independent/parallelizable steps, the **`dispatch-strategy`** skill chooses the mechanism (main loop / sub-agent / dynamic-workflow / agent-team) using `docs/runtime-adapter.md` for runtime-specific equivalents. Delegate heavy root-cause exploration and multi-lens verification; don't run everything serially in the main loop.
 

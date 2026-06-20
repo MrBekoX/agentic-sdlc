@@ -11,6 +11,19 @@ description: Use first in any language to create, edit, test, evaluate, optimize
 > machinery (evals, the review viewer, packaging) is reused from `skill-creator`; this skill owns
 > the *method*, not a parallel toolset.
 
+## Depth contract (proportional — scale rigor to the change)
+Every claim that the skill helps rides on a captured RED baseline and a GREEN re-run of the *same* task, then a held-out phrasing proving it generalizes — not on how the prose reads. Each kept line earns its place against a failure you actually watched happen; a section for a problem you never observed is dead weight, cut it. "It triggers / passes / works" is incomplete until it carries the run output, the transcript, or the diff that shows it. A heavier edit earns more measurement (more held-out phrasings, the transcript read in full); a one-line tweak still names the symptom it removes.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "It looks right, ship it." | Show the baseline failure it fixes — no RED, no evidence it helps. |
+| "Passes my three prompts." | Run a held-out phrasing; three prompts is overfitting. |
+| "It triggers now." | Paste the run output or transcript line that shows it firing — asserting it isn't measuring it. |
+
+## No placeholders
+A skill section for a problem you never observed is speculation, not a fix — drop it until a baseline demonstrates the failure. "Works" with no transcript or diff is an assertion wearing the costume of evidence. Wording tuned to the exact test prompts passes the test and fails the million real ones; tune to the symptom, then prove it on phrasing you didn't write to.
+
 ## Why this exists
 
 A skill that was never measured against a baseline is a guess. The common failure mode is

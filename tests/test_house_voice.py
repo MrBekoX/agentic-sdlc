@@ -124,13 +124,38 @@ class TestGithubMaintenance(unittest.TestCase):
             self.assertIn(field, pr)
 
 
+# --- L1 depth-forcing rolled out to every discipline skill ---
+# Each target skill carries the depth block: a proportional Depth contract, an
+# ASCII `## Excuse -> check` table (distinct from the v0.3.0 Unicode `## Excuse → check`
+# correctness table, so both coexist on full-conversion skills without colliding),
+# and a No-placeholders ban. spec-authoring + plan-authoring are the merged templates.
+DEPTH_FORCING_SKILLS = [
+    "spec-authoring", "plan-authoring",
+    # full-conversion skills (also keep the Unicode Excuse → check from v0.3.0)
+    "root-cause-fix", "safe-refactor", "test-authoring", "security-audit",
+    "code-quality-review", "implementasyon-control", "feature-build",
+    # lighter / special skills (proportional depth, scaled to role)
+    "completion-claim-gate", "mind-spark", "dispatch-strategy",
+    "feedback-triage", "skill-authoring", "using-agentic-sdlc",
+    "agentic-sdlc-pipeline",
+]
+
+# The ASCII heading the depth block uses; kept distinct from the Unicode form on purpose.
+DEPTH_EXCUSE_HEADING = "## Excuse -> check"
+
+
 class TestDepthForcingPresent(unittest.TestCase):
-    def test_spec_plan_authoring_carry_depth_block(self):
-        for name in ("spec-authoring", "plan-authoring"):
+    def test_every_discipline_skill_carries_depth_block(self):
+        missing = []
+        for name in DEPTH_FORCING_SKILLS:
             text = (REPO / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
-            self.assertIn("## Depth contract", text)
-            self.assertIn("## Excuse → check".replace("→", "->"), text)  # arrow ASCII in these blocks
-            self.assertIn("No placeholders", text)
+            if "## Depth contract" not in text:
+                missing.append(f"{name}: ## Depth contract")
+            if DEPTH_EXCUSE_HEADING not in text:
+                missing.append(f"{name}: {DEPTH_EXCUSE_HEADING}")
+            if "## No placeholders" not in text:
+                missing.append(f"{name}: ## No placeholders")
+        self.assertEqual(missing, [], f"missing depth-forcing block: {missing}")
 
 
 if __name__ == "__main__":

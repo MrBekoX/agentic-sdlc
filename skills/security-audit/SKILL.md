@@ -26,6 +26,26 @@ Per finding: file:line, the vulnerable input→sink flow, and a masked example. 
 | "It looks fine." | Looking is not auditing. Trace the untrusted input to the sink. |
 | "It's internal-only." | Internal IDOR/injection still ships and still breaches. |
 
+## Depth contract (proportional — scale rigor to the change)
+Scale depth to the diff: a config tweak needs less than a new request handler, but every verdict you reach must rest on a traced flow, not a glance.
+- Each finding traces the untrusted input from its entry point through every transformation to the dangerous sink, naming both ends — `req.query.id` (source) → `db.query(\`...${id}\`)` (sink) at `file:line`. A finding with no input→sink trace is a guess.
+- A "clean" verdict names the surfaces actually traced and, for each untrusted input, why it cannot reach a sink (parameterized, encoded, allow-listed, never concatenated). "Clean" that names nothing checked is untested.
+- Severity is justified by concrete impact — what the attacker gains (reads another tenant's rows, executes shell, forges a session) — not a bare label.
+- Trace the failure and bypass paths, not only the happy path: the empty token, the unexpected type, the request that skips the guard.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "It's validated upstream." | Name where it's validated, and show the validated value is the same one that reaches the sink — not a re-read or sibling field. |
+| "There's no user input here." | Name every parameter and where it originates; one sourced from a request, header, or file IS user input. |
+| "Severity is High." | Add the impact sentence: what does the attacker actually get when they exploit it? |
+
+## No placeholders
+Do not write "treat as safe" or "standard string handling". Do not write "no concerns" without the traced surfaces behind it. Do not assign a severity with no impact sentence. Do not call a surface "clean" while naming nothing you checked.
+
+## Shallow example (reject this)
+A report whose only reasoning is "standard string handling, no issues" asserts safety without tracing a single input to a sink. Reject it: name the surfaces you traced and, per untrusted input, the reason it cannot reach a sink.
+
 ## Orchestration (consult first)
 Per **`dispatch-strategy`** and `docs/runtime-adapter.md`: multiple independent lenses (injection / authz-IDOR / secrets / auth) fan out to a dynamic-workflow, agent-team, subagents, or the runtime's parallel equivalent. Heavy single-lens analysis should use a fresh-context `security-reviewer` specialist when available. If the runtime lacks a fresh-context specialist, record `Delegation Degraded: fresh-context specialist unavailable`, perform the pass in the main loop, and mark the result non-independent.
 

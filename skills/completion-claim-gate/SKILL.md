@@ -13,6 +13,19 @@ description: Use first in any language as the evidence gate before saying work i
 ## Invariant
 A completion claim is only as true as the fresh output you just read — not memory, not the shape of the diff.
 
+## Depth contract (proportional — scale rigor to the change)
+The evidence must be specific to **this** claim and **this** change: the exact command with its scope (the path or test id you ran, not "the tests"), the exact summary line with its counts including skips (N passed, 0 failed, 0 skipped), produced by a run after your latest edit. A claim backed by a bare "tests pass" — no runner named, no scope, no counts — has named a hope, not run a gate. Proportional: even a one-line claim names its single proof line; a larger claim names one per assertion it makes.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "I'll just say tests pass." | Name the runner, the scope you ran, and the N passed / 0 failed / 0 skipped line. A bare "pass" is not a claim. |
+| "The summary is close enough." | Close is not matching. The output must say what the claim says — skips and all — or the claim overreaches the evidence. |
+| "I'll just say it works." | "Works" names no command. State the path you exercised and what you observed, or you have not gated the claim. |
+
+## No placeholders
+A completion claim carried by a vague word — "works", "fine", "good", "all set" — with no command-plus-output line behind it is not gated; replace the word with the proof. Evidence from before your latest edit describes a state that no longer exists — re-run. A pass count that hides skips ("12 passed" when 3 were skipped) is not a clean run — quote the skip count too.
+
 ## Why this exists
 
 The expensive failures are confident wrong claims: "fixed" when the bug still reproduces, "tests

@@ -12,6 +12,23 @@ description: This skill should be used first as the AGENTIC-SDLC pre-spec intent
 > it costs the code, the rework, and the user's trust. It owns *intent + design only*. The moment the
 > design is approved it hands off to the spec-driven flow and stops — it does not write the spec or plan.
 
+## Depth contract (proportional — scale rigor to the change)
+The design you present and get approved must carry real shape, scaled to the task but never a bare echo of the request. Name the actual units/components involved and how they talk to each other — not "a dashboard" but which piece reads what and renders where. Surface the notable error/edge paths the questions exposed (empty state, failure of the upstream call, the limit that bites), each as a concrete scenario, not a category. State a concrete "success looks like" signal the user can recognize — an observable behavior or output, never "it works". For each of the 2-3 approaches, state the one trade-off that actually distinguishes it from the others (what it buys, what it costs); three phrasings of the same idea is one approach, not three. A trivial change earns a two-sentence design — short and concrete, never short and hollow.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "It's too simple to design." | State the two-sentence design — purpose, shape, success signal — and still get the explicit yes. Simple is cheap to confirm, which is exactly why you confirm it. |
+| "They said just build it." | An explicit build instruction names the *what*, not the *how* — confirm the design before any code. Sounding ready to build is the case this gate exists for, not an exception to it. |
+| "The approaches all kind of work." | Then name the trade-off that separates them; if you can't, you have one approach reworded, and the choice is fake. |
+| "Success is obvious — it just works." | Then state the observable signal that proves it: what the user sees, what the output is, what stops happening. "It works" is not a success criterion. |
+
+## No placeholders
+Do not present a design that only restates the request in new words. Do not offer approaches with no distinguishing trade-off, or a "success looks like" of "it works" / "it's done". Do not refine details of a request that is really several independent subsystems before you've decomposed it and picked the first sub-project. If the design names no units, no edges, and no concrete success signal, it is not a design — it is a restated prompt.
+
+## Shallow example (reject this)
+"I'll add a dashboard that shows the data — sound good?" presented as a design is a restatement: it names no units (what reads the data, what renders it), no edge paths (empty data, slow query, permission gap), and no concrete success signal (what does the user see when it's right?). It would get a reflexive yes and hide every assumption that matters. Reject it; present the shape and the success signal, then get the yes.
+
 ## Why this exists
 
 Most wasted implementation work traces back to a design no one confirmed. The model reads "add a
