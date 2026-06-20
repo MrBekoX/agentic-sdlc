@@ -38,8 +38,8 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 1. Locate the approved spec, ticket, design, or explicit WHAT in the current session or files.
 2. Refuse to invent missing behavior. If the WHAT is absent or contradictory, stop and ask for clarification or route to `spec-authoring`.
 3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
-4. If a durable artifact is requested or the work is substantial, save the plan as `docs/plans/<name>.md`.
-5. Validate saved plans with `python "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/plans/<name>.md --spec docs/specs/<name>.md --strict`, resolving `<runtime-root>` from the active runtime as described in `docs/runtime-adapter.md`.
+4. If a durable artifact is requested or the work is substantial, save the plan as `docs/agentic-sdlc/plans/<work_id>.md` with `work_id`, `spec`, `branch`, and `status` frontmatter.
+5. Validate saved plans with `python "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/agentic-sdlc/plans/<work_id>.md --spec docs/agentic-sdlc/specs/<work_id>.md --strict`, resolving `<runtime-root>` from the active runtime as described in `docs/runtime-adapter.md`.
 6. Present open decisions and stop. Do not implement unless the user asks.
 
 ## Output

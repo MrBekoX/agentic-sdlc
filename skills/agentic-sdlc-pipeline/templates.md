@@ -15,7 +15,7 @@ Risks:
 Initial hypothesis:
 ```
 
-## Spec (step 4 — the WHAT, code-independent) — save approved to `docs/specs/<name>.md`
+## Spec (step 4 — the WHAT, code-independent) — save approved to `docs/agentic-sdlc/specs/<work_id>.md`
 ```md
 # Spec: <name>
 ## Problem / Goal / Non-goals
@@ -29,7 +29,7 @@ Initial hypothesis:
 ```
 Do **not** leak the HOW (files/methods) into the spec.
 
-## Plan (step 5 — the HOW) — save approved to `docs/plans/<name>.md`
+## Plan (step 5 — the HOW) — save approved to `docs/agentic-sdlc/plans/<work_id>.md`
 ```md
 # Implementation Plan
 ## Task N: <title>

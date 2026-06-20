@@ -72,7 +72,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Purpose:** full-envelope SDLC orchestrator for production-impacting, end-to-end work.
 - **Should trigger:** user asks for end-to-end implementation with spec, plan, TDD, tests, security review, PR-ready diff; production-impacting areas (auth, payment, DB migration, API contract, permissions, user data, token/session, RLS).
 - **Should NOT trigger:** narrow feature/fix/test/spec/plan/refactor/review/audit requests; as the default for every implementation question.
-- **Produces:** approved `docs/specs/<name>.md` + `docs/plans/<name>.md`, implementation, tests, security findings, final implementation report.
+- **Produces:** approved `docs/agentic-sdlc/specs/<work_id>.md` + `docs/agentic-sdlc/plans/<work_id>.md`, implementation, tests, security findings, final implementation report.
 - **Delegates to:** `dispatch-strategy`; `root-cause-fix`/`feature-build`/`safe-refactor`/`test-authoring` for the core; `security-audit`, `implementasyon-control`, `completion-claim-gate` for gates.
 - **Contracts:** all of `00`–`10`.
 
@@ -81,7 +81,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Purpose:** produce the WHAT — requirements, acceptance criteria, edge cases, definition of done.
 - **Should trigger:** "write a spec / acceptance criteria / requirements contract / WHAT document"; extract problem, business rules, edge cases, must-not-change behaviors, definition of done.
 - **Should NOT trigger:** implementation task breakdown or sequencing (→ `plan-authoring`); ambiguous design exploration (→ `mind-spark`); end-to-end build/test/security (→ `agentic-sdlc-pipeline`).
-- **Produces:** a spec summary, and when saved `docs/specs/<name>.md` validated by `validate_artifacts.py`.
+- **Produces:** a spec summary, and when saved `docs/agentic-sdlc/specs/<work_id>.md` validated by `validate_artifacts.py`.
 - **Delegates to:** `plan-authoring` if the user then asks for HOW; the pipeline if escalated; `mind-spark` if intent is still ambiguous.
 - **Contracts:** `00`, `01`, `02`.
 
@@ -90,7 +90,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Purpose:** produce the HOW — task breakdown, sequencing, affected surfaces, verification plan.
 - **Should trigger:** "write an implementation plan / task breakdown / HOW document / sequence plan"; turn acceptance criteria into ordered tasks with TDD points and risks.
 - **Should NOT trigger:** spec-only requests (→ `spec-authoring`); test-only/code/ambiguous-design prompts; when there is no approved WHAT (inventing missing behavior is forbidden).
-- **Produces:** a plan summary, AC→task mapping, and when saved `docs/plans/<name>.md` validated by `validate_artifacts.py`.
+- **Produces:** a plan summary, AC→task mapping, and when saved `docs/agentic-sdlc/plans/<work_id>.md` validated by `validate_artifacts.py`.
 - **Delegates to:** `feature-build`/`root-cause-fix`/`safe-refactor`/`test-authoring` for execution; the pipeline only for full-envelope work.
 - **Contracts:** `00`, `01`, `03` (uses `02` for WHAT coverage).
 

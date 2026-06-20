@@ -57,7 +57,7 @@ them. Use routing/trigger `--runs ≥3`.
 | `using-agentic-sdlc` routing — Codex `high` | **15/15 passed** (`gpt-5.3-codex-spark`, `runs=3`) | satisfies the Codex routing evidence requirement |
 | 16-skill trigger matrix — Codex | **16/16 passed** (`low`, after classifier-prompt fix) | `low` is fix-verification; re-confirm at `high` for publish. Pre-fix 12/16 was an eval-tool gap (trigger classifier prompt lacked the over-escalation/feeder guards the routing classifier has), now aligned |
 | `agentic-sdlc-pipeline` procedure — Claude | Sonnet 2/2 at `--max-budget-usd 6`; Haiku 1/3 (floor) | `$2` default cut strong-model runs off mid-run → default raised to `5.00` |
-| `agentic-sdlc-pipeline` procedure — Codex adapter | **`procedure_eval=passed`** (deterministic transcript) | adapter patterns present: `spec-plan-author/critic`, "Workflow unavailable/embedded adapter", `docs/specs/`, `docs/plans/`, all gates. Live `codex exec` procedure run not executed this session (5h quota); adapter behavior verified deterministically |
+| `agentic-sdlc-pipeline` procedure — Codex adapter | **`procedure_eval=passed`** (deterministic transcript) | adapter patterns present: `spec-plan-author/critic`, "Workflow unavailable/embedded adapter", `docs/agentic-sdlc/specs/`, `docs/agentic-sdlc/plans/`, all gates. Live `codex exec` procedure run not executed this session (5h quota); adapter behavior verified deterministically |
 
 Eval-infra fixes made during the sweep (all on `main`): routing-eval early-stop + `runs=3` default;
 implementasyon-control/router call-order guards; `safe-refactor`/`skill-authoring`/`completion-claim-gate`

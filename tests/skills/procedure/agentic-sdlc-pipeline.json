@@ -38,8 +38,8 @@
             "completion-claim-gate",
             "spec-plan-author",
             "spec-plan-critic",
-            "docs/specs/",
-            "docs/plans/"
+            "docs/agentic-sdlc/specs/",
+            "docs/agentic-sdlc/plans/"
           ]
         }
       ],
@@ -48,8 +48,8 @@
         "validate_artifacts\\.py"
       ],
       "required_artifacts": [
-        "docs/specs/",
-        "docs/plans/"
+        "docs/agentic-sdlc/specs/",
+        "docs/agentic-sdlc/plans/"
       ],
       "forbidden_commands": [
         "\\bgit\\s+commit\\b",

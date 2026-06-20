@@ -29,6 +29,11 @@ docs/*
 !docs/specs/*.md
 !docs/plans/
 !docs/plans/*.md
+!docs/agentic-sdlc/
+!docs/agentic-sdlc/specs/
+!docs/agentic-sdlc/specs/*.md
+!docs/agentic-sdlc/plans/
+!docs/agentic-sdlc/plans/*.md
 
 # Optional tool reference snapshots
 mcps/

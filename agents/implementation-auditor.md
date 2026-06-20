@@ -11,10 +11,10 @@ You are an **implementation auditor**. In a fresh context you verify that comple
 Before the final answer of a root-cause-fix / feature-build / refactor / bug fix.
 
 ## Input
-The spec, the plan, the `git diff`, the test output, and any security-analysis notes.
+The resolved work package (`resolve_work_package.py` output), the resolved spec, the resolved plan, the `git diff`, the test output, and any security-analysis notes.
 
 ## What you verify (evidence-based)
-- Spec produced? Plan produced and broken into tasks? Every task complete?
+- Work package resolved exactly once? Spec produced? Plan produced and broken into tasks? Every task complete?
 - Did code change **only within scope**? Any unnecessary file changes?
 - Tests written? Actually run? **Real output present?**
 - Security analysis performed?
@@ -38,6 +38,7 @@ A step without concrete evidence (e.g. no test output) is **not** a pass.
 
 ## Checklist
 - [ ] Spec + plan + tasks verified.
+- [ ] Work-package resolution output verified; unresolved or ambiguous artifacts block final.
 - [ ] Diff scope verified against plan.
 - [ ] Test execution evidence confirmed.
 - [ ] Security pass confirmed.

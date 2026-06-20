@@ -143,17 +143,17 @@ class TestProcedureEvalHarness(unittest.TestCase):
             "shell_command",
             {"command": "python ${PLUGIN_ROOT}/scripts/detect_context.py --path ."},
         )
-        procedure_eval._record_tool(trace, "write_file", {"file_path": "docs/specs/greeting-suffix.md"})
+        procedure_eval._record_tool(trace, "write_file", {"file_path": "docs/agentic-sdlc/specs/greeting-suffix.md"})
         procedure_eval._record_tool(
             trace,
             "shell_command",
-            {"command": "python ${PLUGIN_ROOT}/scripts/validate_artifacts.py --mode spec --file docs/specs/greeting-suffix.md"},
+            {"command": "python ${PLUGIN_ROOT}/scripts/validate_artifacts.py --mode spec --file docs/agentic-sdlc/specs/greeting-suffix.md"},
         )
-        procedure_eval._record_tool(trace, "write_file", {"file_path": "docs/plans/greeting-suffix.md"})
+        procedure_eval._record_tool(trace, "write_file", {"file_path": "docs/agentic-sdlc/plans/greeting-suffix.md"})
         procedure_eval._record_tool(
             trace,
             "shell_command",
-            {"command": "python ${PLUGIN_ROOT}/scripts/validate_artifacts.py --mode plan --file docs/plans/greeting-suffix.md --spec docs/specs/greeting-suffix.md --strict"},
+            {"command": "python ${PLUGIN_ROOT}/scripts/validate_artifacts.py --mode plan --file docs/agentic-sdlc/plans/greeting-suffix.md --spec docs/agentic-sdlc/specs/greeting-suffix.md --strict"},
         )
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:security-audit"})
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:implementasyon-control"})

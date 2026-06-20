@@ -78,7 +78,7 @@ using-agentic-sdlc
 
 `using-agentic-sdlc` routes ordinary work to the smallest sufficient independent skill. Those skills are first-class entry points: users can invoke them directly, and they remain useful without the full pipeline.
 
-`agentic-sdlc-pipeline` is the escalation path for end-to-end or high-risk work. It owns the outer envelope: git lifecycle, analysis, spec/plan phases, validation, scope lock, quality gates, security passes, final audit, and evidence-before-claim discipline. It then feeds the approved `docs/specs/<name>.md` and `docs/plans/<name>.md` into the matching core skill:
+`agentic-sdlc-pipeline` is the escalation path for end-to-end or high-risk work. It owns the outer envelope: git lifecycle, analysis, spec/plan phases, validation, scope lock, quality gates, security passes, final audit, and evidence-before-claim discipline. It then feeds the approved `docs/agentic-sdlc/specs/<work_id>.md` and `docs/agentic-sdlc/plans/<work_id>.md` into the matching core skill:
 
 | Pipeline core need | Delegated skill |
 |---|---|
@@ -102,7 +102,7 @@ workflows/         Claude Code dynamic workflow scripts
 hooks/             Deterministic guard scripts and runtime hook wiring
 contracts/skills/  Durable behavior contracts
 commands/          Manual slash-command definitions
-scripts/           13 Python helpers: probes, validators, eval runners, versioning
+scripts/           14 Python helpers: probes, validators, eval runners, versioning
 tests/             Unit tests, harness, fixtures, golden refs, eval seeds
 docs/              Component reference, boundaries, testing, release notes
 ```

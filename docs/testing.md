@@ -295,7 +295,7 @@ For each case, the evaluator parses the transcript into a trace and checks:
 |---|---|
 | Required skills | A `Skill` tool invocation whose payload contains the expected skill name, a mapped specialist `Agent`/`Task`, or a `required_runtime_adapters[].satisfies` entry with all adapter patterns present. |
 | Required workflows | A `Workflow` tool invocation whose payload contains the expected workflow name, or a `required_runtime_adapters[].satisfies` entry with all adapter patterns present. |
-| Runtime adapter evidence | Regex patterns in `required_runtime_adapters[].required_patterns` proving the runtime-equivalent path, such as `Workflow unavailable`, `spec-plan-author`, `spec-plan-critic`, `docs/specs/`, `docs/plans/`, and activated delegate-skill instructions. |
+| Runtime adapter evidence | Regex patterns in `required_runtime_adapters[].required_patterns` proving the runtime-equivalent path, such as `Workflow unavailable`, `spec-plan-author`, `spec-plan-critic`, `docs/agentic-sdlc/specs/`, `docs/agentic-sdlc/plans/`, and activated delegate-skill instructions. |
 | Required commands | A regex match against the `command` field of any tool invocation recorded in the trace. |
 | Required artifacts | Either a `Write` tool `file_path` matching the pattern, or an existing file glob under the case working directory. |
 | Forbidden commands | A regex match against recorded `command` fields; if any match, the case fails. |
@@ -324,7 +324,7 @@ For each case, the evaluator parses the transcript into a trace and checks:
         }
       ],
       "required_commands": ["detect_context\\.py", "validate_artifacts\\.py"],
-      "required_artifacts": ["docs/specs/", "docs/plans/"],
+      "required_artifacts": ["docs/agentic-sdlc/specs/", "docs/agentic-sdlc/plans/"],
       "forbidden_commands": ["\\bgit\\s+commit\\b", "\\bgit\\s+push\\b", "\\bgit\\s+merge\\b"],
       "required_patterns": [],
       "forbidden_patterns": [],
@@ -345,16 +345,23 @@ For each case, the evaluator parses the transcript into a trace and checks:
 
 ```bash
 # Validate a spec
-python3 scripts/validate_artifacts.py --mode spec --file docs/specs/example.md
+python3 scripts/validate_artifacts.py --mode spec --file docs/agentic-sdlc/specs/example.md
 
 # Validate a plan against its spec
-python3 scripts/validate_artifacts.py --mode plan --file docs/plans/example.md --spec docs/specs/example.md
+python3 scripts/validate_artifacts.py --mode plan --file docs/agentic-sdlc/plans/example.md --spec docs/agentic-sdlc/specs/example.md
 
 # Run both spec and plan checks together
-python3 scripts/validate_artifacts.py --mode all --file docs/plans/example.md --spec docs/specs/example.md
+python3 scripts/validate_artifacts.py --mode all --file docs/agentic-sdlc/plans/example.md --spec docs/agentic-sdlc/specs/example.md
 
 # Promote every warning to a gating error
-python3 scripts/validate_artifacts.py --mode plan --file docs/plans/example.md --spec docs/specs/example.md --strict
+python3 scripts/validate_artifacts.py --mode plan --file docs/agentic-sdlc/plans/example.md --spec docs/agentic-sdlc/specs/example.md --strict
+```
+
+`scripts/resolve_work_package.py` is the deterministic identity gate for implementation audits. It resolves the active `docs/agentic-sdlc/specs/<work_id>.md` + `docs/agentic-sdlc/plans/<work_id>.md` pair from an explicit path, unique branch match, or unique changed canonical plan. It never chooses by newest timestamp.
+
+```bash
+python3 scripts/resolve_work_package.py --plan docs/agentic-sdlc/plans/example.md
+python3 scripts/resolve_work_package.py
 ```
 
 ### What it checks
