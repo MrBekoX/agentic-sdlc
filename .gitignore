@@ -27,13 +27,6 @@ docs/*
 # Tracked dogfooding artifacts (nested un-ignore: dir first, then files).
 !docs/specs/
 !docs/specs/*.md
-!docs/plans/
-!docs/plans/*.md
-!docs/agentic-sdlc/
-!docs/agentic-sdlc/specs/
-!docs/agentic-sdlc/specs/*.md
-!docs/agentic-sdlc/plans/
-!docs/agentic-sdlc/plans/*.md
 
 # Optional tool reference snapshots
 mcps/
