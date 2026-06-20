@@ -113,12 +113,13 @@ The scripts are shared, but runtime wiring differs.
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
-## 11. Deterministic scripts (13)
+## 11. Deterministic scripts (14)
 
 | Script | Purpose |
 |---|---|
 | `check_all.py` | Skill frontmatter and validator tests. |
 | `validate_artifacts.py` | Spec/plan structural validation and secret/placeholder scan. |
+| `resolve_work_package.py` | Deterministically resolves the spec/plan pair for implementation audits. |
 | `detect_context.py` | Workspace/dependency/toolchain classification. |
 | `run_trigger_eval.py` | Claude Code trigger eval runner. |
 | `run_codex_trigger_eval.py` | Codex route-classifier trigger runner. |
