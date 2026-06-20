@@ -13,13 +13,13 @@ Full Mode is not satisfied by inline summaries of other skills. Use `docs/runtim
 - `Skill` -> `agentic-sdlc:implementasyon-control` before finalizing.
 - `Skill` -> `agentic-sdlc:completion-claim-gate` before any success/completion/ready claim.
 
-In non-Claude Agent Skills runtimes such as Codex, OpenCode, and Kimi Code, Claude Code `Workflow` calls are not available. Keep `spec-authoring` and `plan-authoring` as independent entry skills; agentic-sdlc-pipeline does not invoke them for steps 4-5. Instead, agentic-sdlc-pipeline runs the embedded adapter:
+In Codex, the other supported runtime, Claude Code `Workflow` calls are not available. Keep `spec-authoring` and `plan-authoring` as independent entry skills; agentic-sdlc-pipeline does not invoke them for steps 4-5. Instead, agentic-sdlc-pipeline runs the embedded adapter:
 - Draft the spec/plan in the main loop using `spec-plan-author` role instructions and contracts 02/03.
 - Run a fresh-context critic pass with the runtime's subagent/specialist mechanism using `spec-plan-critic` instructions when available.
 - Revise up to two rounds, save the artifact, then run `validate_artifacts.py`.
 - If fresh-context specialists are unavailable, record `Delegation Degraded: fresh-context specialist unavailable` and perform the critic pass inline.
 
-Resolve `<runtime-root>` as `${CLAUDE_PLUGIN_ROOT}` in Claude Code, `${PLUGIN_ROOT}` in Codex, or the configured plugin/skill root in OpenCode and Kimi Code for contract and script paths.
+Resolve `<runtime-root>` as `${CLAUDE_PLUGIN_ROOT}` in Claude Code, `${PLUGIN_ROOT}` in Codex for contract and script paths.
 
 If a tool is missing in the runtime, record `Delegation Degraded: <tool/name>` and continue with the smallest safe fallback. If the tool exists, skipping the call is a failed gate. Manual Read/Glob/ls exploration does not replace `detect_context.py`; manual review text does not replace `validate_artifacts.py`; manual TDD/edit/test work does not replace the selected core work-flow Skill call.
 
@@ -35,7 +35,7 @@ Call-order rule: `dispatch-strategy` is the first delegate call before Read/Bash
 | Behavior-preserving restructure | `safe-refactor` | characterization-test guard + envelope |
 | Test coverage only | `test-authoring` | envelope (usually no migration/git-PR) |
 
-agentic-sdlc-pipeline **owns the Spec and Plan phases directly** (steps 4–5). Claude Code uses the `spec-plan-draft` workflow with review gates; non-Claude Agent Skills runtimes use the embedded author/critic adapter because the Claude Workflow runtime is not available there. agentic-sdlc-pipeline persists the artifacts to **`docs/specs/`** and **`docs/plans/`**, then hands the **approved spec + plan files** to the core work-flow, which executes the implementation core — RED → GREEN → security#1 → refactor → retest → `implementasyon-control` (steps 8–13) — **faithfully to those two files**. The work-flow consumes the provided spec/plan and does not re-draft them.
+agentic-sdlc-pipeline **owns the Spec and Plan phases directly** (steps 4–5). Claude Code uses the `spec-plan-draft` workflow with review gates; Codex uses the embedded author/critic adapter because the Claude Workflow runtime is not available there. agentic-sdlc-pipeline persists the artifacts to **`docs/specs/`** and **`docs/plans/`**, then hands the **approved spec + plan files** to the core work-flow, which executes the implementation core — RED → GREEN → security#1 → refactor → retest → `implementasyon-control` (steps 8–13) — **faithfully to those two files**. The work-flow consumes the provided spec/plan and does not re-draft them.
 
 ---
 
@@ -61,13 +61,13 @@ Manual file reads, `ls`, `Glob`, or a direct `pytest` discovery run are useful a
 
 ### 4. Spec phase (WHAT) — Claude Code workflow or runtime adapter
 In Claude Code, invoke the **`Workflow` tool** for **`agentic-sdlc:spec-plan-draft`** with `args:{ mode:'spec', context:<analysis + scope> }`. It is a **2-step conversational loop**: `spec-plan-author` drafts → `spec-plan-critic` adversarially audits (missing criteria/edge-cases, HOW-leak, contradictions) → author revises (≤2 rounds) → closing audit. Returns a spec draft + **decision points**.
-In Codex, OpenCode, Kimi Code, and similar non-Claude runtimes, do not call standalone `spec-authoring`. Draft the spec inside agentic-sdlc-pipeline using `contracts/skills/02-spec-driven-development.md` and the `spec-plan-author` role instructions, then run a fresh-context critic pass with `spec-plan-critic` instructions when available. Revise up to two rounds; if fresh-context specialists are unavailable, mark the degraded path and perform the critic pass inline. Spec = the WHAT only (no files/layers/tasks/code), per the **Spec** template (`templates.md`).
+In Codex, do not call standalone `spec-authoring`. Draft the spec inside agentic-sdlc-pipeline using `contracts/skills/02-spec-driven-development.md` and the `spec-plan-author` role instructions, then run a fresh-context critic pass with `spec-plan-critic` instructions when available. Revise up to two rounds; if fresh-context specialists are unavailable, mark the degraded path and perform the critic pass inline. Spec = the WHAT only (no files/layers/tasks/code), per the **Spec** template (`templates.md`).
 Use the named workflow only in Claude Code. Do not create an ad hoc Workflow script for spec drafting.
 **Spec Review gate:** resolve the decision points WITH the user (AskUserQuestion); a spec with unresolved decisions or untestable criteria does not pass. On approval, **write the spec to `docs/specs/<kebab-name>.md`** (create the folder if missing), then run `python "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/specs/<kebab-name>.md`. The validator must pass before the review gate can be treated as approved, including automated smoke evals. This file is the authoritative WHAT for the rest of the flow.
 
 ### 5. Plan phase (HOW) — Claude Code workflow or runtime adapter
 After the spec file is approved, in Claude Code invoke the **`Workflow` tool** for **`agentic-sdlc:spec-plan-draft`** with `args:{ mode:'plan', context:<approved spec> }` — same 2-step author⇄critic conversation. Returns the technical task list (Task 1..N), file-level change map, dependency order, and per-behavior RED-test points, covering **every** acceptance criterion of the spec.
-In Codex, OpenCode, Kimi Code, and similar non-Claude runtimes, do not call standalone `plan-authoring`. Draft the plan inside agentic-sdlc-pipeline using `contracts/skills/03-plan-mode.md`, the approved spec, and the `spec-plan-author` role instructions; then run the same fresh-context critic/revise adapter. Use the named workflow only in Claude Code. Do not create an ad hoc Workflow script for plan drafting.
+In Codex, do not call standalone `plan-authoring`. Draft the plan inside agentic-sdlc-pipeline using `contracts/skills/03-plan-mode.md`, the approved spec, and the `spec-plan-author` role instructions; then run the same fresh-context critic/revise adapter. Use the named workflow only in Claude Code. Do not create an ad hoc Workflow script for plan drafting.
 **Plan Review gate:** user approval (contract 03); large/architectural plans need explicit approval. On approval, **write the plan to `docs/plans/<kebab-name>.md`** (same base name as the spec), then run `python "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/plans/<kebab-name>.md --spec docs/specs/<kebab-name>.md --strict`. The validator must pass before implementation starts, including automated smoke evals. From here the implementation phase follows **`docs/specs/<name>.md` + `docs/plans/<name>.md` faithfully** — no scope drift, no undocumented change; a new finding becomes a new task appended to the plan file, not a silent diff.
 
 ### 6. Context7 doc verification — agentic-sdlc-pipeline, fan-out per library

@@ -7,6 +7,9 @@ description: Use first in any language when the user asks only for an implementa
 
 > **Argument:** `/plan-authoring $ARGUMENTS` - if given, that is the target plan; otherwise infer from the latest user prompt. Match the user's language.
 
+## Invariant
+A plan maps every acceptance criterion to a small, testable task — HOW, not new WHAT.
+
 Own the HOW only: implementation tasks, ordering, affected surfaces, TDD points, verification, risks, and acceptance-criteria mapping. Do not edit product code.
 
 This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-end Plan phase and must not call `plan-authoring` as an internal substep.
@@ -17,13 +20,11 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 - **Contracts:** Apply the runtime-local contract files as the primary behavior contract:
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/contracts/skills/03-plan-mode.md`
   - Codex: `${PLUGIN_ROOT}/contracts/skills/03-plan-mode.md`
-  - OpenCode/Kimi Code: configured plugin or skill root.
   Use `02-spec-driven-development.md` from the same runtime root only as the source-WHAT coverage contract; do not rewrite the spec.
-- **Agents:** Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex, OpenCode, Kimi Code, or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
+- **Agents:** Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
 - **Validator:** Saved plans use the runtime-local validator with `--mode plan`:
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py`
   - Codex: `${PLUGIN_ROOT}/scripts/validate_artifacts.py`
-  - OpenCode/Kimi Code: `<runtime-root>/scripts/validate_artifacts.py`
 
 ## Route First
 
@@ -36,7 +37,7 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 
 1. Locate the approved spec, ticket, design, or explicit WHAT in the current session or files.
 2. Refuse to invent missing behavior. If the WHAT is absent or contradictory, stop and ask for clarification or route to `spec-authoring`.
-3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex, OpenCode, Kimi Code, or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
+3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
 4. If a durable artifact is requested or the work is substantial, save the plan as `docs/plans/<name>.md`.
 5. Validate saved plans with `python "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/plans/<name>.md --spec docs/specs/<name>.md --strict`, resolving `<runtime-root>` from the active runtime as described in `docs/runtime-adapter.md`.
 6. Present open decisions and stop. Do not implement unless the user asks.
@@ -51,7 +52,7 @@ Return:
 4. Verification plan.
 5. Evidence: source WHAT, contract(s) applied, workflow/degraded path, agent bindings, and validator result if saved.
 
-## Red Flags
+## Tripwires
 
 - Planning without a clear WHAT.
 - Editing code, tests, docs, or config as part of plan-only work.

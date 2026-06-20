@@ -9,6 +9,23 @@ description: Use first for a pre-final audit in any language that the implementa
 
 Runs before the final response of any implementation flow to confirm the work was done properly — not just that code exists. For a thorough audit it delegates to the **`implementation-auditor`** agent or runtime equivalent (fresh context, sees the diff and the spec/plan, not the reasoning that produced them).
 
+## Invariant
+The audit reports what the evidence shows — a step is "done" only when its artifact/output exists, and missing steps are named, not glossed.
+
+## Tripwires
+- marking a step done from memory, not from an artifact
+- "looks complete" without inspecting the diff
+- skipping the report because "the flow was obviously followed"
+
+## Proof
+Per step, the artifact/output that proves it: spec path, plan path, RED→GREEN, security pass, reviewed diff. Gaps listed explicitly.
+
+## Excuse → check
+| Excuse | Check |
+|---|---|
+| "The flow was clearly followed." | Then point to each artifact. If you can't, it wasn't. |
+| "No time to audit." | An unaudited "done" is exactly the failure this skill exists to catch. |
+
 ## What it checks
 - Was a **spec** produced? A **plan**? Was the plan broken into tasks?
 - Is every task complete?

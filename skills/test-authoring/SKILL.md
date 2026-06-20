@@ -9,6 +9,23 @@ description: Use first in any language to write, add, repair, or design tests be
 
 Designs and writes meaningful tests, or repairs broken ones.
 
+## Invariant
+A test that has never failed proves nothing — each test must be able to fail for the reason it guards.
+
+## Tripwires
+- wrote the test green-first without ever seeing it fail
+- asserting on implementation details instead of behavior
+- coverage went up but no behavior is actually pinned
+
+## Proof
+Each new test shown failing for the right reason before it passes; for characterization tests, the captured baseline.
+
+## Excuse → check
+| Excuse | Check |
+|---|---|
+| "It obviously tests X." | Break X and watch the test fail — that is the only proof it tests X. |
+| "Coverage is 100%." | Coverage is lines executed, not regressions caught. Assert behavior. |
+
 ## Test types
 - **Unit** — one unit in isolation; fast; dependencies faked.
 - **Integration** — real collaboration across components/boundaries (DB, queue, HTTP).

@@ -9,6 +9,23 @@ description: Use first in any language for code-quality review of a diff, file, 
 
 Reviews changes for quality. Best run in a **fresh context** (delegate to the **`code-reviewer`** sub-agent or runtime equivalent) so the review isn't biased toward code it just wrote.
 
+## Invariant
+Every comment points at a specific diff line and says what to change and why — blanket "looks good" is not a review.
+
+## Tripwires
+- approving without reading the full diff
+- comments with no file:line
+- style nits crowding out a real correctness bug
+
+## Proof
+The diff range reviewed (shown), findings as file:line + rationale, ordered by severity.
+
+## Excuse → check
+| Excuse | Check |
+|---|---|
+| "Small diff, skim it." | Small diffs hide the sharpest bugs. Read every line. |
+| "Tests pass, it's fine." | Passing tests do not make a change correct or maintainable. Review the change itself. |
+
 ## Orchestration (consult first)
 Per **`dispatch-strategy`** and `docs/runtime-adapter.md`: prefer a fresh-context specialist (`code-reviewer`) that sees only the diff + criteria, not the authoring reasoning. If the runtime supports a fresh-context specialist, use it. If it does not, record `Delegation Degraded: fresh-context specialist unavailable`, perform the pass in the main loop, and mark the result non-independent.
 

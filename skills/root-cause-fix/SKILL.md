@@ -9,6 +9,23 @@ description: Use first in any language to fix a bug, error, broken behavior, fai
 
 The primary fix workflow. Resolves a problem at its **root cause**, with the smallest change, verified by tests and a double security pass, and audited before the final answer. It is a **gated, looped** flow — don't skip steps; a red gate means go back, not forward.
 
+## Invariant
+A bug is fixed only when a test that failed *because of it* now passes — and nothing else changed.
+
+## Tripwires
+- the fix went in but no test reproduced the bug first
+- the change is widening past the one reported bug
+- tempted to refactor unrelated code while here
+
+## Proof
+The regression test shown RED before the fix and GREEN after, plus the full-suite output.
+
+## Excuse → check
+| Excuse | Check |
+|---|---|
+| "The fix is obvious." | An obvious fix still needs the failing-then-passing test; obvious fixes mis-target often. |
+| "The suite is slow." | A false "fixed" costs a round-trip plus a second bug. Run it. |
+
 ## Orchestration (consult first)
 Before heavy/independent/parallelizable steps, the **`dispatch-strategy`** skill chooses the mechanism (main loop / sub-agent / dynamic-workflow / agent-team) using `docs/runtime-adapter.md` for runtime-specific equivalents. Delegate heavy root-cause exploration and multi-lens verification; don't run everything serially in the main loop.
 

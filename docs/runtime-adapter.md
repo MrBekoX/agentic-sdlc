@@ -2,21 +2,21 @@
 
 AGENTIC-SDLC currently supports **Claude Code** and **Codex** as release targets. This file defines the portable capability vocabulary used by the skills and records how Claude Code and Codex satisfy those capabilities.
 
-OpenCode, Kimi Code, GLM-style harnesses, and similar runtimes are deferred adapter targets. Their names remain here only to make the portability boundary explicit and to keep historical/eval references understandable; they are not supported release targets for `0.2.7`.
-
 ## Portable Capability Matrix
 
-| Portable capability | Claude Code | Codex | OpenCode | Kimi Code | Degraded fallback |
-|---|---|---|---|---|---|
-| Load skill instructions | `Skill` tool | activated skill instructions or explicit skill mention | Deferred adapter target | Deferred adapter target | read runtime-local `SKILL.md`; record `Delegation Degraded: skill tool unavailable` |
-| Run spec-plan author/critic | `Workflow` -> `agentic-sdlc:spec-plan-draft` | embedded `agentic-sdlc-pipeline` adapter | Deferred adapter target | Deferred adapter target | main-loop author pass plus main-loop critic pass |
-| Fresh-context specialist | `Agent` / `Task` | Codex subagent when available | Deferred adapter target | Deferred adapter target | main-loop pass marked `Delegation Degraded: fresh context unavailable` |
-| Parallel fan-out | Workflow, agent-team, or multiple agents | subagent fan-out, parallel local tools, or best available native mechanism | Deferred adapter target | Deferred adapter target | sequential execution with explicit degraded note |
-| Task tracking | `TodoWrite` | `update_plan` or native task tracker | Deferred adapter target | Deferred adapter target | explicit checklist in the response |
-| Ask user | `AskUserQuestion` | direct user question or available input tool | Deferred adapter target | Deferred adapter target | stop at decision point |
-| Goal lock | `/goal` | active goal tool if available; otherwise manual lock | Deferred adapter target | Deferred adapter target | `# Goal Lock` artifact |
-| Loop fail-fix-retest | `/loop` | manual loop with command evidence | Deferred adapter target | Deferred adapter target | `# Loop Iteration` artifact |
-| Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}` | `${PLUGIN_ROOT}` | Deferred adapter target | Deferred adapter target | current repo root |
+| Portable capability | Claude Code | Codex | Degraded fallback |
+|---|---|---|---|
+| Load skill instructions | `Skill` tool | activated skill instructions or explicit skill mention | read runtime-local `SKILL.md`; record `Delegation Degraded: skill tool unavailable` |
+| Run spec-plan author/critic | `Workflow` -> `agentic-sdlc:spec-plan-draft` | embedded `agentic-sdlc-pipeline` adapter | main-loop author pass plus main-loop critic pass |
+| Fresh-context specialist | `Agent` / `Task` | Codex subagent when available | main-loop pass marked `Delegation Degraded: fresh context unavailable` |
+| Parallel fan-out | Workflow, agent-team, or multiple agents | subagent fan-out, parallel local tools, or best available native mechanism | sequential execution with explicit degraded note |
+| Task tracking | `TodoWrite` | `update_plan` or native task tracker | explicit checklist in the response |
+| Ask user | `AskUserQuestion` | direct user question or available input tool | stop at decision point |
+| Goal lock | `/goal` | active goal tool if available; otherwise manual lock | `# Goal Lock` artifact |
+| Loop fail-fix-retest | `/loop` | manual loop with command evidence | `# Loop Iteration` artifact |
+| Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}` | `${PLUGIN_ROOT}` | current repo root |
+
+> Other harnesses (OpenCode, Kimi, GLM-style) are future/unsupported work, not release targets.
 
 ## Evidence Rule
 

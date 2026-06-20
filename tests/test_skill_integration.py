@@ -60,12 +60,14 @@ class TestSkillCrossReferences(unittest.TestCase):
         ):
             self.assertIn(phrase, text)
 
-    def test_pipeline_references_runtime_adapter_and_non_claude_runtimes(self):
+    def test_pipeline_references_runtime_adapter_and_codex(self):
         text = (h.SKILLS_DIR / "agentic-sdlc-pipeline" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("runtime-adapter.md", text)
-        self.assertIn("OpenCode", text)
-        self.assertIn("Kimi Code", text)
+        self.assertIn("Codex", text)
         self.assertIn("Portable capability", text)
+        # Claude+Codex-only scope: the pipeline no longer enumerates other runtimes inline.
+        self.assertNotIn("OpenCode", text)
+        self.assertNotIn("Kimi Code", text)
 
     def test_adapter_dependent_skills_do_not_make_workflow_unconditional(self):
         skills = [
@@ -221,17 +223,21 @@ class TestDocConsistency(unittest.TestCase):
         path = h.REPO / "docs" / "runtime-adapter.md"
         self.assertTrue(path.exists(), "docs/runtime-adapter.md is required for cross-runtime adapter behavior")
         text = path.read_text(encoding="utf-8")
+        # Claude Code + Codex are the supported release runtimes.
         for phrase in (
             "Portable capability",
             "Claude Code",
             "Codex",
-            "OpenCode",
-            "Kimi Code",
             "Degraded fallback",
             "agentic-sdlc-pipeline",
             "spec-plan-draft",
         ):
             self.assertIn(phrase, text)
+        # Other harnesses may appear only as future/unsupported work, not as named release runtimes.
+        self.assertTrue(
+            any(m in text.lower() for m in ("future", "unsupported", "not release targets")),
+            "runtime-adapter.md should frame other harnesses as future/unsupported work",
+        )
 
 
 if __name__ == "__main__":

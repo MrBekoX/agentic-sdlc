@@ -25,6 +25,14 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertEqual(codex_plugin["skills"], "./skills/")
         self.assertNotIn("hooks", codex_plugin)
 
+    def test_marketplace_name_is_public_and_matches_readme(self):
+        mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        self.assertEqual(mp["name"], "mrbekox")
+        self.assertNotIn("dev", mp["name"])
+        readme = (REPO / "README.md").read_text(encoding="utf-8")
+        self.assertIn("agentic-sdlc@mrbekox", readme)
+        self.assertNotIn("agentic-sdlc@agentic-sdlc-dev", readme)
+
     def test_codex_manifest_uses_publishable_schema_keys(self):
         codex_plugin = json.loads((REPO / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         allowed_keys = {
