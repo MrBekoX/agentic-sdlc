@@ -17,6 +17,7 @@ Live mode:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -55,6 +56,7 @@ class Trace:
     tool_inputs: list[dict[str, Any]] = field(default_factory=list)
     commands: list[str] = field(default_factory=list)
     writes: list[str] = field(default_factory=list)
+    artifact_writes: list[tuple[str, str]] = field(default_factory=list)
     runtime_errors: list[str] = field(default_factory=list)
     permission_denials: list[str] = field(default_factory=list)
     text: str = ""
@@ -95,6 +97,9 @@ def _record_tool(trace: Trace, name: str, input_obj: Any) -> None:
     file_path = payload.get("file_path") if isinstance(payload, dict) else None
     if isinstance(file_path, str):
         trace.writes.append(file_path)
+    content = payload.get("content") if isinstance(payload, dict) else None
+    if isinstance(file_path, str) and isinstance(content, str):
+        trace.artifact_writes.append((file_path, content))
 
 
 def trace_events(events: list[dict[str, Any]]) -> Trace:
@@ -267,6 +272,53 @@ def runtime_adapter_satisfies(trace: Trace, case: dict[str, Any], kind: str, exp
     return False
 
 
+def _load_validator():
+    spec = importlib.util.spec_from_file_location("validate_artifacts", REPO / "scripts" / "validate_artifacts.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
+    """For each canonical spec/plan artifact written, validate its CONTENT in strict mode.
+
+    Content is taken from the transcript write (transcript mode) or the on-disk file
+    (live mode). A literal stub like "spec" fails validation -> shallow_artifact error.
+    """
+    validator = _load_validator()
+    errors: list[str] = []
+    # latest content wins if the same path is written more than once
+    latest: dict[str, str] = {}
+    for path, content in trace.artifact_writes:
+        norm = path.replace("\\", "/")
+        if "docs/agentic-sdlc/specs/" in norm or "docs/agentic-sdlc/plans/" in norm:
+            latest[norm] = content
+    for norm, content in sorted(latest.items()):
+        disk = cwd / norm
+        text = disk.read_text(encoding="utf-8") if disk.exists() else content
+        mode = "spec" if "/specs/" in norm else "plan"
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
+            tf.write(text)
+            tmp = Path(tf.name)
+        try:
+            spec_arg = None
+            if mode == "plan":
+                # pair the plan with any spec written in the same run, else None
+                spec_path = next((p for p in latest if "/specs/" in p), None)
+                if spec_path:
+                    sp = cwd / spec_path
+                    spec_text = sp.read_text(encoding="utf-8") if sp.exists() else latest[spec_path]
+                    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as sf:
+                        sf.write(spec_text)
+                    spec_arg = sf.name
+            code, _fields = validator.run(mode, str(tmp), spec_arg, strict=True)
+            if code != 0:
+                errors.append(f"shallow_artifact:{norm}")
+        finally:
+            tmp.unlink(missing_ok=True)
+    return errors
+
+
 def evaluate_case(case: dict[str, Any], trace: Trace, cwd: Path) -> list[str]:
     errors = []
     haystack = trace.haystack()
@@ -295,6 +347,8 @@ def evaluate_case(case: dict[str, Any], trace: Trace, cwd: Path) -> list[str]:
     for pattern in case.get("forbidden_patterns", []):
         if regex_present(pattern, haystack):
             errors.append(f"forbidden_pattern:{pattern}")
+    if case.get("check_artifact_depth", False):
+        errors += evaluate_artifact_depth(trace, cwd)
     return errors
 
 

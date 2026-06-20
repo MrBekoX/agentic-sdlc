@@ -20,10 +20,15 @@ SCRIPT = HERE.parent / "scripts" / "validate_artifacts.py"
 
 
 def _load_module():
-    """Load validate_artifacts.py by path so tests don't depend on cwd."""
+    """Load validate_artifacts.py by path so tests don't depend on cwd.
+
+    Register it in sys.modules too, so the in-method `from validate_artifacts
+    import ...` statements resolve to this same instance.
+    """
     spec = importlib.util.spec_from_file_location("validate_artifacts", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    sys.modules["validate_artifacts"] = mod
     return mod
 
 
@@ -256,9 +261,11 @@ PLAN_FULL = """\
 
 ## Task 1 — Reduce total once (AC1)
 Create `src/ledger.py`. Write a failing test (RED) first, then the minimal fix.
+Run: pytest tests/test_ledger.py
 
 ## Task 2 — Dedup refunds (AC2)
 Modify `src/ledger.py`. TDD: add a failing test for the duplicate path, then GREEN.
+Run: pytest tests/test_ledger.py
 """
 
 PLAN_UNCOVERED = """\
@@ -387,6 +394,48 @@ class TestModeAll(unittest.TestCase):
             # Output is one sorted block.
             lines = [ln for ln in out.splitlines() if ln and "=" in ln]
             self.assertEqual(lines, sorted(lines))
+
+
+class TestQualityChecks(unittest.TestCase):
+    """Deterministic QUALITY warnings (no count floors), calibrated by fixtures."""
+
+    def test_plan_task_without_verification_warns(self):
+        from validate_artifacts import check_plan
+        plan = "## Task 1 - do it\nCreate greeting.py. TDD: add a RED test.\n"  # no Run/command
+        res = check_plan(plan, "AC1")
+        assert "task_no_verification" in res["warnings"]
+
+    def test_plan_deferral_phrase_warns(self):
+        from validate_artifacts import check_plan
+        plan = "## Task 1 - thing\nModify x. TDD: RED test.\nRun: pytest\n\n## Non-task step\nSecurity executed after the implementation in the core-workflow gates.\n"
+        res = check_plan(plan, "AC1")
+        assert "deferred_work" in res["warnings"]
+
+    def test_spec_security_handwave_warns(self):
+        from validate_artifacts import check_spec
+        spec = ("# S\n## Problem\np p p p p p p p p p p p p p p p\n## Business Rules\nb b b b b b b b b b\n"
+                "## Acceptance Criteria\n- AC1: given x when y then z\n## Edge Cases\ne e e e e e e e e e\n"
+                "## Security\nNo untrusted input; treat as safe string handling only.\n"
+                "## Definition of Done\nd d d d d d d d d d\n## Must-not-change\nm m m m m m m m m m\n")
+        res = check_spec(spec)
+        assert "security_handwave" in res["warnings"]
+
+    def test_deep_reference_artifacts_stay_clean(self):
+        # The committed deep reference must not trip the new quality checks (calibration).
+        from validate_artifacts import check_plan, check_spec
+        # uses the same compact content shape as the deep fixture; counts not asserted.
+        spec = ("# Spec\n## Problem\nThe greet function hardcodes punctuation here clearly.\n"
+                "## Business Rules\nDefault output is unchanged when no suffix is given here.\n"
+                "## Acceptance Criteria\n- AC1: Given Ada and no suffix, when greet runs, then returns Hello, Ada!.\n"
+                "## Edge Cases\nEmpty suffix returns Hello, Ada with no trailing punctuation here.\n"
+                "## Definition of Done\nTests for AC1 pass and default behaviour is preserved here.\n"
+                "## Must-not-change\nThe single-argument call path keeps the exclamation mark here.\n")
+        plan = ("# Plan\n## Task 1 - Failing test (AC1)\nModify test_greeting.py. TDD: RED test for greet.\nRun: pytest test_greeting.py\n")
+        sres = check_spec(spec)
+        pres = check_plan(plan, spec)
+        assert "security_handwave" not in sres["warnings"]
+        assert "task_no_verification" not in pres["warnings"]
+        assert "deferred_work" not in pres["warnings"]
 
 
 if __name__ == "__main__":

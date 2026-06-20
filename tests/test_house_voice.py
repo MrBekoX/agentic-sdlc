@@ -124,5 +124,14 @@ class TestGithubMaintenance(unittest.TestCase):
             self.assertIn(field, pr)
 
 
+class TestDepthForcingPresent(unittest.TestCase):
+    def test_spec_plan_authoring_carry_depth_block(self):
+        for name in ("spec-authoring", "plan-authoring"):
+            text = (REPO / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            self.assertIn("## Depth contract", text)
+            self.assertIn("## Excuse → check".replace("→", "->"), text)  # arrow ASCII in these blocks
+            self.assertIn("No placeholders", text)
+
+
 if __name__ == "__main__":
     unittest.main()

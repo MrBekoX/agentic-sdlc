@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"write_file","input":{"file_path":"docs/agentic-sdlc/specs/x.md","content":"spec"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"write_file","input":{"file_path":"docs/agentic-sdlc/plans/x.md","content":"plan"}}]}}

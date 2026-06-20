@@ -8,6 +8,7 @@ import scripts.run_procedure_eval as procedure_eval
 
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "scripts"))
 
 
 class TestProcedureEvalHarness(unittest.TestCase):
@@ -43,6 +44,22 @@ class TestProcedureEvalHarness(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("procedure_eval=passed", proc.stdout)
+
+    def test_shallow_artifacts_fail_depth_check(self):
+        from run_procedure_eval import trace_events, load_json_lines, evaluate_case, load_eval
+        cases = load_eval(REPO / "tests" / "skills" / "procedure" / "skill-depth.json")
+        shallow = next(c for c in cases if c["id"] == "skill-depth-shallow")
+        trace = trace_events(load_json_lines(REPO / "tests" / "fixtures" / "transcripts" / "skill-depth-shallow-artifacts.jsonl"))
+        errors = evaluate_case(shallow, trace, REPO)
+        assert any(e.startswith("shallow_artifact:") for e in errors), errors
+
+    def test_deep_artifacts_pass_depth_check(self):
+        from run_procedure_eval import trace_events, load_json_lines, evaluate_case, load_eval
+        cases = load_eval(REPO / "tests" / "skills" / "procedure" / "skill-depth.json")
+        deep = next(c for c in cases if c["id"] == "skill-depth-deep")
+        trace = trace_events(load_json_lines(REPO / "tests" / "fixtures" / "transcripts" / "skill-depth-deep-artifacts.jsonl"))
+        errors = evaluate_case(deep, trace, REPO)
+        assert not any(e.startswith("shallow_artifact:") for e in errors), errors
 
     def test_codex_adapter_transcript_satisfies_non_claude_spec_plan_gate(self):
         proc = subprocess.run(

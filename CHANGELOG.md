@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — skill-depth contract (PoC)
+
+- Procedure eval now validates written artifact **content** (a literal `"spec"`/`"plan"` stub is rejected as `shallow_artifact`), closing the gap where surface-trace transcripts passed.
+- Validator gained quality checks (`task_no_verification`, `deferred_work`, `security_handwave`) — quality + proportionality, **no numeric count floors**.
+- `spec-plan-critic` carries a hard-blocker list + external-signal grounding; the inline-critic loophole is removed from all skills — a fresh-context critic is mandatory wherever the runtime supports it.
+- `spec-authoring` / `plan-authoring` carry proportional depth-forcing (Depth contract + Excuse→Check + no-placeholder + shallow example).
+- Regression fixtures lock the bar: shallow artifacts FAIL, a deep reference PASSES. Live before/after proof is pending a CLI run.
+
 ## 0.3.0 - 2026-06-19
 
 - Introduced the original "Assertion contract" skill voice (`Invariant` / `Tripwires` / `Proof` / `Excuse → check`) and applied it to the discipline-bearing skills; removed borrowed `Red Flags`/`Rationalizations` headings from the product surface.

@@ -14,6 +14,19 @@ Own the HOW only: implementation tasks, ordering, affected surfaces, TDD points,
 
 This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-end Plan phase and must not call `plan-authoring` as an internal substep.
 
+## Depth contract (proportional)
+Every task carries: the exact files (Create/Modify), a RED test point (concrete name + what it asserts), and a runnable verification (the command to run and the expected pass/fail). No "Non-task step" deferrals — security and audit are real tasks with their own verification, or they are explicitly out of scope with a reason.
+
+## Excuse -> check
+| Excuse | Check |
+|---|---|
+| "Security/audit happens later in the gates." | Then it is a task with a command, not a deferral. Name what runs and what proves it. |
+| "Each task is obvious." | Then give its exact command and expected output; obvious tasks are the cheapest to make concrete. |
+| "Compiles, so it works." | Compiling is not the verification. State the test that exercises the behaviour. |
+
+## No placeholders
+Ban "Non-task step", "as appropriate", and tasks with no runnable verification. A task a reviewer cannot run is not a task.
+
 ## Runtime Bindings
 
 - **Hook:** `session-start.mjs` injects `using-agentic-sdlc` as the session-local router. That hook may route directly to `plan-authoring` for HOW-only prompts; this does not require `agentic-sdlc-pipeline`.
@@ -21,7 +34,7 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/contracts/skills/03-plan-mode.md`
   - Codex: `${PLUGIN_ROOT}/contracts/skills/03-plan-mode.md`
   Use `02-spec-driven-development.md` from the same runtime root only as the source-WHAT coverage contract; do not rewrite the spec.
-- **Agents:** Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
+- **Agents:** Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author (`spec-plan-author`) -> critic (`spec-plan-critic`) -> revise adapter. The critic pass is **mandatory and must run in a fresh context** (a separate subagent/specialist) wherever the runtime exposes one; a same-context inline critic is a **degraded** path that must be flagged `Delegation Degraded: fresh-context critic unavailable` and held to extra scrutiny — never presented as an equal substitute. State the adapter path used.
 - **Validator:** Saved plans use the runtime-local validator with `--mode plan`:
   - Claude Code: `${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py`
   - Codex: `${PLUGIN_ROOT}/scripts/validate_artifacts.py`
@@ -37,7 +50,7 @@ This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-en
 
 1. Locate the approved spec, ticket, design, or explicit WHAT in the current session or files.
 2. Refuse to invent missing behavior. If the WHAT is absent or contradictory, stop and ask for clarification or route to `spec-authoring`.
-3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author -> critic -> revise adapter with `spec-plan-author` and `spec-plan-critic` role instructions manually or through available subagents, then state the adapter path used.
+3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author (`spec-plan-author`) -> critic (`spec-plan-critic`) -> revise adapter. The critic pass is **mandatory and must run in a fresh context** (a separate subagent/specialist) wherever the runtime exposes one; a same-context inline critic is a **degraded** path that must be flagged `Delegation Degraded: fresh-context critic unavailable` and held to extra scrutiny — never presented as an equal substitute. State the adapter path used.
 4. If a durable artifact is requested or the work is substantial, save the plan as `docs/agentic-sdlc/plans/<work_id>.md` with `work_id`, `spec`, `branch`, and `status` frontmatter.
 5. Validate saved plans with `python "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/agentic-sdlc/plans/<work_id>.md --spec docs/agentic-sdlc/specs/<work_id>.md --strict`, resolving `<runtime-root>` from the active runtime as described in `docs/runtime-adapter.md`.
 6. Present open decisions and stop. Do not implement unless the user asks.
