@@ -42,8 +42,11 @@ Do not write "consider refactoring" with no named target, "looks good" as a verd
 ## Shallow example (reject this)
 "Overall clean, maybe tidy some variable names." — no `file:line`, no consequence, no replacement name, no must-fix/optional split. It performs review without doing it. Reject.
 
-## Orchestration (consult first)
-Per **`dispatch-strategy`** and `docs/runtime-adapter.md`: prefer a fresh-context specialist (`code-reviewer`) that sees only the diff + criteria, not the authoring reasoning. If the runtime supports a fresh-context specialist, use it. If it does not, record `Delegation Degraded: fresh-context specialist unavailable`, perform the pass in the main loop, and mark the result non-independent.
+## Orchestration — fan out per layer, you coordinate (consult `dispatch-strategy` first)
+When the diff spans 2+ independent layers or file-groups, dispatch **one `code-reviewer` per layer in a single message** so they run concurrently — each sees only its slice of the diff + the criteria, not the authoring reasoning, so the pass is unbiased. For a structural change, add a `software-architect` instance for the architecture lens. You (main loop) stay the **coordinator**: merge findings, dedup, split must-fix from optional, decide. Reads fan out; any fix is applied serially in an implementation skill, never by two agents on one file.
+- **Independent verdict:** when a clean/done call would mean judging code you wrote, route the merged findings through `implementation-auditor` (via `implementasyon-control`), not self-attestation.
+- **Degrade:** a single-layer diff, or running inside a delegated sub-agent (no nesting), or a runtime without parallel agents → review in the main loop and record `Delegation Degraded: fresh-context specialist unavailable`, marked non-independent.
+- **Higher-rigor pass:** the `multi-lens-review` workflow (preset `quality`) fans out the review lenses, then adversarially verifies each finding before you act on it.
 
 ## Review areas
 - **Readability** — is intent clear on first read?

@@ -46,8 +46,10 @@ Do not write "treat as safe" or "standard string handling". Do not write "no con
 ## Shallow example (reject this)
 A report whose only reasoning is "standard string handling, no issues" asserts safety without tracing a single input to a sink. Reject it: name the surfaces you traced and, per untrusted input, the reason it cannot reach a sink.
 
-## Orchestration (consult first)
-Per **`dispatch-strategy`** and `docs/runtime-adapter.md`: multiple independent lenses (injection / authz-IDOR / secrets / auth) fan out to a dynamic-workflow, agent-team, subagents, or the runtime's parallel equivalent. Heavy single-lens analysis should use a fresh-context `security-reviewer` specialist when available. If the runtime lacks a fresh-context specialist, record `Delegation Degraded: fresh-context specialist unavailable`, perform the pass in the main loop, and mark the result non-independent.
+## Orchestration — one reviewer per lens, you coordinate (consult `dispatch-strategy` first)
+The lenses (injection / authz-IDOR / secrets / auth) are independent read-only slices: dispatch **one `security-reviewer` per lens in a single message** so they run concurrently — parallel `Agent` calls, or a `Workflow` when you want the fixed lens set run deterministically. You (main loop) stay the **coordinator**: merge findings, dedup overlapping reports across lenses, rank by severity, decide. The audit reads only; fixes route to `root-cause-fix` / `feature-build` with approval.
+- **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → run the lenses in the main loop and record `Delegation Degraded: fresh-context specialist unavailable`, marked non-independent.
+- **Higher-rigor pass:** the `multi-lens-review` workflow (preset `security`) runs this lens fan-out, then has independent skeptics adversarially refute each finding — only the confirmed survive. Use it when a wrong call is costly.
 
 ## Review areas
 1. **Input validation** — all external input validated/sanitized.

@@ -49,6 +49,13 @@ Use the portable capability matrix in `docs/runtime-adapter.md`.
 
 > **Context-bloat heuristic (always apply):** if a task will produce many intermediate tool-calls/reads/builds you won't need later → **delegate** (sub-agent or workflow). Don't do it serially in the main loop.
 
+## Per-slice fan-out — parallel specialists, you coordinate
+The common in-skill shape: the work splits into 2+ **independent read-only slices** (layers, lenses, file-groups, hypotheses). Dispatch **one specialist per slice in a single message** — parallel `Agent` calls, or a `Workflow` when the slices are a fixed ≈3+ and you want them deterministic/repeatable — so they run concurrently. You (main loop) stay the **coordinator**: the fresh-context specialists return unbiased findings; merging, dedup, conflict resolution, and the final call are yours.
+- **Reads fan out; writes stay serial.** Review/analysis/audit slices parallelize; file edits stay in one loop or worktree-isolated — never two agents on one file.
+- **Independent verdict, not self-attestation.** When accepting the merged findings would mean judging your own code, route them through `implementation-auditor` (via `implementasyon-control`). You coordinate; the auditor arbitrates.
+- **No coordinator agent.** The main loop already receives every specialist's result — a separate coordinator sub-agent would see less than you and cannot apply fixes. Don't add one.
+- **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → run the slices serially and flag `Delegation Degraded: parallel specialists unavailable`, marked non-independent.
+
 ## Mandatory gates (contracts)
 - **Delegation required:** an **independent** piece whose intermediate work you don't need to keep (exploration, reference analysis, N-file fixed-pattern generation, multi-file verification) → **sub-agent**. Doing it serially in the main loop is forbidden.
 - **Fan-out required:** ≈3+ similar **verification/research** items → **dynamic-workflow** (don't do them one-by-one inline).
@@ -63,10 +70,11 @@ Use the portable capability matrix in `docs/runtime-adapter.md`.
 - Agent-team in headless mode.
 
 ## Relationship to work-skills
-- **root-cause-fix / feature-build:** scope/exploration + fixed-pattern multi-file generation → **sub-agent**; verification fan-out (tests/lint/security lenses) → **dynamic-workflow**.
-- **security-audit:** multiple lenses (injection / authz-IDOR / secrets / auth) → **dynamic-workflow** (parallel lenses) or **agent-team** (interactive review).
-- **code-quality-review:** fresh-context **sub-agent** so the reviewer isn't the author.
-- **safe-refactor / test-authoring:** large multi-file passes → **dynamic-workflow**; heavy reference analysis → **sub-agent**.
+- **root-cause-fix:** heavy context-gathering → `context-analyst` sub-agent(s); competing root-cause hypotheses → one `debugger` per hypothesis (parallel, read-only); verification (tests/lint/security) → fan-out. The fix itself stays in the main loop.
+- **feature-build:** scope map → one `context-analyst` per affected layer; verification → test/lint/security lenses in parallel (`security-reviewer` for the security lens). Interdependent code stays in the main loop.
+- **security-audit:** the lenses (injection / authz-IDOR / secrets / auth) → one `security-reviewer` per lens in parallel (or **agent-team** for interactive review); you merge.
+- **code-quality-review:** one `code-reviewer` per changed layer/file-group (fresh-context, so the reviewer isn't the author); add a `software-architect` lens for a structural change. You synthesize.
+- **safe-refactor:** characterize per module via `software-architect` / `context-analyst`; large parallel *edits* run worktree-isolated. **test-authoring:** coverage-gap analysis per behavior-area via `test-engineer`; test-writing stays serial.
 - Spec/plan drafting in Claude Code flows → `spec-plan-draft` workflow (author → critic), not shallow main-loop writing.
 - Spec/plan drafting inside `agentic-sdlc-pipeline` on Codex runs the embedded author/critic adapter with a fresh-context critic when available. Standalone `spec-authoring` and `plan-authoring` remain independent prompt routes.
 

@@ -51,6 +51,7 @@ class TestDestructiveCommandGuard(unittest.TestCase):
             "env FOO=bar rm -rf ./tmp",
             "env -u FOO rm -rf ./tmp",
             "rm.exe -rf ./tmp",
+            "rm ./tmp -Recurse",
         ]
         for command in blocked:
             with self.subTest(command=command):
@@ -71,7 +72,6 @@ class TestDestructiveCommandGuard(unittest.TestCase):
             "erase ./tmp -Recurse",
             "rd ./tmp -Recurse",
             "rmdir ./tmp -Recurse",
-            "rm ./tmp -Recurse",
             "powershell -Command Remove-Item ./tmp -Recurse",
             "powershell -Command Remove-Item ./tmp -Re",
             'pwsh -c "Remove-Item ./tmp -Recurse"',
@@ -98,6 +98,68 @@ class TestDestructiveCommandGuard(unittest.TestCase):
             "printf '; rm -rf ./tmp'",
             'echo "rm -rf ./tmp"',
             "Write-Output '; Remove-Item ./tmp -Recurse'",
+        ]
+        for command in allowed:
+            with self.subTest(command=command):
+                out = self.run_hook(command)
+                self.assertEqual(out, {})
+
+    # Regression: bypasses confirmed by the multi-lens-review run (2026-06-21).
+    def test_blocks_git_global_option_bypasses(self):
+        # git global options before the subcommand defeat an adjacency-only match.
+        blocked = [
+            ("git -C /tmp reset --hard", "git-reset-hard"),
+            ("git -c core.pager=cat reset --hard HEAD", "git-reset-hard"),
+            ("git --no-pager reset --hard", "git-reset-hard"),
+            ("git -C /tmp clean -fdx", "git-clean-force"),
+        ]
+        for command, label in blocked:
+            with self.subTest(command=command):
+                out = self.run_hook(command)
+                reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn(label, reason)
+
+    def test_blocks_rm_long_recursive_flag_bundles(self):
+        # Recursive short-flag bundles longer than 5 chars (the old arg.length<=5 cap).
+        for command in ["rm -rfvvv ./tmp", "rm -vfrii ./tmp", "rm -fdrvv ./tmp"]:
+            with self.subTest(command=command):
+                out = self.run_hook(command)
+                reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn("rm-recursive", reason)
+
+    def test_blocks_wrapped_recursive_rm(self):
+        # Shell -c payloads, eval, and prefix wrappers that hide the real command.
+        blocked = [
+            'bash -c "rm -rf ./tmp"',
+            "sh -c 'rm -rf ./tmp'",
+            'zsh -c "rm -rf ./tmp"',
+            'eval "rm -rf ./tmp"',
+            "timeout 5 rm -rf ./tmp",
+            "timeout -s KILL 5 rm -rf ./tmp",
+            "nohup rm -rf ./tmp",
+            "nice -n 10 rm -rf ./tmp",
+            "nice rm -rf ./tmp",
+            "setsid rm -rf ./tmp",
+            "xargs rm -rf",
+        ]
+        for command in blocked:
+            with self.subTest(command=command):
+                out = self.run_hook(command)
+                reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn("rm-recursive", reason)
+
+    def test_allows_wrappers_and_global_options_on_safe_commands(self):
+        # False-positive boundary: wrappers / global options on non-destructive commands stay allowed.
+        allowed = [
+            "timeout 5 ls -la",
+            "nice -n 10 ls",
+            'bash -c "ls -la"',
+            "sh -c 'echo hi'",
+            "git -C /repo status",
+            "git --no-pager log --oneline",
+            "nohup sleep 30",
+            "xargs ls",
+            "time rm file.txt",
         ]
         for command in allowed:
             with self.subTest(command=command):

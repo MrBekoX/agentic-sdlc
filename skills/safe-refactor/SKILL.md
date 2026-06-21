@@ -42,8 +42,9 @@ Don't ship "behavior unchanged" with no captured snapshot, or let "equivalent" /
 ## Shallow example (reject this)
 "Refactored for clarity; the suite is green so behavior is preserved." Green before AND after is not proof *this* change preserved behavior — the suite was already green. Reject and capture the before/after snapshot for the inputs the change actually touches.
 
-## Orchestration (consult first)
-Per **`dispatch-strategy`** and `docs/runtime-adapter.md`: large multi-file refactors fan out to a dynamic-workflow or runtime equivalent (worktree isolation for parallel edits when available); heavy reference analysis goes to a subagent or documented degraded path.
+## Orchestration — characterize in parallel, edit serially, you coordinate (consult `dispatch-strategy` first)
+Characterizing current behavior across modules is a read-only fan-out: dispatch **one `software-architect` or `context-analyst` per module in a single message** to map the observable behavior and boundaries that must not move. You (main loop) stay the **coordinator**: assemble the safety net, then refactor. Large parallel *edits* are the dangerous part — run them **worktree-isolated** (a `Workflow` with worktree isolation), never two agents on one file; a small refactor just stays in the main loop.
+- **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → characterize/edit in the main loop and flag `Delegation Degraded: parallel specialists unavailable`.
 
 ## Flow
 1. **Characterize current behavior** — identify the behavior that must not change. If tests don't cover it, **add characterization tests first** and see them pass (show output). This is the safety net.

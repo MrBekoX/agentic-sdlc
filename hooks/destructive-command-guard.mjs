@@ -6,12 +6,12 @@ import { readStdin } from './secret-patterns.mjs';
 const BLOCKED = [
   {
     label: 'git-reset-hard',
-    re: /\bgit\s+reset\s+--hard\b/i,
+    check: hasGitResetHard,
     reason: 'git reset --hard discards local changes.',
   },
   {
     label: 'git-clean-force',
-    re: /\bgit\s+clean\b(?=[\s\S]*(?:--force\b|-[A-Za-z]*f))(?=[\s\S]*(?:-[A-Za-z]*[dxX]|--ignored\b|--exclude-standard\b))/i,
+    check: hasGitCleanForce,
     reason: 'git clean with force and directory/ignored-file flags deletes untracked files.',
   },
   {
@@ -25,6 +25,23 @@ const BLOCKED = [
     reason: 'Remove-Item -Recurse recursively deletes files.',
   },
 ];
+
+// Command wrappers whose real command follows them: `timeout 5 rm -rf`, `nice -n 10 rm -rf`,
+// `nohup rm -rf`, `xargs rm -rf`. positional = positional args the wrapper itself consumes
+// (timeout takes a DURATION); argOpts = options that consume a following value.
+const WRAPPERS = {
+  nohup: { positional: 0, argOpts: new Set() },
+  setsid: { positional: 0, argOpts: new Set() },
+  nice: { positional: 0, argOpts: new Set(['-n', '--adjustment']) },
+  ionice: { positional: 0, argOpts: new Set(['-c', '-n', '-p']) },
+  stdbuf: { positional: 0, argOpts: new Set(['-i', '-o', '-e']) },
+  time: { positional: 0, argOpts: new Set(['-o', '--output', '-f', '--format']) },
+  timeout: { positional: 1, argOpts: new Set(['-s', '--signal', '-k', '--kill-after']) },
+  xargs: { positional: 0, argOpts: new Set(['-n', '--max-args', '-p', '--max-procs', '-i', '--replace', '-d', '--delimiter', '-a', '--arg-file', '-s', '--max-chars', '-l', '--max-lines', '-e', '--eof']) },
+};
+
+// Shells whose `-c <payload>` (and `eval <payload>`) run an inline command we must inspect.
+const SHELL_NAMES = ['powershell', 'pwsh', 'bash', 'sh', 'zsh', 'dash', 'ksh'];
 
 function stripQuoted(text) {
   let out = '';
@@ -142,18 +159,24 @@ function commandName(token) {
 
 function commandTokens(cmd) {
   const tokens = commandSegments(cmd).map(tokenize).map(unwrapCommand).filter((items) => items.length);
-  const wrapped = rawCommandSegments(cmd).flatMap(powerShellPayloads).flatMap(commandTokens);
+  const wrapped = rawCommandSegments(cmd).flatMap(shellPayloads).flatMap(commandTokens);
   return tokens.concat(wrapped);
 }
 
-function powerShellPayloads(segment) {
+function shellPayloads(segment) {
   const tokens = tokenizePreservingQuotes(segment);
   const payloads = [];
   for (let i = 0; i < tokens.length; i += 1) {
     const name = commandName(tokens[i]);
-    if (!['powershell', 'pwsh'].includes(name)) continue;
+    if (name === 'eval') {
+      const payload = tokens.slice(i + 1).join(' ').trim();
+      if (payload) payloads.push(payload);
+      continue;
+    }
+    if (!SHELL_NAMES.includes(name)) continue;
     for (let j = i + 1; j < tokens.length; j += 1) {
-      if (/^(?:-command|-c|\/c)$/i.test(tokens[j])) {
+      // bash/sh/zsh/dash/ksh: -c (also -lc/-ic); powershell/pwsh: -Command / -c / /c.
+      if (/^(?:-command|\/c|-[a-z]*c)$/i.test(tokens[j])) {
         const payload = tokens.slice(j + 1).join(' ').trim();
         if (payload) payloads.push(payload);
         break;
@@ -200,13 +223,41 @@ function unwrapCommand(tokens) {
       }
       continue;
     }
+    if (WRAPPERS[name]) {
+      const wrap = WRAPPERS[name];
+      i += 1;
+      while (i < tokens.length && tokens[i].startsWith('-')) {
+        const raw = tokens[i];
+        const opt = raw.split('=')[0].toLowerCase();
+        i += 1;
+        if (!raw.includes('=') && wrap.argOpts.has(opt) && i < tokens.length && !tokens[i].startsWith('-')) {
+          i += 1;
+        }
+      }
+      for (let p = 0; p < wrap.positional && i < tokens.length && !tokens[i].startsWith('-'); p += 1) {
+        i += 1;
+      }
+      continue;
+    }
+    if (name === 'find') {
+      const rest = tokens.slice(i + 1);
+      const execAt = rest.findIndex((t) => /^-exec$|^-execdir$/i.test(t));
+      if (execAt !== -1) {
+        i += 1 + execAt + 1;
+        continue;
+      }
+      break;
+    }
     break;
   }
   return tokens.slice(i);
 }
 
 function hasRmRecursiveFlag(args) {
-  return args.some((arg) => arg === '--recursive' || (arg.length <= 5 && /^-[A-Za-z]*[rR][A-Za-z]*$/.test(arg)));
+  // A single-dash bundle of letters containing r/R is a recursive rm flag at any length
+  // (the prior arg.length<=5 cap let `rm -rfvvv` through). `--recursive` starts with two dashes,
+  // so the regex never matches it here, and a non-flag path argument never starts with a single dash.
+  return args.some((arg) => arg === '--recursive' || /^-[A-Za-z]*[rR][A-Za-z]*$/.test(arg));
 }
 
 function hasRemoveItemRecursiveFlag(args) {
@@ -225,6 +276,42 @@ function hasRecursiveRemoveItem(cmd) {
   return commandTokens(cmd).some((tokens) => {
     const name = commandName(tokens[0]);
     return names.has(name) && hasRemoveItemRecursiveFlag(tokens.slice(1));
+  });
+}
+
+// Return the git subcommand + its args, skipping any global options before the subcommand
+// (git -C <dir>, git -c k=v, git --no-pager, ...) so `git -C /tmp reset --hard` is still matched.
+function gitSubcommand(tokens) {
+  const ARG_OPTS = new Set(['-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--exec-path']);
+  let i = 1;
+  while (i < tokens.length && tokens[i].startsWith('-')) {
+    const raw = tokens[i];
+    const base = raw.split('=')[0].toLowerCase();
+    i += 1;
+    if (!raw.includes('=') && ARG_OPTS.has(base) && i < tokens.length && !tokens[i].startsWith('-')) {
+      i += 1;
+    }
+  }
+  return tokens.slice(i);
+}
+
+function hasGitResetHard(cmd) {
+  return commandTokens(cmd).some((tokens) => {
+    if (commandName(tokens[0]) !== 'git') return false;
+    const sub = gitSubcommand(tokens);
+    return sub[0] === 'reset' && sub.slice(1).some((arg) => arg === '--hard');
+  });
+}
+
+function hasGitCleanForce(cmd) {
+  return commandTokens(cmd).some((tokens) => {
+    if (commandName(tokens[0]) !== 'git') return false;
+    const sub = gitSubcommand(tokens);
+    if (sub[0] !== 'clean') return false;
+    const args = sub.slice(1);
+    const force = args.some((arg) => arg === '--force' || /^-[A-Za-z]*f[A-Za-z]*$/.test(arg));
+    const target = args.some((arg) => arg === '--ignored' || arg === '--exclude-standard' || /^-[A-Za-z]*[dxX][A-Za-z]*$/.test(arg));
+    return force && target;
   });
 }
 

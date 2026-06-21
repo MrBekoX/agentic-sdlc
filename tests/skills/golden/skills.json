@@ -85,7 +85,9 @@
         {"ref": "implementasyon-control", "kind": "skill"},
         {"ref": "spec-plan-draft", "kind": "workflow"},
         {"ref": "spec-plan-author", "kind": "agent"},
-        {"ref": "spec-plan-critic", "kind": "agent"}
+        {"ref": "spec-plan-critic", "kind": "agent"},
+        {"ref": "debugger", "kind": "agent"},
+        {"ref": "context-analyst", "kind": "agent"}
       ]
     },
     "feature-build": {
@@ -94,19 +96,24 @@
         {"ref": "dispatch-strategy", "kind": "skill"},
         {"ref": "implementasyon-control", "kind": "skill"},
         {"ref": "spec-plan-author", "kind": "agent"},
-        {"ref": "spec-plan-critic", "kind": "agent"}
+        {"ref": "spec-plan-critic", "kind": "agent"},
+        {"ref": "context-analyst", "kind": "agent"}
       ]
     },
     "safe-refactor": {
       "description_must_include": ["refactor", "without changing behavior", "approval"],
       "must_reference": [
         {"ref": "dispatch-strategy", "kind": "skill"},
-        {"ref": "implementasyon-control", "kind": "skill"}
+        {"ref": "implementasyon-control", "kind": "skill"},
+        {"ref": "software-architect", "kind": "agent"},
+        {"ref": "context-analyst", "kind": "agent"}
       ]
     },
     "test-authoring": {
       "description_must_include": ["regression", "e2e", "meaningful assertions"],
-      "must_reference": []
+      "must_reference": [
+        {"ref": "test-engineer", "kind": "agent"}
+      ]
     },
     "dispatch-strategy": {
       "_note": "dispatch-strategy references the work-SKILLS (not the reviewer agents directly; those are referenced by code-quality-review/security-audit themselves).",
@@ -134,7 +141,8 @@
       "description_must_include": ["readability", "duplication", "fresh context"],
       "must_reference": [
         {"ref": "dispatch-strategy", "kind": "skill"},
-        {"ref": "code-reviewer", "kind": "agent"}
+        {"ref": "code-reviewer", "kind": "agent"},
+        {"ref": "software-architect", "kind": "agent"}
       ]
     },
     "implementasyon-control": {

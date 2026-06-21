@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "$comment": "Single source for runtime flow-step enforcement. Consumed by the live hooks (flow-step-guard.mjs on Stop, flow-order-guard.mjs on PreToolUse) and asserted by the offline gate. Evidence is ALWAYS re-derived from observable facts (artifact file re-validated by validate_artifacts.py / a real tool_use event / a real command in the transcript), never trusted from the agent's prose.",
+  "sourceGlobs": [
+    "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "go", "rs", "java", "rb",
+    "php", "c", "cc", "cpp", "h", "hpp", "cs", "kt", "swift", "scala", "m"
+  ],
+  "artifactRoots": {
+    "spec": "docs/agentic-sdlc/specs",
+    "plan": "docs/agentic-sdlc/plans"
+  },
+  "testCommand": "\\b(pytest|unittest|jest|vitest|mocha|go\\s+test|cargo\\s+test|rspec|phpunit|gradle\\s+test|mvn\\s+test)\\b",
+  "completionClaim": "\\b(all\\s+tests?\\s+(pass|passing|green)|all\\s+green|ready\\s+to\\s+(merge|ship)|implementation\\s+(is\\s+)?complete|feature\\s+complete|task\\s+(is\\s+)?complete|done\\s+and\\s+verified|fixed\\s+and\\s+verified|everything\\s+(works|passes))\\b",
+  "flows": {
+    "root-cause-fix": {
+      "activeWhen": { "skill": "root-cause-fix" },
+      "steps": [
+        {
+          "id": "spec",
+          "label": "Spec (WHAT)",
+          "evidence": [
+            { "kind": "artifact", "role": "spec", "validate": { "mode": "spec", "strict": true } },
+            { "kind": "toolUse", "tool": "Workflow", "contains": "spec-plan-draft" },
+            { "kind": "toolUse", "tool": "Agent", "contains": "spec-plan-author" }
+          ],
+          "stop": "block",
+          "beforeSourceEdit": true
+        },
+        {
+          "id": "plan",
+          "label": "Plan (HOW)",
+          "evidence": [
+            { "kind": "artifact", "role": "plan", "validate": { "mode": "plan", "strict": true } },
+            { "kind": "toolUse", "tool": "Workflow", "contains": "spec-plan-draft" }
+          ],
+          "stop": "block",
+          "beforeSourceEdit": true
+        },
+        {
+          "id": "tests",
+          "label": "RED to GREEN tests run",
+          "evidence": [
+            { "kind": "command", "matches": "testCommand" }
+          ],
+          "stop": "block",
+          "beforeSourceEdit": false
+        },
+        {
+          "id": "security",
+          "label": "Security analysis",
+          "evidence": [
+            { "kind": "toolUse", "tool": "Skill", "contains": "security-audit" },
+            { "kind": "toolUse", "tool": "Agent", "contains": "security-reviewer" }
+          ],
+          "stop": "warn",
+          "beforeSourceEdit": false
+        },
+        {
+          "id": "control",
+          "label": "Implementation control",
+          "evidence": [
+            { "kind": "toolUse", "tool": "Skill", "contains": "implementasyon-control" },
+            { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" }
+          ],
+          "stop": "block",
+          "beforeSourceEdit": false
+        }
+      ]
+    },
+    "feature-build": {
+      "activeWhen": { "skill": "feature-build" },
+      "steps": [
+        { "id": "spec", "label": "Spec (WHAT)", "evidence": [ { "kind": "artifact", "role": "spec", "validate": { "mode": "spec", "strict": true } }, { "kind": "toolUse", "tool": "Workflow", "contains": "spec-plan-draft" }, { "kind": "toolUse", "tool": "Agent", "contains": "spec-plan-author" } ], "stop": "block", "beforeSourceEdit": true },
+        { "id": "plan", "label": "Plan (HOW)", "evidence": [ { "kind": "artifact", "role": "plan", "validate": { "mode": "plan", "strict": true } }, { "kind": "toolUse", "tool": "Workflow", "contains": "spec-plan-draft" } ], "stop": "block", "beforeSourceEdit": true },
+        { "id": "tests", "label": "RED to GREEN tests run", "evidence": [ { "kind": "command", "matches": "testCommand" } ], "stop": "block", "beforeSourceEdit": false },
+        { "id": "security", "label": "Security analysis", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "security-audit" }, { "kind": "toolUse", "tool": "Agent", "contains": "security-reviewer" } ], "stop": "warn", "beforeSourceEdit": false },
+        { "id": "control", "label": "Implementation control", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "implementasyon-control" }, { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" } ], "stop": "block", "beforeSourceEdit": false }
+      ]
+    },
+    "safe-refactor": {
+      "activeWhen": { "skill": "safe-refactor" },
+      "steps": [
+        { "id": "characterization", "label": "Characterization tests (safety net) run", "evidence": [ { "kind": "command", "matches": "testCommand" } ], "stop": "block", "beforeSourceEdit": true },
+        { "id": "control", "label": "Implementation control", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "implementasyon-control" }, { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" } ], "stop": "block", "beforeSourceEdit": false }
+      ]
+    },
+    "agentic-sdlc-pipeline": {
+      "$comment": "Detected only when the pipeline skill is invoked via the Skill tool (router escalation). Slash-command-only activation produces no self-referential Skill call, so that path is covered by the offline procedure-eval (tests/skills/procedure/agentic-sdlc-pipeline.json), which also enforces detect_context.py and bans git commit/push/merge.",
+      "activeWhen": { "skill": "agentic-sdlc-pipeline" },
+      "steps": [
+        { "id": "dispatch", "label": "Mechanism decision (dispatch-strategy)", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "dispatch-strategy" } ], "stop": "block", "beforeSourceEdit": true },
+        { "id": "spec", "label": "Spec (WHAT)", "evidence": [ { "kind": "artifact", "role": "spec", "validate": { "mode": "spec", "strict": true } }, { "kind": "toolUse", "tool": "Workflow", "contains": "spec-plan-draft" }, { "kind": "toolUse", "tool": "Agent", "contains": "spec-plan-author" } ], "stop": "block", "beforeSourceEdit": true },
+        { "id": "plan", "label": "Plan (HOW)", "evidence": [ { "kind": "artifact", "role": "plan", "validate": { "mode": "plan", "strict": true } }, { "kind": "toolUse", "tool": "Workflow", "contains": "spec-plan-draft" } ], "stop": "block", "beforeSourceEdit": true },
+        { "id": "core", "label": "Core work-flow delegation", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "feature-build" }, { "kind": "toolUse", "tool": "Skill", "contains": "root-cause-fix" }, { "kind": "toolUse", "tool": "Skill", "contains": "safe-refactor" }, { "kind": "toolUse", "tool": "Skill", "contains": "test-authoring" } ], "stop": "block", "beforeSourceEdit": true },
+        { "id": "tests", "label": "RED to GREEN tests run", "evidence": [ { "kind": "command", "matches": "testCommand" } ], "stop": "block", "beforeSourceEdit": false },
+        { "id": "security", "label": "Security analysis", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "security-audit" }, { "kind": "toolUse", "tool": "Agent", "contains": "security-reviewer" } ], "stop": "block", "beforeSourceEdit": false },
+        { "id": "control", "label": "Implementation control", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "implementasyon-control" }, { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" } ], "stop": "block", "beforeSourceEdit": false }
+      ]
+    }
+  }
+}

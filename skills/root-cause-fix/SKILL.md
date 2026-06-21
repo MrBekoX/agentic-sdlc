@@ -42,8 +42,9 @@ Don't ship "added a defensive check" as the whole root-cause story; an "edge cas
 ## Shallow example (reject this)
 "Root cause: the function returned null. Fix: added a null check." That restates the symptom (null appeared) as if it were the cause. The real root cause names *why* it was null — which upstream path left it unset and under what trigger. Reject and trace it.
 
-## Orchestration (consult first)
-Before heavy/independent/parallelizable steps, the **`dispatch-strategy`** skill chooses the mechanism (main loop / sub-agent / dynamic-workflow / agent-team) using `docs/runtime-adapter.md` for runtime-specific equivalents. Delegate heavy root-cause exploration and multi-lens verification; don't run everything serially in the main loop.
+## Orchestration — fan out investigation and verification, you coordinate (consult `dispatch-strategy` first)
+Two read-only fan-out points: **investigation** — heavy context-gathering goes to a `context-analyst` sub-agent, and when several root causes are plausible, dispatch **one `debugger` per competing hypothesis in a single message** so they're investigated concurrently; and **verification** — the test/lint/security lenses in parallel. You (main loop) stay the **coordinator**: weigh the hypotheses against evidence, pick the root layer, decide. The fix itself is written in the main loop (serial, in scope) — never fan out writers onto one file.
+- **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → investigate/verify in the main loop and flag `Delegation Degraded: parallel specialists unavailable`.
 
 ## Flow (with gates)
 
