@@ -100,7 +100,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Should trigger:** "add/build a new feature, endpoint, screen, flow, or capability"; focused new functionality when the full pipeline envelope has **not** been requested.
 - **Should NOT trigger:** bug/root-cause fixes (→ `root-cause-fix`); test-only work (→ `test-authoring`); behavior-preserving refactors (→ `safe-refactor`); full SDLC envelope requests (→ `agentic-sdlc-pipeline`).
 - **Produces:** implemented feature, tests, security notes, final report.
-- **Delegates to:** `dispatch-strategy` for exploration/verification fan-out; `implementasyon-control` for pre-final audit; `completion-claim-gate` before success claims.
+- **Delegates to:** `context-analyst` for per-layer scope mapping; `dispatch-strategy` for exploration/verification fan-out; `implementasyon-control` for pre-final audit; `completion-claim-gate` before success claims.
 - **Contracts:** `01`, `02`, `03`, `04`, `05`, `06`, `07`, `08`, `09`, `10`.
 
 ### `root-cause-fix`
@@ -118,7 +118,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Should trigger:** "refactor / restructure / clean up / simplify / improve readability / reduce duplication / change architecture without changing behavior"; requests requiring characterization tests and approval for broad scope.
 - **Should NOT trigger:** bug fixes (→ `root-cause-fix`); new features (→ `feature-build`); test-only work (→ `test-authoring`).
 - **Produces:** restructured code, proof behavior is unchanged (tests green before and after), remaining risks.
-- **Delegates to:** `dispatch-strategy` for multi-file fan-out; `implementasyon-control` for pre-final audit.
+- **Delegates to:** `software-architect`/`context-analyst` for per-module characterization; `dispatch-strategy` for multi-file fan-out; `implementasyon-control` for pre-final audit.
 - **Contracts:** `01`, `04`, `05`, `06`, `07`, `08`, `10`.
 
 ### `test-authoring`
@@ -127,7 +127,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Should trigger:** "write / add / repair / design tests: unit, integration, regression, e2e, flaky tests, failing tests, meaningful assertions, coverage, test doubles, test strategy"; test-only work that must not change production behavior.
 - **Should NOT trigger:** feature implementation (→ `feature-build`); bug fixes (→ `root-cause-fix`); refactors (→ `safe-refactor`).
 - **Produces:** tests with RED→GREEN evidence, suite output, assertion-quality review.
-- **Delegates to:** `root-cause-fix` if the failing test reveals a bug; `dispatch-strategy` for large multi-file passes.
+- **Delegates to:** `test-engineer` for coverage-gap analysis; `root-cause-fix` if the failing test reveals a bug; `dispatch-strategy` for large multi-file passes.
 - **Contracts:** `00`, `01`, `05`.
 
 ### `dispatch-strategy`
@@ -154,7 +154,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Should trigger:** "review a diff / file / PR / change for code quality before merge"; readability, duplication, overengineering, naming, error handling, performance, testability.
 - **Should NOT trigger:** received review feedback on the user's own change (→ `feedback-triage`); security audit (→ `security-audit`); build/fix work.
 - **Produces:** findings grouped by area with `file:line`, issue, concrete suggestion; split into must-fix and optional.
-- **Delegates to:** `code-reviewer` sub-agent for fresh-context review; implementation skills for any resulting fixes.
+- **Delegates to:** `code-reviewer` (per changed layer) and `software-architect` (architecture lens) sub-agents for fresh-context review; implementation skills for any resulting fixes.
 - **Contracts:** `00`, `04`, `10`.
 
 ### `feedback-triage`

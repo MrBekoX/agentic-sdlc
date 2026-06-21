@@ -42,8 +42,9 @@ Do not ship "should work", acceptance criteria written as feature names instead 
 ## Shallow example (reject this)
 A feature whose only evidence is "build passes, endpoint added" — the path never exercised, no RED→GREEN test, no observed output — is shallow. Reject.
 
-## Orchestration (consult first)
-Per the **`dispatch-strategy`** skill and `docs/runtime-adapter.md`: delegate codebase scoping/exploration and fixed-pattern multi-file generation to subagents or runtime equivalents; fan out verification (test/lint/security lenses) to a dynamic-workflow or the runtime's parallel/degraded equivalent. Keep design/ordering decisions and interdependent code in the main loop.
+## Orchestration — fan out scope and verification, you coordinate (consult `dispatch-strategy` first)
+Two read-only fan-out points: the **scope map** (one `context-analyst` per affected layer, in a single message) and **verification** (test / lint / security lenses in parallel — `security-reviewer` for the security lens). Dispatch each set concurrently and stay the **coordinator**: merge the layer maps into one scope, read the verification results, decide. Interdependent code and ordering decisions stay in the main loop; writes stay serial — never two agents on one file.
+- **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → run scope/verification in the main loop and flag `Delegation Degraded: parallel specialists unavailable`.
 
 ## Flow
 1. **Requirement analysis** — what the feature must do; who uses it; constraints.
