@@ -37,6 +37,18 @@
             "statusMessage": "Branch guard (push)..."
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/flow-order-guard.mjs"],
+            "timeout": 15,
+            "statusMessage": "Flow-order guard..."
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -74,6 +86,13 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/completion-claim-guard.mjs"],
             "timeout": 15,
             "statusMessage": "Completion-claim guard..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/flow-step-guard.mjs"],
+            "timeout": 30,
+            "statusMessage": "Flow-step guard..."
           }
         ]
       }
