@@ -23,7 +23,7 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertEqual(codex_plugin["name"], "agentic-sdlc")
         self.assertEqual(codex_plugin["version"], version)
         self.assertEqual(codex_plugin["skills"], "./skills/")
-        self.assertNotIn("hooks", codex_plugin)
+        self.assertEqual(codex_plugin["hooks"], "./hooks/hooks-codex.json")
 
     def test_marketplace_name_is_public_and_matches_readme(self):
         mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
@@ -62,6 +62,7 @@ class TestPackagingMetadata(unittest.TestCase):
             "version",
             "description",
             "skills",
+            "hooks",
             "apps",
             "mcpServers",
             "interface",

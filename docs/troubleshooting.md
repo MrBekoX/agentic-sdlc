@@ -36,9 +36,9 @@ Check:
 
 Check:
 
-1. `hooks/hooks.json` is valid Codex hook JSON and has only the top-level `hooks` object.
+1. `hooks/hooks-codex.json` is valid Codex hook JSON and has only the top-level `hooks` object, and `.codex-plugin/plugin.json` declares `"hooks": "./hooks/hooks-codex.json"`.
 2. The plugin was reinstalled after hook config changes.
-3. Start a new Codex thread so the plugin-default hook config is reloaded.
+3. Start a new Codex thread so the declared Codex hook config is reloaded.
 4. Open `/hooks` and review/trust the plugin-bundled `SessionStart` command hook if Codex marks it pending review.
 5. `node` is on `PATH`.
 6. `${PLUGIN_ROOT}` resolves in the Codex plugin runtime.

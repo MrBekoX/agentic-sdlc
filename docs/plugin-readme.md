@@ -20,7 +20,7 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 | `.claude-plugin/marketplace.json` | Claude Code | Local marketplace source; the repo root is the source. |
 | `.codex-plugin/plugin.json` | Codex | Codex plugin metadata, `skills`, and `interface` block. |
 | `hooks/hooks-claude.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
-| `hooks/hooks.json` | Codex | Plugin-default `SessionStart` bootstrap wiring, subject to Codex hook review/trust. |
+| `hooks/hooks-codex.json` | Codex | `SessionStart` bootstrap wiring (declared in `.codex-plugin/plugin.json`), subject to Codex hook review/trust. |
 
 Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Runtime root variables are:
 
@@ -156,7 +156,7 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 ## Known Limitations
 
 - `0.3.0` supports Claude Code and Codex only.
-- Codex hook wiring is discoverable from the plugin-default `hooks/hooks.json`; non-managed plugin-bundled command hooks require Codex review/trust before they run, and the publishable manifest still omits a top-level `hooks` field.
+- Codex hook wiring is declared via `.codex-plugin/plugin.json` -> `hooks/hooks-codex.json`; non-managed plugin-bundled command hooks require Codex review/trust before they run. It is deliberately not named `hooks/hooks.json`, which Claude Code would auto-load with an undefined `${PLUGIN_ROOT}`.
 - Codex trigger evals are classifier evidence, not Claude-style `Skill` event evidence.
 - Hooks fail open where necessary so a hook fault does not break a session.
 - `validate_artifacts.py` is structural; it cannot prove that a spec is semantically about the requested task.

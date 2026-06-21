@@ -305,3 +305,24 @@ class TestCodexSessionStartHook(unittest.TestCase):
         self.assertIn("completion-claim-gate", context)
         self.assertNotIn("Skill tool", context)
         self.assertNotIn("calling the Skill tool", context)
+
+
+class TestRuntimeHookConfigSeparation(unittest.TestCase):
+    """Claude Code auto-loads hooks/hooks.json by default, in ADDITION to the plugin.json-
+    declared hooks-claude.json (confirmed by a WSL install). So hooks/hooks.json must NOT carry
+    the Codex ${PLUGIN_ROOT} variable -- it is undefined in Claude Code, so the SessionStart
+    command resolves to /hooks/... -> MODULE_NOT_FOUND. The Codex config lives at
+    hooks/hooks-codex.json, declared in .codex-plugin/plugin.json."""
+
+    def test_default_hooks_json_does_not_use_codex_plugin_root(self):
+        p = REPO / "hooks" / "hooks.json"
+        if p.exists():
+            self.assertNotIn(
+                "${PLUGIN_ROOT}", p.read_text(encoding="utf-8"),
+                "hooks/hooks.json is auto-loaded by Claude Code; it must not use the Codex ${PLUGIN_ROOT}",
+            )
+
+    def test_codex_hook_config_present_and_declared(self):
+        self.assertTrue((REPO / "hooks" / "hooks-codex.json").exists(), "Codex hook config missing")
+        codex = json.loads((REPO / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(codex.get("hooks"), "./hooks/hooks-codex.json")
