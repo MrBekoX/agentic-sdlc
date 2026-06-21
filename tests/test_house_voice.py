@@ -158,5 +158,27 @@ class TestDepthForcingPresent(unittest.TestCase):
         self.assertEqual(missing, [], f"missing depth-forcing block: {missing}")
 
 
+# --- Author worker carries the depth contract in its OWN system prompt ---
+# Per the Claude Code docs, a subagent "receive[s] only this system prompt … not the full
+# Claude Code system prompt" and "starts with a fresh, isolated context window … does not see
+# … the skills you've already invoked." So the depth contract in the skill bodies never reaches
+# the spec-plan-author worker — it must live in agents/spec-plan-author.md or the author drafts
+# shallow (the eval's 10 unfalsifiable ACs). These markers prove the contract is in the worker.
+AUTHOR_DEPTH_MARKERS = (
+    "Given/When/Then",        # SPEC: each acceptance criterion as G/W/T + the failure it guards
+    "input->sink",            # SPEC: a security note traces untrusted input to its sink
+    "RED test",               # PLAN: each task names a RED test point (name + assertion)
+    "runnable verification",  # PLAN: each task names a runnable verification command
+)
+
+
+class TestAuthorDepthContract(unittest.TestCase):
+    def test_spec_plan_author_carries_depth_contract(self):
+        text = (REPO / "agents" / "spec-plan-author.md").read_text(encoding="utf-8")
+        missing = [m for m in AUTHOR_DEPTH_MARKERS if m not in text]
+        self.assertEqual(missing, [], f"author worker missing depth-contract markers: {missing}")
+        self.assertIn("No placeholders", text)
+
+
 if __name__ == "__main__":
     unittest.main()
