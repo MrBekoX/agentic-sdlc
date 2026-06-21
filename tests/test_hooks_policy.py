@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -307,20 +308,48 @@ class TestCodexSessionStartHook(unittest.TestCase):
         self.assertNotIn("calling the Skill tool", context)
 
 
+def _claude_loadable_hook_configs():
+    """Hook config JSONs that Claude Code loads for this plugin: the file declared in
+    .claude-plugin/plugin.json's `hooks` field, PLUS the default hooks/hooks.json if present
+    (Claude Code auto-loads that filename regardless of the declaration -- that collision is the
+    bug this guards). Returns existing paths only."""
+    paths = []
+    manifest = json.loads((REPO / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    declared = manifest.get("hooks")
+    if isinstance(declared, str):
+        paths.append(REPO / declared.lstrip("./"))
+    paths.append(REPO / "hooks" / "hooks.json")
+    return [p for p in paths if p.exists()]
+
+
 class TestRuntimeHookConfigSeparation(unittest.TestCase):
     """Claude Code auto-loads hooks/hooks.json by default, in ADDITION to the plugin.json-
-    declared hooks-claude.json (confirmed by a WSL install). So hooks/hooks.json must NOT carry
-    the Codex ${PLUGIN_ROOT} variable -- it is undefined in Claude Code, so the SessionStart
-    command resolves to /hooks/... -> MODULE_NOT_FOUND. The Codex config lives at
-    hooks/hooks-codex.json, declared in .codex-plugin/plugin.json."""
+    declared hooks-claude.json (confirmed by a WSL install). Claude Code substitutes
+    ${CLAUDE_PLUGIN_ROOT}; the Codex variable ${PLUGIN_ROOT} is undefined here and resolves to
+    empty -> /hooks/... -> MODULE_NOT_FOUND. So every hook config Claude can load must use ONLY
+    ${CLAUDE_PLUGIN_ROOT}. The Codex config lives at hooks/hooks-codex.json, declared in
+    .codex-plugin/plugin.json, where Claude never auto-loads it."""
 
-    def test_default_hooks_json_does_not_use_codex_plugin_root(self):
-        p = REPO / "hooks" / "hooks.json"
-        if p.exists():
+    def test_claude_loadable_hooks_use_only_claude_plugin_root(self):
+        # validate_hooks_json only checks that refs RESOLVE to a file -- it could not catch the
+        # original bug, because the Codex session-start-codex.mjs happens to exist. This asserts
+        # the stronger property: no Claude-loadable config carries ${PLUGIN_ROOT}, and every
+        # ${CLAUDE_PLUGIN_ROOT}/<path> it references exists.
+        configs = _claude_loadable_hook_configs()
+        self.assertTrue(configs, "no Claude-loadable hook config found")
+        ref_re = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_./-]+)")
+        for cfg in configs:
+            text = cfg.read_text(encoding="utf-8")
+            rel = cfg.relative_to(REPO).as_posix()
             self.assertNotIn(
-                "${PLUGIN_ROOT}", p.read_text(encoding="utf-8"),
-                "hooks/hooks.json is auto-loaded by Claude Code; it must not use the Codex ${PLUGIN_ROOT}",
+                "${PLUGIN_ROOT}", text,
+                f"{rel} is loaded by Claude Code and must not use the Codex ${{PLUGIN_ROOT}} variable",
             )
+            for ref in ref_re.findall(text):
+                self.assertTrue(
+                    (REPO / ref).exists(),
+                    f"{rel} references ${{CLAUDE_PLUGIN_ROOT}}/{ref} which does not exist",
+                )
 
     def test_codex_hook_config_present_and_declared(self):
         self.assertTrue((REPO / "hooks" / "hooks-codex.json").exists(), "Codex hook config missing")
