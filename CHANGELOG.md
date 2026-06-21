@@ -2,6 +2,7 @@
 
 ## Unreleased — skill-depth contract (PoC)
 
+- Refreshed plugin documentation for the current Claude/Codex layer split: active flow guards, flow evidence config, deeper spec/plan validation, work-package resolution, router/procedure evals, and current test-suite coverage.
 - Procedure eval now validates written artifact **content** (a literal `"spec"`/`"plan"` stub is rejected as `shallow_artifact`), closing the gap where surface-trace transcripts passed.
 - Validator gained quality checks (`task_no_verification`, `deferred_work`, `security_handwave`) — quality + proportionality, **no numeric count floors**.
 - `spec-plan-critic` carries a hard-blocker list + external-signal grounding; the inline-critic loophole is removed from all skills — a fresh-context critic is mandatory wherever the runtime supports it.

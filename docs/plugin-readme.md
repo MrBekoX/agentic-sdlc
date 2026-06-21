@@ -18,7 +18,7 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 |---|---|---|
 | `.claude-plugin/plugin.json` | Claude Code | Plugin metadata. |
 | `.claude-plugin/marketplace.json` | Claude Code | Local marketplace source; the repo root is the source. |
-| `.codex-plugin/plugin.json` | Codex | Codex plugin metadata, `skills`, and `interface` block. |
+| `.codex-plugin/plugin.json` | Codex | Codex plugin metadata, `skills`, `hooks`, and `interface` block. |
 | `hooks/hooks-claude.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
 | `hooks/hooks-codex.json` | Codex | `SessionStart` bootstrap wiring (declared in `.codex-plugin/plugin.json`), subject to Codex hook review/trust. |
 
@@ -37,7 +37,7 @@ Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Run
 | `contracts/skills/` | Durable behavior rules: context-first, spec, plan, testing, security, git safety, documentation, collaboration. |
 | `agents/` | Read-only role contracts used for fresh-context analysis, review, audit, and author/critic passes. |
 | `workflows/` | Claude Code dynamic workflow scripts. Codex does not run these directly. |
-| `hooks/` | Deterministic guard scripts and runtime hook wiring. |
+| `hooks/` | Deterministic guard scripts, active-flow evidence rules, and runtime hook wiring. |
 | `commands/` | Manual slash-command definitions such as `/git-safety-check`. |
 | `scripts/` | Deterministic probes, validators, eval runners, version helpers, and review-package helpers. |
 | `tests/` | Unit tests, harness, fixtures, golden references, and eval seeds. |
@@ -75,6 +75,8 @@ Gate skills feed the pipeline at control points: `dispatch-strategy`, `security-
 
 The pipeline must not call standalone `spec-authoring` or `plan-authoring` for its internal steps 4-5.
 
+Both runtimes use the same depth contract for spec/plan work. `spec-plan-author` carries the concrete bar for Given/When/Then criteria, input-to-sink security notes, RED test points, and runnable verification. `spec-plan-critic` is the adversarial pass and cannot return clean when a draft is shallow, leaks HOW into a spec, invents WHAT in a plan, omits verification, or hand-waves security.
+
 ## Focused Skills
 
 | Skill | Owns |
@@ -108,8 +110,13 @@ The scripts are shared, but runtime wiring differs.
 | `scan-commit.mjs` | `PreToolUse` for `git commit*` | Not wired | Blocks high-confidence secrets in added diff lines. |
 | `branch-guard.mjs` | `PreToolUse` for `git commit*` and `git push*` | Not wired | Warns on protected branches; can block with `AGENTIC_BRANCH_GUARD_BLOCK=true`. |
 | `destructive-command-guard.mjs` | `PreToolUse` for shell commands | Not wired | Blocks deterministic destructive commands. |
+| `flow-order-guard.mjs` | `PreToolUse` for `Write`/`Edit`/`MultiEdit` | Not wired | Checks current-turn pre-edit evidence for active implementation flows before source edits; can deny with `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `completion-claim-guard.mjs` | `Stop` | Not wired | Warns, or blocks with `AGENTIC_COMPLETION_GATE_BLOCK=true`, when final completion claims skip `completion-claim-gate`. |
+| `flow-step-guard.mjs` | `Stop` | Not wired | Re-derives active-flow step evidence from validated artifacts, tool calls, and commands; can block missing required steps with `AGENTIC_FLOW_GATE_BLOCK=true`. |
+| `flow-evidence.mjs` | Shared library | Shared library | Evidence engine used by the flow guards. |
 | `secret-patterns.mjs` | Shared library | Shared library | Secret-pattern scanner used by hook scripts. |
+
+`hooks/flow-requirements.json` is the shared source for which steps each active flow must evidence. It covers `root-cause-fix`, `feature-build`, `safe-refactor`, and `agentic-sdlc-pipeline`; the offline gate validates that every referenced skill, workflow, agent, and validator exists.
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
@@ -118,8 +125,8 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | Script | Purpose |
 |---|---|
 | `check_all.py` | Skill frontmatter and validator tests. |
-| `validate_artifacts.py` | Spec/plan structural validation and secret/placeholder scan. |
-| `resolve_work_package.py` | Deterministically resolves the spec/plan pair for implementation audits. |
+| `validate_artifacts.py` | Spec/plan validation: structure, AC coverage, placeholders/secrets, task verification, deferral, and security hand-wave checks. |
+| `resolve_work_package.py` | Deterministically resolves the canonical spec/plan pair for implementation audits without timestamp fallback. |
 | `detect_context.py` | Workspace/dependency/toolchain classification. |
 | `run_trigger_eval.py` | Claude Code trigger eval runner. |
 | `run_codex_trigger_eval.py` | Codex route-classifier trigger runner. |

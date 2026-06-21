@@ -126,7 +126,7 @@ Important boundary: `spec-authoring` and `plan-authoring` are standalone prompt-
 skills/            Shared skill source: one directory per skill
 agents/            Read-only sub-agent role contracts
 workflows/         Claude Code dynamic workflow scripts
-hooks/             Deterministic guard scripts and runtime hook wiring
+hooks/             Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/  Durable behavior contracts
 commands/          Manual slash-command definitions
 scripts/           14 Python helpers: probes, validators, eval runners, versioning
@@ -182,6 +182,8 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 |---|---|
 | Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. |
 | Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`; `SessionStart` bootstrap only after Codex hook review/trust. |
+
+Claude Code also wires flow enforcement: `flow-order-guard.mjs` checks active-flow evidence before source edits, and `flow-step-guard.mjs` re-derives Stop-time evidence from artifacts, tool calls, and commands. Both read [`hooks/flow-requirements.json`](hooks/flow-requirements.json) through [`hooks/flow-evidence.mjs`](hooks/flow-evidence.mjs). Codex carries the same discipline through skills, contracts, explicit validators, and procedure transcripts in this release.
 
 Judgment-based checks, such as whether context was actually read or test output was understood, live in skills and contracts rather than hook scripts. See [`hooks/README.md`](hooks/README.md).
 

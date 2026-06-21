@@ -14,6 +14,8 @@ AGENTIC-SDLC currently supports **Claude Code** and **Codex** as release targets
 | Ask user | `AskUserQuestion` | direct user question or available input tool | stop at decision point |
 | Goal lock | `/goal` | active goal tool if available; otherwise manual lock | `# Goal Lock` artifact |
 | Loop fail-fix-retest | `/loop` | manual loop with command evidence | `# Loop Iteration` artifact |
+| Deterministic hook guardrails | Full `hooks/hooks-claude.json`: command guards, write scan, flow guards, session bootstrap, Stop guards | `hooks/hooks-codex.json` SessionStart bootstrap after hook review/trust | skills, contracts, explicit script runs, and transcript/procedure evidence |
+| Active-flow evidence enforcement | `flow-order-guard.mjs` and `flow-step-guard.mjs` read `hooks/flow-requirements.json` | no command-blocking flow hooks in this release | run validators and record missing native enforcement as degraded evidence |
 | Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}` | `${PLUGIN_ROOT}` | current repo root |
 
 > Other harnesses (OpenCode, Kimi, GLM-style) are future/unsupported work, not release targets.

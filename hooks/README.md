@@ -26,8 +26,13 @@ Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve t
 | `scan-commit.mjs` | `PreToolUse` (`git commit*`) | Not wired | Scans added diff lines for high-confidence secrets; blocks commit. |
 | `branch-guard.mjs` | `PreToolUse` (`git commit*` / `git push*`) | Not wired | Warns on `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. |
 | `destructive-command-guard.mjs` | `PreToolUse` shell command | Not wired | Blocks deterministic destructive commands such as `git reset --hard`, forceful `git clean`, recursive `rm` including wrapper/path forms, and `Remove-Item -Recurse` including common aliases/wrappers. |
+| `flow-order-guard.mjs` | `PreToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | For active flows, checks current-turn pre-edit evidence before source edits; warns by default and denies when `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `completion-claim-guard.mjs` | `Stop` | Not wired | Warns when a final completion claim appears without `completion-claim-gate`; blocks when `AGENTIC_COMPLETION_GATE_BLOCK=true`. |
+| `flow-step-guard.mjs` | `Stop` | Not wired | Re-derives required active-flow evidence from validated artifacts, real tool calls, and commands; warns by default and blocks missing `stop:block` steps when `AGENTIC_FLOW_GATE_BLOCK=true`. |
+| `flow-evidence.mjs` | Shared library | Shared library | Evidence engine used by `flow-order-guard.mjs` and `flow-step-guard.mjs`. |
 | `secret-patterns.mjs` | Shared library | Shared library | Secret-pattern scanner used by the scan hooks. |
+
+`flow-requirements.json` is the shared source for active-flow step definitions and source-file extensions. The live flow hooks read it at runtime, and `tests/test_flow_requirements.py` validates that its skill, workflow, agent, and validator references resolve.
 
 All scripts are generic: no shell for git operations, path-normalized skip lists, no embedded real secrets, and fail-open behavior on hook errors.
 
@@ -43,6 +48,7 @@ These checkpoints require model judgment, so they live as flow gates in skills a
 | `post-test-result-check` | contract `05-testing`; TDD loops in implementation skills. |
 | `security-sensitive-change-check` | contract `06-security`; `security-audit`. |
 | `pre-git-operation-check` | contract `08-git-safety`; `/git-safety-check`; `scan-commit.mjs`; `branch-guard.mjs`. |
+| `flow-step-evidence-check` | `flow-order-guard.mjs`; `flow-step-guard.mjs`; `hooks/flow-requirements.json`; implementation skills and `implementasyon-control`. |
 | `final-response-verification` | `implementasyon-control` plus `completion-claim-gate`; Claude `completion-claim-guard.mjs` is only a deterministic backstop. |
 
 ## Adding Or Disabling Hooks

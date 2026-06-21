@@ -38,7 +38,7 @@ On Windows, use `py -3` for the same commands when `python3` is not on `PATH`.
 |---|---|
 | `python3 scripts/bump_version.py --check` | `VERSION`, Claude plugin metadata, Claude marketplace metadata, and Codex plugin metadata agree. |
 | `python3 scripts/check_all.py` | Every `skills/<name>/SKILL.md` has valid frontmatter; name matches the directory; only allowed keys; description present and free of angle brackets; the discovered `tests/test_*.py` suites pass. |
-| `python3 tests/skills/harness.py` | Skill/agent/workflow/hook/skill-contract references resolve; golden cross-references have not drifted; safety-fixture evidence is wired to real files; `${CLAUDE_PLUGIN_ROOT}` paths and `hooks.json` references resolve. |
+| `python3 tests/skills/harness.py` | Skill/agent/workflow/hook/skill-contract references resolve; golden cross-references have not drifted; safety-fixture evidence is wired to real files; `${CLAUDE_PLUGIN_ROOT}` and `${PLUGIN_ROOT}` paths plus Claude/Codex hook configs resolve. |
 | `python3 -m unittest discover -s tests -v` | `detect_context.py` classifies workspaces correctly; `validate_artifacts.py` enforces spec/plan structure and scans for placeholders/secrets; hook and workflow JavaScript parses under `node --check` (skipped if `node` is missing). |
 
 ### What the gate does NOT prove
@@ -83,18 +83,25 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | File | Matrix | What it verifies |
 |---|---|---|
 | `tests/test_skill_structure.py` | A | Every skill has valid frontmatter, a kebab-case name matching its directory, a present description without angle brackets, and only allowed frontmatter keys. Every agent has a name matching its filename and a description. |
-| `tests/test_skill_integration.py` | F | Golden `must_reference` entries appear in `SKILL.md` and resolve to real skills/agents/workflows/commands/scripts/files/contracts/hooks; plugin-root references exist; `hooks.json` is valid JSON and each referenced `.mjs` exists; workflow `agentType` values resolve to real agents; README/hooks-README claims match the tree. |
+| `tests/test_skill_integration.py` | F | Golden `must_reference` entries appear in `SKILL.md` and resolve to real skills/agents/workflows/commands/scripts/files/contracts/hooks; plugin-root references exist; Claude and Codex hook configs are valid JSON and each referenced `.mjs` exists; workflow `agentType` values resolve to real agents; README/hooks-README claims match the tree. |
 | `tests/test_skill_fixtures.py` | B / D / G | Every skill has a golden entry; golden description keywords still appear in live descriptions; safety scenarios are well-formed and their guardrail evidence exists in the cited repo files; every `tests/skills/evals/<skill>.json` is well-formed, targets a real skill, and contains both positive and negative queries. |
 | `tests/test_detect_context.py` | script unit | `detect_context.py` classifies empty dirs as greenfield, counts source files, detects one vs. multiple architectural layers, ignores noise dirs, probes dependency manifests, probes toolchains, and always exits 0 even on hostile paths. |
-| `tests/test_validate_artifacts.py` | script unit | `validate_artifacts.py` detects missing spec sections, thin sections, untestable acceptance criteria, placeholder tokens, secrets (masked), AC coverage gaps, and task-block ordering; `--strict` promotes warnings to errors. |
+| `tests/test_validate_artifacts.py` | script unit | `validate_artifacts.py` detects missing spec sections, thin sections, untestable acceptance criteria, placeholder tokens, secrets (masked), AC coverage gaps, task-block ordering, missing task verification, deferrals, and security hand-waves; `--strict` promotes warnings to errors. |
+| `tests/test_work_package_resolution.py` | script unit | `resolve_work_package.py` resolves canonical `docs/agentic-sdlc/specs/` + `docs/agentic-sdlc/plans/` pairs by explicit path, branch, or changed plan, and rejects ambiguity, bad metadata, path traversal, missing specs, and timestamp fallback. |
 | `tests/test_static_node.py` | E | Every hook `.mjs` and every workflow `.js` passes `node --check` (workflows are wrapped the same way the Workflow runtime wraps them). Skipped if `node` is absent. |
 | `tests/test_trigger_eval.py` | eval-runner unit | The Claude trigger eval runner parses fixtures, builds command shims, and detects trigger outcomes correctly. |
 | `tests/test_codex_trigger_eval.py` | eval-runner unit | The Codex route-classifier trigger runner parses fixtures and classifies routes correctly. |
+| `tests/test_routing_eval.py` | eval-runner unit | The router eval runner handles Claude/Codex command construction, model aliases, error extraction, and route classification. |
 | `tests/test_behavior_eval.py` | eval-runner unit | The behavior eval runner validates fixture shape and matches required/forbidden patterns. |
-| `tests/test_procedure_eval.py` | eval-runner unit | The procedure evaluator parses stream-json transcripts and enforces required/forbidden skills, workflows, commands, artifacts, and patterns. |
-| `tests/test_hooks_policy.py` | policy unit | Hook wiring policy (block vs warn, fail-open, secret-pattern coverage). |
+| `tests/test_procedure_eval.py` | eval-runner unit | The procedure evaluator parses stream-json transcripts and enforces required/forbidden skills, workflows, commands, artifacts, adapter evidence, artifact depth, and patterns. |
+| `tests/test_flow_requirements.py` | hook policy unit | `hooks/flow-requirements.json` parses and every named skill, workflow, agent, validator, and command regex resolves. |
+| `tests/test_flow_guards.py` | hook policy unit | `flow-order-guard.mjs` and `flow-step-guard.mjs` re-derive evidence, fail open outside active flows, and warn/block according to `AGENTIC_FLOW_GATE_BLOCK`. |
+| `tests/test_hooks_policy.py` | policy unit | Hook wiring policy (block vs warn, fail-open, secret-pattern coverage, Claude/Codex hook-config separation). |
 | `tests/test_packaging_metadata.py` | metadata unit | Plugin manifests, publishable Codex schema keys, marketplace version consistency, and `bump_version.py` behavior. |
-| `tests/test_handoff_scripts.py` | script unit | `task_brief.py` and `review_package.py` CLI behavior. |
+| `tests/test_release_readiness_docs.py` | doc consistency unit | Release-readiness docs and documented helper counts match the repository. |
+| `tests/test_house_voice.py` | product-surface unit | Runtime scope, house-voice markers, depth-forcing blocks, and maintenance files remain present. |
+| `tests/test_skill_creator_resolver.py` | helper unit | `skill-authoring/scripts/resolve_skill_creator.py` discovers or reports the external skill-creator location without hidden installs. |
+| `tests/test_handoff_scripts.py` | script unit | `task_brief.py` extracts a single plan task into a handoff file. |
 
 ---
 
@@ -112,8 +119,8 @@ It is the static counterpart to live evals — proving the substrate underneath 
 | **Trigger (B)** | Eval-set well-formedness, target skill exists, positive + negative queries present | Whether the model actually triggers the skill |
 | **Procedure (C)** | Core flow skills reference their steps/workflows via golden `must_reference` | Step ordering and runtime obedience |
 | **Safety (D)** | Each scenario's guardrail text is wired in a contract/skill/hook | Whether the model obeys the guardrail |
-| **Tool-use (E)** | Hook `.mjs` + workflow `.js` parse with `node --check` | Runtime tool decisions |
-| **Integration (F)** | Every cross-reference + `${CLAUDE_PLUGIN_ROOT}` path resolves | — |
+| **Tool-use (E)** | Hook `.mjs` + workflow `.js` parse with `node --check`; Claude/Codex hook configs reference real scripts | Runtime tool decisions |
+| **Integration (F)** | Every cross-reference plus `${CLAUDE_PLUGIN_ROOT}` and `${PLUGIN_ROOT}` path reference resolves | — |
 | **Regression (G)** | Golden baseline: name + description keywords + `must_reference` | — |
 
 Run the harness standalone:
@@ -135,9 +142,43 @@ The deterministic layer is driven by checked-in references and fixtures under `t
 | `tests/skills/golden/skills.json` | Per-skill regression baseline. `description_must_include` lists trigger keywords that must survive edits; `must_reference` lists cross-references that must appear and resolve. | `{ "skills": { "<name>": { "description_must_include": [...], "must_reference": [{"ref": "...", "kind": "skill\|agent\|workflow\|command\|script\|file\|contract\|hook"}] } } }` |
 | `tests/skills/fixtures/safety.json` | Seven unsafe-instruction scenarios. Each points to `guardrail_evidence`: repo files + substrings that prove the guardrail is wired. | `{ "scenarios": [{ "id", "prompt", "category", "expected_behavior", "guardrail_evidence": [{"file": "...", "contains": "..."}] }] }` |
 | `tests/skills/evals/<skill>.json` | Live trigger eval fixtures shared by the Claude and Codex runners. | `{ "queries": [{ "query": "...", "should_trigger": true\|false }] }` |
+| `tests/skills/routing/using-agentic-sdlc.json` | Router eval scenarios for smallest-sufficient-skill selection. | `{ "scenarios": [{ "prompt", "expected", "escalation" }] }` |
 | `tests/skills/behavior/<case>.json` | Behavior eval seeds. Each case gives a prompt and required/forbidden regex patterns. | `{ "cases": [{ "id", "prompt", "required_patterns": [...], "forbidden_patterns": [...] }] }` |
-| `tests/skills/procedure/<case>.json` | Procedure eval seeds (see format below). | `{ "cases": [{ "id", "prompt", "fixture_dir?", "required_skills": [...], "required_workflows": [...], "required_runtime_adapters": [...], "required_commands": [...], "required_artifacts": [...], "forbidden_commands": [...], "required_patterns": [...], "forbidden_patterns": [...] }] }` |
+| `tests/skills/procedure/<case>.json` | Procedure eval seeds, including `agentic-sdlc-pipeline.json` and `skill-depth.json` (see format below). | `{ "cases": [{ "id", "prompt", "fixture_dir?", "check_artifact_depth?", "required_skills": [...], "required_workflows": [...], "required_runtime_adapters": [...], "required_commands": [...], "required_artifacts": [...], "forbidden_commands": [...], "required_patterns": [...], "forbidden_patterns": [...] }] }` |
 | `tests/fixtures/transcripts/*.jsonl` | Sample Claude Code stream-json transcripts for deterministic procedure-eval testing. | One JSON object per line — typically `assistant`, `stream_event`, and `result` events. |
+
+---
+
+## Router evals
+
+`scripts/run_routing_eval.py` evaluates `using-agentic-sdlc` as a router, not as a child skill trigger. It checks whether the prompt routes to the smallest sufficient skill and whether only full-envelope/high-risk prompts escalate to `agentic-sdlc-pipeline`.
+
+Claude and Codex use different evidence sources, so read the runtime label on every result:
+
+```bash
+python3 scripts/run_routing_eval.py \
+  --eval-set tests/skills/routing/using-agentic-sdlc.json \
+  --runtime claude \
+  --runs 3
+
+python3 scripts/run_routing_eval.py \
+  --eval-set tests/skills/routing/using-agentic-sdlc.json \
+  --runtime codex \
+  --reasoning-effort high \
+  --runs 3
+```
+
+The fixture format is:
+
+```json
+{
+  "scenarios": [
+    {"prompt": "...", "expected": "root-cause-fix", "escalation": false}
+  ]
+}
+```
+
+Do not combine routing eval results with trigger eval results as if they measure the same thing. Routing evals score the router's classification decision; trigger evals score runtime activation for a target skill.
 
 ---
 
@@ -300,6 +341,7 @@ For each case, the evaluator parses the transcript into a trace and checks:
 | Runtime adapter evidence | Regex patterns in `required_runtime_adapters[].required_patterns` proving the runtime-equivalent path, such as `Workflow unavailable`, `spec-plan-author`, `spec-plan-critic`, `docs/agentic-sdlc/specs/`, `docs/agentic-sdlc/plans/`, and activated delegate-skill instructions. |
 | Required commands | A regex match against the `command` field of any tool invocation recorded in the trace. |
 | Required artifacts | Either a `Write` tool `file_path` matching the pattern, or an existing file glob under the case working directory. |
+| Artifact depth | When `check_artifact_depth` is true, written spec/plan artifacts are re-run through `validate_artifacts.py`; literal stubs such as `spec` or `plan` fail as `shallow_artifact:<path>`. |
 | Forbidden commands | A regex match against recorded `command` fields; if any match, the case fails. |
 | Required patterns | A regex match anywhere in the serialized trace haystack. |
 | Forbidden patterns | A regex match anywhere in the serialized trace haystack. |
@@ -327,6 +369,7 @@ For each case, the evaluator parses the transcript into a trace and checks:
       ],
       "required_commands": ["detect_context\\.py", "validate_artifacts\\.py"],
       "required_artifacts": ["docs/agentic-sdlc/specs/", "docs/agentic-sdlc/plans/"],
+      "check_artifact_depth": true,
       "forbidden_commands": ["\\bgit\\s+commit\\b", "\\bgit\\s+push\\b", "\\bgit\\s+merge\\b"],
       "required_patterns": [],
       "forbidden_patterns": [],
@@ -373,6 +416,7 @@ python3 scripts/resolve_work_package.py
 - Required sections present: Problem, Business rules, Acceptance criteria, Edge cases, Definition of done, Must-not-change.
 - Each present section has enough content (non-gating warning if thin).
 - Acceptance-criteria bullets contain a testable marker (`Given`, `When`, `Then`, `returns`, `exit`, `->`, `=>`).
+- Security sections cannot be bare dismissals; `security_handwave` warns on claims such as "safe string handling only" without an input-to-sink explanation.
 - No `TODO`/`TBD`/`FIXME`/`XXX` placeholders remain in prose (fenced code and inline code are skipped).
 - No secret-shaped content (explicit narrow patterns only; no entropy detector).
 
@@ -380,10 +424,19 @@ python3 scripts/resolve_work_package.py
 
 - Task blocks start with `## Task N` headings or line-leading `TN` markers.
 - Each task references a file to create or modify and mentions TDD or a failing test.
+- Each task includes runnable verification; missing commands or expected signals warn as `task_no_verification`.
+- Deferral hand-waves such as "Non-task step" or "executed later after gates" warn as `deferred_work`.
 - Tasks are ordered with strictly increasing numbers.
 - Every acceptance-criterion id (`AC1`, `AC2`, …) from the spec is covered by at least one task block.
 
 > The validator is **structural only** — it cannot tell whether the spec is *about the requested work*. At the Spec Review gate also confirm the spec's topic matches the requested task (a mis-carried workflow context can yield a structurally-valid but **off-target** spec).
+
+**For work-package identity:**
+
+- `resolve_work_package.py` requires spec frontmatter (`work_id`, `status`) and plan frontmatter (`work_id`, `spec`, `branch`, `status`).
+- It accepts only canonical roots under `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/`.
+- It resolves from explicit path first, then a unique branch match, then a unique changed canonical plan.
+- It rejects ambiguous plans, missing specs, bad status values, work-id mismatches, and path traversal; it never selects by newest timestamp.
 
 ---
 

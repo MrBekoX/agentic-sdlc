@@ -18,7 +18,7 @@ Check:
 2. Its `agentic-sdlc` entry points at `~/plugins/agentic-sdlc`.
 3. `~/plugins/agentic-sdlc` is a real copy or symlink/junction to this plugin root.
 4. The plugin was installed with `codex plugin add agentic-sdlc@personal`.
-5. The manifest contains `"skills": "./skills/"` and no unsupported top-level `hooks` field.
+5. The manifest contains `"skills": "./skills/"` and `"hooks": "./hooks/hooks-codex.json"`.
 6. Skills are under root `skills/`, not `.codex/skills/`.
 7. The runtime guide in [`../.codex-plugin/README.md`](../.codex-plugin/README.md) matches the installed path.
 
@@ -64,6 +64,16 @@ AGENTIC_COMPLETION_GATE_BLOCK=true
 ```
 
 This deterministic guard complements the judgment gate. It does not replace `completion-claim-gate`.
+
+## Flow Guard Only Warns
+
+This is the default in Claude Code for `flow-order-guard.mjs` and `flow-step-guard.mjs`. To deny source edits or block Stop when active implementation-flow evidence is missing:
+
+```bash
+AGENTIC_FLOW_GATE_BLOCK=true
+```
+
+The flow guards re-derive evidence from the current transcript, validated `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/` artifacts, real tool calls, and real commands. Prose such as "I ran the gate" does not satisfy a required step.
 
 ## Secret Scanner False Positive
 

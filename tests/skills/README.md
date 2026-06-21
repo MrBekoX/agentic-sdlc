@@ -13,7 +13,7 @@ not cover). It checks structure and cross-references — **not** runtime model b
 | Procedure (C) | core flow skills reference their steps/work-flows (via golden) | step *ordering at runtime* |
 | Safety (D) | each scenario's guardrail text is **wired** in a contract/skill/hook | whether the model *obeys* the guardrail |
 | Tool-use (E) | hook `.mjs` + workflow `.js` parse (`node --check`) | runtime tool decisions |
-| Integration (F) | every cross-reference + `${CLAUDE_PLUGIN_ROOT}` path resolves | — |
+| Integration (F) | every cross-reference plus `${CLAUDE_PLUGIN_ROOT}` and `${PLUGIN_ROOT}` path references resolve | — |
 | Regression (G) | golden baseline: name + description keywords + must_reference | — |
 
 The harness reports **errors** (gating) and **warnings** (non-gating doc drift), mirroring
@@ -23,16 +23,20 @@ The harness reports **errors** (gating) and **warnings** (non-gating doc drift),
 
 ```
 tests/skills/
-  harness.py            # stdlib library + standalone runner (python tests/skills/harness.py)
+  harness.py            # stdlib library + standalone runner (python3 tests/skills/harness.py)
   golden/skills.json    # per-skill regression baseline + must_reference cross-ref map (G/F)
   fixtures/safety.json  # 7 unsafe-instruction scenarios + wired-guardrail evidence (D)
   evals/<skill>.json    # live trigger eval-sets, run_trigger_eval.py format (B)
+  routing/*.json        # router scenarios for using-agentic-sdlc
+  behavior/*.json       # behavior eval seeds
+  procedure/*.json      # procedure/transcript eval seeds
   README.md             # this file
 ```
 
 The unittest **runners live at `tests/` top level** (`test_skill_structure.py`,
-`test_skill_integration.py`, `test_skill_fixtures.py`, `test_static_node.py`), not under
-`tests/skills/`. Reason: `scripts/check_all.py` runs `python -m unittest discover -s tests`,
+`test_skill_integration.py`, `test_skill_fixtures.py`, `test_static_node.py`, flow guard tests,
+eval-runner tests, and supporting script tests), not under
+`tests/skills/`. Reason: `scripts/check_all.py` runs `python3 -m unittest discover -s tests`,
 which collects `test_*.py` at the top level exactly like the two existing script suites —
 so the new tests join the gate automatically with no import/package gymnastics. `tests/skills/`
 holds only the library, fixtures, and golden data (no `snapshots/` dir — `golden/` already
@@ -42,14 +46,14 @@ serves the regression-snapshot role; a second copy would just drift).
 
 ```bash
 # Official gate (lints skill frontmatter + runs ALL discovered tests, incl. these):
-python scripts/check_all.py
+python3 scripts/check_all.py
 
 # Just the new suites:
-python -m unittest discover -s tests -p "test_skill_*.py" -v
-python -m unittest discover -s tests -p "test_static_node.py" -v
+python3 -m unittest discover -s tests -p "test_skill_*.py" -v
+python3 -m unittest discover -s tests -p "test_static_node.py" -v
 
 # Standalone harness summary (sorted key=value, exit 1 on error):
-python tests/skills/harness.py
+python3 tests/skills/harness.py
 ```
 
 `test_static_node.py` **skips** (does not pass) if `node` is absent.
@@ -57,7 +61,7 @@ python tests/skills/harness.py
 ## Live trigger eval (B) — gated, model required, not run by the gate
 
 ```bash
-python scripts/run_trigger_eval.py \
+python3 scripts/run_trigger_eval.py \
   --skill-path skills/root-cause-fix --eval-set tests/skills/evals/root-cause-fix.json --runs 3
 ```
 

@@ -230,10 +230,10 @@ Standalone `spec-authoring` / `plan-authoring` may still use `spec-plan-draft` a
 | Layer | Owns |
 |---|---|
 | `contracts/skills/` | Durable skill behavior contracts (`00`–`10`). |
-| `hooks/` | Deterministic runtime enforcement and warnings (secret scan, branch guard, destructive-command guard, session start). |
+| `hooks/` | Deterministic runtime enforcement and warnings (secret scan, branch guard, destructive-command guard, session start, completion claim, active-flow evidence guards). |
 | `skills/` | Procedure and agentic workflow surface; one directory per skill. |
 | `agents/` | Fresh-context specialist roles (context-analyst, code-reviewer, security-reviewer, implementation-auditor, spec-plan-author, spec-plan-critic, …). |
-| `workflows/` | Deterministic multi-agent author/critic loops (`spec-plan-draft.js`, `skill-draft.js`). |
+| `workflows/` | Deterministic multi-agent loops: `spec-plan-draft.js`, `skill-draft.js`, and higher-rigor `multi-lens-review.js`. |
 | `commands/` | Explicit manual checks such as `/git-safety-check`. |
 | `scripts/` | Machine-checkable helpers (`check_all.py`, `validate_artifacts.py`, `detect_context.py`, eval runners, packaging tools). |
 | `tests/` | Deterministic test, fixture, golden, and procedure-eval infrastructure. |

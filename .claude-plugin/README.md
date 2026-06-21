@@ -74,12 +74,14 @@ Claude Code wires the full hook surface in `hooks/hooks-claude.json`:
 
 | Event | Scripts |
 |---|---|
-| `PreToolUse` | `scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs` |
+| `PreToolUse` | `scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs`, `flow-order-guard.mjs` |
 | `PostToolUse` | `scan-write.mjs` |
 | `SessionStart` | `session-start.mjs` |
-| `Stop` | `completion-claim-guard.mjs` |
+| `Stop` | `completion-claim-guard.mjs`, `flow-step-guard.mjs` |
 
 `scan-commit.mjs` and `destructive-command-guard.mjs` can block. `scan-write.mjs` warns. `branch-guard.mjs` warns by default and blocks only when `AGENTIC_BRANCH_GUARD_BLOCK=true`. `completion-claim-guard.mjs` warns by default and blocks only when `AGENTIC_COMPLETION_GATE_BLOCK=true`.
+
+The flow guards are the deterministic backstop for active implementation flows. `flow-order-guard.mjs` checks before source edits that required pre-edit evidence exists in the current turn; `flow-step-guard.mjs` checks at Stop that required flow steps have observable evidence. Both use `hooks/flow-requirements.json` and `flow-evidence.mjs`, warn by default, and block/deny only when `AGENTIC_FLOW_GATE_BLOCK=true`.
 
 ## Requirements
 
