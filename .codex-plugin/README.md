@@ -10,7 +10,7 @@ Codex reads:
 |---|---|
 | `.codex-plugin/plugin.json` | Codex plugin metadata and interface block. |
 | `skills/*/SKILL.md` | Shared skill source. |
-| `hooks/hooks.json` | Codex default hook config: SessionStart bootstrap only after hook review/trust. |
+| `hooks/hooks-codex.json` | Codex hook config (declared in the manifest): SessionStart bootstrap only after hook review/trust. |
 
 The manifest points to:
 
@@ -113,7 +113,7 @@ Focused skills are independently routable in Codex and also serve as pipeline bu
 
 ## Hooks In Codex
 
-The publishable Codex manifest does not declare a top-level `hooks` field. Codex auto-detects hooks/hooks.json; no manifest hooks field is required. Codex can discover the plugin-default `hooks/hooks.json`, which wires only `SessionStart` to `hooks/session-start-codex.mjs` through `${PLUGIN_ROOT}`. Non-managed plugin-bundled command hooks require Codex review/trust before they run. Command-blocking guardrails remain Claude-only in this release; Codex guardrail behavior is carried by skills, contracts, manual checks, and explicit script runs where appropriate.
+The Codex manifest declares `"hooks": "./hooks/hooks-codex.json"`, which wires only `SessionStart` to `hooks/session-start-codex.mjs` through `${PLUGIN_ROOT}`. The config is deliberately NOT named `hooks/hooks.json`: Claude Code auto-loads that default filename, where `${PLUGIN_ROOT}` is undefined and the command would fail. Non-managed plugin-bundled command hooks require Codex review/trust before they run. Command-blocking guardrails remain Claude-only in this release; Codex guardrail behavior is carried by skills, contracts, manual checks, and explicit script runs where appropriate.
 
 ## Requirements
 

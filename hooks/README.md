@@ -10,7 +10,7 @@ Two kinds of guard live here:
 | Runtime | Config | Wired events in this release |
 |---|---|---|
 | Claude Code | `hooks/hooks-claude.json` via `.claude-plugin/plugin.json` | `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop` |
-| Codex | `hooks/hooks.json` as the plugin default, after Codex hook review/trust | `SessionStart` only |
+| Codex | `hooks/hooks-codex.json` declared in `.codex-plugin/plugin.json`, after Codex hook review/trust | `SessionStart` only |
 
 The hook scripts are shared in this directory, but being present as a script is not the same as being wired by every runtime.
 
@@ -47,6 +47,6 @@ These checkpoints require model judgment, so they live as flow gates in skills a
 
 ## Adding Or Disabling Hooks
 
-- Add new scripts under the matching event in `hooks/hooks-claude.json` for Claude Code or `hooks/hooks.json` for Codex when that runtime supports the event.
+- Add new scripts under the matching event in `hooks/hooks-claude.json` for Claude Code or `hooks/hooks-codex.json` for Codex when that runtime supports the event.
 - Use runtime hook controls to browse or temporarily disable hooks.
 - Keep scripts deterministic. Checks that need judgment belong in skills/contracts.

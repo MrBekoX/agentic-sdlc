@@ -181,7 +181,7 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 | Runtime | Hook wiring |
 |---|---|
 | Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. |
-| Codex | [`hooks/hooks.json`](hooks/hooks.json), plugin-default `SessionStart` bootstrap only after Codex hook review/trust. |
+| Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`; `SessionStart` bootstrap only after Codex hook review/trust. |
 
 Judgment-based checks, such as whether context was actually read or test output was understood, live in skills and contracts rather than hook scripts. See [`hooks/README.md`](hooks/README.md).
 
