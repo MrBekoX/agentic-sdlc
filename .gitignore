@@ -17,6 +17,7 @@ tests/**/__pycache__/
 
 # Documentation: track plugin docs; keep generated audit reports local unless intentionally added.
 docs/*
+docs/codex-plugin-runtime-debug-report/
 !docs/plugin-readme.md
 !docs/claude-code-runtime.md
 !docs/testing.md
