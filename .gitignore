@@ -26,6 +26,12 @@ docs/codex-plugin-runtime-debug-report/
 !docs/runtime-adapter.md
 !docs/release-readiness.md
 
+# Debug / local runtime artifacts
+debug.txt
+2026-06-21-161126-sessionstartstartup-hook-error.txt
+2026-06-22-181040-hooksbranch-guardmjs-hooku-tetiklenmiyor-bu.txt
+2026-06-22-184416-hooksbranch-guardmjs-hooku-tetiklenmiyor.txt
+
 # Optional tool reference snapshots
 mcps/
 

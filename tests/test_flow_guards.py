@@ -64,6 +64,7 @@ def _write_stub_spec(cwd):
 # command, security + control via real agent dispatches.
 SATISFIED = [
     skill(RCF),
+    edit("src/app.py"),
     workflow("agentic-sdlc:spec-plan-draft"),
     bash("py -3 -m unittest tests.test_app"),
     agent("agentic-sdlc:security-reviewer"),
@@ -112,6 +113,13 @@ class TestFlowStepGuard(unittest.TestCase):
         out = self.run_guard(SATISFIED, block=True)
         self.assertEqual(out, {})
 
+    def test_diagnose_only_no_source_edit_is_silent(self):  # regression: report-only run, no false positive
+        # root-cause-fix invoked for investigation only ("no changes, just a report").
+        # No production source file edited -> no implementation obligations to enforce.
+        events = [skill(RCF), bash("git commit --dry-run"),
+                  ev_text("Root cause report: wiring is intact.")]
+        self.assertEqual(self.run_guard(events, block=True), {})
+
     def test_no_flow_heuristic_warns_never_blocks(self):  # AC6
         events = [edit("src/app.py"), edit("src/two.py"), ev_text("All tests passing, feature complete.")]
         out = self.run_guard(events, block=True)
@@ -143,7 +151,7 @@ class TestFlowStepGuard(unittest.TestCase):
 
     def test_feature_build_satisfied_is_silent(self):
         events = [
-            skill(FB), workflow("agentic-sdlc:spec-plan-draft"),
+            skill(FB), edit("src/app.py"), workflow("agentic-sdlc:spec-plan-draft"),
             bash("py -3 -m unittest tests.test_app"),
             agent("agentic-sdlc:security-reviewer"),
             agent("agentic-sdlc:implementation-auditor"), ev_text("Done."),
@@ -158,6 +166,7 @@ class TestFlowStepGuard(unittest.TestCase):
     def test_safe_refactor_satisfied_is_silent(self):
         events = [
             skill(SR), bash("py -3 -m unittest tests.test_characterization"),
+            edit("src/app.py"),
             agent("agentic-sdlc:implementation-auditor"), ev_text("Done."),
         ]
         self.assertEqual(self.run_guard(events, block=True), {})
@@ -173,6 +182,7 @@ class TestFlowStepGuard(unittest.TestCase):
             skill("agentic-sdlc:dispatch-strategy"),
             workflow("agentic-sdlc:spec-plan-draft"),
             skill("agentic-sdlc:feature-build"),  # core handoff
+            edit("src/app.py"),
             bash("py -3 -m unittest tests.test_app"),
             skill("agentic-sdlc:security-audit"),
             skill("agentic-sdlc:implementasyon-control"),

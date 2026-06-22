@@ -37,8 +37,15 @@ try {
 
   const flows = activeFlowNames(trace, req);
 
+  // A flow's stop-steps are obligations of IMPLEMENTING through that flow. If the flow skill was
+  // invoked but no production source file was edited this session (a diagnose/report-only run),
+  // nothing was implemented -> nothing to test/secure/audit. Mirror flow-order-guard, which only
+  // ever gates real source edits. (completion-claim-guard still catches a bare "fixed" claim.)
+  const sourceEdited = trace.edits.some((e) => isSourceFile(e, req));
+
   const missing = [];
   for (const flow of flows) {
+    if (!sourceEdited) continue; // diagnose/report-only run: no implementation, no obligations
     const steps = req.flows?.[flow]?.steps || [];
     for (const step of steps) {
       if (!step.stop) continue;

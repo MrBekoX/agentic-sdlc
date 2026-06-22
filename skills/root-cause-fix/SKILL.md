@@ -42,6 +42,10 @@ Don't ship "added a defensive check" as the whole root-cause story; an "edge cas
 ## Shallow example (reject this)
 "Root cause: the function returned null. Fix: added a null check." That restates the symptom (null appeared) as if it were the cause. The real root cause names *why* it was null — which upstream path left it unset and under what trigger. Reject and trace it.
 
+## Call-order guard — dispatch-strategy first
+
+After loading `root-cause-fix`, do not read files, run shell commands, or take any other action until you have called `Skill` -> `agentic-sdlc:dispatch-strategy` to set the working strategy for this task. Required even when the likely answer is "small single-file work; main loop is enough" — making the decision explicit is the point. The skill then runs under the chosen mechanism; the Orchestration section below applies it (reads fan out, writes stay serial).
+
 ## Orchestration — fan out investigation and verification, you coordinate (consult `dispatch-strategy` first)
 Two read-only fan-out points: **investigation** — heavy context-gathering goes to a `context-analyst` sub-agent, and when several root causes are plausible, dispatch **one `debugger` per competing hypothesis in a single message** so they're investigated concurrently; and **verification** — the test/lint/security lenses in parallel. You (main loop) stay the **coordinator**: weigh the hypotheses against evidence, pick the root layer, decide. The fix itself is written in the main loop (serial, in scope) — never fan out writers onto one file.
 - **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → investigate/verify in the main loop and flag `Delegation Degraded: parallel specialists unavailable`.

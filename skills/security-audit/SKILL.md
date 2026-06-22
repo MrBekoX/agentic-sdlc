@@ -46,6 +46,10 @@ Do not write "treat as safe" or "standard string handling". Do not write "no con
 ## Shallow example (reject this)
 A report whose only reasoning is "standard string handling, no issues" asserts safety without tracing a single input to a sink. Reject it: name the surfaces you traced and, per untrusted input, the reason it cannot reach a sink.
 
+## Call-order guard — dispatch-strategy first
+
+After loading `security-audit`, do not read files, run shell commands, or take any other action until you have called `Skill` -> `agentic-sdlc:dispatch-strategy` to set the working strategy for this task. Required even when the likely answer is "small single-file work; main loop is enough" — making the decision explicit is the point. The skill then runs under the chosen mechanism; the Orchestration section below applies it (reads fan out, writes stay serial).
+
 ## Orchestration — one reviewer per lens, you coordinate (consult `dispatch-strategy` first)
 The lenses (injection / authz-IDOR / secrets / auth) are independent read-only slices: dispatch **one `security-reviewer` per lens in a single message** so they run concurrently — parallel `Agent` calls, or a `Workflow` when you want the fixed lens set run deterministically. You (main loop) stay the **coordinator**: merge findings, dedup overlapping reports across lenses, rank by severity, decide. The audit reads only; fixes route to `root-cause-fix` / `feature-build` with approval.
 - **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → run the lenses in the main loop and record `Delegation Degraded: fresh-context specialist unavailable`, marked non-independent.

@@ -46,6 +46,10 @@ Do not ship "covers edge cases" without listing each one as a concrete input. Do
 ## Shallow example (reject this)
 A test named `test_works` whose body asserts only `mock.called` pins nothing — flip any real logic and it still passes. Reject it: name the behaviour, name the input that would break it, and watch it go red first.
 
+## Call-order guard — dispatch-strategy first
+
+After loading `test-authoring`, do not read files, run shell commands, or take any other action until you have called `Skill` -> `agentic-sdlc:dispatch-strategy` to set the working strategy for this task. Required even when the likely answer is "small single-file work; main loop is enough" — making the decision explicit is the point. The skill then runs under the chosen mechanism; the Orchestration section below applies it (reads fan out, writes stay serial).
+
 ## Orchestration — fan out coverage analysis, you coordinate (consult `dispatch-strategy` first)
 For a broad suite across several behavior-areas or modules, dispatch **one `test-engineer` per area in a single message** to analyze coverage gaps and judge whether existing tests pin real behavior — read-only, concurrent. You (main loop) stay the **coordinator**: merge the gap reports, prioritize, decide what to write. Writing/repairing the tests stays serial in the main loop (or worktree-isolated for a large multi-file pass) — never two agents on one file.
 - **Degrade:** a single small target, or running inside a delegated sub-agent (no nesting), or a runtime without parallel agents → analyze in the main loop and flag `Delegation Degraded: parallel specialists unavailable`.
