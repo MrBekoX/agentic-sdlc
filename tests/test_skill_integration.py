@@ -144,6 +144,17 @@ class TestSkillCrossReferences(unittest.TestCase):
         ):
             self.assertIn(phrase, desc)
 
+    def test_dispatch_strategy_scope_is_fenced_to_mechanism(self):
+        # dispatch decides the execution mechanism over a skill's named parts -- never the
+        # skill's internal flow, its steps, or its mandated integrity gates.
+        text = (h.SKILLS_DIR / "dispatch-strategy" / "SKILL.md").read_text(encoding="utf-8")
+        for phrase in (
+            "mechanism map over the skill's named parts",
+            "Never wholesale-delegate a multi-step skill",
+            "Never touch the skill's internal mechanism",
+        ):
+            self.assertIn(phrase, text)
+
     def test_mind_spark_description_covers_language_independent_brainstorming_intent(self):
         art = h.load_markdown_artifact(h.SKILLS_DIR / "mind-spark" / "SKILL.md")
         desc = h.frontmatter_value(art["frontmatter"], "description")
