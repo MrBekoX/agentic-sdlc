@@ -42,6 +42,10 @@ Do not write "consider refactoring" with no named target, "looks good" as a verd
 ## Shallow example (reject this)
 "Overall clean, maybe tidy some variable names." — no `file:line`, no consequence, no replacement name, no must-fix/optional split. It performs review without doing it. Reject.
 
+## Call-order guard — dispatch-strategy first
+
+After loading `code-quality-review`, do not read files, run shell commands, or take any other action until you have called `Skill` -> `agentic-sdlc:dispatch-strategy` to set the working strategy for this task. Required even when the likely answer is "small single-file work; main loop is enough" — making the decision explicit is the point. The skill then runs under the chosen mechanism; the Orchestration section below applies it (reads fan out, writes stay serial).
+
 ## Orchestration — fan out per layer, you coordinate (consult `dispatch-strategy` first)
 When the diff spans 2+ independent layers or file-groups, dispatch **one `code-reviewer` per layer in a single message** so they run concurrently — each sees only its slice of the diff + the criteria, not the authoring reasoning, so the pass is unbiased. For a structural change, add a `software-architect` instance for the architecture lens. You (main loop) stay the **coordinator**: merge findings, dedup, split must-fix from optional, decide. Reads fan out; any fix is applied serially in an implementation skill, never by two agents on one file.
 - **Independent verdict:** when a clean/done call would mean judging code you wrote, route the merged findings through `implementation-auditor` (via `implementasyon-control`), not self-attestation.

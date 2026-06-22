@@ -42,6 +42,10 @@ Do not ship "should work", acceptance criteria written as feature names instead 
 ## Shallow example (reject this)
 A feature whose only evidence is "build passes, endpoint added" — the path never exercised, no RED→GREEN test, no observed output — is shallow. Reject.
 
+## Call-order guard — dispatch-strategy first
+
+After loading `feature-build`, do not read files, run shell commands, or take any other action until you have called `Skill` -> `agentic-sdlc:dispatch-strategy` to set the working strategy for this task. Required even when the likely answer is "small single-file work; main loop is enough" — making the decision explicit is the point. The skill then runs under the chosen mechanism; the Orchestration section below applies it (reads fan out, writes stay serial).
+
 ## Orchestration — fan out scope and verification, you coordinate (consult `dispatch-strategy` first)
 Two read-only fan-out points: the **scope map** (one `context-analyst` per affected layer, in a single message) and **verification** (test / lint / security lenses in parallel — `security-reviewer` for the security lens). Dispatch each set concurrently and stay the **coordinator**: merge the layer maps into one scope, read the verification results, decide. Interdependent code and ordering decisions stay in the main loop; writes stay serial — never two agents on one file.
 - **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → run scope/verification in the main loop and flag `Delegation Degraded: parallel specialists unavailable`.

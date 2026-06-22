@@ -42,6 +42,10 @@ Don't ship "behavior unchanged" with no captured snapshot, or let "equivalent" /
 ## Shallow example (reject this)
 "Refactored for clarity; the suite is green so behavior is preserved." Green before AND after is not proof *this* change preserved behavior — the suite was already green. Reject and capture the before/after snapshot for the inputs the change actually touches.
 
+## Call-order guard — dispatch-strategy first
+
+After loading `safe-refactor`, do not read files, run shell commands, or take any other action until you have called `Skill` -> `agentic-sdlc:dispatch-strategy` to set the working strategy for this task. Required even when the likely answer is "small single-file work; main loop is enough" — making the decision explicit is the point. The skill then runs under the chosen mechanism; the Orchestration section below applies it (reads fan out, writes stay serial).
+
 ## Orchestration — characterize in parallel, edit serially, you coordinate (consult `dispatch-strategy` first)
 Characterizing current behavior across modules is a read-only fan-out: dispatch **one `software-architect` or `context-analyst` per module in a single message** to map the observable behavior and boundaries that must not move. You (main loop) stay the **coordinator**: assemble the safety net, then refactor. Large parallel *edits* are the dangerous part — run them **worktree-isolated** (a `Workflow` with worktree isolation), never two agents on one file; a small refactor just stays in the main loop.
 - **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → characterize/edit in the main loop and flag `Delegation Degraded: parallel specialists unavailable`.
