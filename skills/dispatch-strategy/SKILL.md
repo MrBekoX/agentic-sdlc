@@ -7,6 +7,15 @@ description: Use first in any language to decide whether work runs in the main l
 
 > Before any non-trivial work, this skill answers "how should I run this?" Other work-skills reference it at fan-out gates. **Goal:** run parallelizable work in parallel; delegate independent work so the main context stays clean; never do heavy independent work serially in the main loop.
 
+## Scope — mechanism only, never a skill's internal flow
+At the start of a work-skill, produce a **mechanism map over the skill's named parts**: for each heavy/independent/fan-out part the skill exposes, pick which mechanism runs it (main loop / sub-agent / dynamic-workflow / agent-team). That map IS the dispatch decision.
+
+This scope is fenced:
+- **Never wholesale-delegate a multi-step skill.** The skill always coordinates from the main loop; only its *parts* receive a mechanism — a multi-step skill run inside one sub-agent would nest its own delegations and degrade its fresh-context gates.
+- **Never touch the skill's internal mechanism.** Its steps, their order, whether a step runs, the mandated integrity gates (a `spec-plan-critic` for a drafted spec/plan, an `implementation-auditor` for self-graded code/findings), and the content/correctness verdicts belong to the skill and its contracts — not to this decision.
+
+In one line: dispatch sets the **working strategy**; the skill owns **what the work is and how it is sequenced**.
+
 ## Depth contract (proportional — scale rigor to the change)
 A dispatch decision names the **property of the work** that selects the mechanism, not just the verdict. State the relevant property: independence (does this part need the main context, or run alone?), similar-item count (≈3+ alike → fan-out), whether the intermediate context is needed later (disposable → delegate), interactivity (peers + live lead → team). One short clause of "why" per decision is enough — this is a routing call, not an essay. If you land on "main loop" for heavy *independent* work, say why it isn't delegable; absent a reason, that default is the bug.
 

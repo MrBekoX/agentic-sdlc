@@ -43,7 +43,7 @@ This keeps the dependency graph one-directional and prevents the pipeline from b
 | `root-cause-fix` | Bug fix or failing behavior requiring root cause, regression test, and final audit. | Net-new product capability. |
 | `safe-refactor` | Behavior-preserving restructure guarded by characterization tests. | Behavior-changing feature/fix work. |
 | `test-authoring` | Writing or fixing tests without production behavior change. | Owning feature/fix implementation. |
-| `dispatch-strategy` | Deciding whether work runs in main loop, sub-agent, dynamic-workflow, or agent-team. | Performing the domain work itself. |
+| `dispatch-strategy` | Choosing the execution mechanism (main loop, sub-agent, dynamic-workflow, agent-team) for a skill's named parts. | Performing the domain work, or governing a skill's internal step flow / integrity gates. |
 | `security-audit` | Security audit for code, diff, design, endpoint, or dependency changes. | General maintainability review or implementing fixes. |
 | `code-quality-review` | Quality review of code/diff/file with fresh context. | Applying received reviewer feedback. |
 | `feedback-triage` | Verifying, judging, and applying external review comments. | Producing a fresh review from scratch. |
@@ -133,6 +133,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 ### `dispatch-strategy`
 
 - **Purpose:** decide how work should run — main loop, sub-agent, dynamic-workflow, or agent-team.
+- **Scope (fenced):** chooses the execution mechanism over a skill's named parts (a map produced at the start); never wholesale-delegates a multi-step skill — the skill coordinates from the main loop and only its parts get a mechanism — and never governs the skill's internal steps, their order, or its mandated integrity gates (critic/auditor).
 - **Should trigger:** "should this run in the main loop, a sub-agent, a workflow, or an agent-team?"; work with 2+ independent parts, heavy exploration, verification/research fan-out, multi-file generation, or multi-angle review/audit.
 - **Should NOT trigger:** as a substitute for doing the domain work; when the skill request already implies a specific focused skill (the focused skill consults `dispatch-strategy` internally).
 - **Produces:** a mechanism recommendation with cost/caveat rationale.
