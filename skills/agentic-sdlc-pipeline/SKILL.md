@@ -56,15 +56,16 @@ Minimum Full-mode transcript in Claude Code:
 10. `Skill` -> `agentic-sdlc:completion-claim-gate` immediately before the final implementation report or any claim containing done, fixed, passing, verified, ready, complete, works, or commit/push/PR readiness.
 
 Minimum Full-mode evidence in Codex (the other supported runtime):
-1. Activate `dispatch-strategy` instructions before heavy, independent, or parallel steps.
+Before the list, emit `Runtime: Codex`. For each gate below, emit a one-line `Codex Adapter Gate: <gate> ...` marker when the gate is reached. If Codex lacks a native transcript event, say `Delegation Degraded: native Skill transcript events unavailable` and then record the adapter evidence; do not say the step-skill itself was unavailable unless its `SKILL.md` could not be loaded. If skill descriptions are missing from context, discover `<runtime-root>/skills/*/SKILL.md`, read the exact needed skill file, and treat that as activation evidence. In automated smoke evals and normal Codex runs, do not run recursive cleanup deletes for generated caches such as `__pycache__`; leave them or report them in `git status` instead of issuing a delete command.
+1. Activate `dispatch-strategy` instructions before heavy, independent, or parallel steps; record `Codex Adapter Gate: dispatch-strategy activated`.
 2. Run `python "<runtime-root>/scripts/detect_context.py" --path <scope>` before replacing exploration decisions with file reads.
-3. Draft the spec inside agentic-sdlc-pipeline using `contracts/skills/02-spec-driven-development.md` and the `spec-plan-author` role instructions.
-4. Run a fresh-context critic pass using the runtime's subagent/specialist mechanism with `spec-plan-critic` instructions when available; otherwise mark the degraded path and perform the critic pass inline.
+3. Draft the spec inside agentic-sdlc-pipeline using `contracts/skills/02-spec-driven-development.md` and the `spec-plan-author` role instructions; record `Codex Adapter Gate: spec-plan-draft spec author`.
+4. Run a fresh-context critic pass using the runtime's subagent/specialist mechanism with `spec-plan-critic` instructions when available; otherwise mark the degraded path and perform the critic pass inline; record `Codex Adapter Gate: spec-plan-draft spec critic`.
 5. Save `docs/agentic-sdlc/specs/<work_id>.md`, then run `python "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/agentic-sdlc/specs/<work_id>.md`.
-6. Draft the plan inside agentic-sdlc-pipeline using `contracts/skills/03-plan-mode.md` and the approved spec.
-7. Run the same critic/revise adapter for the plan, save `docs/agentic-sdlc/plans/<work_id>.md`, then validate with `--mode plan --spec docs/agentic-sdlc/specs/<work_id>.md --strict`.
-8. Activate the selected core work-flow skill instructions (`root-cause-fix`, `feature-build`, `safe-refactor`, or `test-authoring`) before implementation tests or code edits.
-9. Activate `security-audit`, `implementasyon-control`, and `completion-claim-gate` at their gates, using runtime subagents where the skill calls for fresh context and the runtime supports them.
+6. Draft the plan inside agentic-sdlc-pipeline using `contracts/skills/03-plan-mode.md` and the approved spec; record `Codex Adapter Gate: spec-plan-draft plan author`.
+7. Run the same critic/revise adapter for the plan, save `docs/agentic-sdlc/plans/<work_id>.md`, then validate with `--mode plan --spec docs/agentic-sdlc/specs/<work_id>.md --strict`; record `Codex Adapter Gate: spec-plan-draft plan critic`.
+8. Activate the selected core work-flow skill instructions (`root-cause-fix`, `feature-build`, `safe-refactor`, or `test-authoring`) before implementation tests or code edits; record `Codex Adapter Gate: <selected-core-skill> activated`.
+9. Activate `security-audit`, `implementasyon-control`, and `completion-claim-gate` at their gates, using runtime subagents where the skill calls for fresh context and the runtime supports them; record `Codex Adapter Gate: security-audit`, `Codex Adapter Gate: implementasyon-control`, and `Codex Adapter Gate: completion-claim-gate`.
 
 Do not satisfy these by restating another skill's checklist inline. If a runtime tool is genuinely unavailable, write a `Delegation Degraded` note naming the missing tool and perform the smallest safe fallback; otherwise, missing the tool call is a failed gate.
 

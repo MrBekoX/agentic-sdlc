@@ -84,6 +84,8 @@ Codex uses activated skill instructions and available Codex tools. It does not e
 
 Codex has no Claude Code Workflow runtime. Therefore `agentic-sdlc-pipeline` does not call the `spec-plan-draft` JavaScript workflow. It uses the embedded author/critic adapter:
 
+Emit `Runtime: Codex` once. At each gate below, emit `Codex Adapter Gate: <gate>` so `codex exec --json` transcripts have deterministic evidence. When Codex has no native `Skill` transcript event, record `Delegation Degraded: native Skill transcript events unavailable`; the adapter still runs the step by loading or activating the relevant `SKILL.md` instructions.
+
 1. Activate `dispatch-strategy` before heavy, independent, or parallel decisions.
 2. Run `detect_context.py` through `${PLUGIN_ROOT}`.
 3. Draft the spec inside `agentic-sdlc-pipeline` using the spec contract and `spec-plan-author` role instructions.
@@ -93,6 +95,8 @@ Codex has no Claude Code Workflow runtime. Therefore `agentic-sdlc-pipeline` doe
 7. Save `docs/agentic-sdlc/plans/<work_id>.md` and run `validate_artifacts.py --mode plan --strict`.
 8. Activate the selected core workflow skill before implementation edits.
 9. Activate `security-audit`, `implementasyon-control`, and `completion-claim-gate` at their gates.
+
+During Codex pipeline and eval runs, do not run recursive cleanup deletes for generated caches such as `__pycache__`. Leave or report them instead; cleanup is not a pipeline gate and may create permission-denial noise in procedure transcripts.
 
 `spec-authoring` and `plan-authoring` remain standalone prompt-level skills. They are not internal pipeline substeps.
 

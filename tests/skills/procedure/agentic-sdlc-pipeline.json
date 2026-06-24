@@ -31,6 +31,7 @@
           "required_patterns": [
             "Runtime:\\s*Codex|OpenCode|Kimi Code|non-Claude",
             "Workflow unavailable|embedded author/critic adapter",
+            "Codex Adapter Gate",
             "dispatch-strategy",
             "feature-build",
             "security-audit",

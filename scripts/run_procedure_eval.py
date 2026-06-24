@@ -76,7 +76,14 @@ class Trace:
 
 def load_json_lines(path: Path) -> list[dict[str, Any]]:
     events = []
-    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    raw_bytes = path.read_bytes()
+    if raw_bytes.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = raw_bytes.decode("utf-16", errors="replace")
+    elif raw_bytes.startswith(b"\xef\xbb\xbf"):
+        text = raw_bytes.decode("utf-8-sig", errors="replace")
+    else:
+        text = raw_bytes.decode("utf-8", errors="replace")
+    for raw in text.splitlines():
         raw = raw.strip()
         if not raw:
             continue
@@ -100,6 +107,73 @@ def _record_tool(trace: Trace, name: str, input_obj: Any) -> None:
     content = payload.get("content") if isinstance(payload, dict) else None
     if isinstance(file_path, str) and isinstance(content, str):
         trace.artifact_writes.append((file_path, content))
+
+
+def _record_codex_item(trace: Trace, item: dict[str, Any]) -> None:
+    """Record current `codex exec --json` item events.
+
+    Codex does not emit Claude-style `tool_use` blocks. Its transcript uses
+    `item.completed` / `item.started` envelopes with typed items such as
+    `command_execution`, `file_change`, `todo_list`, and `agent_message`.
+    """
+    item_type = item.get("type")
+    if item_type == "agent_message":
+        text = item.get("text")
+        if isinstance(text, str):
+            trace.text += "\n" + text
+        return
+
+    if item_type == "command_execution":
+        command = item.get("command")
+        output = item.get("aggregated_output")
+        payload = {
+            "command": command,
+            "status": item.get("status"),
+            "exit_code": item.get("exit_code"),
+        }
+        _record_tool(trace, "command_execution", payload)
+        if isinstance(output, str) and output:
+            trace.text += "\n" + output
+        if item.get("status") == "declined":
+            detail = f"command_execution:{command}" if isinstance(command, str) else "command_execution"
+            trace.permission_denials.append(detail)
+        return
+
+    if item_type == "file_change":
+        trace.tools.append("file_change")
+        changes = item.get("changes", [])
+        if not isinstance(changes, list):
+            return
+        for change in changes:
+            if not isinstance(change, dict):
+                continue
+            path = change.get("path")
+            if isinstance(path, str):
+                trace.writes.append(path)
+                trace.tool_inputs.append({"name": "file_change", "input": change})
+        return
+
+    if item_type == "todo_list":
+        trace.tools.append("todo_list")
+        items = item.get("items", [])
+        if not isinstance(items, list):
+            return
+        todo_text: list[str] = []
+        for todo in items:
+            if not isinstance(todo, dict):
+                continue
+            trace.tool_inputs.append({"name": "todo_list", "input": todo})
+            text = todo.get("text")
+            if isinstance(text, str):
+                todo_text.append(text)
+        if todo_text:
+            trace.text += "\n" + "\n".join(todo_text)
+        return
+
+    if item_type == "error":
+        message = item.get("message")
+        if isinstance(message, str):
+            trace.text += "\n" + message
 
 
 def trace_events(events: list[dict[str, Any]]) -> Trace:
@@ -155,6 +229,13 @@ def trace_events(events: list[dict[str, Any]]) -> Trace:
                 command = tool_input.get("command") if isinstance(tool_input, dict) else None
                 detail = f"{tool_name}:{command}" if command else str(tool_name)
                 trace.permission_denials.append(detail)
+        elif etype in {"item.started", "item.completed", "item.updated"}:
+            item = event.get("item")
+            if isinstance(item, dict):
+                _record_codex_item(trace, item)
+        elif etype in {"turn.failed", "error"}:
+            message = event.get("message") or event.get("error")
+            trace.runtime_errors.append(str(message or etype))
     return trace
 
 

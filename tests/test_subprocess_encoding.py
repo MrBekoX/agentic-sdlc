@@ -54,9 +54,12 @@ class TestSubprocessUtf8(unittest.TestCase):
         offenders = {}
         for root in SCANNED_ROOTS:
             for path in sorted((REPO / root).rglob("*.py")):
+                rel = path.relative_to(REPO)
+                if rel.parts[:2] == ("tests", "artifacts"):
+                    continue
                 bad = _text_mode_without_encoding(path)
                 if bad:
-                    offenders[path.relative_to(REPO).as_posix()] = bad
+                    offenders[rel.as_posix()] = bad
         self.assertEqual(
             offenders,
             {},

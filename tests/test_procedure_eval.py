@@ -78,6 +78,38 @@ class TestProcedureEvalHarness(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("procedure_eval=passed", proc.stdout)
 
+    def test_current_codex_exec_transcript_shape_satisfies_adapter_gates(self):
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_procedure_eval.py",
+                "--eval-set",
+                "tests/skills/procedure/agentic-sdlc-pipeline.json",
+                "--transcript",
+                "tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-codex-exec-current.jsonl",
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("procedure_eval=passed", proc.stdout)
+        self.assertNotIn("_tools=0", proc.stdout)
+
+    def test_load_json_lines_accepts_utf16_codex_transcript(self):
+        with tempfile.TemporaryDirectory() as td:
+            transcript = Path(td) / "codex.jsonl"
+            transcript.write_text(
+                '{"type":"item.completed","item":{"type":"agent_message","text":"Runtime: Codex"}}\n',
+                encoding="utf-16",
+            )
+
+            events = procedure_eval.load_json_lines(transcript)
+
+        self.assertEqual(len(events), 1)
+        trace = procedure_eval.trace_events(events)
+        self.assertIn("Runtime: Codex", trace.text)
+
     def test_runtime_error_transcript_fails_even_with_required_calls(self):
         proc = subprocess.run(
             [

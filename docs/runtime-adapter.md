@@ -26,6 +26,8 @@ If a native runtime tool exists, use it. If it does not exist, record `Delegatio
 
 Do not claim a deferred runtime is supported because this matrix names it. Support requires manifest/runtime wiring, docs, tests, and live evidence.
 
+For Codex procedure transcripts, emit `Runtime: Codex` once and a `Codex Adapter Gate: <gate>` marker at each adapted Skill/Workflow gate. `Delegation Degraded: native Skill transcript events unavailable` means the transcript event is unavailable; the step still has to run through activated/read skill instructions plus deterministic command/artifact evidence. Do not run recursive cleanup deletes for generated caches such as `__pycache__` during Codex pipeline/eval runs; report them instead of adding permission-denial noise.
+
 ## Pipeline Spec/Plan Rule
 
 `agentic-sdlc-pipeline` owns internal Spec and Plan phases. Claude Code uses `spec-plan-draft`; Codex uses the embedded author -> critic -> revise adapter. The pipeline must not call standalone `spec-authoring` or `plan-authoring` for its internal steps 4-5.

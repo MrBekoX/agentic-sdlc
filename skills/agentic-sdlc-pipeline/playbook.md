@@ -18,6 +18,8 @@ In Codex, the other supported runtime, Claude Code `Workflow` calls are not avai
 - Run a fresh-context critic pass with the runtime's subagent/specialist mechanism using `spec-plan-critic` instructions wherever the runtime exposes a subagent mechanism (mandatory there).
 - Revise up to two rounds, save the artifact, then run `validate_artifacts.py`.
 - If fresh-context specialists are unavailable, record `Delegation Degraded: fresh-context specialist unavailable` and perform the critic pass inline.
+- Emit `Runtime: Codex` once and `Codex Adapter Gate: <gate>` for dispatch-strategy, spec-plan-draft author/critic, the selected core skill, security-audit, implementasyon-control, and completion-claim-gate. If Codex lacks a native transcript event, record `Delegation Degraded: native Skill transcript events unavailable`; this means the transcript event is unavailable, not that the step itself may be skipped.
+- Do not run recursive cleanup deletes for generated caches such as `__pycache__` during Codex pipeline/eval runs. Leave or report them; cleanup is not a pipeline gate.
 
 Resolve `<runtime-root>` as `${CLAUDE_PLUGIN_ROOT}` in Claude Code, `${PLUGIN_ROOT}` in Codex for contract and script paths.
 

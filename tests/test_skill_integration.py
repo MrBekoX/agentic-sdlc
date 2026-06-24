@@ -69,6 +69,19 @@ class TestSkillCrossReferences(unittest.TestCase):
         self.assertNotIn("OpenCode", text)
         self.assertNotIn("Kimi Code", text)
 
+    def test_pipeline_documents_codex_adapter_gate_evidence(self):
+        skill = (h.SKILLS_DIR / "agentic-sdlc-pipeline" / "SKILL.md").read_text(encoding="utf-8")
+        codex_readme = (h.REPO / ".codex-plugin" / "README.md").read_text(encoding="utf-8")
+        for phrase in (
+            "Codex Adapter Gate",
+            "native Skill transcript events unavailable",
+            "do not run recursive cleanup deletes",
+            "__pycache__",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, skill)
+                self.assertIn(phrase, codex_readme)
+
     def test_adapter_dependent_skills_do_not_make_workflow_unconditional(self):
         skills = [
             "dispatch-strategy",

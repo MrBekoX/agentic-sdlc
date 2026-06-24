@@ -318,7 +318,7 @@ Behavior evals should move toward **transcript JSONL** checks for evidence such 
 
 ## Procedure evals
 
-`scripts/run_procedure_eval.py` checks more than "did the skill trigger?" It inspects stream-json tool use and optional filesystem artifacts to verify that a workflow used required skills, commands, workflows, and artifacts and did **not** run forbidden commands. For Codex and deferred adapter targets, a fixture can also provide runtime-adapter evidence patterns proving equivalent author -> critic -> revise behavior, artifact save, validator execution, and delegate-skill activation.
+`scripts/run_procedure_eval.py` checks more than "did the skill trigger?" It inspects stream-json tool use and optional filesystem artifacts to verify that a workflow used required skills, commands, workflows, and artifacts and did **not** run forbidden commands. For Codex and deferred adapter targets, a fixture can also provide runtime-adapter evidence patterns proving equivalent author -> critic -> revise behavior, artifact save, validator execution, and delegate-skill activation. The parser accepts Claude stream-json and current `codex exec --json` events (`command_execution`, `file_change`, `todo_list`, `agent_message`), including UTF-16 transcript files produced by some Windows capture paths.
 
 ### Modes
 
@@ -338,7 +338,7 @@ For each case, the evaluator parses the transcript into a trace and checks:
 |---|---|
 | Required skills | A `Skill` tool invocation whose payload contains the expected skill name, a mapped specialist `Agent`/`Task`, or a `required_runtime_adapters[].satisfies` entry with all adapter patterns present. |
 | Required workflows | A `Workflow` tool invocation whose payload contains the expected workflow name, or a `required_runtime_adapters[].satisfies` entry with all adapter patterns present. |
-| Runtime adapter evidence | Regex patterns in `required_runtime_adapters[].required_patterns` proving the runtime-equivalent path, such as `Workflow unavailable`, `spec-plan-author`, `spec-plan-critic`, `docs/agentic-sdlc/specs/`, `docs/agentic-sdlc/plans/`, and activated delegate-skill instructions. |
+| Runtime adapter evidence | Regex patterns in `required_runtime_adapters[].required_patterns` proving the runtime-equivalent path, such as `Workflow unavailable`, `Codex Adapter Gate`, `spec-plan-author`, `spec-plan-critic`, `docs/agentic-sdlc/specs/`, `docs/agentic-sdlc/plans/`, and activated delegate-skill instructions. |
 | Required commands | A regex match against the `command` field of any tool invocation recorded in the trace. |
 | Required artifacts | Either a `Write` tool `file_path` matching the pattern, or an existing file glob under the case working directory. |
 | Artifact depth | When `check_artifact_depth` is true, written spec/plan artifacts are re-run through `validate_artifacts.py`; literal stubs such as `spec` or `plan` fail as `shallow_artifact:<path>`. |
@@ -346,7 +346,7 @@ For each case, the evaluator parses the transcript into a trace and checks:
 | Required patterns | A regex match anywhere in the serialized trace haystack. |
 | Forbidden patterns | A regex match anywhere in the serialized trace haystack. |
 | Runtime errors | `result` events with `is_error` true or a subtype starting with `error`. |
-| Permission denials | Recorded `permission_denials` in `result` events. |
+| Permission denials | Recorded `permission_denials` in `result` events, or Codex `command_execution` items with `status:"declined"`. |
 
 ### Procedure fixture format
 
