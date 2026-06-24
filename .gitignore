@@ -31,12 +31,16 @@ debug.txt
 2026-06-21-161126-sessionstartstartup-hook-error.txt
 2026-06-22-181040-hooksbranch-guardmjs-hooku-tetiklenmiyor-bu.txt
 2026-06-22-184416-hooksbranch-guardmjs-hooku-tetiklenmiyor.txt
+2026-06-24-133157-security-debug.txt
+2026-06-24-155430-grev.txt
 
 # Optional tool reference snapshots
 mcps/
 
 # Claude Code local / runtime
 .claude/
+# OpenCode local tool workspace (node_modules + config; local tooling, not distributed)
+.opencode/
 settings.local.json
 *.lock
 scheduled_tasks.lock

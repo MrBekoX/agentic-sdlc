@@ -38,7 +38,7 @@ def run_cli(*args):
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), *args],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8",
     )
     return proc.returncode, proc.stdout, proc.stderr
 

@@ -23,7 +23,7 @@ class TestProcedureEvalHarness(unittest.TestCase):
             ],
             cwd=REPO,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("procedure_eval=dry-run-passed", proc.stdout)
@@ -40,7 +40,7 @@ class TestProcedureEvalHarness(unittest.TestCase):
             ],
             cwd=REPO,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("procedure_eval=passed", proc.stdout)
@@ -73,7 +73,7 @@ class TestProcedureEvalHarness(unittest.TestCase):
             ],
             cwd=REPO,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("procedure_eval=passed", proc.stdout)
@@ -90,7 +90,7 @@ class TestProcedureEvalHarness(unittest.TestCase):
             ],
             cwd=REPO,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("runtime_error:error_max_budget_usd", proc.stdout)
@@ -108,7 +108,7 @@ class TestProcedureEvalHarness(unittest.TestCase):
             ],
             cwd=REPO,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("permission_denied:Bash", proc.stdout)
@@ -193,6 +193,6 @@ class TestProcedureEvalHarness(unittest.TestCase):
                 ["git", "rev-parse", "--verify", "HEAD"],
                 cwd=cwd,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8",
             )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)

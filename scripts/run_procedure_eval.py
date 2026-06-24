@@ -300,8 +300,8 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
             tf.write(text)
             tmp = Path(tf.name)
+        spec_arg = None
         try:
-            spec_arg = None
             if mode == "plan":
                 # pair the plan with any spec written in the same run, else None
                 spec_path = next((p for p in latest if "/specs/" in p), None)
@@ -316,6 +316,10 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
                 errors.append(f"shallow_artifact:{norm}")
         finally:
             tmp.unlink(missing_ok=True)
+            # The paired-spec temp (delete=False) was never cleaned up -> untrusted spec bodies
+            # accumulated in the system temp dir across runs. Unlink it in the same finally.
+            if spec_arg is not None:
+                Path(spec_arg).unlink(missing_ok=True)
     return errors
 
 

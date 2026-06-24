@@ -30,7 +30,7 @@ NODE = shutil.which("node")
 
 def _node_check(path):
     """Return (returncode, stderr) from `node --check <path>`."""
-    proc = subprocess.run([NODE, "--check", str(path)], capture_output=True, text=True)
+    proc = subprocess.run([NODE, "--check", str(path)], capture_output=True, text=True, encoding="utf-8")
     return proc.returncode, proc.stderr
 
 
@@ -68,6 +68,27 @@ class TestWorkflowSyntax(unittest.TestCase):
                 self.assertEqual(rc, 0, f"{p.name} failed node --check (runtime wrapper):\n{err}")
             finally:
                 tmp.unlink(missing_ok=True)
+
+
+class TestWorkflowUntrustedFencing(unittest.TestCase):
+    """Workflows interpolate caller-supplied scope/context into sub-agent prompts. That untrusted
+    text must be wrapped in a delimited DATA block (prompt-injection hardening), not concatenated
+    raw, so a malicious file under review cannot smuggle instructions into a sub-agent."""
+
+    def _src(self, name):
+        return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
+
+    def test_all_three_fence_untrusted_input(self):
+        for name in ["multi-lens-review.js", "spec-plan-draft.js", "skill-draft.js"]:
+            with self.subTest(workflow=name):
+                src = self._src(name)
+                self.assertIn("fenceUntrusted", src, f"{name}: fence helper missing")
+                self.assertIn("[UNTRUSTED", src, f"{name}: untrusted-data delimiter missing")
+
+    def test_raw_context_interpolation_removed(self):
+        for name in ["spec-plan-draft.js", "skill-draft.js"]:
+            with self.subTest(workflow=name):
+                self.assertNotIn("Context: ${ctxStr}", self._src(name), f"{name}: raw ctx interpolation remains")
 
 
 if __name__ == "__main__":

@@ -86,7 +86,7 @@ class TestFlowStepGuard(unittest.TestCase):
             proc = subprocess.run(
                 [NODE, str(STEP_GUARD)],
                 input=json.dumps({"transcript_path": str(tpath), "stop_hook_active": stop_active}),
-                capture_output=True, text=True, cwd=run_cwd, env=env,
+                capture_output=True, text=True, encoding="utf-8", cwd=run_cwd, env=env,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
             out = (proc.stdout or "").strip()
@@ -204,7 +204,7 @@ class TestFlowOrderGuard(unittest.TestCase):
             proc = subprocess.run(
                 [NODE, str(ORDER_GUARD)],
                 input=json.dumps({"tool_input": {"file_path": file_path}, "transcript_path": str(tpath)}),
-                capture_output=True, text=True, cwd=run_cwd, env=env,
+                capture_output=True, text=True, encoding="utf-8", cwd=run_cwd, env=env,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
             out = (proc.stdout or "").strip()

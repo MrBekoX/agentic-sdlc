@@ -19,7 +19,7 @@ class TestDestructiveCommandGuard(unittest.TestCase):
             [NODE, str(REPO / "hooks" / "destructive-command-guard.mjs")],
             input=json.dumps({"tool_input": {"command": command}}),
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return json.loads(proc.stdout) if proc.stdout.strip() else {}
@@ -120,6 +120,26 @@ class TestDestructiveCommandGuard(unittest.TestCase):
                 reason = out["hookSpecificOutput"]["permissionDecisionReason"]
                 self.assertIn(label, reason)
 
+    def test_blocks_quoted_command_name_bypass(self):
+        # A quoted command NAME still runs the command in a shell: "rm", 'rm', r"m", rm""
+        # all execute `rm`. The old stripQuoted() blanked quoted spans to spaces BEFORE
+        # tokenizing, so the command name was lost and the recursive-rm / git checks never saw
+        # it -> ALLOW. Quote-aware tokenization must normalize these back to the real command.
+        blocked = [
+            ('"rm" -rf ./tmp', "rm-recursive"),
+            ("'rm' -rf ./tmp", "rm-recursive"),
+            ('r"m" -rf ./tmp', "rm-recursive"),
+            ('rm"" -rf ./tmp', "rm-recursive"),
+            ('"git" reset --hard', "git-reset-hard"),
+            ("'git' clean -fdx", "git-clean-force"),
+            ('"rm" ./tmp -Recurse', "rm-recursive"),
+        ]
+        for command, label in blocked:
+            with self.subTest(command=command):
+                out = self.run_hook(command)
+                reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn(label, reason)
+
     def test_blocks_rm_long_recursive_flag_bundles(self):
         # Recursive short-flag bundles longer than 5 chars (the old arg.length<=5 cap).
         for command in ["rm -rfvvv ./tmp", "rm -vfrii ./tmp", "rm -fdrvv ./tmp"]:
@@ -180,7 +200,7 @@ class TestBranchGuard(unittest.TestCase):
             env=env,
             input=json.dumps({"tool_input": {"command": command}}),
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return json.loads(proc.stdout) if proc.stdout.strip() else {}
@@ -219,8 +239,7 @@ class TestCompletionClaimGuard(unittest.TestCase):
                 env=env,
                 input=json.dumps({"transcript_path": str(tpath), "stop_hook_active": stop_active}),
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
+                text=True, encoding="utf-8",
                 errors="replace",
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -266,7 +285,7 @@ class TestSessionStartHook(unittest.TestCase):
             [NODE, str(REPO / "hooks" / "session-start.mjs")],
             cwd=REPO,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         out = json.loads(proc.stdout)
@@ -293,7 +312,7 @@ class TestCodexSessionStartHook(unittest.TestCase):
             [NODE, str(REPO / "hooks" / "session-start-codex.mjs")],
             cwd=REPO,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         out = json.loads(proc.stdout)
@@ -355,3 +374,91 @@ class TestRuntimeHookConfigSeparation(unittest.TestCase):
         self.assertTrue((REPO / "hooks" / "hooks-codex.json").exists(), "Codex hook config missing")
         codex = json.loads((REPO / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(codex.get("hooks"), "./hooks/hooks-codex.json")
+
+
+@unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")
+class TestScanCommitSecretScan(unittest.TestCase):
+    """scan-commit.mjs blocks secrets ADDED in a commit, scanning with the HIGH set. The HIGH
+    set used to recognize only 4 shapes (PEM header, AWS AKIA, password=, JSON credential), so
+    a modern provider token on its own line committed unblocked, and key FILES were not caught
+    by name at all. Values used here are synthetic (repeated 'a1B2' etc.), never real secrets."""
+
+    HOOK = REPO / "hooks" / "scan-commit.mjs"
+
+    def _scan(self, files):
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            for name, content in files.items():
+                p = Path(td) / name
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(content, encoding="utf-8")
+                subprocess.run(["git", "add", "--", name], cwd=td, check=True, capture_output=True)
+            proc = subprocess.run(
+                [NODE, str(self.HOOK)],
+                cwd=td,
+                input=json.dumps({"tool_input": {"command": "git commit -m test"}}),
+                capture_output=True,
+                text=True, encoding="utf-8",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def _assert_blocked(self, files):
+        out = self._scan(files)
+        self.assertEqual(
+            out.get("hookSpecificOutput", {}).get("permissionDecision"),
+            "deny",
+            f"expected deny, got {out!r}",
+        )
+        return out
+
+    def test_blocks_modern_provider_tokens_in_content(self):
+        cases = {
+            "github-pat": "TOKEN = " + "ghp_" + "a1B2" * 9,
+            "github-fine-grained": "TOKEN = github_pat_" + "a1B2" * 12,
+            "stripe": "STRIPE = " + "sk_live_" + "a1B2" * 5,
+            "slack-bot": "SLACK = " + "xoxb-" + "1a2B3c4D5e6F",
+            "slack-app": "SLACK = " + "xapp-1-" + "A1b2C3d4E5f6",
+            "google-api": "GOOGLE = " + "AIza" + "a1B2" * 8 + "abc",
+            "openai": "OPENAI = " + "sk-" + "a1B2" * 6,
+            "jwt": "JWT = " + "eyJa1B2a1B2" + "." + "eyJc3D4c3D4" + "." + "e5F6e5F6",
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self._assert_blocked({"config.txt": line + "\n"})
+
+    def test_blocks_bearer_token_on_commit(self):
+        # bearer-token used to live only in BROAD (warn); scan-commit scans HIGH, so a commit
+        # with a bearer token was not blocked. It must now be blocked at commit time.
+        self._assert_blocked({"config.txt": "Authorization: Bearer " + "a1B2" * 6 + "\n"})
+
+    def test_blocks_key_file_by_name(self):
+        for name in ["deploy.pem", "server.key", "cert.p12", "id_rsa", ".npmrc", "secrets/id_ed25519"]:
+            with self.subTest(name=name):
+                self._assert_blocked({name: "opaque body — flagged by filename, not content\n"})
+
+    def test_allows_clean_diff(self):
+        out = self._scan({"notes.txt": "Just a normal note discussing rm -rf safety.\n"})
+        self.assertEqual(out, {})
+
+    def test_warns_non_blocking_when_git_diff_unreadable(self):
+        # Outside a git repo `git diff --cached` errors -> fail-open. The commit is still allowed
+        # (no deny), but the user must be WARNED it was not scanned, not silently passed as clean.
+        with tempfile.TemporaryDirectory() as td:  # deliberately NOT a git repo
+            proc = subprocess.run(
+                [NODE, str(self.HOOK)],
+                cwd=td,
+                input=json.dumps({"tool_input": {"command": "git commit -m test"}}),
+                capture_output=True,
+                text=True, encoding="utf-8",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+            self.assertNotIn("hookSpecificOutput", out)  # not a deny
+            self.assertIn("systemMessage", out)
+            self.assertIn("NOT", out.get("systemMessage", ""))
+
+    def test_does_not_print_secret_value(self):
+        secret = "ghp_" + "a1B2" * 9
+        out = self._assert_blocked({"config.txt": "TOKEN = " + secret + "\n"})
+        self.assertNotIn(secret, json.dumps(out))

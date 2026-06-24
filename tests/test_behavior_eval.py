@@ -19,7 +19,7 @@ class TestBehaviorEvalHarness(unittest.TestCase):
             ],
             cwd=REPO,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("behavior_eval=dry-run-passed", proc.stdout)

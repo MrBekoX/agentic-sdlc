@@ -28,7 +28,7 @@ def run_cli(*args):
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), *args],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8",
     )
     return proc.returncode, proc.stdout, proc.stderr
 
@@ -218,7 +218,7 @@ status: in_progress
             ["git", "checkout", "-b", "feature/current"],
             cwd=self.root,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
             check=True,
         )
         _spec, plan = write_artifacts(self.root, work_id="changed", branch="feature/other")
