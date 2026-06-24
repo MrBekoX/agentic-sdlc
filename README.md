@@ -40,7 +40,7 @@ After install, the `using-agentic-sdlc` router is available as a skill. Claude C
 
 ### Codex
 
-Codex uses the personal marketplace layout. Put this plugin at `~/plugins/agentic-sdlc` or point that path at this clone, then install it from the personal marketplace:
+Codex uses the personal marketplace layout. Put this plugin at `~/.codex/plugins/agentic-sdlc` or point that path at this clone, then install it from the personal marketplace. In the default personal marketplace, the `./plugins/agentic-sdlc` source path resolves to that plugin directory.
 
 Example `~/.agents/plugins/marketplace.json`:
 

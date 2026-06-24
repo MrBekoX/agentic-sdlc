@@ -54,6 +54,26 @@ class TestPackagingMetadata(unittest.TestCase):
             for old in legacy:
                 self.assertNotIn(old, text, f"{rel} still uses legacy artifact path {old}")
 
+    def test_codex_docs_use_current_personal_plugin_directory(self):
+        docs = [
+            REPO / "README.md",
+            REPO / ".codex-plugin" / "README.md",
+            REPO / "docs" / "troubleshooting.md",
+        ]
+        for path in docs:
+            text = path.read_text(encoding="utf-8")
+            rel = path.relative_to(REPO)
+            self.assertIn(
+                "~/.codex/plugins/agentic-sdlc",
+                text,
+                f"{rel} missing current Codex personal plugin path",
+            )
+            self.assertNotIn(
+                "~/plugins/agentic-sdlc",
+                text,
+                f"{rel} still uses legacy Codex personal plugin path",
+            )
+
     def test_codex_manifest_uses_publishable_schema_keys(self):
         codex_plugin = json.loads((REPO / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         allowed_keys = {

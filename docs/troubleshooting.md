@@ -15,8 +15,8 @@ Check:
 Check:
 
 1. The personal marketplace exists at `~/.agents/plugins/marketplace.json`.
-2. Its `agentic-sdlc` entry points at `~/plugins/agentic-sdlc`.
-3. `~/plugins/agentic-sdlc` is a real copy or symlink/junction to this plugin root.
+2. Its `agentic-sdlc` entry points at `~/.codex/plugins/agentic-sdlc`.
+3. `~/.codex/plugins/agentic-sdlc` is a real copy or symlink/junction to this plugin root.
 4. The plugin was installed with `codex plugin add agentic-sdlc@personal`.
 5. The manifest contains `"skills": "./skills/"` and `"hooks": "./hooks/hooks-codex.json"`.
 6. Skills are under root `skills/`, not `.codex/skills/`.

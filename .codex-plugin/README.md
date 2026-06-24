@@ -24,7 +24,7 @@ The `interface` block supplies Codex display metadata, capabilities, default pro
 
 ## Install
 
-Codex discovers the default personal marketplace at `~/.agents/plugins/marketplace.json`. Its `agentic-sdlc` entry should point at `~/plugins/agentic-sdlc`, which can be a real copy or a symlink/junction to this clone.
+Codex discovers the default personal marketplace at `~/.agents/plugins/marketplace.json`. Its `agentic-sdlc` entry should point at `~/.codex/plugins/agentic-sdlc`, which can be a real copy or a symlink/junction to this clone. In the default personal marketplace, the `./plugins/agentic-sdlc` source path resolves to that plugin directory.
 
 Example `~/.agents/plugins/marketplace.json`:
 
