@@ -365,11 +365,11 @@ def copy_fixture(case: dict[str, Any], tmp_root: Path) -> Path:
         raise ValueError(f"fixture_dir missing: {fixture}")
     dst = tmp_root / case["id"]
     shutil.copytree(src, dst)
-    subprocess.run(["git", "init", "-b", "main"], cwd=dst, capture_output=True, text=True)
-    subprocess.run(["git", "config", "user.email", "eval@example.invalid"], cwd=dst, capture_output=True, text=True)
-    subprocess.run(["git", "config", "user.name", "Agentic SDLC Eval"], cwd=dst, capture_output=True, text=True)
-    subprocess.run(["git", "add", "."], cwd=dst, capture_output=True, text=True)
-    subprocess.run(["git", "commit", "-m", "fixture baseline"], cwd=dst, capture_output=True, text=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=dst, capture_output=True, text=True, encoding="utf-8")
+    subprocess.run(["git", "config", "user.email", "eval@example.invalid"], cwd=dst, capture_output=True, text=True, encoding="utf-8")
+    subprocess.run(["git", "config", "user.name", "Agentic SDLC Eval"], cwd=dst, capture_output=True, text=True, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=dst, capture_output=True, text=True, encoding="utf-8")
+    subprocess.run(["git", "commit", "-m", "fixture baseline"], cwd=dst, capture_output=True, text=True, encoding="utf-8")
     return dst
 
 

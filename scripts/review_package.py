@@ -22,7 +22,7 @@ def _slug(ref: str) -> str:
 
 
 def git(args: list[str]) -> str:
-    proc = subprocess.run(["git", *args], capture_output=True, text=True)
+    proc = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or "git command failed")
     return proc.stdout.strip()
@@ -33,6 +33,8 @@ def default_out_dir() -> Path:
         ["git", "rev-parse", "--git-path", "sdd"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if proc.returncode == 0 and proc.stdout.strip():
         return Path(proc.stdout.strip())

@@ -87,7 +87,7 @@ def main():
     # Run the deterministic-validator unit tests.
     res = subprocess.run(
         [sys.executable, "-m", "unittest", "discover", "-s", str(TESTS_DIR)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     tests_ok = res.returncode == 0
     if not tests_ok:
