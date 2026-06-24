@@ -174,6 +174,8 @@ def _current_branch(repo):
             cwd=str(repo),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except (OSError, subprocess.SubprocessError):
@@ -192,6 +194,8 @@ def _changed_plans_from_git(repo):
             cwd=str(repo),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except (OSError, subprocess.SubprocessError):
