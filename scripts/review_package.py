@@ -7,10 +7,18 @@ single file containing commit list, stat, and full diff.
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+
+def _slug(ref: str) -> str:
+    """Make a ref safe to embed in the output filename: a ref like `origin/main` or a crafted
+    `../x` would otherwise inject a path separator and write outside out_dir. Keep only
+    filename-safe chars; '/' (and any other separator) collapses to '_', so no traversal."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", ref)[:12]
 
 
 def git(args: list[str]) -> str:
@@ -38,10 +46,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out-dir", type=Path, default=None)
     args = parser.parse_args(argv)
 
+    # git parses any argument beginning with '-' as an option, not a revision. A ref like
+    # `--output=<file>` would turn the `git diff/log` calls below into an arbitrary file write
+    # (git option injection). git itself forbids ref/branch names starting with '-', so
+    # refusing them here loses no legitimate input and closes the injection at the boundary.
+    for ref in (args.base, args.head):
+        if ref.startswith("-"):
+            print(f"error=invalid ref (must not start with '-'): {ref!r}")
+            return 1
+
     out_dir = args.out_dir or default_out_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    out = out_dir / f"review-package-{args.base[:12]}-{args.head[:12]}-{stamp}.md"
+    out = out_dir / f"review-package-{_slug(args.base)}-{_slug(args.head)}-{stamp}.md"
     try:
         log = git(["log", "--oneline", f"{args.base}..{args.head}"])
         stat = git(["diff", "--stat", args.base, args.head])

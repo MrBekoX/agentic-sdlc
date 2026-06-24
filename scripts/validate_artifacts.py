@@ -44,6 +44,8 @@ PLACEHOLDER_RE = re.compile(r"\b(TODO|TBD|FIXME|XXX)\b")
 
 # DP-3: explicit secret patterns only — NO entropy detector. Each pattern is kept
 # narrow so high-entropy prose (build hashes, correlation ids) does not fire.
+# Provider-prefix tokens mirror hooks/secret-patterns.mjs (HIGH) so this validator and the
+# commit/write guards recognize the same modern formats — keep the two lists in sync.
 SECRET_PATTERNS = [
     re.compile(r"api[_-]?key\s*[:=]", re.IGNORECASE),
     re.compile(r"secret\s*[:=]", re.IGNORECASE),
@@ -51,6 +53,12 @@ SECRET_PATTERNS = [
     re.compile(r"token\s*[:=]\s*\S{12,}", re.IGNORECASE),
     re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"(?:gh[posru]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,})"),
+    re.compile(r"(?:xox[baprs]|xapp)-[A-Za-z0-9-]{10,}", re.IGNORECASE),
+    re.compile(r"(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"),
+    re.compile(r"AIza[0-9A-Za-z_-]{35}"),
+    re.compile(r"sk-(?:proj-)?[A-Za-z0-9]{20,}"),
+    re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
 ]
 
 # A heading line: one-or-more '#' then text. We also accept the task forms below.

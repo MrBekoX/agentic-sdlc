@@ -1,6 +1,13 @@
 // PreToolUse (Bash) — blocks high-risk destructive shell commands.
 // This is intentionally narrow and deterministic. It catches common commands that
 // destroy repository state or recursively delete files. On parse errors it fails open.
+//
+// Scope (deliberate — a backstop, NOT full coverage): rm -rf, git reset --hard, git clean -fd,
+// Remove-Item -Recurse — including quoted command names ("rm"/'rm'), wrappers
+// (sudo/env/command/timeout/nice/xargs/...), and shell `-c` / `eval` payloads. NOT covered, by
+// design: other destructive verbs (find -delete, shred, truncate -s 0, dd of=, >-redirect) and
+// runtime shell indirection that is statically undecidable (eval "$(...)", a=rm;$a, rm$IFS-rf).
+// The permission prompt remains the primary control; this guard only catches the common cases.
 import { readStdin } from './secret-patterns.mjs';
 
 const BLOCKED = [
@@ -43,39 +50,6 @@ const WRAPPERS = {
 // Shells whose `-c <payload>` (and `eval <payload>`) run an inline command we must inspect.
 const SHELL_NAMES = ['powershell', 'pwsh', 'bash', 'sh', 'zsh', 'dash', 'ksh'];
 
-function stripQuoted(text) {
-  let out = '';
-  let quote = null;
-  let escaped = false;
-  for (const ch of text) {
-    if (quote) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch === '\\' && quote === '"') {
-        escaped = true;
-      } else if (ch === quote) {
-        quote = null;
-      }
-      out += /\s/.test(ch) ? ch : ' ';
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      out += ' ';
-      continue;
-    }
-    out += ch;
-  }
-  return out;
-}
-
-function commandSegments(cmd) {
-  return stripQuoted(cmd)
-    .split(/[;&|\n(){}]+/)
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-}
-
 function rawCommandSegments(cmd) {
   const segments = [];
   let segment = '';
@@ -107,10 +81,6 @@ function rawCommandSegments(cmd) {
   }
   if (segment.trim()) segments.push(segment.trim());
   return segments;
-}
-
-function tokenize(segment) {
-  return segment.split(/\s+/).filter(Boolean);
 }
 
 function tokenizePreservingQuotes(text) {
@@ -158,7 +128,12 @@ function commandName(token) {
 }
 
 function commandTokens(cmd) {
-  const tokens = commandSegments(cmd).map(tokenize).map(unwrapCommand).filter((items) => items.length);
+  // Segment on UNQUOTED separators, then tokenize each segment with quote REMOVAL (not blanking).
+  // A quoted command name still runs the command in a shell ("rm"/'rm'/r"m" all execute rm), so
+  // unquoting per token — instead of erasing quoted spans before tokenizing — keeps the real
+  // command name visible to the checks below while still treating a quoted argument blob
+  // (echo "rm -rf x") as a single non-command token.
+  const tokens = rawCommandSegments(cmd).map(tokenizePreservingQuotes).map(unwrapCommand).filter((items) => items.length);
   const wrapped = rawCommandSegments(cmd).flatMap(shellPayloads).flatMap(commandTokens);
   return tokens.concat(wrapped);
 }

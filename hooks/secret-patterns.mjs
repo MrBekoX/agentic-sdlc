@@ -9,10 +9,26 @@ export function looksPlaceholder(s) {
   return !s || PLACEHOLDER.test(String(s));
 }
 
-// Blocking (high-confidence) patterns.
+// Blocking (high-confidence) patterns. Provider-prefix tokens are recognized by their fixed,
+// vendor-published shapes (not a keyword on the line), so a bare `TOKEN = ghp_...` is blocked
+// even with no password/secret keyword and no JSON wrapper.
 export const HIGH = [
   { label: 'private-key', re: /-----BEGIN[A-Z0-9 ]*PRIVATE KEY-----/ },
   { label: 'aws-access-key-id', re: /\bAKIA[0-9A-Z]{16}\b/ },
+  // GitHub: classic PAT/OAuth (ghp_/gho_/ghu_/ghs_/ghr_ + 36) and fine-grained (github_pat_ + 40+).
+  { label: 'github-token', re: /\b(?:gh[posru]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,})\b/ },
+  // Slack bot/user/app/refresh and app-level tokens.
+  { label: 'slack-token', re: /\b(?:xox[baprs]|xapp)-[A-Za-z0-9-]{10,}/i },
+  // Stripe secret / restricted keys (publishable pk_ is not a secret, so excluded).
+  { label: 'stripe-key', re: /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b/ },
+  // Google API key.
+  { label: 'google-api-key', re: /\bAIza[0-9A-Za-z_\-]{35}\b/ },
+  // OpenAI secret / project key.
+  { label: 'openai-key', re: /\bsk-(?:proj-)?[A-Za-z0-9]{20,}\b/ },
+  // JWT: header.payload.signature, header+payload are base64url-encoded JSON objects -> 'eyJ'.
+  { label: 'jwt', re: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/ },
+  // Authorization: Bearer <token>. In HIGH (not just BROAD) so commits are blocked, not only warned.
+  { label: 'bearer-token', re: /\bbearer\s+[A-Za-z0-9._\-]{20,}/i },
   // Password=...  veya  PASSWORD: "..."  (connection string / compose / env)
   { label: 'password-literal', re: /\b(?:password|pwd|passwd|sa_password|mssql_sa_password)\s*[:=]\s*["']?([^;"'\s]{6,})/i, valueGroup: 1 },
   // JSON credential:  "...Key|Secret|Password|Token|Credential...": "long-value" (>=16 chars)
@@ -23,7 +39,6 @@ export const HIGH = [
 export const BROAD = [
   ...HIGH,
   { label: 'assigned-secret', re: /\b(?:api[_-]?key|apikey|secret|access[_-]?token|client[_-]?secret|auth[_-]?token)\b\s*[:=]\s*["']?([A-Za-z0-9_\-.]{16,})/i, valueGroup: 1 },
-  { label: 'bearer-token', re: /\bbearer\s+[A-Za-z0-9._\-]{20,}/i },
 ];
 
 // Scans text line by line; at most one finding per line.
