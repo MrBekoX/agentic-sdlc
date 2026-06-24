@@ -99,7 +99,7 @@ class TestPackagingMetadata(unittest.TestCase):
             ["git", "ls-files"],
             cwd=REPO,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         tracked = set(proc.stdout.splitlines())
@@ -174,7 +174,7 @@ class TestPackagingMetadata(unittest.TestCase):
             [sys.executable, "scripts/bump_version.py", "--check"],
             cwd=REPO,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("version_check=passed", proc.stdout)

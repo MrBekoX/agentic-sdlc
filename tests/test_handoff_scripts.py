@@ -21,7 +21,7 @@ class TestTaskBriefScript(unittest.TestCase):
                 [sys.executable, str(REPO / "scripts" / "task_brief.py"), str(plan), "2"],
                 cwd=REPO,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8",
             )
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             out = Path(proc.stdout.strip())

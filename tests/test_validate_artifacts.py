@@ -40,7 +40,7 @@ def run_cli(*args):
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), *args],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8",
     )
     return proc.returncode, proc.stdout, proc.stderr
 
@@ -210,6 +210,32 @@ class TestScanner(unittest.TestCase):
             any(e.startswith("possible_secret:") for e in result["errors"]),
             result["errors"],
         )
+
+    def test_modern_provider_tokens_flagged_and_masked(self):
+        # Sync with hooks/secret-patterns.mjs HIGH: provider-prefix tokens must trip the scanner
+        # even on a bare `value = <token>` line (no api_key/secret/token keyword). Values are
+        # synthetic (repeated 'a1B2'), never real secrets, and must be masked in any output.
+        tokens = [
+            "ghp_" + "a1B2" * 9,
+            "github_pat_" + "a1B2" * 12,
+            "xoxb-" + "1a2B3c4D5e6F",
+            "sk_live_" + "a1B2" * 5,
+            "AIza" + "a1B2" * 8 + "abc",
+            "sk-" + "a1B2" * 6,
+            "eyJa1B2a1B2.eyJc3D4c3D4.e5F6e5F6",
+        ]
+        for token in tokens:
+            with self.subTest(token=token[:8]):
+                text = COMPLETE_SPEC + f"\n\n## Config\nvalue = {token}\n"
+                result = va.scan_placeholders_and_secrets(text)
+                self.assertTrue(
+                    any(e.startswith("possible_secret:") for e in result["errors"]),
+                    f"{token[:8]}... not flagged: {result['errors']}",
+                )
+                self.assertTrue(
+                    all(token not in e for e in result["errors"]),
+                    f"raw token leaked into error output for {token[:8]}...",
+                )
 
     def test_complete_spec_still_exits_zero_after_scanner(self):
         # The clean fixture must remain scanner-clean: no placeholder, no secret.
