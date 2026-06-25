@@ -8,6 +8,7 @@
 // per-message-DECODED carrier value (so a token inside one message is never split by the JSON record
 // envelope), across the whole rollout (user- and assistant-authored carriers alike).
 import { statSync, readFileSync } from 'node:fs';
+import { extractWrittenContent } from './codex-write-signal.mjs';
 
 // Single source of truth for the gate's self-signature. The completion-claim-gate SKILL.md emits this
 // exact literal when it runs; AC17's drift test asserts the two copies stay byte-identical.
@@ -84,4 +85,68 @@ export function readRollout(path) {
   }
   const finalMessage = lastTaskComplete != null ? lastTaskComplete : (lastAssistant != null ? lastAssistant : '');
   return { finalMessage, gateMarkerPresent, readable: true };
+}
+
+// Additive second slice for the flow-step adapter (AP2b): surface the executed COMMANDS and the
+// patch-style EDIT TARGETS a Codex session recorded, scoped to this rollout. Same fail-open
+// discipline as readRollout: missing/non-file/over-ceiling/unreadable -> EMPTY readable:false, so the
+// caller never blocks on an unconfirmable rollout. Pure: one read, JSON-decode per line, no eval,
+// no spawn. readRollout / GATE_MARKER / carrierTexts / payloadOf are untouched (AC20).
+//
+// Carriers (DP-E union; carrier SHAPES stay labelled VERIFY, reused from AP1/AP2a probes):
+//   commands  - function_call exec_command {cmd}, AND event_msg exec_command_begin {command, parsed_cmd}.
+//   edits     - function_call apply_patch/patch {input: <V4A patch>}, AND event_msg patch_apply_begin {changes}.
+// Edit targets are read ONLY from patch carriers via extractWrittenContent('apply_patch', ...), which
+// always routes to the V4A patch parser - a command string is NEVER inspected for an edit target, so a
+// Bash redirect/heredoc/`sed -i` surfaces no edit (AC27 fail-open).
+function parseArgs(args) {
+  if (args && typeof args === 'object') return args;
+  if (typeof args === 'string') { try { return JSON.parse(args); } catch { return null; } }
+  return null;
+}
+
+export function readRolloutSignals(path) {
+  const EMPTY = { commands: [], editTargets: [], readable: false };
+  if (!path || typeof path !== 'string') return EMPTY;
+  let raw;
+  try {
+    const st = statSync(path);
+    if (!st.isFile() || st.size > MAX) return EMPTY; // missing/non-file/over-ceiling -> unconfirmable
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return EMPTY; // unreadable -> unconfirmable
+  }
+
+  const commands = [];
+  const editTargets = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line) continue;
+    let o;
+    try { o = JSON.parse(line); } catch { continue; } // tolerate a malformed line
+    const p = payloadOf(o);
+    if (!p || typeof p !== 'object') continue;
+
+    if (p.type === 'function_call') {
+      const a = parseArgs(p.arguments);
+      if (p.name === 'exec_command') {
+        const cmd = a && a.cmd;
+        if (Array.isArray(cmd)) commands.push(cmd.map((x) => String(x)).join(' '));
+        else if (typeof cmd === 'string') commands.push(cmd);
+      } else if (p.name === 'apply_patch' || p.name === 'patch') {
+        const patchText = a && a.input;
+        if (typeof patchText === 'string') {
+          for (const t of extractWrittenContent('apply_patch', patchText).targets) editTargets.push(t);
+        }
+      }
+    } else if (p.type === 'exec_command_begin') {
+      if (typeof p.command === 'string' && p.command) commands.push(p.command);
+      if (Array.isArray(p.parsed_cmd)) {
+        const toks = p.parsed_cmd.filter((x) => typeof x === 'string');
+        if (toks.length) commands.push(toks.join(' '));
+      }
+    } else if (p.type === 'patch_apply_begin') {
+      for (const t of Object.keys(p.changes || {})) editTargets.push(t);
+    }
+  }
+  return { commands, editTargets, readable: true };
 }

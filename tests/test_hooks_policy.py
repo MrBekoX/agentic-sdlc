@@ -636,6 +636,10 @@ class TestCodexDocWiredSet(unittest.TestCase):
         # would NOT see it via the base substring — DP7). Listing it makes the lock non-vacuous: it is
         # wired, so it must be named WIRED in the docs.
         "completion-claim-guard-codex.mjs",
+        # The Codex flow-step adapter (AP2b): evidence-only Stop backstop. Same DP7 rationale — the
+        # "-codex" infix means "flow-step-guard.mjs" is NOT a substring of it, so the deferred Claude
+        # flow-step-guard.mjs stays classified deferred while this wired adapter must be named WIRED.
+        "flow-step-guard-codex.mjs",
     ]
 
     def _split(self):
