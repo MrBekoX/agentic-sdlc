@@ -10,7 +10,7 @@ Two kinds of guard live here:
 | Runtime | Config | Wired events in this release |
 |---|---|---|
 | Claude Code | `hooks/hooks-claude.json` via `.claude-plugin/plugin.json` | `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop` |
-| Codex | `hooks/hooks-codex.json` declared in `.codex-plugin/plugin.json`, after Codex hook review/trust | `SessionStart` only |
+| Codex | `hooks/hooks-codex.json` declared in `.codex-plugin/plugin.json`, after Codex hook review/trust | `SessionStart` + `PreToolUse` (`Bash` command guards: `scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs`; `Bash`+`apply_patch` pre-write secret guard: `scan-write-codex.mjs`) |
 
 The hook scripts are shared in this directory, but being present as a script is not the same as being wired by every runtime.
 
@@ -22,15 +22,17 @@ Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve t
 |---|---|---|---|
 | `session-start.mjs` | `SessionStart` | Not wired | Injects git status summary and Claude Code Skill-tool bootstrap reminder. |
 | `session-start-codex.mjs` | Not wired | `SessionStart` | Injects git status summary and Codex-specific AGENTIC-SDLC bootstrap reminder. |
-| `scan-write.mjs` | `PostToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | Scans newly written text for secrets; warns only. |
-| `scan-commit.mjs` | `PreToolUse` (`git commit*`) | Not wired | Scans added diff lines for high-confidence secrets; blocks commit. |
-| `branch-guard.mjs` | `PreToolUse` (`git commit*` / `git push*`) | Not wired | Warns on `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. |
-| `destructive-command-guard.mjs` | `PreToolUse` shell command | Not wired | Blocks deterministic destructive commands such as `git reset --hard`, forceful `git clean`, recursive `rm` including wrapper/path forms, and `Remove-Item -Recurse` including common aliases/wrappers. |
+| `scan-write.mjs` | `PostToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | Scans newly written text for secrets; warns only. (Claude `Write`/`Edit` field shape; superseded on Codex by `scan-write-codex.mjs`.) |
+| `scan-write-codex.mjs` | Not wired | `PreToolUse` (`Bash`/`apply_patch`) | Codex-native pre-write secret guard: extracts the literal added content of recognized write forms (apply_patch V4A; `printf`/`echo` `>`/`>>`; literal heredocs) and DENIES a high-confidence secret before the write. Bounded backstop — NOT covered (fail-open): pipe/`tee`/`base64`/command-substitution and `$VAR`/`${...}`/`$(...)` expansion. |
+| `scan-commit.mjs` | `PreToolUse` (`git commit*`) | `PreToolUse` (`Bash`) | Scans added diff lines for high-confidence secrets; blocks commit. Self-gates to `git commit` internally, so Codex wires it without an `if` clause. |
+| `branch-guard.mjs` | `PreToolUse` (`git commit*` / `git push*`) | `PreToolUse` (`Bash`) | Warns on `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. Self-gates to `git commit`/`push` internally. |
+| `destructive-command-guard.mjs` | `PreToolUse` shell command | `PreToolUse` (`Bash`) | Blocks deterministic destructive commands such as `git reset --hard`, forceful `git clean`, recursive `rm` including wrapper/path forms, and `Remove-Item -Recurse` including common aliases/wrappers. |
 | `flow-order-guard.mjs` | `PreToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | For active flows, checks current-turn pre-edit evidence before source edits; warns by default and denies when `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `completion-claim-guard.mjs` | `Stop` | Not wired | Warns when a final completion claim appears without `completion-claim-gate`; blocks when `AGENTIC_COMPLETION_GATE_BLOCK=true`. |
 | `flow-step-guard.mjs` | `Stop` | Not wired | Re-derives required active-flow evidence from validated artifacts, real tool calls, and commands; warns by default and blocks missing `stop:block` steps when `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `flow-evidence.mjs` | Shared library | Shared library | Evidence engine used by `flow-order-guard.mjs` and `flow-step-guard.mjs`. |
 | `secret-patterns.mjs` | Shared library | Shared library | Secret-pattern scanner used by the scan hooks. |
+| `codex-write-signal.mjs` | Not wired | Shared library | Pure write-content extractor (apply_patch V4A + bounded literal Bash write forms) used by `scan-write-codex.mjs`. No shell, no I/O. |
 
 `flow-requirements.json` is the shared source for active-flow step definitions and source-file extensions. The live flow hooks read it at runtime, and `tests/test_flow_requirements.py` validates that its skill, workflow, agent, and validator references resolve.
 

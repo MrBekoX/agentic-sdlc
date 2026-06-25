@@ -24,6 +24,7 @@ const bootstrap = [
   '<AGENTIC_SDLC_CODEX_BOOTSTRAP>',
   'You are in the AGENTIC-SDLC Codex plugin. Skills live in root skills/ (not .codex/skills/).',
   'Codex does not expose Claude Code Skill, Workflow, or Agent transcript events. Use Codex skill activation ($skill-name or @agentic-sdlc:skill-name) and available Codex tools.',
+  'Deterministic guards on Codex: the PreToolUse command guards (scan-commit, destructive-command, branch-guard) and a pre-write secret guard (scan-write-codex, matcher Bash+apply_patch, a bounded backstop over recognized write forms) block natively via hooks-codex.json. The Stop guards (completion-claim, flow-step) and flow-order path-gating are not yet wired on Codex (they need a rollout-transcript adapter), so for those gates rely on skills, contracts, and explicit checks.',
   'If a user names an AGENTIC-SDLC skill and skill descriptions are missing, read ${PLUGIN_ROOT}/skills/<skill>/SKILL.md before acting; replace <skill> with the kebab-case skill name.',
   'Routing authority is the using-agentic-sdlc skill; consult it when no focused skill below clearly fits or scope changes. Route by semantic intent, not exact keywords or prompt language.',
   'Use the smallest sufficient skill. agentic-sdlc-pipeline is only for full-envelope end-to-end SDLC and uses the embedded author -> critic -> revise adapter for internal spec/plan phases.',

@@ -321,6 +321,8 @@ class TestCodexSessionStartHook(unittest.TestCase):
         self.assertIn("AGENTIC-SDLC Codex plugin", context)
         self.assertIn("root skills/", context)
         self.assertIn("Codex does not expose Claude Code Skill, Workflow, or Agent transcript events", context)
+        # Phase 1: the bootstrap now names the natively-wired command guards (AC6).
+        self.assertIn("block natively via hooks-codex.json", context)
         self.assertIn("embedded author -> critic -> revise adapter", context)
         self.assertIn("${PLUGIN_ROOT}/skills/<skill>/SKILL.md", context)
         self.assertIn("Codex Adapter Gate", context)
@@ -382,6 +384,13 @@ class TestRuntimeHookConfigSeparation(unittest.TestCase):
         self.assertTrue((REPO / "hooks" / "hooks-codex.json").exists(), "Codex hook config missing")
         codex = json.loads((REPO / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(codex.get("hooks"), "./hooks/hooks-codex.json")
+
+    def test_codex_config_uses_no_claude_plugin_root(self):
+        # Symmetric to the Claude-side check: the Codex config resolves paths via ${PLUGIN_ROOT}
+        # and must never carry the Claude variable (which is undefined on Codex).
+        text = (REPO / "hooks" / "hooks-codex.json").read_text(encoding="utf-8")
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", text)
+        self.assertIn("${PLUGIN_ROOT}", text)
 
 
 @unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")
@@ -470,3 +479,186 @@ class TestScanCommitSecretScan(unittest.TestCase):
         secret = "ghp_" + "a1B2" * 9
         out = self._assert_blocked({"config.txt": "TOKEN = " + secret + "\n"})
         self.assertNotIn(secret, json.dumps(out))
+
+
+def _codex_bash_payload(command, cwd="/repo"):
+    """A realistic Codex v0.142.0 PreToolUse(Bash) hook input (verified live, codex-cli 0.142.0):
+    tool_name='Bash', tool_input.command carries the command, plus Codex's richer top-level keys.
+    The command guards read only tool_name + tool_input.command, so the extra keys are inert."""
+    return {
+        "tool_name": "Bash",
+        "hook_event_name": "PreToolUse",
+        "cwd": cwd,
+        "tool_input": {"command": command},
+        "session_id": "probe-session",
+        "tool_use_id": "tu_1",
+        "turn_id": "turn_1",
+        "model": "gpt-5.3-codex-spark",
+        "permission_mode": "default",
+        "transcript_path": "/tmp/none.jsonl",
+    }
+
+
+class TestCodexHookWiring(unittest.TestCase):
+    """Phase 1 (AC2): Codex v0.142.0 natively supports BLOCKING PreToolUse hooks (verified live).
+    The three command guards must be wired into hooks-codex.json with the SHELL-STRING command form
+    (the args-array form does NOT run on Codex — verified), ${PLUGIN_ROOT} only, matcher 'Bash'."""
+
+    WIRED = ["scan-commit.mjs", "destructive-command-guard.mjs", "branch-guard.mjs"]
+
+    def _pretooluse_handlers(self):
+        cfg = json.loads((REPO / "hooks" / "hooks-codex.json").read_text(encoding="utf-8"))
+        out = []
+        for block in cfg.get("hooks", {}).get("PreToolUse", []):
+            for h in block.get("hooks", []):
+                out.append((block.get("matcher"), h))
+        return out
+
+    def test_wires_three_command_guards(self):
+        blob = json.dumps(self._pretooluse_handlers())
+        for guard in self.WIRED:
+            with self.subTest(guard=guard):
+                self.assertIn(guard, blob, f"{guard} not wired in hooks-codex.json PreToolUse")
+
+    def test_uses_shell_string_form_plugin_root_and_bash_matcher(self):
+        handlers = self._pretooluse_handlers()
+        self.assertTrue(handlers, "no PreToolUse handlers in hooks-codex.json")
+        for matcher, h in handlers:
+            with self.subTest(handler=h.get("command")):
+                # Every PreToolUse handler TARGETS Bash: the command guards use matcher "Bash",
+                # the write guard uses "Bash|apply_patch" (Phase 0c verified the combined regex
+                # fires for both tools). assertIn — not assertEqual — accepts the apply_patch matcher.
+                self.assertIn("Bash", matcher or "")
+                self.assertNotIn("args", h, "Codex must use the shell-string form; args-array does not run")
+                self.assertIn("node", h.get("command", ""))
+                self.assertIn("${PLUGIN_ROOT}", h.get("command", ""))
+                self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", h.get("command", ""))
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestDestructiveCommandGuardCodexShape(unittest.TestCase):
+    """AC4: the guard denies a destructive command fed in the Codex hook-input shape, end-to-end."""
+
+    HOOK = REPO / "hooks" / "destructive-command-guard.mjs"
+
+    def _run(self, command):
+        proc = subprocess.run(
+            [NODE, str(self.HOOK)],
+            input=json.dumps(_codex_bash_payload(command)),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def test_codex_shaped_git_reset_hard_is_denied(self):
+        out = self._run("git reset --hard HEAD")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_codex_shaped_safe_command_allowed(self):
+        self.assertEqual(self._run("git status --short"), {})
+
+
+@unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")
+class TestScanCommitCodexShape(unittest.TestCase):
+    """AC4: scan-commit blocks a synthetic secret on a Codex-shaped commit input. Values are
+    synthetic ('a1B2'-repeats), never real secrets."""
+
+    HOOK = REPO / "hooks" / "scan-commit.mjs"
+
+    def _scan(self, files):
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            for name, content in files.items():
+                (Path(td) / name).write_text(content, encoding="utf-8")
+                subprocess.run(["git", "add", "--", name], cwd=td, check=True, capture_output=True)
+            proc = subprocess.run(
+                [NODE, str(self.HOOK)],
+                cwd=td,
+                input=json.dumps(_codex_bash_payload("git commit -m x", cwd=td)),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def test_codex_shaped_commit_with_secret_is_denied(self):
+        out = self._scan({"config.txt": "TOKEN = " + "ghp_" + "a1B2" * 9 + "\n"})
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+
+    def test_codex_shaped_clean_commit_allowed(self):
+        self.assertEqual(self._scan({"notes.txt": "an ordinary note\n"}), {})
+
+    def test_codex_deny_does_not_print_secret_value(self):
+        secret = "ghp_" + "a1B2" * 9
+        out = self._scan({"config.txt": "TOKEN = " + secret + "\n"})
+        self.assertNotIn(secret, json.dumps(out))
+
+
+@unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")
+class TestBranchGuardCodexShape(unittest.TestCase):
+    """AC4: branch-guard denies a protected-branch commit on a Codex-shaped input when the block
+    env is set. branch-guard reads git state from the hook process cwd; Phase 0 verified Codex
+    runs the hook in the working root, and this test sets cwd to the temp repo to exercise it."""
+
+    HOOK = REPO / "hooks" / "branch-guard.mjs"
+
+    def test_codex_shaped_protected_branch_commit_is_denied(self):
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            env = os.environ.copy()
+            env["AGENTIC_BRANCH_GUARD_BLOCK"] = "true"
+            proc = subprocess.run(
+                [NODE, str(self.HOOK)],
+                cwd=td,
+                env=env,
+                input=json.dumps(_codex_bash_payload("git commit -m x", cwd=td)),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+            self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
+class TestCodexDocWiredSet(unittest.TestCase):
+    """AC6: bind the hooks-scoped docs to the REAL wired set in hooks-codex.json. check_doc_consistency
+    does not validate these doc bodies, so this is the gate-enforced lock against doc drift and
+    against accidentally wiring a guard whose Codex contract is still unverified."""
+
+    ALL_GUARDS = [
+        "scan-commit.mjs", "destructive-command-guard.mjs", "branch-guard.mjs",
+        "scan-write.mjs", "flow-order-guard.mjs", "completion-claim-guard.mjs", "flow-step-guard.mjs",
+    ]
+
+    def _split(self):
+        cfg_text = json.dumps(json.loads((REPO / "hooks" / "hooks-codex.json").read_text(encoding="utf-8")))
+        wired = [g for g in self.ALL_GUARDS if g in cfg_text]
+        deferred = [g for g in self.ALL_GUARDS if g not in cfg_text]
+        return wired, deferred, cfg_text
+
+    def test_wired_guards_named_in_docs(self):
+        wired, _deferred, _ = self._split()
+        ra = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
+        readme = (REPO / "hooks" / "README.md").read_text(encoding="utf-8")
+        self.assertTrue(wired, "expected at least one Codex-wired command guard")
+        for g in wired:
+            with self.subTest(wired=g):
+                self.assertIn(g, ra, f"{g} is wired on Codex but not named in docs/runtime-adapter.md")
+                self.assertIn(g, readme, f"{g} is wired on Codex but not named in hooks/README.md")
+
+    def test_deferred_guards_absent_from_config_and_marked_verify(self):
+        _wired, deferred, cfg_text = self._split()
+        ra_lines = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8").splitlines()
+        for g in deferred:
+            with self.subTest(deferred=g):
+                self.assertNotIn(g, cfg_text, f"{g} is deferred but present in hooks-codex.json")
+                named = [ln for ln in ra_lines if g in ln]
+                if named:
+                    self.assertTrue(
+                        any("VERIFY" in ln for ln in named),
+                        f"{g} is deferred but its runtime-adapter.md line carries no VERIFY marker",
+                    )

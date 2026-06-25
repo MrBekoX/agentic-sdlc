@@ -1,5 +1,42 @@
 {
+  "description": "Codex hook wiring. Paths use ${PLUGIN_ROOT}, resolved to this plugin's install directory. Codex v0.142.0 natively supports blocking PreToolUse hooks; the command form is a single shell string (the args-array form does not run on Codex).",
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/scan-commit.mjs\"",
+            "timeout": 20,
+            "statusMessage": "Secret scan (commit)..."
+          },
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/destructive-command-guard.mjs\"",
+            "timeout": 15,
+            "statusMessage": "Destructive command guard..."
+          },
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/branch-guard.mjs\"",
+            "timeout": 15,
+            "statusMessage": "Branch guard (commit/push)..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/scan-write-codex.mjs\"",
+            "timeout": 20,
+            "statusMessage": "Secret scan (write)..."
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup|resume|clear|compact",
