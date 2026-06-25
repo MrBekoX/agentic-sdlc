@@ -10,7 +10,7 @@ Two kinds of guard live here:
 | Runtime | Config | Wired events in this release |
 |---|---|---|
 | Claude Code | `hooks/hooks-claude.json` via `.claude-plugin/plugin.json` | `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop` |
-| Codex | `hooks/hooks-codex.json` declared in `.codex-plugin/plugin.json`, after Codex hook review/trust | `SessionStart` + `PreToolUse` (`Bash` command guards: `scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs`; `Bash`+`apply_patch` pre-write secret guard: `scan-write-codex.mjs`) |
+| Codex | `hooks/hooks-codex.json` declared in `.codex-plugin/plugin.json`, after Codex hook review/trust | `SessionStart` + `PreToolUse` (`Bash` command guards: `scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs`; `Bash`+`apply_patch` pre-write secret guard: `scan-write-codex.mjs`) + `Stop` (completion-claim marker backstop: `completion-claim-guard-codex.mjs`) |
 
 The hook scripts are shared in this directory, but being present as a script is not the same as being wired by every runtime.
 
@@ -28,11 +28,13 @@ Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve t
 | `branch-guard.mjs` | `PreToolUse` (`git commit*` / `git push*`) | `PreToolUse` (`Bash`) | Warns on `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. Self-gates to `git commit`/`push` internally. |
 | `destructive-command-guard.mjs` | `PreToolUse` shell command | `PreToolUse` (`Bash`) | Blocks deterministic destructive commands such as `git reset --hard`, forceful `git clean`, recursive `rm` including wrapper/path forms, and `Remove-Item -Recurse` including common aliases/wrappers. |
 | `flow-order-guard.mjs` | `PreToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | For active flows, checks current-turn pre-edit evidence before source edits; warns by default and denies when `AGENTIC_FLOW_GATE_BLOCK=true`. |
-| `completion-claim-guard.mjs` | `Stop` | Not wired | Warns when a final completion claim appears without `completion-claim-gate`; blocks when `AGENTIC_COMPLETION_GATE_BLOCK=true`. |
+| `completion-claim-guard.mjs` | `Stop` | Not wired (Claude file; mechanism superseded on Codex by `completion-claim-guard-codex.mjs`) | Warns when a final completion claim appears without `completion-claim-gate`; blocks when `AGENTIC_COMPLETION_GATE_BLOCK=true`. |
+| `completion-claim-guard-codex.mjs` | Not wired | `Stop` | Codex completion-claim backstop: on a final completion claim without the `completion-claim-gate` **sentinel marker** in the rollout, emits a non-blocking advisory by default or blocks when `AGENTIC_COMPLETION_GATE_BLOCK=true`. Same env switch + copied claim/negation patterns as the Claude guard. |
 | `flow-step-guard.mjs` | `Stop` | Not wired | Re-derives required active-flow evidence from validated artifacts, real tool calls, and commands; warns by default and blocks missing `stop:block` steps when `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `flow-evidence.mjs` | Shared library | Shared library | Evidence engine used by `flow-order-guard.mjs` and `flow-step-guard.mjs`. |
 | `secret-patterns.mjs` | Shared library | Shared library | Secret-pattern scanner used by the scan hooks. |
 | `codex-write-signal.mjs` | Not wired | Shared library | Pure write-content extractor (apply_patch V4A + bounded literal Bash write forms) used by `scan-write-codex.mjs`. No shell, no I/O. |
+| `codex-rollout.mjs` | Not wired | Shared library | Pure Codex rollout reader (final assistant message + completion-claim-gate sentinel-marker presence) used by `completion-claim-guard-codex.mjs`. `node:fs` read only; no shell, no eval. |
 
 `flow-requirements.json` is the shared source for active-flow step definitions and source-file extensions. The live flow hooks read it at runtime, and `tests/test_flow_requirements.py` validates that its skill, workflow, agent, and validator references resolve.
 

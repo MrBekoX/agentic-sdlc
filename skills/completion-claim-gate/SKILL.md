@@ -152,3 +152,13 @@ verbatim regardless of language.
 - [ ] Verify: output matches the specific words of the claim (no skipped/partial passing as full).
 - [ ] Then claim: stated with the evidence attached, not as a bare verdict.
 - [ ] No commit / push / PR / "ready" without a just-run verification in the same message.
+
+## Gate completion marker (required final line)
+
+When this gate has run with real evidence attached, end your message by emitting this exact sentinel on its own line, once and verbatim (no edits, no interpolation):
+
+```
+<!-- agentic-sdlc:gate:completion-claim:verified -->
+```
+
+This is the gate's deterministic self-signature. On Codex — where a skill activation leaves no reliable transcript signal — the Stop backstop (`completion-claim-guard-codex.mjs`) treats this marker's presence as proof the gate ran, so a completion claim WITHOUT it is challenged. Emit it only after the evidence is genuinely in hand; printing it without doing the work defeats your own gate. (On Claude Code the existing Skill-invocation detection stays authoritative; the marker is harmless there.)

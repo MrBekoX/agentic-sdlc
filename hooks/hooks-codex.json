@@ -49,6 +49,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/completion-claim-guard-codex.mjs\"",
+            "timeout": 20,
+            "statusMessage": "Completion-claim gate (marker)..."
+          }
+        ]
+      }
     ]
   }
 }

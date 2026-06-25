@@ -632,6 +632,10 @@ class TestCodexDocWiredSet(unittest.TestCase):
     ALL_GUARDS = [
         "scan-commit.mjs", "destructive-command-guard.mjs", "branch-guard.mjs",
         "scan-write.mjs", "flow-order-guard.mjs", "completion-claim-guard.mjs", "flow-step-guard.mjs",
+        # The Codex completion-claim adapter (different filename from the Claude base, so the doc-lock
+        # would NOT see it via the base substring — DP7). Listing it makes the lock non-vacuous: it is
+        # wired, so it must be named WIRED in the docs.
+        "completion-claim-guard-codex.mjs",
     ]
 
     def _split(self):
