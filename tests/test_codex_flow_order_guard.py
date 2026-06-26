@@ -110,9 +110,18 @@ def _redirect_cmd(path):
     return _exec_fc(["bash", "-lc", f"printf x > {path}"])
 
 
+def _patch_end(paths, success=True):
+    """event_msg carrier: patch_apply_end — the shape codex-cli 0.142.0 ACTUALLY persists for a native
+    apply_patch (verified live: no patch_apply_begin / function_call apply_patch is emitted)."""
+    return _line("event_msg", {"type": "patch_apply_end", "success": success,
+                               "changes": {p: {"type": "add", "content": ""} for p in paths}})
+
+
 def _mark_write(rel):
-    """Mark a path as written this session (an in-session apply_patch edit signal)."""
-    return _patch_begin([rel])
+    """Mark a path as written this session (an in-session apply_patch edit signal). Uses the REAL
+    codex-cli 0.142.0 carrier (patch_apply_end), so the whole AP2c in-session-write suite exercises
+    the shape Codex actually emits (DP-LIVE), not just the begin/function_call forms."""
+    return _patch_end([rel])
 
 
 def _write_rollout(lines):
@@ -520,9 +529,11 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         "hooks/hooks-claude.json",
         "hooks/completion-claim-guard.mjs",
         # AP2a/AP2b Codex modules (reused read-only).
+        # NOTE: hooks/codex-rollout.mjs is intentionally NOT locked here — a DP-LIVE follow-up fix
+        # corrected readRolloutSignals to read the real `patch_apply_end` carrier; that file is the
+        # fix target, covered by its own regression test (test_patch_targets_from_patch_apply_end).
         "hooks/completion-claim-guard-codex.mjs",
         "hooks/flow-step-guard-codex.mjs",
-        "hooks/codex-rollout.mjs",
         "hooks/codex-flow-evidence.mjs",
         "hooks/codex-write-signal.mjs",
         # AP1 command/write guards + reused pattern source (this slice edits the very

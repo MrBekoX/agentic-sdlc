@@ -102,6 +102,13 @@ def _patch_begin(paths):
     return _line("event_msg", {"type": "patch_apply_begin", "changes": {p: {} for p in paths}})
 
 
+def _patch_end(paths, success=True):
+    """event_msg carrier: patch_apply_end — the shape codex-cli 0.142.0 ACTUALLY persists for a native
+    apply_patch (verified live: no patch_apply_begin / function_call apply_patch is emitted)."""
+    return _line("event_msg", {"type": "patch_apply_end", "success": success,
+                               "changes": {p: {"type": "add", "content": ""} for p in paths}})
+
+
 def _src_patch(path="src/app.py"):
     """An in-session NON-test production source patch (ext in sourceGlobs, not test/artifact)."""
     return _patch_fc(_v4a_add(path))
@@ -226,6 +233,17 @@ class TestRolloutSignals(unittest.TestCase):
         ]))
         self.assertIn("src/x.py", sig["editTargets"])
         self.assertIn("docs/agentic-sdlc/specs/W.md", sig["editTargets"])
+
+    def test_patch_targets_from_patch_apply_end(self):  # DP-LIVE carrier fix (the real codex shape)
+        # codex-cli 0.142.0 persists a native apply_patch as event_msg patch_apply_end (no _begin / no
+        # function_call). A successful end's changes ARE in-session edit targets; a failed one is NOT.
+        sig = _signals(_write_rollout([
+            _patch_end(["docs/agentic-sdlc/specs/W.md", "src/app.py"]),
+            _patch_end(["src/never.py"], success=False),
+        ]))
+        self.assertIn("docs/agentic-sdlc/specs/W.md", sig["editTargets"])
+        self.assertIn("src/app.py", sig["editTargets"])
+        self.assertNotIn("src/never.py", sig["editTargets"])  # failed apply wrote nothing
 
     def test_redirect_is_not_an_edit_target(self):  # AC27
         sig = _signals(_write_rollout([_redirect_cmd("src/app.py")]))

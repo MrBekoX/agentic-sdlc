@@ -146,6 +146,12 @@ export function readRolloutSignals(path) {
       }
     } else if (p.type === 'patch_apply_begin') {
       for (const t of Object.keys(p.changes || {})) editTargets.push(t);
+    } else if (p.type === 'patch_apply_end') {
+      // The shape codex-cli 0.142.0 actually persists for a native apply_patch (verified live): an
+      // event_msg `patch_apply_end` carrying `{ changes: { <absolute path>: {type,content} }, success }`.
+      // (No `patch_apply_begin` / `function_call apply_patch` is emitted in the rollout.) Count only a
+      // SUCCESSFUL apply as a real in-session write; a failed patch wrote nothing.
+      if (p.success !== false) for (const t of Object.keys(p.changes || {})) editTargets.push(t);
     }
   }
   return { commands, editTargets, readable: true };
