@@ -321,14 +321,17 @@ class TestFlowOrderGuard(_Tmp):
         out = _run_hook(self._pre(cwd, _src_redirect_cmd(), rollout_lines=[]), ENV_ON)
         self.assertEqual(_missing_list(out), ["spec", "plan"])
 
-    def test_prior_redirect_written_spec_plan_not_evidence_denies(self):  # BR4a/DP-PRIORGAP
+    def test_prior_redirect_written_spec_plan_is_now_evidence_allows(self):  # A1/BR4a closure (was a false-DENY)
+        # Before A1 a redirect-written spec/plan was invisible as prior evidence, so flow-order
+        # FALSE-DENIED a correctly-ordered following source edit. Now the `>`/`>>` redirect writes are
+        # detected, the in-session spec+plan pair counts, and ordering is respected -> ALLOW.
         cwd = self._cwd()
         _artifact(cwd, "spec", "W", valid=True)
         _artifact(cwd, "plan", "W", valid=True)
         roll = [_redirect_cmd("docs/agentic-sdlc/specs/W.md"),
                 _redirect_cmd("docs/agentic-sdlc/plans/W.md")]
         out = _run_hook(self._pre(cwd, _src_redirect_cmd(), rollout_lines=roll), ENV_ON)
-        self.assertEqual(_missing_list(out), ["spec", "plan"])
+        self.assertEqual(out.strip(), "")  # no more false block
 
     def test_atomic_bundle_patch_denies(self):  # DP-ATOMIC
         cwd = self._cwd()

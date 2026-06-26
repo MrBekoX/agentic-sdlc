@@ -245,9 +245,25 @@ class TestRolloutSignals(unittest.TestCase):
         self.assertIn("src/app.py", sig["editTargets"])
         self.assertNotIn("src/never.py", sig["editTargets"])  # failed apply wrote nothing
 
-    def test_redirect_is_not_an_edit_target(self):  # AC27
-        sig = _signals(_write_rollout([_redirect_cmd("src/app.py")]))
-        self.assertEqual(sig["editTargets"], [])
+    def test_non_redirect_write_form_is_not_an_edit_target(self):  # narrowed BR4a residual (A1)
+        # After A1, any `>`/`>>` redirect target IS surfaced (even a bash -lc-wrapped one). What stays
+        # opaque is a write with NO `>` redirect: cp, sed -i (in-place), tee. These remain undetected.
+        for cmd in ("cp a.py src/app.py", "sed -i 's/x/y/' src/app.py", "tee src/app.py"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(_signals(_write_rollout([_exec_fc(cmd)]))["editTargets"], [])
+
+    def test_raw_redirect_write_is_an_edit_target(self):  # A1/BR4a closure (the real raw-command shape)
+        # codex records a shell-redirect write as a RAW command string ({"cmd":"printf x > path"}) and
+        # often BUNDLES several writes in one exec_command separated by newlines — every `>`/`>>` target
+        # is surfaced as an in-session edit (so a redirect-written spec/plan is no longer invisible).
+        single = _signals(_write_rollout([_exec_fc("printf '# spec' > docs/agentic-sdlc/specs/W.md")]))
+        self.assertIn("docs/agentic-sdlc/specs/W.md", single["editTargets"])  # flow now activates on it
+        bundled = _signals(_write_rollout([
+            _exec_fc("printf a > docs/agentic-sdlc/specs/W.md\nprintf b > src/app.py"),  # two writes, one cmd
+        ]))
+        self.assertIn("docs/agentic-sdlc/specs/W.md", bundled["editTargets"])  # NOT just the last target
+        self.assertIn("src/app.py", bundled["editTargets"])
+        self.assertNotIn("err.txt", _signals(_write_rollout([_exec_fc("pytest 2> err.txt")]))["editTargets"])
 
     def test_over_ceiling_unreadable(self):  # AC16
         path = _write_over_ceiling_rollout()

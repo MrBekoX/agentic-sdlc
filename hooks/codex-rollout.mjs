@@ -119,6 +119,18 @@ export function readRolloutSignals(path) {
 
   const commands = [];
   const editTargets = [];
+  // A1/BR4a closure: a Codex shell-redirect WRITE is recorded as a raw command string (verified live:
+  // exec_command {cmd:"printf 'hi' > note.txt"}), and codex often BUNDLES several writes into one
+  // exec_command separated by newlines, so the single-write `extractWrittenContent` (which keys on a
+  // trailing redirect) only catches the LAST target. Here we want every file a command redirected to,
+  // so scan for ALL `>`/`>>` redirect targets across the whole command string — a spec/plan (or source)
+  // written via a `>`/`>>` redirect is no longer invisible to flow-step/flow-order. fd redirects (`2>`,
+  // `>&2`) are skipped. Still bounded (narrowed BR4a): a `bash -lc`-wrapped redirect, `sed -i`, `tee`,
+  // a `cat` copy, `base64`, or a `$`-expansion target are not surfaced. Pure: a single regex scan.
+  const REDIRECT = /[^0-9&>]>>?\s*(['"]?)([^\s'";&|<>()]+)/g;
+  const pushRedirectTargets = (s) => {
+    for (const m of String(s).matchAll(REDIRECT)) editTargets.push(m[2]);
+  };
   for (const line of raw.split(/\r?\n/)) {
     if (!line) continue;
     let o;
@@ -130,8 +142,8 @@ export function readRolloutSignals(path) {
       const a = parseArgs(p.arguments);
       if (p.name === 'exec_command') {
         const cmd = a && a.cmd;
-        if (Array.isArray(cmd)) commands.push(cmd.map((x) => String(x)).join(' '));
-        else if (typeof cmd === 'string') commands.push(cmd);
+        const s = Array.isArray(cmd) ? cmd.map((x) => String(x)).join(' ') : (typeof cmd === 'string' ? cmd : null);
+        if (s != null) { commands.push(s); pushRedirectTargets(s); }
       } else if (p.name === 'apply_patch' || p.name === 'patch') {
         const patchText = a && a.input;
         if (typeof patchText === 'string') {
@@ -139,7 +151,7 @@ export function readRolloutSignals(path) {
         }
       }
     } else if (p.type === 'exec_command_begin') {
-      if (typeof p.command === 'string' && p.command) commands.push(p.command);
+      if (typeof p.command === 'string' && p.command) { commands.push(p.command); pushRedirectTargets(p.command); }
       if (Array.isArray(p.parsed_cmd)) {
         const toks = p.parsed_cmd.filter((x) => typeof x === 'string');
         if (toks.length) commands.push(toks.join(' '));
