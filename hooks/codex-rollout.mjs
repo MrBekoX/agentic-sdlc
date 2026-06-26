@@ -125,12 +125,22 @@ export function readRolloutSignals(path) {
   // trailing redirect) only catches the LAST target. Here we want every file a command redirected to,
   // so scan for ALL `>`/`>>` redirect targets across the whole command string — a spec/plan (or source)
   // written via a `>`/`>>` redirect is no longer invisible to flow-step/flow-order. fd redirects (`2>`,
-  // `>&2`) are skipped. Still bounded (narrowed BR4a): a `bash -lc`-wrapped redirect, `sed -i`, `tee`,
-  // a `cat` copy, `base64`, or a `$`-expansion target are not surfaced. Pure: a single regex scan.
+  // `>&2`) are skipped. Still bounded (narrowed BR4a): a `cat` copy, `base64`, or a `$`-expansion
+  // target are not surfaced. Pure: regex scans only.
   const REDIRECT = /[^0-9&>]>>?\s*(['"]?)([^\s'";&|<>()]+)/g;
-  const pushRedirectTargets = (s) => {
-    for (const m of String(s).matchAll(REDIRECT)) editTargets.push(m[2]);
+  // B3: in-place / pipe writes that carry no `>` redirect. `sed -i` rewrites its file argument(s) — the
+  // file is the LAST token of the sed segment (after the script), so capture it greedily up to the next
+  // `>`/segment boundary (best-effort: only the last file of a multi-file sed is surfaced). `tee [-a]`
+  // writes the file argument after it.
+  const SED = /\bsed\b(?=[^\n;|&>]*\s-i)[^\n;|&>]*\s([^\s;|&<>'"]+)/g;
+  const TEE = /\btee\b\s+(?:-a\s+)?([^\s;|&<>'"]+)/g;
+  const pushWriteTargets = (s) => {
+    const str = String(s);
+    for (const m of str.matchAll(REDIRECT)) editTargets.push(m[2]);
+    for (const m of str.matchAll(SED)) editTargets.push(m[1]);
+    for (const m of str.matchAll(TEE)) editTargets.push(m[1]);
   };
+  const pushRedirectTargets = pushWriteTargets; // keep the call sites below stable
   for (const line of raw.split(/\r?\n/)) {
     if (!line) continue;
     let o;

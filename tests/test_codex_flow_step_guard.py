@@ -255,12 +255,14 @@ class TestRolloutSignals(unittest.TestCase):
         self.assertIn("src/app.py", sig["editTargets"])
         self.assertNotIn("src/never.py", sig["editTargets"])  # failed apply wrote nothing
 
-    def test_non_redirect_write_form_is_not_an_edit_target(self):  # narrowed BR4a residual (A1)
-        # After A1, any `>`/`>>` redirect target IS surfaced (even a bash -lc-wrapped one). What stays
-        # opaque is a write with NO `>` redirect: cp, sed -i (in-place), tee. These remain undetected.
-        for cmd in ("cp a.py src/app.py", "sed -i 's/x/y/' src/app.py", "tee src/app.py"):
-            with self.subTest(cmd=cmd):
-                self.assertEqual(_signals(_write_rollout([_exec_fc(cmd)]))["editTargets"], [])
+    def test_sed_inplace_and_tee_are_edit_targets(self):  # B3 (in-place / pipe writes, no `>` redirect)
+        self.assertIn("src/app.py", _signals(_write_rollout([_exec_fc("sed -i 's/x/y/' src/app.py")]))["editTargets"])
+        self.assertIn("docs/agentic-sdlc/specs/W.md",
+                      _signals(_write_rollout([_exec_fc("sed -i.bak -e 'a' docs/agentic-sdlc/specs/W.md")]))["editTargets"])
+        self.assertIn("out.txt", _signals(_write_rollout([_exec_fc("cat x | tee -a out.txt")]))["editTargets"])
+        # a READ-ONLY sed (no -i) is NOT a write; cp/base64 stay the documented residual
+        self.assertEqual(_signals(_write_rollout([_exec_fc("sed 's/x/y/' src/app.py")]))["editTargets"], [])
+        self.assertEqual(_signals(_write_rollout([_exec_fc("cp a.py src/app.py")]))["editTargets"], [])
 
     def test_raw_redirect_write_is_an_edit_target(self):  # A1/BR4a closure (the real raw-command shape)
         # codex records a shell-redirect write as a RAW command string ({"cmd":"printf x > path"}) and
