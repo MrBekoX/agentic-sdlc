@@ -126,6 +126,15 @@ export function orderDecision(signals, req, cwd) {
     }
   }
 
+  // DP-SCOPE-FLOW (B2): safe-refactor's before-source-edit obligation is a characterization-test run,
+  // NOT a spec/plan pair (and TDD flows write a failing test before the edit). flow-order cannot detect
+  // the active flow on Codex (DP1), so it accepts EITHER before-source-edit evidence: a validated
+  // spec+plan pair OR a recorded test run this session. So a safe-refactor (or a test-first edit) that
+  // ran tests before editing source is no longer falsely denied. Bad/absent testCommand -> skip (no throw).
+  let testRe = null;
+  try { if (req.testCommand) testRe = new RegExp(req.testCommand); } catch { testRe = null; }
+  if (testRe && signals.commands.some((c) => testRe.test(String(c)))) return { satisfied: true };
+
   // SATISFIED iff a single work id W has BOTH an in-session spec write AND an in-session plan write,
   // and both re-validate strict (the plan paired with the SAME-W spec, no fallback).
   for (const W of specIds) {

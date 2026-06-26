@@ -443,10 +443,18 @@ class TestFlowOrderGuard(_Tmp):
         out = _run_hook(inp, ENV_ON)
         self.assertTrue(_is_deny(out))  # deny, NOT fail-open silence
 
-    def test_safe_refactor_source_edit_denies(self):  # AC20 accepted false-block
+    def test_characterization_tests_satisfy_order_allows(self):  # B2/DP-SCOPE-FLOW closure (was a false-block)
+        # A characterization-test run before the source edit (safe-refactor's before-source-edit
+        # obligation) — or a TDD red test — is now accepted as ordering evidence, so no spec/plan pair
+        # is demanded and the edit is ALLOWED. (Before B2 this DENIED, the documented DP-SCOPE-FLOW gap.)
         cwd = self._cwd()
-        roll = [_exec_fc(["python3", "-m", "pytest"])]  # characterization test, no spec/plan
+        roll = [_exec_fc(["python3", "-m", "pytest"])]  # a test ran before the edit; no spec/plan
         out = _run_hook(self._pre(cwd, _src_redirect_cmd(), rollout_lines=roll), ENV_ON)
+        self.assertEqual(out.strip(), "")
+
+    def test_source_edit_with_no_process_evidence_still_denies(self):  # the gate still bites
+        cwd = self._cwd()  # no spec/plan, no test run -> deny
+        out = _run_hook(self._pre(cwd, _src_redirect_cmd(), rollout_lines=[]), ENV_ON)
         self.assertTrue(_is_deny(out))
 
     def test_deny_payload_shape(self):  # AC13 shape
