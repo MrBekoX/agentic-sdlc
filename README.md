@@ -4,7 +4,7 @@
 
 > A local AGENTIC-SDLC plugin for **Claude Code** and **Codex**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
-> `Version 0.3.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
+> `Version 0.4.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
 
 ---
 
@@ -212,7 +212,7 @@ This proves metadata consistency, static skill wiring, fixture health, hook/work
 
 ## Versioning
 
-Current version: `0.3.0`.
+Current version: `0.4.0`.
 
 ```bash
 python3 scripts/bump_version.py --check

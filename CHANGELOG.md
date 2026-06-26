@@ -9,6 +9,16 @@
 - `spec-authoring` / `plan-authoring` carry proportional depth-forcing (Depth contract + Excuse→Check + no-placeholder + shallow example).
 - Regression fixtures lock the bar: shallow artifacts FAIL, a deep reference PASSES. Live before/after proof is pending a CLI run.
 
+## 0.4.0 - 2026-06-26
+
+- **Codex v0.142.0 native deterministic hooks.** The plugin's guard logic now runs on Codex's native hook system (each guard's logic preserved, driven by Codex-native mechanisms; Claude Code behavior stays byte-identical). All Codex behavior was established by live `codex exec` probes, not assumed.
+  - Command guards (`scan-commit`, `destructive-command-guard`, `branch-guard`) + a bounded pre-write **secret guard** `scan-write-codex.mjs` (matcher `Bash|apply_patch`, backed by the pure `codex-write-signal.mjs`).
+  - **completion-claim** Stop backstop `completion-claim-guard-codex.mjs`: since a skill activation leaves no reliable rollout signal on Codex, the `completion-claim-gate` now emits a deterministic sentinel marker and the guard detects it (live-verified block/silent).
+  - **flow-step** Stop backstop `flow-step-guard-codex.mjs` (+ `codex-flow-evidence.mjs`, `codex-rollout.mjs`): evidence-only, session-scoped — an artifact-bearing flow that finished with a missing step (stub/missing spec or plan, or no test run after a source edit) warns or, under `AGENTIC_FLOW_GATE_BLOCK`, blocks. Committed prior-session artifacts never false-activate it.
+  - **flow-order** PreToolUse pre-edit gate `flow-order-guard-codex.mjs`: env-gated opt-in (its own `AGENTIC_FLOW_ORDER_BLOCK`, independent of flow-step) that denies a source edit attempted before a validated spec + matching plan exist this session.
+- The Codex rollout reader was hardened against live findings: it reads the real `patch_apply_end` apply_patch carrier, and surfaces every `>`/`>>` shell-redirect target (including newline-bundled multi-writes) as an in-session edit.
+- Two Stop guards (completion-claim + flow-step) confirmed live to fire independently on one Stop event.
+
 ## 0.3.0 - 2026-06-19
 
 - Introduced the original "Assertion contract" skill voice (`Invariant` / `Tripwires` / `Proof` / `Excuse → check`) and applied it to the discipline-bearing skills; removed borrowed `Red Flags`/`Rationalizations` headings from the product surface.

@@ -1,6 +1,6 @@
 # Release Readiness
 
-This file is the publish gate for `agentic-sdlc` version `0.3.0`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex.
+This file is the publish gate for `agentic-sdlc` version `0.4.0`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex.
 
 ## Supported Release Scope
 
@@ -8,7 +8,7 @@ This file is the publish gate for `agentic-sdlc` version `0.3.0`. It keeps the r
 |---|---|---|
 | Claude Code | Supported | Local gate plus live routing/procedure transcript evidence before claiming live behavior. |
 | Codex | Supported | Local gate plus route-classifier/procedure transcript evidence before claiming live behavior. |
-| OpenCode, Kimi Code, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.3.0`. |
+| OpenCode, Kimi Code, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.0`. |
 
 ## Required Local Gate
 
@@ -78,7 +78,7 @@ codex -a never exec --json --ephemeral --dangerously-bypass-hook-trust -s worksp
 
 Passing signals observed in the transcript:
 
-- plugin cache refreshed to `agentic-sdlc@personal` version `0.3.0` before the run;
+- plugin cache refreshed to `agentic-sdlc@personal` version `0.4.0` before the run;
 - pipeline used the Codex embedded author -> critic -> revise adapter and wrote canonical artifacts under `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/`;
 - `validate_artifacts.py --mode spec` passed;
 - `validate_artifacts.py --mode plan --strict` passed with `plan_ac_covered=4`, `plan_tasks=2`;
@@ -110,14 +110,14 @@ Scan staged and unstaged diffs for tokens, private keys, connection strings, and
 - Codex command-blocking guardrails are advisory/manual in this release: Codex wires the plugin-default `SessionStart` hook only, while destructive-command, commit-secret, branch, and completion-claim hook enforcement remain Claude Code-only.
 - `agentic-sdlc-pipeline` owns internal spec/plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for pipeline steps 4-5; Codex uses the embedded author/critic adapter.
 - Hooks are local runtime guardrails. Some warn or fail open by design, so they complement but do not replace diff review, test output, and secret scanning.
-- `0.3.0` is publishable for Claude Code and Codex only when the local gate and current live evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
+- `0.4.0` is publishable for Claude Code and Codex only when the local gate and current live evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
 
 ## Release Verdict Template
 
 Use this shape in a release note or final publish report:
 
 ```text
-version=0.3.0
+version=0.4.0
 scope=Claude Code, Codex
 local_gate=<passed|failed> <date>
 claude_routing_eval=<passed|failed|not-run> <transcript-or-log>
