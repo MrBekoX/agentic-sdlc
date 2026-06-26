@@ -255,10 +255,25 @@ class TestWiring(unittest.TestCase):
         self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", CODEX_CFG.read_text(encoding="utf-8"))
         self.assertFalse((REPO / "hooks" / "hooks.json").exists())
 
-    def test_ap1_pretooluse_and_sessionstart_unchanged(self):  # AC13
+    def test_ap1_pretooluse_and_sessionstart_unchanged(self):  # AC13 (additive-only since AP2c)
+        # AP2c additively appends flow-order-guard-codex.mjs to the Bash|apply_patch PreToolUse
+        # block, so strict PreToolUse == HEAD is no longer the contract. The AP2a intent — this
+        # slice does not touch the AP1 PreToolUse surface or SessionStart — is preserved as
+        # additive-only: SessionStart unchanged, the Bash command-guard block unchanged, and the
+        # scan-write-codex handler dict unchanged.
         head = json.loads(_git_show("hooks/hooks-codex.json"))
-        self.assertEqual(self.cfg["hooks"]["PreToolUse"], head["hooks"]["PreToolUse"])
         self.assertEqual(self.cfg["hooks"]["SessionStart"], head["hooks"]["SessionStart"])
+        cur_bash = [b for b in self.cfg["hooks"]["PreToolUse"] if b.get("matcher") == "Bash"]
+        head_bash = [b for b in head["hooks"]["PreToolUse"] if b.get("matcher") == "Bash"]
+        self.assertEqual(cur_bash, head_bash)
+
+        def _scan_handler(cfg):
+            for b in cfg["hooks"]["PreToolUse"]:
+                if b.get("matcher") == "Bash|apply_patch":
+                    return [h for h in b["hooks"] if "scan-write-codex.mjs" in h["command"]]
+            return []
+
+        self.assertEqual(_scan_handler(self.cfg), _scan_handler(head))
 
 
 if __name__ == "__main__":

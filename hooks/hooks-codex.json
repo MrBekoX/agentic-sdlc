@@ -33,6 +33,12 @@
             "command": "node \"${PLUGIN_ROOT}/hooks/scan-write-codex.mjs\"",
             "timeout": 20,
             "statusMessage": "Secret scan (write)..."
+          },
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/flow-order-guard-codex.mjs\"",
+            "timeout": 20,
+            "statusMessage": "Flow-order gate (codex)..."
           }
         ]
       }

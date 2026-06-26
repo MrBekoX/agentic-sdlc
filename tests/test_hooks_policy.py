@@ -335,6 +335,14 @@ class TestCodexSessionStartHook(unittest.TestCase):
         self.assertIn("completion-claim-gate", context)
         self.assertNotIn("Skill tool", context)
         self.assertNotIn("calling the Skill tool", context)
+        # AP2c (AC15): flow-order is now wired, so the bootstrap must drop the "unwired" claim, name
+        # the wired adapter, mark the AP2 envelope complete, and state the shared-env warn->block
+        # coupling (AC16) — while preserving every assertion above.
+        self.assertNotIn("Only flow-order path-gating remains unwired", context)
+        self.assertIn("flow-order-guard-codex", context)
+        self.assertIn("AP2", context)
+        self.assertIn("AGENTIC_FLOW_GATE_BLOCK", context)
+        self.assertIn("warn to block", context)
 
 
 def _claude_loadable_hook_configs():
@@ -640,6 +648,11 @@ class TestCodexDocWiredSet(unittest.TestCase):
         # "-codex" infix means "flow-step-guard.mjs" is NOT a substring of it, so the deferred Claude
         # flow-step-guard.mjs stays classified deferred while this wired adapter must be named WIRED.
         "flow-step-guard-codex.mjs",
+        # The Codex flow-order adapter (AP2c): env-gated opt-in PreToolUse pre-edit ordering gate.
+        # Same DP7 rationale — "flow-order-guard.mjs" is NOT a substring of "flow-order-guard-codex.mjs"
+        # ("-codex.mjs" vs ".mjs"), so the deferred Claude flow-order-guard.mjs stays classified
+        # deferred while this wired adapter must be named WIRED in both docs.
+        "flow-order-guard-codex.mjs",
     ]
 
     def _split(self):
@@ -670,3 +683,15 @@ class TestCodexDocWiredSet(unittest.TestCase):
                         any("VERIFY" in ln for ln in named),
                         f"{g} is deferred but its runtime-adapter.md line carries no VERIFY marker",
                     )
+
+    def test_runtime_adapter_documents_shared_env_coupling(self):  # AC16
+        # The single AGENTIC_FLOW_GATE_BLOCK switch both activates the AP2c flow-order pre-gate AND
+        # escalates the AP2b flow-step Stop backstop from warn to block. The doc must state this
+        # coupling on one flow-order-context line (the filename-only doc-lock did not verify the
+        # coupling sentence exists).
+        ra_lines = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8").splitlines()
+        coupling = [ln for ln in ra_lines
+                    if "AGENTIC_FLOW_GATE_BLOCK" in ln and "also escalates" in ln and "warn to block" in ln]
+        self.assertTrue(coupling, "runtime-adapter.md lacks the AP2c/AP2b shared-env coupling sentence")
+        self.assertTrue(any("flow-order" in ln for ln in coupling),
+                        "the shared-env coupling sentence is not stated in a flow-order context")

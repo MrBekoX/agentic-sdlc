@@ -529,11 +529,26 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
                 self.assertIsNotNone(head, f"{rel} not in HEAD")
                 self.assertEqual((REPO / rel).read_text(encoding="utf-8"), head)
 
-    def test_codex_pretooluse_sessionstart_unchanged(self):  # AC18
+    def test_codex_pretooluse_sessionstart_unchanged(self):  # AC18 (additive-only since AP2c)
+        # AP2c additively appends flow-order-guard-codex.mjs to the Bash|apply_patch PreToolUse
+        # block, so strict PreToolUse == HEAD is no longer the contract. Relaxed to additive-only:
+        # SessionStart unchanged, the Bash command-guard block unchanged, and the scan-write-codex
+        # handler dict unchanged (the new flow-order handler is the only permitted addition, asserted
+        # positively by tests/test_codex_flow_order_guard.py::test_pretooluse_array_has_both_guards).
         cur = json.loads(CODEX_CFG.read_text(encoding="utf-8"))
         head = json.loads(_git_show("hooks/hooks-codex.json"))
-        self.assertEqual(cur["hooks"]["PreToolUse"], head["hooks"]["PreToolUse"])
         self.assertEqual(cur["hooks"]["SessionStart"], head["hooks"]["SessionStart"])
+        cur_bash = [b for b in cur["hooks"]["PreToolUse"] if b.get("matcher") == "Bash"]
+        head_bash = [b for b in head["hooks"]["PreToolUse"] if b.get("matcher") == "Bash"]
+        self.assertEqual(cur_bash, head_bash)
+
+        def _scan_handler(cfg):
+            for b in cfg["hooks"]["PreToolUse"]:
+                if b.get("matcher") == "Bash|apply_patch":
+                    return [h for h in b["hooks"] if "scan-write-codex.mjs" in h["command"]]
+            return []
+
+        self.assertEqual(_scan_handler(cur), _scan_handler(head))
 
     def test_existing_completion_claim_stop_handler_unchanged(self):  # AC18
         cur = json.loads(CODEX_CFG.read_text(encoding="utf-8"))
