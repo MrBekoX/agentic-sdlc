@@ -554,10 +554,12 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         "hooks/completion-claim-guard-codex.mjs",
         "hooks/flow-step-guard-codex.mjs",
         "hooks/codex-flow-evidence.mjs",
-        "hooks/codex-write-signal.mjs",
+        # hooks/codex-write-signal.mjs is NOT locked here — a security follow-up bounded its heredoc
+        # parser against a ReDoS; it is covered by the AP1 write-guard suite.
         # AP1 command/write guards + reused pattern source (this slice edits the very
         # Bash|apply_patch block scan-write-codex.mjs lives in, so its bytes must be locked).
-        "hooks/scan-write-codex.mjs",
+        # hooks/scan-write-codex.mjs is NOT locked here — a security follow-up sanitized the target
+        # path in its deny reason (prompt-injection fix); it is covered by the AP1 write-guard suite.
         "hooks/scan-commit.mjs",
         "hooks/destructive-command-guard.mjs",
         "hooks/branch-guard.mjs",

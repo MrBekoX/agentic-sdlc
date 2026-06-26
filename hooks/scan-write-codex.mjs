@@ -27,7 +27,17 @@ try {
   if (!findings.length) process.exit(0);
 
   const labels = [...new Set(findings.map((f) => f.label))].join(', ');
-  const paths = (targets || []).filter(Boolean).slice(0, 5).join(', ');
+  // The target path comes from the write command / V4A patch (`*** Add/Update File: (.+)`), which is
+  // attacker-influenceable — reflecting it verbatim into the deny reason (fed back into the agent's
+  // continuation + shown to the user) is a prompt-injection surface. Reduce each to a sanitized
+  // BASENAME (mirrors workIdOf) so the file hint survives but injected bytes/instructions cannot.
+  const paths = (targets || [])
+    // first whitespace token (a real path has no spaces; injected instructions live AFTER a space, so
+    // they are dropped), then the basename, then a strict charset — no attacker bytes reach the reason.
+    .map((t) => String(t).trim().split(/\s+/)[0].split(/[\\/]/).pop().replace(/[^A-Za-z0-9._-]/g, ''))
+    .filter(Boolean)
+    .slice(0, 5)
+    .join(', ');
   // Reason carries finding LABELS (+ optional target paths) only — never the matched value, and no
   // absolute source line (the only index is blob-relative, which would mislead).
   const reason =

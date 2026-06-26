@@ -127,18 +127,24 @@ export function readRolloutSignals(path) {
   // written via a `>`/`>>` redirect is no longer invisible to flow-step/flow-order. fd redirects (`2>`,
   // `>&2`) are skipped. Still bounded (narrowed BR4a): a `cat` copy, `base64`, or a `$`-expansion
   // target are not surfaced. Pure: regex scans only.
-  const REDIRECT = /[^0-9&>]>>?\s*(['"]?)([^\s'";&|<>()]+)/g;
-  // B3: in-place / pipe writes that carry no `>` redirect. `sed -i` rewrites its file argument(s) — the
-  // file is the LAST token of the sed segment (after the script), so capture it greedily up to the next
-  // `>`/segment boundary (best-effort: only the last file of a multi-file sed is surfaced). `tee [-a]`
-  // writes the file argument after it.
-  const SED = /\bsed\b(?=[^\n;|&>]*\s-i)[^\n;|&>]*\s([^\s;|&<>'"]+)/g;
-  const TEE = /\btee\b\s+(?:-a\s+)?([^\s;|&<>'"]+)/g;
+  const REDIRECT = /[^0-9&>]>>?\s*(['"]?)([^\s'";&|<>()]+)/g; // LINEAR (disjoint classes, no nested quantifier)
+  const TEE = /\btee\b\s+(?:-a\s+)?([^\s;|&<>'"]+)/g;          // LINEAR
+  // B3: in-place / pipe writes that carry no `>` redirect. `tee [-a]` writes its file argument. `sed -i`
+  // rewrites its file argument(s) — the file is the LAST token of the sed statement (best-effort: only the
+  // last file of a multi-file sed). The earlier single-regex SED form used a `(?=...)` lookahead that
+  // re-scanned the tail at every `\bsed\b`, which is O(n^2) on a crafted command of many `sed ` tokens
+  // (a default-reachable ReDoS). Instead split on shell statement boundaries FIRST (O(n)), then read each
+  // sed statement's last token once — total linear, no lookahead, so an 8 MiB rollout cannot DoS the hook.
+  const SED_LAST = /\s([^\s;|&<>'"]+)\s*$/;
   const pushWriteTargets = (s) => {
     const str = String(s);
     for (const m of str.matchAll(REDIRECT)) editTargets.push(m[2]);
-    for (const m of str.matchAll(SED)) editTargets.push(m[1]);
     for (const m of str.matchAll(TEE)) editTargets.push(m[1]);
+    for (const seg of str.split(/[;\n|&]+/)) {
+      if (!/\bsed\b/.test(seg) || !/(?:^|\s)-i/.test(seg)) continue; // only an in-place sed is a write
+      const m = seg.split('>')[0].match(SED_LAST); // drop any redirect tail (REDIRECT already has it)
+      if (m) editTargets.push(m[1]);
+    }
   };
   const pushRedirectTargets = pushWriteTargets; // keep the call sites below stable
   for (const line of raw.split(/\r?\n/)) {

@@ -255,6 +255,13 @@ class TestRolloutSignals(unittest.TestCase):
         self.assertIn("src/app.py", sig["editTargets"])
         self.assertNotIn("src/never.py", sig["editTargets"])  # failed apply wrote nothing
 
+    def test_sed_flood_is_linear_not_redos(self):  # security: the sed scan is linear, not O(n^2) ReDoS
+        import time
+        path = _write_rollout([_exec_fc("sed " * 200000)])  # ~1 MB 'sed ' flood; old lookahead was ~30s+
+        t = time.time()
+        _signals(path)
+        self.assertLess(time.time() - t, 5.0, "sed scan should be linear, not quadratic")
+
     def test_sed_inplace_and_tee_are_edit_targets(self):  # B3 (in-place / pipe writes, no `>` redirect)
         self.assertIn("src/app.py", _signals(_write_rollout([_exec_fc("sed -i 's/x/y/' src/app.py")]))["editTargets"])
         self.assertIn("docs/agentic-sdlc/specs/W.md",

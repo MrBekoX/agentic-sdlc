@@ -46,8 +46,16 @@ function parseBash(cmd) {
 
   // 1) Heredocs FIRST — capture the body intact (newlines preserved) BEFORE any boundary split, so
   //    the heredoc's own newlines never reach the segmenter, then blank the window out.
+  // ReDoS guard: the heredoc body `[\s\S]*?` scans to end for every UNTERMINATED `<<` opener, which is
+  // O(n^2) in opener count — a crafted command of thousands of `<<EOF` openers (within the 512 KiB cap)
+  // would hang the secret scanner past its hook timeout (a default-reachable DoS/bypass). A real command
+  // has at most a handful of heredocs, so if there are absurdly many `<<` openers we skip heredoc parsing
+  // entirely (the command is then handled by the redirect/segment path; its heredoc bodies are not
+  // scanned — accepted within the bounded-backstop posture, and far better than a timeout-then-allow).
+  const HEREDOC_OPENER_CAP = 24;
+  const openerCount = (cmd.match(/<</g) || []).length;
   const heredocRe = /<<\s*(['"]?)([A-Za-z_]\w*)\1([^\n]*)\n([\s\S]*?)\n\2(?=\n|$)/g;
-  const work = cmd.replace(heredocRe, (full, q, _delim, rest, body) => {
+  const work = openerCount > HEREDOC_OPENER_CAP ? cmd : cmd.replace(heredocRe, (full, q, _delim, rest, body) => {
     const literal = q === "'";                 // single-quoted delimiter => no expansion of the body
     const tgt = /(?:>>?)\s*(\S+)/.exec(rest);
     if (!literal && EXPANSION.test(body)) { hasExpansion = true; }
