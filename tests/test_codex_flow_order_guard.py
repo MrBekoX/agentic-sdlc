@@ -2,7 +2,7 @@
 
 The pre-edit gate denies a source-file edit attempted before THIS session produced a validated
 spec AND a matching plan (same work id, BOTH written this session via a recognized artifact write,
-each re-validating). Default-silent; only active under AGENTIC_FLOW_GATE_BLOCK.
+each re-validating). Default-silent; only active under AGENTIC_FLOW_ORDER_BLOCK.
 
 Behavioral/fail-open tests drive the real hook `hooks/flow-order-guard-codex.mjs` as a subprocess.
 The pure `orderDecision(signals, req, cwd)` is exported and driven by an `_order_decision` node
@@ -197,7 +197,7 @@ def _order_decision(rollout_lines, req_obj, cwd):
 
 def _run_hook(stdin, env_extra=None):
     env = dict(os.environ)
-    env.pop("AGENTIC_FLOW_GATE_BLOCK", None)
+    env.pop("AGENTIC_FLOW_ORDER_BLOCK", None)
     if env_extra:
         env.update(env_extra)
     payload = stdin if isinstance(stdin, str) else json.dumps(stdin)
@@ -227,7 +227,7 @@ def _is_deny(stdout):
     return '"permissionDecision":"deny"' in stdout.replace(" ", "")
 
 
-ENV_ON = {"AGENTIC_FLOW_GATE_BLOCK": "true"}
+ENV_ON = {"AGENTIC_FLOW_ORDER_BLOCK": "true"}
 
 
 class _Tmp(unittest.TestCase):
@@ -250,17 +250,24 @@ class TestFlowOrderGuard(_Tmp):
         out = _run_hook(self._pre(cwd, _src_redirect_cmd()))  # env unset
         self.assertEqual(out.strip(), "")
 
+    def test_flow_gate_block_alone_does_not_activate_order(self):  # A2/DP-ENV decouple
+        # The flow-step switch must NOT turn the flow-order pre-gate on (independent switches).
+        cwd = self._cwd()
+        out = _run_hook(self._pre(cwd, _src_redirect_cmd()),
+                        {"AGENTIC_FLOW_GATE_BLOCK": "true"})  # only the flow-STEP switch
+        self.assertEqual(out.strip(), "")  # flow-order stays silent
+
     def test_env_truthy_boundary(self):  # BR1/DP-TRUTHY
         cwd = self._cwd()
         for val in ("1", "yes", "TRUE"):
             with self.subTest(env=val):
                 out = _run_hook(self._pre(cwd, _src_redirect_cmd()),
-                                {"AGENTIC_FLOW_GATE_BLOCK": val})
+                                {"AGENTIC_FLOW_ORDER_BLOCK": val})
                 self.assertTrue(_is_deny(out))
         for val in ("0", "no", "maybe", ""):
             with self.subTest(env=val):
                 out = _run_hook(self._pre(cwd, _src_redirect_cmd()),
-                                {"AGENTIC_FLOW_GATE_BLOCK": val})
+                                {"AGENTIC_FLOW_ORDER_BLOCK": val})
                 self.assertEqual(out.strip(), "")
 
     def test_bash_redirect_source_edit_no_pair_denies(self):  # AC1/AC3 redirect form
@@ -408,8 +415,8 @@ class TestFlowOrderGuard(_Tmp):
         node_bin = shutil.which("node")
         empty = self._cwd()  # an empty dir; PATH-empty removes every interpreter launcher
         env = dict(os.environ)
-        env.pop("AGENTIC_FLOW_GATE_BLOCK", None)
-        env["AGENTIC_FLOW_GATE_BLOCK"] = "true"
+        env.pop("AGENTIC_FLOW_ORDER_BLOCK", None)
+        env["AGENTIC_FLOW_ORDER_BLOCK"] = "true"
         env["PATH"] = empty
         r = subprocess.run([node_bin, str(HOOK)], input=json.dumps(inp),
                            capture_output=True, text=True, encoding="utf-8", env=env)

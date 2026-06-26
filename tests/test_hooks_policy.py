@@ -684,14 +684,12 @@ class TestCodexDocWiredSet(unittest.TestCase):
                         f"{g} is deferred but its runtime-adapter.md line carries no VERIFY marker",
                     )
 
-    def test_runtime_adapter_documents_shared_env_coupling(self):  # AC16
-        # The single AGENTIC_FLOW_GATE_BLOCK switch both activates the AP2c flow-order pre-gate AND
-        # escalates the AP2b flow-step Stop backstop from warn to block. The doc must state this
-        # coupling on one flow-order-context line (the filename-only doc-lock did not verify the
-        # coupling sentence exists).
+    def test_runtime_adapter_documents_decoupled_flow_envs(self):  # AC16 (A2/DP-ENV decouple)
+        # After A2 the two flow switches are INDEPENDENT: AGENTIC_FLOW_GATE_BLOCK escalates only the
+        # AP2b flow-step Stop backstop; AGENTIC_FLOW_ORDER_BLOCK activates only the AP2c flow-order
+        # pre-gate. The doc must name BOTH switches and state their independence in a flow-order line.
         ra_lines = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8").splitlines()
-        coupling = [ln for ln in ra_lines
-                    if "AGENTIC_FLOW_GATE_BLOCK" in ln and "also escalates" in ln and "warn to block" in ln]
-        self.assertTrue(coupling, "runtime-adapter.md lacks the AP2c/AP2b shared-env coupling sentence")
-        self.assertTrue(any("flow-order" in ln for ln in coupling),
-                        "the shared-env coupling sentence is not stated in a flow-order context")
+        decoupled = [ln for ln in ra_lines
+                     if "AGENTIC_FLOW_ORDER_BLOCK" in ln and "AGENTIC_FLOW_GATE_BLOCK" in ln
+                     and "independent" in ln.lower() and "flow-order" in ln]
+        self.assertTrue(decoupled, "runtime-adapter.md lacks the decoupled flow-env (A2/DP-ENV) statement")

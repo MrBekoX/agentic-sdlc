@@ -2,7 +2,7 @@
 // counterpart to the AP2b flow-step Stop backstop: it DENIES a production-source edit attempted
 // before THIS session has produced a validated spec AND a matching plan (same work id, BOTH written
 // this session via a recognized apply_patch artifact write, each re-validating strict). Default
-// SILENT - inert unless AGENTIC_FLOW_GATE_BLOCK is truthy (BR1), because Codex emits no
+// SILENT - inert unless AGENTIC_FLOW_ORDER_BLOCK is truthy (BR1; its own switch, A2/DP-ENV), because Codex emits no
 // active-flow signal and a default-on gate would false-positive on every ordinary source edit.
 //
 // Why this does NOT reuse codex-flow-evidence.mjs deriveFlowEvidence (DP-EVID/BR3): that engine
@@ -31,9 +31,14 @@ import { dirname, join } from 'node:path';
 import { readStdin } from './secret-patterns.mjs';
 import { extractWrittenContent } from './codex-write-signal.mjs';
 import { readRolloutSignals } from './codex-rollout.mjs';
-import { loadRequirements, blockFlag, isSourceFile } from './flow-evidence.mjs';
+import { loadRequirements, isSourceFile } from './flow-evidence.mjs';
 
 const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
+
+// A2/DP-ENV decouple: flow-order has its OWN opt-in switch, independent of the flow-step Stop guard's
+// AGENTIC_FLOW_GATE_BLOCK. Setting AGENTIC_FLOW_GATE_BLOCK alone (to harden flow-step warn->block) no
+// longer silently turns this pre-edit gate on; an operator opts into ordering enforcement explicitly.
+const ORDER_BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_FLOW_ORDER_BLOCK || ''));
 
 // Local re-implementation of the byte-locked engines' private runValidator. Read-only subprocess:
 // the artifact path is a SEPARATE argv (no shell). Returns the exit code, or null when no
@@ -146,7 +151,7 @@ export function orderDecision(signals, req, cwd) {
 // carries no rollout/command/path/work-id byte (BR6/AC12).
 function denyPayload(missing) {
   const reason =
-    'Flow ordering enforcement (AGENTIC_FLOW_GATE_BLOCK): editing source requires a validated '
+    'Flow ordering enforcement (AGENTIC_FLOW_ORDER_BLOCK): editing source requires a validated '
     + 'spec and matching plan authored this session for this work item. '
     + `Missing this session: [${missing.join(', ')}]. `
     + 'Author the listed artifact(s) as validated artifacts before editing source.';
@@ -175,7 +180,7 @@ async function main() {
   const raw = await readStdin();
   let input = {};
   try { input = JSON.parse(raw || '{}'); } catch { process.exit(0); } // AC8 malformed -> fail open
-  if (!blockFlag()) process.exit(0); // BR1/AC2: opt-in only
+  if (!ORDER_BLOCK) process.exit(0); // BR1/AC2: opt-in only (dedicated AGENTIC_FLOW_ORDER_BLOCK, A2)
   try {
     const command = input?.tool_input?.command;
     if (typeof command !== 'string' || !command) process.exit(0); // AC8 absent/non-string command
