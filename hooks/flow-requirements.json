@@ -9,7 +9,7 @@
     "spec": "docs/agentic-sdlc/specs",
     "plan": "docs/agentic-sdlc/plans"
   },
-  "testCommand": "\\b(pytest|unittest|jest|vitest|mocha|go\\s+test|cargo\\s+test|rspec|phpunit|gradle\\s+test|mvn\\s+test)\\b",
+  "testCommand": "\\b(pytest|unittest|jest|vitest|mocha|go\\s+test|cargo\\s+test|rspec|phpunit|gradle\\s+test|mvn\\s+test|make\\s+test|npm\\s+(?:run\\s+)?test|yarn\\s+test|pnpm\\s+(?:run\\s+)?test|tox|nox)\\b",
   "completionClaim": "\\b(all\\s+tests?\\s+(pass|passing|green)|all\\s+green|ready\\s+to\\s+(merge|ship)|implementation\\s+(is\\s+)?complete|feature\\s+complete|task\\s+(is\\s+)?complete|done\\s+and\\s+verified|fixed\\s+and\\s+verified|everything\\s+(works|passes))\\b",
   "flows": {
     "root-cause-fix": {

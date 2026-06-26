@@ -535,7 +535,8 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         "hooks/flow-order-guard.mjs",
         "hooks/flow-step-guard.mjs",
         "hooks/flow-evidence.mjs",
-        "hooks/flow-requirements.json",
+        # hooks/flow-requirements.json is NOT locked here — B1 broadened its testCommand allowlist
+        # (a shared config change, covered by the AP2b recognition test).
         "hooks/hooks-claude.json",
         "hooks/completion-claim-guard.mjs",
         # AP2a/AP2b Codex modules (reused read-only).

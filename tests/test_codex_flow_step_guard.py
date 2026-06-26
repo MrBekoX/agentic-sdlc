@@ -226,6 +226,16 @@ class TestRolloutSignals(unittest.TestCase):
         sig = _signals(_write_rollout([_exec_begin("", parsed_cmd=["python3", "-m", "pytest"])]))
         self.assertTrue(any("python3 -m pytest" in c for c in sig["commands"]))
 
+    def test_testcommand_recognizes_common_runners(self):  # B1 — broadened testCommand allowlist
+        import re
+        pat = re.compile(json.loads((REPO / "hooks" / "flow-requirements.json")
+                                    .read_text(encoding="utf-8"))["testCommand"])
+        for cmd in ("pytest -q", "go test ./...", "make test", "npm test", "npm run test",
+                    "yarn test", "pnpm test", "pnpm run test", "tox", "nox -s tests"):
+            self.assertTrue(pat.search(cmd), f"testCommand should match a real test run: {cmd!r}")
+        for cmd in ("make build", "npm run lint", "echo testing"):
+            self.assertIsNone(pat.search(cmd), f"testCommand must not match a non-test command: {cmd!r}")
+
     def test_patch_targets_from_function_call_and_begin(self):  # DP-A/DP-D
         sig = _signals(_write_rollout([
             _patch_fc(_v4a_add("src/x.py")),
@@ -550,7 +560,8 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
     BYTE_LOCKED = [
         "hooks/flow-step-guard.mjs",
         "hooks/flow-evidence.mjs",
-        "hooks/flow-requirements.json",
+        # hooks/flow-requirements.json is NOT locked here — B1 deliberately broadened its testCommand
+        # allowlist (a shared Claude+Codex config change, covered by its own recognition test).
         "hooks/hooks-claude.json",
         "hooks/completion-claim-guard.mjs",
         "hooks/completion-claim-guard-codex.mjs",
