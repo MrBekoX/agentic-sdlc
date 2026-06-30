@@ -22,6 +22,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 ROLLOUT = REPO / "hooks" / "codex-rollout.mjs"
 EVID = REPO / "hooks" / "codex-flow-evidence.mjs"
+FLOW_EVID = REPO / "hooks" / "flow-evidence.mjs"
 HOOK = REPO / "hooks" / "flow-step-guard-codex.mjs"
 CODEX_CFG = REPO / "hooks" / "hooks-codex.json"
 
@@ -151,6 +152,18 @@ def _artifact(cwd, role, work_id, valid=True, ac_id="AC1"):
     return f"docs/agentic-sdlc/{sub}/{work_id}.md"
 
 
+def _pp_artifact(cwd, slug, role, work_id, valid=True, ac_id="AC1"):
+    """Write a per-package <slug>/<role>/<work_id>.md FILE to disk. Returns its repo-relative path."""
+    d = Path(cwd) / "docs" / "agentic-sdlc" / slug / role
+    d.mkdir(parents=True, exist_ok=True)
+    if role == "spec":
+        text = _VALID_SPEC.format(work_id=work_id, ac_id=ac_id) if valid else "# Spec\n(stub)\n"
+    else:
+        text = _VALID_PLAN.format(work_id=work_id, ac_id=ac_id) if valid else "## Task 1\n(todo)\n"
+    (d / f"{work_id}.md").write_text(text, encoding="utf-8")
+    return f"docs/agentic-sdlc/{slug}/{role}/{work_id}.md"
+
+
 def _mark_write(rel):
     """Mark a path as written this session (an in-session edit signal)."""
     return _patch_begin([rel])
@@ -176,6 +189,15 @@ def _derive(rollout_path, cwd):
               "process.stdout.write(JSON.stringify(m.deriveFlowEvidence(process.argv[1], process.argv[2])));"
               % json.dumps(EVID.as_uri()))
     return json.loads(_node(script, rollout_path, str(cwd)))
+
+
+def _find_artifact(cwd, role, work_id):
+    """Drive the exported codex findArtifactFile over the real loaded requirements."""
+    script = ("const e = await import(%s); const f = await import(%s);"
+              "const r = e.findArtifactFile(process.argv[1], process.argv[2], f.loadRequirements(), process.argv[3]);"
+              "process.stdout.write(JSON.stringify(r === null || r === undefined ? null : r));"
+              % (json.dumps(EVID.as_uri()), json.dumps(FLOW_EVID.as_uri())))
+    return json.loads(_node(script, str(cwd), role, work_id))
 
 
 def _derive_with(rollout_path, req_obj, cwd):
@@ -416,6 +438,46 @@ class TestFlowEvidenceDerivation(_Tmp):
         self.assertIn("spec", missing)
         self.assertIn("plan", missing)
 
+    # ---- per-package layout (work-package-artifact-resolution: AC12/AC14/AC15) ----
+    def test_per_package_spec_plan_detected_codex(self):  # AC15
+        cwd = self._cwd()
+        s = _pp_artifact(cwd, "work-x", "spec", "work-x", valid=True)
+        p = _pp_artifact(cwd, "work-x", "plan", "work-x", valid=True)
+        roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch()])
+        self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], ["tests"])
+
+    def test_per_package_reserved_slug_not_detected_codex(self):  # AC14/BR11
+        cwd = self._cwd()
+        # slug 'plan' is reserved -> docs/agentic-sdlc/plan/spec/x.md does NOT activate.
+        roll = _write_rollout([_mark_write("docs/agentic-sdlc/plan/spec/x.md"), _src_patch()])
+        out = _derive(roll, cwd)
+        self.assertFalse(out["flow"])
+        self.assertEqual(out["missingBlockSteps"], [])
+
+    def test_per_package_evidence_not_activating_codex(self):  # AC12
+        cwd = self._cwd()
+        # an evidence write is never a trigger (perPackageRole -> null for the evidence subdir).
+        roll = _write_rollout([_mark_write("docs/agentic-sdlc/work-x/evidence/work-x.md"), _src_patch()])
+        out = _derive(roll, cwd)
+        self.assertFalse(out["flow"])
+        self.assertEqual(out["missingBlockSteps"], [])
+
+    def test_per_package_findartifact_deterministic_across_duplicate_slugs_codex(self):  # Finding-4
+        cwd = self._cwd()
+        _pp_artifact(cwd, "a-pkg", "spec", "work-x", valid=True)
+        _pp_artifact(cwd, "b-pkg", "spec", "work-x", valid=True)  # both hold work-x.md
+        first = _find_artifact(cwd, "spec", "work-x")
+        self.assertIsNotNone(first)
+        self.assertTrue(first.replace("\\", "/").endswith("a-pkg/spec/work-x.md"), first)  # sorted-first
+        for _ in range(3):
+            self.assertEqual(_find_artifact(cwd, "spec", "work-x"), first)  # deterministic
+
+    def test_missing_per_package_still_reported_codex(self):
+        cwd = self._cwd()
+        s = _pp_artifact(cwd, "work-x", "spec", "work-x", valid=False)  # stub fails strict
+        roll = _write_rollout([_mark_write(s), _src_patch()])
+        self.assertIn("spec", _derive(roll, cwd)["missingBlockSteps"])
+
 
 # ---- AC4..AC9, AC13..AC17, AC23, AC25, AC27..AC29: behavioral Stop hook -----
 class TestFlowStepGuardBehavior(_Tmp):
@@ -568,7 +630,10 @@ class TestStopWiring(unittest.TestCase):
 class TestRegressionSurfaceUntouched(unittest.TestCase):
     BYTE_LOCKED = [
         "hooks/flow-step-guard.mjs",
-        "hooks/flow-evidence.mjs",
+        # hooks/flow-evidence.mjs is NOT locked here — the AP2 "regression surface untouched"
+        # guarantee is intentionally SUPERSEDED for it by work-package-artifact-resolution
+        # (per-package recognition + Claude Stop co-located pairing); its new behavior is covered by
+        # test_flow_guards / test_codex_flow_step_guard.
         # hooks/flow-requirements.json is NOT locked here — B1 deliberately broadened its testCommand
         # allowlist (a shared Claude+Codex config change, covered by its own recognition test).
         "hooks/hooks-claude.json",

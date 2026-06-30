@@ -542,7 +542,10 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # Claude flow files (spec §7).
         "hooks/flow-order-guard.mjs",
         "hooks/flow-step-guard.mjs",
-        "hooks/flow-evidence.mjs",
+        # hooks/flow-evidence.mjs and hooks/codex-flow-evidence.mjs are NOT locked here — the AP2
+        # "regression surface untouched" guarantee is intentionally SUPERSEDED for these two files
+        # by work-package-artifact-resolution (per-package recognition + Claude Stop co-located
+        # pairing); their new behavior is covered by test_flow_guards / test_codex_flow_step_guard.
         # hooks/flow-requirements.json is NOT locked here — B1 broadened its testCommand allowlist
         # (a shared config change, covered by the AP2b recognition test).
         "hooks/hooks-claude.json",
@@ -553,7 +556,6 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # fix target, covered by its own regression test (test_patch_targets_from_patch_apply_end).
         "hooks/completion-claim-guard-codex.mjs",
         "hooks/flow-step-guard-codex.mjs",
-        "hooks/codex-flow-evidence.mjs",
         # hooks/codex-write-signal.mjs is NOT locked here — a security follow-up bounded its heredoc
         # parser against a ReDoS; it is covered by the AP1 write-guard suite.
         # AP1 command/write guards + reused pattern source (this slice edits the very

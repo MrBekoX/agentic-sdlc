@@ -41,18 +41,70 @@ function runValidator(mode, file, specFile, cwd) {
   return null; // could not run any interpreter -> caller fails open
 }
 
+// Per-package slug safety (BR2/BR11), mirroring hooks/flow-evidence.mjs. The rule is carried in
+// flow-requirements.json (perPackageArtifact) and kept in lock-step across the resolver, both JS
+// engines, and the offline procedure-eval by test_procedure_eval::test_slug_rule_parity_across_sources.
+function isValidSlug(slug, pp) {
+  if (!slug || !pp) return false;
+  let re;
+  try { re = new RegExp(pp.slugPattern); } catch { return false; }
+  if (!re.test(slug)) return false;
+  return !(pp.reservedSlugs || []).includes(slug);
+}
+
+// Classify a per-package artifact path docs/agentic-sdlc/<slug>/<subdir>/<basename>.md -> role
+// ('spec'|'plan') for a valid, non-reserved slug; the evidence subdir and any reserved/invalid slug
+// return null, so evidence is never a trigger (AC12) and a reserved slug never shadows a flat root.
+function perPackageRole(filePath, req) {
+  const pp = req?.perPackageArtifact;
+  if (!pp || typeof pp.base !== 'string' || !filePath) return null;
+  const norm = String(filePath).replace(/\\/g, '/');
+  const marker = `${pp.base}/`;
+  let idx = norm.indexOf(marker);
+  while (idx !== -1 && !(idx === 0 || norm[idx - 1] === '/')) idx = norm.indexOf(marker, idx + 1);
+  if (idx === -1) return null;
+  const parts = norm.slice(idx + marker.length).split('/').filter(Boolean);
+  if (parts.length !== 3 || !parts[2].endsWith('.md')) return null;
+  if (!isValidSlug(parts[0], pp)) return null;
+  for (const [role, sub] of Object.entries(pp.subdirs || {})) {
+    if (sub === parts[1]) return role;
+  }
+  return null;
+}
+
 // Sink-B artifact lookup (spec §6 mandated mechanism): the sanitized work-id is used ONLY as a
 // membership key against the trusted readdirSync listing; the path handed to the validator is joined
 // from the matched LISTING ENTRY, never from a work-id-constructed string. A crafted/traversing
 // work-id reduces to a bare token that matches no entry -> null -> step unsatisfied, no path escape.
-function findArtifactFile(cwd, role, req, workId) {
-  const root = req.artifactRoots?.[role];
-  if (!root) return null;
-  let entries;
-  try { entries = readdirSync(join(cwd, root)); } catch { return null; }
+// After the flat root miss, the per-package roots <base>/<slug>/<subdir>/<workId>.md are searched in
+// SORTED slug order. When two slug dirs both hold <workId>.md (a malformed/duplicate state) the pick
+// is deterministic-but-arbitrary by design: the RESOLVER is the ambiguity authority (it reports
+// malformed_package/ambiguous_plan, AC20/AC10); this guard is detection-only and fail-open, so it
+// must only be deterministic, not adjudicate ambiguity.
+export function findArtifactFile(cwd, role, req, workId) {
   const want = workId + '.md';
-  const match = entries.find((e) => e === want);
-  return match ? join(cwd, root, match) : null;
+  const root = req.artifactRoots?.[role];
+  if (root) {
+    try {
+      const entries = readdirSync(join(cwd, root));
+      const match = entries.find((e) => e === want);
+      if (match) return join(cwd, root, match);
+    } catch { /* flat root absent -> per-package fallback */ }
+  }
+  const pp = req.perPackageArtifact;
+  const subdir = pp?.subdirs?.[role];
+  if (pp && typeof pp.base === 'string' && subdir) {
+    let slugs;
+    try { slugs = readdirSync(join(cwd, pp.base)); } catch { return null; }
+    for (const slug of slugs.sort()) {
+      if (!isValidSlug(slug, pp)) continue;
+      let entries;
+      try { entries = readdirSync(join(cwd, pp.base, slug, subdir)); } catch { continue; }
+      const match = entries.find((e) => e === want);
+      if (match) return join(cwd, pp.base, slug, subdir, match);
+    }
+  }
+  return null;
 }
 
 // Reduce a rollout edit-target path to a bare work-id base-name; reject traversal/empty.
@@ -118,7 +170,8 @@ export function deriveFlowEvidenceWith(signals, req, cwd) {
     const workIds = [];
     for (const t of signals.editTargets) {
       const norm = String(t).replace(/\\/g, '/');
-      const isArtifactWrite = (specRoot && norm.includes(specRoot)) || (planRoot && norm.includes(planRoot));
+      const isArtifactWrite = (specRoot && norm.includes(specRoot)) || (planRoot && norm.includes(planRoot))
+        || perPackageRole(t, req) !== null; // per-package <slug>/{spec,plan}/ write (AC15)
       if (!isArtifactWrite) continue;
       const id = workIdOf(t);
       if (id && !workIds.includes(id)) workIds.push(id);

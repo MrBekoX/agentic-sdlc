@@ -49,6 +49,34 @@ SKILL_AGENT_EQUIVALENTS: dict[str, list[str]] = {
 # no dispatch still fails the gate (no Agent call), so this credits delegation without trivializing it.
 DELEGATION_SATISFIES: set[str] = {"dispatch-strategy"}
 
+# Per-package layout (BR1/BR2/BR11): docs/agentic-sdlc/<slug>/{spec,plan}/<work_id>.md.
+# The slug rule is triplicated by design across the resolver (scripts/resolve_work_package.py),
+# the flow-guard config (hooks/flow-requirements.json), and this offline gate; the three copies
+# are kept byte-identical by tests.test_procedure_eval.test_slug_rule_parity_across_sources.
+RESERVED_SLUGS = {"specs", "plans", "evidence", "notes", "spec", "plan"}
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+_PER_PACKAGE_PATH_RE = re.compile(r"(?:^|/)docs/agentic-sdlc/([^/]+)/(spec|plan)/([^/]+)\.md$")
+
+
+def per_package_layout(norm: str) -> tuple[str, str, str] | None:
+    """Classify a per-package spec/plan write path -> (mode, slug, work_id) | None.
+
+    Matches docs/agentic-sdlc/<slug>/spec|plan/<id>.md via the SINGULAR /spec/ and /plan/
+    path SEGMENT — never the flat plural /specs/,/plans/ roots — so the flat-substring
+    classification in evaluate_artifact_depth stays byte-identical. The slug is validated
+    against the shared kebab regex + reserved-name set (parity-pinned with the resolver and
+    flow-guard config). A reserved or malformed slug (e.g. docs/agentic-sdlc/spec/spec/x.md)
+    returns None, leaving the path to the flat classifier (which also rejects it).
+    """
+    norm = norm.replace("\\", "/")
+    m = _PER_PACKAGE_PATH_RE.search(norm)
+    if not m:
+        return None
+    slug, mode, work_id = m.group(1), m.group(2), m.group(3)
+    if not SLUG_RE.match(slug) or slug in RESERVED_SLUGS:
+        return None
+    return (mode, slug, work_id)
+
 
 @dataclass
 class Trace:
@@ -372,20 +400,42 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
     latest: dict[str, str] = {}
     for path, content in trace.artifact_writes:
         norm = path.replace("\\", "/")
-        if "docs/agentic-sdlc/specs/" in norm or "docs/agentic-sdlc/plans/" in norm:
+        # Additive: keep the flat plural-substring gate, also admit per-package
+        # (singular /spec/, /plan/ segment) writes. Flat detection is unchanged.
+        if (
+            "docs/agentic-sdlc/specs/" in norm
+            or "docs/agentic-sdlc/plans/" in norm
+            or per_package_layout(norm) is not None
+        ):
             latest[norm] = content
     for norm, content in sorted(latest.items()):
         disk = cwd / norm
         text = disk.read_text(encoding="utf-8") if disk.exists() else content
-        mode = "spec" if "/specs/" in norm else "plan"
+        # Per-package mode comes from the singular-segment classifier; flat falls back
+        # to the existing plural-substring test verbatim (provably unchanged for flat).
+        pp = per_package_layout(norm)
+        mode = pp[0] if pp is not None else ("spec" if "/specs/" in norm else "plan")
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
             tf.write(text)
             tmp = Path(tf.name)
         spec_arg = None
         try:
             if mode == "plan":
-                # pair the plan with any spec written in the same run, else None
-                spec_path = next((p for p in latest if "/specs/" in p), None)
+                if pp is not None:
+                    # per-package plan pairs with its same-slug per-package spec written in the run
+                    spec_path = next(
+                        (
+                            p
+                            for p in latest
+                            if (cand := per_package_layout(p)) is not None
+                            and cand[0] == "spec"
+                            and cand[1] == pp[1]
+                        ),
+                        None,
+                    )
+                else:
+                    # flat plan pairing unchanged: pair with any flat spec written in the run
+                    spec_path = next((p for p in latest if "/specs/" in p), None)
                 if spec_path:
                     sp = cwd / spec_path
                     spec_text = sp.read_text(encoding="utf-8") if sp.exists() else latest[spec_path]

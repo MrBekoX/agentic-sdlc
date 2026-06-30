@@ -106,6 +106,9 @@ PASS / PARTIAL / FAIL
 ## Final Decision
 ```
 
+## Evidence persistence
+For **per-package** work the Final Implementation Report is persisted to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get none), using the slug `resolve_work_package.py` reports; a re-run **overwrites** it in place (single canonical file, last run wins). This persisting write is done by the **main control/finalize step** this skill runs in (the main pipeline finalize step), not the read-only `implementation-auditor` sub-agent it dispatches — the auditor only consumes the report and resolver output as input. Evidence has **no validator** and never gates resolution (AC12).
+
 ## Limits
 - Audits only; performs no code changes.
 - Evidence-based: a step without real evidence (e.g. test output) is **not** PASS.
