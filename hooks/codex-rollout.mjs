@@ -121,6 +121,221 @@ export function parseCodexExitCode(text) {
   return m ? Number(m[1]) : null;
 }
 
+// ---------------------------------------------------------------------------
+// B5 (write-form symmetry): ONE shared recognizer of the write FORMS (in-place
+// `sed -i`, `tee`, plain `>`/`>>` redirect) feeds BOTH consumers so recognition
+// breadth cannot drift apart again (the #5 root cause). The two consumers differ
+// ONLY in precision:
+//   - writeTargetsOf(cmd)        -> RAW / over-approximating, for prior-evidence
+//     (readRolloutSignals.editTargets). Extra targets there only bias the flow-
+//     ORDER decision toward ALLOW (BR6-safe). It is a STRICT SUPERSET of HEAD:
+//     HEAD's REDIRECT/TEE/SED_LAST run verbatim, and the shared multi-operand
+//     extractors only ADD the remaining `sed`/`tee` file operands (BR5).
+//   - preciseWriteTargetsOf(cmd) -> PRECISE, for the flow-ORDER current-edit deny
+//     trigger. Quote/heredoc/statement/expansion-aware, so a redirect/tee/sed-
+//     looking token that is quoted, an argument value, a heredoc body, or
+//     expansion-bearing is NOT counted (BR7); an over-approximation on the
+//     DENY-biased side would be a spurious block (BR4).
+// The precision *pattern* mirrors codex-write-signal.mjs (a quote-aware splitter +
+// the EXPANSION marker), RE-IMPLEMENTED here so that byte-locked module stays
+// untouched. All scans are single-pass / disjoint-class regex -> linear (BR10).
+// Redirect scope is exactly `>`/`>>`; the fd-excluded class leaves `&>`, `>|`,
+// `N>`, `>&N` unrecognized (deferred residual #6). Pure: string/regex over the
+// command treated as DATA (no eval, no spawn).
+const CMD_MAX = 512 * 1024;                                   // per-command scan cap (mirrors codex-write-signal)
+const HEREDOC_OPENER_CAP = 24;                               // pathological `<<` flood -> skip heredoc parse
+const EXPANSION = /\$[\w{(]|`/;                              // any shell-expansion marker (re-implemented, not imported)
+const REDIRECT = /[^0-9&>]>>?\s*(['"]?)([^\s'";&|<>()]+)/g;  // `>`/`>>` only; fd/&-excluded; LINEAR
+const TEE = /\btee\b\s+(?:-a\s+)?([^\s;|&<>'"]+)/g;          // HEAD first-operand baseline (raw superset); LINEAR
+const SED_LAST = /\s([^\s;|&<>'"]+)\s*$/;                    // HEAD last-token baseline (raw superset)
+
+// Quote-aware tokenizer: an unquoted whitespace run separates tokens; a single- or
+// double-quoted span stays ONE token with quotes stripped (so a quoted sed script
+// `'s/a/> b.py/'` is one opaque token, never scanned for `>`).
+function shellTokens(str) {
+  const toks = [];
+  let cur = null;
+  let q = null;
+  for (let i = 0; i < str.length; i += 1) {
+    const c = str[i];
+    if (q) { if (c === q) q = null; else cur += c; continue; }
+    if (c === "'" || c === '"') { q = c; if (cur === null) cur = ''; continue; }
+    if (c === ' ' || c === '\t' || c === '\n') { if (cur !== null) { toks.push(cur); cur = null; } continue; }
+    cur = (cur === null ? '' : cur) + c;
+  }
+  if (cur !== null) toks.push(cur);
+  return toks;
+}
+
+// Replace every quoted span (and its quote chars) with spaces, positions kept, so a
+// REDIRECT scan over the result never sees a `>` that lives inside quotes.
+function quoteBlank(str) {
+  let out = '';
+  let q = null;
+  for (let i = 0; i < str.length; i += 1) {
+    const c = str[i];
+    if (q) { if (c === q) q = null; out += ' '; continue; }
+    if (c === "'" || c === '"') { q = c; out += ' '; continue; }
+    out += c;
+  }
+  return out;
+}
+
+// Quote-aware statement split on ; && || | & and newline (a separator inside quotes
+// does not split). Single pass (LINEAR).
+function splitSegmentsQA(str) {
+  const segs = [];
+  let cur = '';
+  let q = null;
+  for (let i = 0; i < str.length; i += 1) {
+    const c = str[i];
+    const n = str[i + 1];
+    if (q) { cur += c; if (c === q) q = null; continue; }
+    if (c === "'" || c === '"') { q = c; cur += c; continue; }
+    if (c === '\n' || c === ';') { segs.push(cur); cur = ''; continue; }
+    if (c === '&' && n === '&') { segs.push(cur); cur = ''; i += 1; continue; }
+    if (c === '|' && n === '|') { segs.push(cur); cur = ''; i += 1; continue; }
+    if (c === '|' || c === '&') { segs.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  if (cur) segs.push(cur);
+  return segs;
+}
+
+// Blank every heredoc window (opener + body) to spaces so a body line like `> evil.py`
+// is never mistaken for a redirect. The heredoc's own opener redirect target is
+// supplied by extractWrittenContent in the caller's union, so it need not be
+// re-extracted here. `[\s\S]*?` is opener-capped by the caller against a `<<` flood.
+function blankHeredocs(cmd) {
+  const heredocRe = /<<\s*(['"]?)([A-Za-z_]\w*)\1([^\n]*)\n([\s\S]*?)\n\2(?=\n|$)/g;
+  return cmd.replace(heredocRe, (full) => full.replace(/[^\n]/g, ' '));
+}
+
+// Strip a wrapping subshell `( ... )`. LINEAR: trim + single-char slices only — deliberately NOT a
+// `/\s*\)$/` regex. A greedy `\s*` before an end `$` anchor is O(n^2) on a long internal whitespace
+// run (e.g. `echo <200k spaces> x`): at the 512 KiB cap that hangs the hook for minutes and then
+// fail-open-bypasses under AGENTIC_FLOW_ORDER_BLOCK (a self-inflicted DoS). Keep this branchy + linear.
+function stripWrappingSubshell(seg) {
+  let s = seg.trim();
+  if (s.startsWith('(')) s = s.slice(1);
+  if (s.endsWith(')')) s = s.slice(0, -1);
+  return s.trim();
+}
+
+// First token that is not a leading `VAR=val` assignment (the command word).
+function commandWord(toks) {
+  for (const t of toks) {
+    if (/^[A-Za-z_]\w*=/.test(t)) continue;
+    return t;
+  }
+  return '';
+}
+
+function teeIndex(toks) {
+  return toks.findIndex((t) => t === 'tee' || t.endsWith('/tee'));
+}
+
+// A `sed` in-place flag: `-i`, `-i.bak` (glued suffix), a combined short group
+// containing `i` (e.g. `-ni`), or the GNU long form `--in-place[=SUFFIX]`.
+function isInplaceSedFlag(t) {
+  if (t.startsWith('--in-place')) return true;
+  if (t.startsWith('--')) return false;
+  return /^-[A-Za-z]*i/.test(t);
+}
+
+// A redirect operator token (bare or glued), incl. fd-numbered `N>` and `<`.
+function isRedirectToken(t) {
+  return /^\d*(?:>>?|<)/.test(t);
+}
+
+// FILE operands of a `sed` invocation (tokens are quote-aware). The sed script — the
+// leading script token when no `-e`/`-f` is present, and any `-e`/`-f`/`--expression`/
+// `--file` argument (separated OR glued) — is NOT a write target, nor are option flags.
+// Stops at a redirect token (REDIRECT owns it). Single pass (LINEAR).
+function sedFileOperands(toks) {
+  const start = toks.findIndex((t) => t === 'sed' || t.endsWith('/sed'));
+  if (start < 0) return [];
+  const files = [];
+  let scriptTaken = false;
+  for (let j = start + 1; j < toks.length; j += 1) {
+    const t = toks[j];
+    if (isRedirectToken(t)) break;
+    if (t === '--') continue;
+    if (t.startsWith('-')) {
+      if (t === '-e' || t === '-f' || t === '--expression' || t === '--file') { j += 1; scriptTaken = true; continue; }
+      if (/^--(?:expression|file)=/.test(t)) { scriptTaken = true; continue; }
+      if (/^-[A-Za-z]*[ef]\S/.test(t)) { scriptTaken = true; continue; }
+      continue;
+    }
+    if (!scriptTaken && files.length === 0) { scriptTaken = true; continue; }
+    files.push(t);
+  }
+  return files;
+}
+
+// FILE operands of a `tee` invocation after index `i` (caller guards i>=0). Option
+// flags skipped; stops at a redirect token. Single pass (LINEAR).
+function teeFileOperands(toks, i) {
+  if (i < 0) return [];
+  const files = [];
+  for (let j = i + 1; j < toks.length; j += 1) {
+    const t = toks[j];
+    if (isRedirectToken(t)) break;
+    if (t === '--') continue;
+    if (t.startsWith('-') && t !== '-') continue; // -a, --append, -i, -p, --output-error, ...
+    files.push(t);
+  }
+  return files;
+}
+
+// RAW / over-approximating write targets (prior-evidence). STRICT SUPERSET of HEAD:
+// lines (1)(2a)(3a) reproduce HEAD's exact output; (2b)(3b) add the remaining shared
+// multi-file operands (BR5). Duplicates are harmless (every downstream consumer dedups).
+export function writeTargetsOf(command) {
+  const str = String(command || '');
+  const targets = [];
+  for (const m of str.matchAll(REDIRECT)) targets.push(m[2]);   // (1) HEAD redirects
+  for (const m of str.matchAll(TEE)) targets.push(m[1]);        // (2a) HEAD tee first-operand
+  for (const seg of str.split(/[;\n|&]+/)) {
+    const toks = shellTokens(seg);
+    const ti = teeIndex(toks);
+    if (ti >= 0) for (const t of teeFileOperands(toks, ti)) targets.push(t); // (2b) BR5 all tee operands
+    if (/\bsed\b/.test(seg) && /(?:^|\s)-i/.test(seg)) {
+      const m = seg.split('>')[0].match(SED_LAST);
+      if (m) targets.push(m[1]);                                 // (3a) HEAD sed last-token
+      for (const t of sedFileOperands(toks)) targets.push(t);    // (3b) BR5 all sed operands
+    }
+  }
+  return targets;
+}
+
+// PRECISE write targets (current-edit deny trigger). Quote/heredoc/statement/expansion-
+// aware: only real, unquoted, statement-level, non-expansion targets count (BR7). NOT a
+// raw union of writeTargetsOf. Bash-only (the caller never runs this over patch text, BR8).
+export function preciseWriteTargetsOf(command) {
+  const cmd = String(command || '');
+  if (!cmd || cmd.length > CMD_MAX) return [];
+  if ((cmd.match(/<</g) || []).length > HEREDOC_OPENER_CAP) return []; // `<<` flood -> fail-open
+  const work = blankHeredocs(cmd);
+  const targets = [];
+  for (const rawSeg of splitSegmentsQA(work)) {
+    const stmt = stripWrappingSubshell(rawSeg);
+    if (!stmt) continue;
+    for (const m of quoteBlank(stmt).matchAll(REDIRECT)) {       // redirect over the QUOTE-BLANKED statement
+      if (!EXPANSION.test(m[2])) targets.push(m[2]);             // drop `$`-expansion targets (DP1/BR4)
+    }
+    const toks = shellTokens(stmt);                             // quote-aware (script stays one token)
+    const cw = commandWord(toks);
+    if ((cw === 'sed' || cw.endsWith('/sed')) && toks.some(isInplaceSedFlag)) {
+      for (const t of sedFileOperands(toks)) if (!EXPANSION.test(t)) targets.push(t);
+    }
+    if (cw === 'tee' || cw.endsWith('/tee')) {
+      for (const t of teeFileOperands(toks, teeIndex(toks))) if (!EXPANSION.test(t)) targets.push(t);
+    }
+  }
+  return targets;
+}
+
 export function readRolloutSignals(path) {
   const EMPTY = { commands: [], editTargets: [], commandRuns: [], readable: false };
   if (!path || typeof path !== 'string') return EMPTY;
@@ -152,25 +367,12 @@ export function readRolloutSignals(path) {
   // written via a `>`/`>>` redirect is no longer invisible to flow-step/flow-order. fd redirects (`2>`,
   // `>&2`) are skipped. Still bounded (narrowed BR4a): a `cat` copy, `base64`, or a `$`-expansion
   // target are not surfaced. Pure: regex scans only.
-  const REDIRECT = /[^0-9&>]>>?\s*(['"]?)([^\s'";&|<>()]+)/g; // LINEAR (disjoint classes, no nested quantifier)
-  const TEE = /\btee\b\s+(?:-a\s+)?([^\s;|&<>'"]+)/g;          // LINEAR
-  // B3: in-place / pipe writes that carry no `>` redirect. `tee [-a]` writes its file argument. `sed -i`
-  // rewrites its file argument(s) — the file is the LAST token of the sed statement (best-effort: only the
-  // last file of a multi-file sed). The earlier single-regex SED form used a `(?=...)` lookahead that
-  // re-scanned the tail at every `\bsed\b`, which is O(n^2) on a crafted command of many `sed ` tokens
-  // (a default-reachable ReDoS). Instead split on shell statement boundaries FIRST (O(n)), then read each
-  // sed statement's last token once — total linear, no lookahead, so an 8 MiB rollout cannot DoS the hook.
-  const SED_LAST = /\s([^\s;|&<>'"]+)\s*$/;
-  const pushWriteTargets = (s) => {
-    const str = String(s);
-    for (const m of str.matchAll(REDIRECT)) editTargets.push(m[2]);
-    for (const m of str.matchAll(TEE)) editTargets.push(m[1]);
-    for (const seg of str.split(/[;\n|&]+/)) {
-      if (!/\bsed\b/.test(seg) || !/(?:^|\s)-i/.test(seg)) continue; // only an in-place sed is a write
-      const m = seg.split('>')[0].match(SED_LAST); // drop any redirect tail (REDIRECT already has it)
-      if (m) editTargets.push(m[1]);
-    }
-  };
+  // B5: prior-evidence write targets come from the SHARED raw recognizer writeTargetsOf — a strict
+  // superset of the earlier inline REDIRECT/TEE/SED_LAST scan that ADDS the multi-file `sed`/`tee`
+  // operands (BR5). Sharing the form-recognition with the current-edit detector is what keeps their
+  // breadth from drifting apart (the #5 root cause). Over-approximation here only biases flow-ORDER
+  // toward ALLOW (BR6-safe); the cross-consumer flow-STEP effect of the widening is accepted (AC18).
+  const pushWriteTargets = (s) => { for (const t of writeTargetsOf(s)) editTargets.push(t); };
   const pushRedirectTargets = pushWriteTargets; // keep the call sites below stable
   for (const line of raw.split(/\r?\n/)) {
     if (!line) continue;

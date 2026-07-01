@@ -382,10 +382,15 @@ class TestFlowOrderGuard(_Tmp):
         out = _run_hook(self._pre(cwd, patch, tool_name="apply_patch"), ENV_ON)
         self.assertEqual(out.strip(), "")
 
-    def test_unrecognized_form_silent(self):  # AC9
+    def test_sed_inplace_source_now_denies(self):  # B5-AC1/DP3 (was test_unrecognized_form_silent)
+        # This exact command used to slip the gate (returned SILENT — the encoded #5 bypass); the
+        # write-form symmetry fix now recognizes an in-place `sed` source write, so it DENIES.
+        # Fail-open-on-truly-unmodeled forms (cp/dd) is repointed to
+        # TestB5WriteformSymmetry.test_unmodeled_form_fail_open.
         cwd = self._cwd()
         out = _run_hook(self._pre(cwd, "sed -i s/a/b/ src/app.py"), ENV_ON)
-        self.assertEqual(out.strip(), "")
+        self.assertTrue(_is_deny(out))
+        self.assertEqual(_missing_list(out), ["spec", "plan"])
 
     def test_unreadable_transcript_fail_open(self):  # AC7
         cwd = self._cwd()
@@ -584,8 +589,11 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # fix target, covered by its own regression test (test_patch_targets_from_patch_apply_end).
         "hooks/completion-claim-guard-codex.mjs",
         "hooks/flow-step-guard-codex.mjs",
-        # hooks/codex-write-signal.mjs is NOT locked here — a security follow-up bounded its heredoc
-        # parser against a ReDoS; it is covered by the AP1 write-guard suite.
+        # hooks/codex-write-signal.mjs IS locked here (B5/DP-C): the #5 fix keeps the shared secret-write
+        # extractor byte-untouched (the precise recognizer re-implements its pattern rather than editing it),
+        # and the spec Must-not-change names it a protected surface; its prior ReDoS follow-up is at HEAD, so
+        # locking-to-HEAD is consistent — this is the only automated enforcement of that Must-not-change item.
+        "hooks/codex-write-signal.mjs",
         # AP1 command/write guards + reused pattern source (this slice edits the very
         # Bash|apply_patch block scan-write-codex.mjs lives in, so its bytes must be locked).
         # hooks/scan-write-codex.mjs is NOT locked here — a security follow-up sanitized the target
@@ -602,6 +610,193 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
                 head = _git_show(rel)
                 self.assertIsNotNone(head, f"{rel} not in HEAD")
                 self.assertEqual((REPO / rel).read_text(encoding="utf-8"), head)
+
+
+# ==== B5 (#5 write-form symmetry): drivers + tests ==========================
+# NB (DP-NS): the file's earlier `# AC*` comments carry AP2c meanings; the tests below use `B5-AC*`
+# ids (spec codex-flow-order-writeform-symmetry). `_signals`/`_precise_targets`/`_raw_targets` drive the
+# newly-exported readRolloutSignals / preciseWriteTargetsOf / writeTargetsOf directly.
+def _signals(rollout_lines):
+    """Drive the exported readRolloutSignals over a synthetic rollout; return its object."""
+    rollout = _write_rollout(rollout_lines)
+    script = ("const r = await import(%s);"
+              "process.stdout.write(JSON.stringify(r.readRolloutSignals(process.argv[1])));"
+              % json.dumps(ROLLOUT.as_uri()))
+    return json.loads(_node(script, rollout))
+
+
+def _precise_targets(command):
+    """Drive the exported preciseWriteTargetsOf (current-edit precise recognizer)."""
+    script = ("const r = await import(%s);"
+              "process.stdout.write(JSON.stringify(r.preciseWriteTargetsOf(process.argv[1])));"
+              % json.dumps(ROLLOUT.as_uri()))
+    return json.loads(_node(script, command))
+
+
+def _raw_targets(command):
+    """Drive the exported writeTargetsOf (raw prior-evidence superset recognizer)."""
+    script = ("const r = await import(%s);"
+              "process.stdout.write(JSON.stringify(r.writeTargetsOf(process.argv[1])));"
+              % json.dumps(ROLLOUT.as_uri()))
+    return json.loads(_node(script, command))
+
+
+def _cmd_fc(script_str):
+    """A rollout exec_command carrier for a Bash `-lc` script (the realistic codex argv shape)."""
+    return _exec_fc(["bash", "-lc", script_str])
+
+
+class TestB5WriteformSymmetry(_Tmp):
+    """B5 (#5): the current-edit deny trigger must recognize the SAME literal write forms
+    (`sed -i` / `tee` / plain `>`,`>>`) the prior-evidence detector does, PRECISELY (quote/heredoc/
+    expansion-aware), and multi-file `sed`/`tee` must surface every operand on both sides."""
+
+    def _assert_denies(self, command):
+        out = _run_hook(self._pre(self._cwd(), command), ENV_ON)
+        self.assertTrue(_is_deny(out), f"expected DENY for {command!r}, got {out!r}")
+        self.assertEqual(_missing_list(out), ["spec", "plan"])
+
+    def _assert_allows(self, command, tool_name="Bash"):
+        out = _run_hook(self._pre(self._cwd(), command, tool_name=tool_name), ENV_ON)
+        self.assertEqual(out.strip(), "", f"expected ALLOW (silent) for {command!r}, got {out!r}")
+
+    # ---- NEW behaviour: symmetric current-edit DENY (RED-first vs HEAD) ----
+    def test_sed_source_edit_denies(self):  # B5-AC1
+        self._assert_denies("sed -i 's/x/y/' src/app.py")
+        self._assert_denies("sed -i.bak 's/x/y/' src/app.py")
+
+    def test_sed_glued_expression_denies(self):  # B5-AC1 (glued -e)
+        self._assert_denies("sed -i -e's/x/y/' src/app.py")
+
+    def test_tee_source_edit_denies(self):  # B5-AC2
+        self._assert_denies("printf x | tee src/app.py")
+        self._assert_denies("printf x | tee -a src/app.py")
+
+    def test_plain_redirect_source_edit_denies(self):  # B5-AC3
+        self._assert_denies("cat tmp > src/app.py")
+        self._assert_denies("cat tmp >> src/app.py")
+
+    def test_multifile_sed_nonlast_source_denies(self):  # B5-AC4 (discriminating)
+        self._assert_denies("sed -i 's/x/y/' src/app.py README.md")
+        self._assert_denies("sed -i 's/x/y/' src/a.py src/b.py")
+
+    def test_multifile_tee_nonfirst_source_denies(self):  # B5-AC5
+        self._assert_denies("printf x | tee README.md src/app.py")
+
+    def test_sed_source_and_test_file_denies(self):  # B5-AC4 (source+test edge, finding 5)
+        self._assert_denies("sed -i 's/x/y/' src/a.py tests/test_b.py")
+
+    def test_current_edit_sed_e_only_real_file(self):  # B5-AC7-current
+        self.assertEqual(_precise_targets("sed -i -e 's/x/y/' src/a.py"), ["src/a.py"])
+        self._assert_denies("sed -i -e 's/x/y/' src/a.py")
+
+    def test_sed_two_expressions_denies_only_real_file(self):  # B5-AC7 (finding 4)
+        cmd = "sed -i -e 's/a/b/' -e 's/c/d/' src/app.py"
+        self._assert_denies(cmd)
+        self.assertEqual(_precise_targets(cmd), ["src/app.py"])
+
+    def test_literal_source_write_beside_expansion_sibling_denies(self):  # B5-AC11 (finding 4)
+        cmd = "printf x > src/app.py; cat y > $F.py"
+        self._assert_denies(cmd)
+        self.assertEqual(_precise_targets(cmd), ["src/app.py"])
+
+    def test_deny_reason_leakfree_new_forms(self):  # B5-AC8 (security)
+        secret = "SENTINEL_LEAK_XYZ"
+        cmd = f"sed -i 's/x/{secret}/' /abs/secret/src/app.py"
+        out = _run_hook(self._pre(self._cwd(), cmd), ENV_ON)
+        self.assertTrue(_is_deny(out))
+        reason = _deny_reason(out)
+        for leak in (secret, "/abs/secret", "src/app.py"):
+            self.assertNotIn(leak, reason)
+
+    # ---- RAW prior-evidence completeness (exact set, both sides) ----
+    def test_prior_evidence_multifile_sed_exact_set(self):  # B5-AC6
+        sig = _signals([_cmd_fc("sed -i 's/x/y/' docs/agentic-sdlc/specs/W.md src/app.py")])
+        self.assertEqual(set(sig["editTargets"]), {"docs/agentic-sdlc/specs/W.md", "src/app.py"})
+
+    def test_prior_evidence_sed_expression_never_target_exact_set(self):  # B5-AC7-raw
+        sig = _signals([_cmd_fc("sed -i -e 's/x/y/' src/a.py src/b.py")])
+        self.assertEqual(set(sig["editTargets"]), {"src/a.py", "src/b.py"})
+
+    def test_prior_evidence_glued_expression_exact_set(self):  # B5-AC7-raw (glued)
+        sig = _signals([_cmd_fc("sed -i -e's/x/y/' src/a.py src/b.py")])
+        self.assertEqual(set(sig["editTargets"]), {"src/a.py", "src/b.py"})
+
+    def test_prior_evidence_multifile_tee_all_operands(self):  # B5-AC5-raw (RED at HEAD: first-only)
+        sig = _signals([_cmd_fc("cat x | tee README.md src/app.py")])
+        self.assertEqual(set(sig["editTargets"]), {"README.md", "src/app.py"})
+
+    def test_prior_evidence_pathqualified_tee_superset(self):  # B5-AC9-raw (GREEN at HEAD, superset)
+        sig = _signals([_cmd_fc("cat x | /usr/bin/tee out.txt")])
+        self.assertIn("out.txt", sig["editTargets"])
+
+    def test_raw_scan_linear_flood(self):  # B5-AC15-raw (ReDoS-safe)
+        import time
+        cmd = "printf x > a.py; sed -i s/x/y/ b.py c.py; cat | tee d.py e.py; " * 1200  # ~76 KB (< argv cap)
+        t = time.time()
+        _raw_targets(cmd)
+        self.assertLess(time.time() - t, 5.0)
+
+    # ---- PRESERVATION: fail-open / no new spurious DENY (GREEN at HEAD and after) ----
+    def test_unmodeled_form_fail_open(self):  # B5-AC10 (repoint target for DP3)
+        self._assert_allows("cp a.py src/app.py")
+        self._assert_allows("dd if=x of=src/app.py")
+
+    def test_expansion_target_fail_open(self):  # B5-AC11
+        self._assert_allows("sed -i 's/x/y/' $F.py")
+        self._assert_allows("cat x > $F.py")
+        self._assert_allows("printf x | tee $DIR/app.py")
+
+    def test_quoted_or_heredoc_writelooking_allows(self):  # B5-AC12
+        self._assert_allows('git commit -m "wrote > app.py"')
+        self._assert_allows('echo "x > y.py"')
+        self._assert_allows("grep 'a > b.py' f")
+        self._assert_allows("printf 'see notes > backup.py' > README.md")
+        self._assert_allows("echo run sed -i on foo.py > notes.md")
+        self._assert_allows("cat <<'EOF' > notes.md\nsee > evil.py\nEOF\n")
+
+    def test_patch_content_redirect_not_denied(self):  # B5-AC14 (BR8)
+        patch = _v4a_add("docs/note.md", body_lines=("printf x > src/evil.py", "return a > config.py"))
+        self._assert_allows(patch, tool_name="apply_patch")
+
+    def test_precise_scan_linear(self):  # B5-AC15 (ReDoS-safe, precise side)
+        import time
+        cmd = "sed -i s/x/y/ a.py; printf x | tee b.py; cat c > d.py; " * 1400  # ~76 KB (< argv cap)
+        t = time.time()
+        _precise_targets(cmd)
+        self.assertLess(time.time() - t, 5.0)
+
+    def test_precise_scan_linear_internal_whitespace(self):  # B5-AC15 (ReDoS regression: stripWrappingSubshell)
+        # A long INTERNAL whitespace run with no trailing ')' was the O(n^2) trap in the `/\s*\)$/`
+        # subshell strip (security review, High): ~8s at 110 KB with the greedy regex, <0.1s linear.
+        import time
+        cmd = "echo " + " " * 110000 + "x"  # ~110 KB, < argv cap
+        t = time.time()
+        _precise_targets(cmd)
+        self.assertLess(time.time() - t, 3.0)
+
+    def test_sed_program_file_not_target(self):  # B5-AC16 (-f program file, not written)
+        self.assertEqual(_precise_targets("sed -i -f script.py README.md"), ["README.md"])
+        self._assert_allows("sed -i -f script.py README.md")
+
+    def test_sed_script_token_not_target(self):  # B5-AC17 (in-script look-alike token)
+        self._assert_allows("sed -i 's/x/y.py/' README.md")
+        self.assertEqual(_precise_targets("sed -i 's/a/> b.py/' README.md"), ["README.md"])
+        self._assert_allows("sed -i 's/a/> b.py/' README.md")
+
+    def test_fd_redirect_source_fail_open(self):  # B5-AC3 scope / DP5 (fd/extended redirects deferred)
+        self._assert_allows("cmd &> src/app.py")
+        self._assert_allows("cmd >| src/app.py")
+        self._assert_allows("cmd 1> src/app.py")
+
+    def test_flow_order_recognized_forms_documented(self):  # B5 (finding 6): docs match behavior
+        readme = (REPO / "hooks" / "README.md").read_text(encoding="utf-8")
+        row = "\n".join(ln for ln in readme.splitlines() if "flow-order-guard-codex.mjs" in ln)
+        self.assertTrue(row, "flow-order-guard-codex.mjs row missing from hooks/README.md")
+        for form in ("sed -i", "tee", "`>`/`>>`"):        # recognized current-edit forms (B5)
+            self.assertIn(form, row, f"recognized form {form!r} not documented")
+        for residual in ("&>", ">|", "*** Begin Patch"):  # deferred residuals (#6)
+            self.assertIn(residual, row, f"deferred residual {residual!r} not documented")
 
 
 if __name__ == "__main__":

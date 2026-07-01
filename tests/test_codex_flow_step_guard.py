@@ -860,5 +860,37 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         self.assertEqual(cur_cc, head_cc)
 
 
+# ---- B5-AC18 (DP-XCONSUMER): the multi-file completeness fix's cross-consumer effect ----
+class TestB5CrossConsumer(_Tmp):
+    """B5-AC18 (spec codex-flow-order-writeform-symmetry): the multi-file `sed`/`tee` completeness
+    fix widens the SHARED readRolloutSignals().editTargets, which flow-STEP also reads. A single
+    command writing BOTH an artifact and source now activates the flow-step block where HEAD (last-
+    operand-only) was silent. This is an ACCEPTED correctness improvement (DP-XCONSUMER option a); the
+    flow-step guard's own bytes are unchanged (byte-lock holds)."""
+
+    def test_multifile_sed_activates_flowstep_block(self):  # B5-AC18
+        cwd = self._cwd()
+        # One `sed -i` writing an artifact (specs/W.md) AND source (src/app.py). At HEAD only the LAST
+        # token (src/app.py) surfaced -> no artifact workId -> flow:false. After the fix both operands
+        # surface -> work W active + a source edit -> BLOCK with spec/plan/tests missing (no on-disk W).
+        roll = _write_rollout([_exec_fc(["bash", "-lc",
+                                         "sed -i 's/x/y/' docs/agentic-sdlc/specs/W.md src/app.py"])])
+        out = _derive(roll, cwd)
+        self.assertTrue(out["flow"])
+        self.assertIn("W", out["workIds"])
+        self.assertTrue({"spec", "plan", "tests"}.issubset(set(out["missingBlockSteps"])),
+                        out["missingBlockSteps"])
+
+    def test_single_file_sed_flowstep_unchanged(self):  # B5-AC18 (containment: non-multi-file case unchanged)
+        # A single-file `sed -i` on source alone must behave exactly as HEAD: a source edit with no
+        # active workId -> flow:false (this is the containment guard proving only the multi-file
+        # artifact+source case flips, not ordinary single-file sed).
+        cwd = self._cwd()
+        roll = _write_rollout([_exec_fc(["bash", "-lc", "sed -i 's/x/y/' src/app.py"])])
+        out = _derive(roll, cwd)
+        self.assertFalse(out["flow"])
+        self.assertEqual(out["missingBlockSteps"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
