@@ -109,9 +109,12 @@ class TestRolloutReader(unittest.TestCase):
         path = _write_rollout([_assistant("work"), _task_complete("done " + MARKER)])
         self.assertTrue(_read_rollout(path)["gateMarkerPresent"])
 
-    def test_marker_in_earlier_carrier(self):  # AC2 (two placements)
+    def test_marker_in_earlier_carrier_not_counted(self):  # A1 injection-hardening
+        # A bare marker in an EARLIER assistant message (or an echoed/quoted carrier) must NOT
+        # satisfy the gate — only the model's own FINAL message counts. Closes rollout-injection
+        # of the public literal falsely silencing the backstop.
         path = _write_rollout([_assistant("ran the gate " + MARKER), _task_complete(CLAIM_TEXT)])
-        self.assertTrue(_read_rollout(path)["gateMarkerPresent"])
+        self.assertFalse(_read_rollout(path)["gateMarkerPresent"])
 
     def test_marker_absent(self):  # AC2
         path = _write_rollout([_assistant("work"), _task_complete(CLAIM_TEXT)])
@@ -171,10 +174,18 @@ class TestGuardBehavior(unittest.TestCase):
         out = _run_hook(inp, {"AGENTIC_COMPLETION_GATE_BLOCK": "true"})
         self.assertIn('"decision":"block"', out.replace(" ", ""))
 
-    def test_silent_with_marker(self):  # AC2
-        inp = self._stop(CLAIM_TEXT, [_assistant("ran gate " + MARKER), _task_complete(CLAIM_TEXT)])
+    def test_silent_with_marker_in_final_message(self):  # AC2
+        inp = self._stop(CLAIM_TEXT + " " + MARKER,
+                         [_assistant("work"), _task_complete(CLAIM_TEXT + " " + MARKER)])
         out = _run_hook(inp, {"AGENTIC_COMPLETION_GATE_BLOCK": "true"})
         self.assertEqual(out.strip(), "")
+
+    def test_reminds_when_marker_only_in_earlier_message(self):  # A1 injection-hardening
+        # The marker echoed only in an EARLIER message, with the final claiming message carrying
+        # none, is not a satisfied gate -> the backstop still fires (advisory by default).
+        inp = self._stop(CLAIM_TEXT, [_assistant("ran gate " + MARKER), _task_complete(CLAIM_TEXT)])
+        out = _run_hook(inp)
+        self.assertIn("systemMessage", out)
 
     def test_default_advisory_no_block_env(self):  # AC4
         inp = self._stop(CLAIM_TEXT, [_task_complete(CLAIM_TEXT)])

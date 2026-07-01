@@ -80,9 +80,26 @@ def _exec_begin(command, parsed_cmd=None):
     return _line("event_msg", p)
 
 
-def _exec_end(exit_code):
-    """event_msg exec_command_end - proves BR3 (exit code is not inspected)."""
-    return _line("event_msg", {"type": "exec_command_end", "exit_code": exit_code})
+def _exec_fc_id(cmd_argv, call_id):
+    """response_item function_call exec_command carrying a call_id (A2: correlates to its output)."""
+    return _line("response_item", {"type": "function_call", "name": "exec_command",
+                                   "arguments": json.dumps({"cmd": cmd_argv}), "call_id": call_id})
+
+
+def _fc_output(call_id, exit_code, body=""):
+    """response_item function_call_output: codex-added `Exit code: N` line + (truncated) combined output.
+    OFFICIAL-SOURCE (openai/codex rust-v0.142.x): the rollout persists function_call_output {call_id,
+    output}; codex prepends an `Exit code: N` line. Fixture models that shape (LIVE capture pending)."""
+    text = f"Exit code: {exit_code}" + (f"\n{body}" if body else "")
+    return _line("response_item", {"type": "function_call_output", "call_id": call_id, "output": text})
+
+
+def _exec_end_id(call_id, exit_code, aggregated_output=""):
+    """event_msg exec_command_end DEFENSIVE secondary exit carrier (correlated by call_id)."""
+    p = {"type": "exec_command_end", "call_id": call_id, "exit_code": exit_code}
+    if aggregated_output:
+        p["aggregated_output"] = aggregated_output
+    return _line("event_msg", p)
 
 
 def _v4a_add(path, body_lines=("x = 1",)):
@@ -184,6 +201,23 @@ def _signals(rollout_path):
     return json.loads(_node(script, rollout_path))
 
 
+def _is_real_run(command):
+    """Drive the exported SHAPE helper isRealRunnerInvocation over the real testCommand allowlist."""
+    script = ("const f = await import(%s);"
+              "const re = new RegExp(f.loadRequirements().testCommand, 'i');"
+              "process.stdout.write(JSON.stringify(f.isRealRunnerInvocation(process.argv[1], re)));"
+              % json.dumps(FLOW_EVID.as_uri()))
+    return json.loads(_node(script, command))
+
+
+def _has_sig(text):
+    """Drive the exported advisory test-result signature scanner outputHasTestSignature."""
+    script = ("const f = await import(%s);"
+              "process.stdout.write(JSON.stringify(f.outputHasTestSignature(process.argv[1])));"
+              % json.dumps(FLOW_EVID.as_uri()))
+    return json.loads(_node(script, text))
+
+
 def _derive(rollout_path, cwd):
     script = ("const m = await import(%s);"
               "process.stdout.write(JSON.stringify(m.deriveFlowEvidence(process.argv[1], process.argv[2])));"
@@ -247,6 +281,30 @@ class TestRolloutSignals(unittest.TestCase):
     def test_event_message_parsed_cmd_surfaced(self):  # AC32 (parsed_cmd token join)
         sig = _signals(_write_rollout([_exec_begin("", parsed_cmd=["python3", "-m", "pytest"])]))
         self.assertTrue(any("python3 -m pytest" in c for c in sig["commands"]))
+
+    def test_function_call_output_exit0_correlated_by_call_id(self):  # A2 substrate (OFFICIAL-SOURCE)
+        sig = _signals(_write_rollout([
+            _exec_fc_id(["pytest", "-q"], "call_1"),
+            _fc_output("call_1", 0, "5 passed in 0.12s"),
+        ]))
+        run = next(r for r in sig["commandRuns"] if "pytest" in r["command"])
+        self.assertEqual(run["exitCode"], 0)
+        self.assertIn("5 passed", run["output"])
+
+    def test_function_call_output_nonzero_exit_correlated(self):  # A2 substrate: exit1 parsed
+        sig = _signals(_write_rollout([_exec_fc_id(["pytest"], "call_2"), _fc_output("call_2", 1, "1 failed")]))
+        run = next(r for r in sig["commandRuns"] if r["command"] == "pytest")
+        self.assertEqual(run["exitCode"], 1)
+
+    def test_exec_command_end_defensive_exit_carrier(self):  # A2: exec_command_end fallback (no fc_output)
+        sig = _signals(_write_rollout([_exec_fc_id(["pytest", "-q"], "call_3"), _exec_end_id("call_3", 0, "3 passed")]))
+        run = next(r for r in sig["commandRuns"] if "pytest" in r["command"])
+        self.assertEqual(run["exitCode"], 0)
+
+    def test_uncorrelated_run_has_null_exit(self):  # A2: no call_id -> substrate absent (fail-open path)
+        sig = _signals(_write_rollout([_exec_fc(["pytest", "-q"])]))
+        run = next(r for r in sig["commandRuns"] if "pytest" in r["command"])
+        self.assertIsNone(run["exitCode"])
 
     def test_testcommand_recognizes_common_runners(self):  # B1 — broadened testCommand allowlist
         import re
@@ -321,6 +379,53 @@ class TestRolloutSignals(unittest.TestCase):
         self.assertEqual(sig["editTargets"], [])
 
 
+# ---- A2: SHAPE gate + advisory result-signature (pure, cross-runtime helpers) ----
+class TestShapeAndSignatureHelpers(unittest.TestCase):
+    def test_shape_rejects_noop_printers(self):  # `echo pytest` / `echo "...5 passed..."` are not real runs
+        for cmd in ("echo pytest", 'echo "pytest: 5 passed"', "printf 'pytest'", "cat pytest",
+                    ": pytest", "true && echo pytest", "# pytest"):
+            self.assertFalse(_is_real_run(cmd), f"forged run must not qualify: {cmd!r}")
+
+    def test_shape_rejects_assignment_and_quoted_and_substitution_forgeries(self):  # A2 security fix (Loop B)
+        # A no-op that merely MENTIONS a runner must not qualify: a bare assignment named after a runner,
+        # a runner name hidden in a command-substitution value, or a runner in quoted DATA a printer emits.
+        for cmd in ("pytest=1", "tox=1", "pytest=echo",
+                    "x=$(echo pytest)", "x=`echo pytest`",
+                    "echo ';pytest'", 'echo "see |pytest docs"'):
+            self.assertFalse(_is_real_run(cmd), f"forged run must not qualify: {cmd!r}")
+
+    def test_shape_accepts_real_runner_invocations(self):  # a segment that actually STARTS with a runner
+        for cmd in ("pytest -q", "cd repo && pytest", "python -m pytest -q", "python3 -m unittest",
+                    "py -3 -m unittest tests.test_app", "VENV=1 python -m pytest",
+                    "go test ./...", "make test", "npm test", "pytest --version"):
+            self.assertTrue(_is_real_run(cmd), f"real runner invocation must qualify: {cmd!r}")
+
+    def test_shape_python_m_runner_recognized(self):  # HB7: python -m <runner> is not a bare `python`
+        self.assertTrue(_is_real_run("python -m pytest"))
+        self.assertFalse(_is_real_run("python -m pip install x"))  # a non-runner module
+
+    def test_shape_is_linear_not_redos(self):  # AC8: shape strip/split is linear
+        # ~100 KB (under the 128 KB single-argv limit); a catastrophic-backtracking pattern would hang
+        # on far fewer repeats, so this still guards ReDoS while staying well under argv size limits.
+        import time
+        t = time.time()
+        _is_real_run(("echo " * 20000) + "pytest")
+        self.assertLess(time.time() - t, 5.0)
+
+    def test_signature_matches_common_frameworks(self):
+        for out in ("5 passed in 0.1s", "1 failed, 2 passed", "OK", "FAILED (failures=1)",
+                    "test result: ok. 3 passed", "3 passing", "ok  \texample 0.01s"):
+            self.assertTrue(_has_sig(out), f"should recognize a result signature: {out!r}")
+        for out in ("pytest 8.0.0", "hello world", "usage: pytest [options]"):
+            self.assertFalse(_has_sig(out), f"non-result text must not match: {out!r}")
+
+    def test_signature_is_linear_not_redos(self):  # AC8
+        import time
+        t = time.time()
+        _has_sig(("a " * 40000) + "passed")  # ~80 KB, under the 128 KB single-argv limit
+        self.assertLess(time.time() - t, 5.0)
+
+
 # ---- AC1..AC3, AC10..AC14, AC24, AC26, AC30..AC32: pure derivation ----------
 class TestFlowEvidenceDerivation(_Tmp):
     def test_valid_spec_plan_only_tests_missing(self):  # AC1
@@ -330,13 +435,75 @@ class TestFlowEvidenceDerivation(_Tmp):
         roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch()])
         self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], ["tests"])
 
-    def test_command_satisfies_tests_ignoring_nonzero_exit(self):  # AC2
+    def test_correlated_nonzero_exit_no_longer_satisfies_tests(self):  # A2/HB2: DELIBERATELY reverses AP2b
+        # AP2b's contract was "exit code never inspected" (a matched test command satisfied regardless of
+        # exit; the old test asserted a nonzero-exit run STILL satisfied). A2 flow-STEP now correlates the
+        # run's codex `Exit code:` line by call_id: a real runner that exited NONZERO is a RED run and no
+        # longer satisfies the tests step (GREEN is the obligation). flow-ORDER stays exit-agnostic
+        # (a TDD RED run still counts for ordering) — asserted in test_codex_flow_order_guard.
         cwd = self._cwd()
         s = _artifact(cwd, "spec", "W", valid=True)
         p = _artifact(cwd, "plan", "W", valid=True)
         roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch(),
-                               _exec_fc(["python3", "-m", "pytest"]), _exec_end(1)])
+                               _exec_fc_id(["python3", "-m", "pytest"], "c1"), _fc_output("c1", 1, "1 failed")])
+        self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], ["tests"])
+
+    def test_real_green_run_satisfies_tests(self):  # A2 AC2: exit0 + result signature -> satisfied
+        cwd = self._cwd()
+        s = _artifact(cwd, "spec", "W", valid=True)
+        p = _artifact(cwd, "plan", "W", valid=True)
+        roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch(),
+                               _exec_fc_id("python -m pytest -q", "c1"), _fc_output("c1", 0, "5 passed in 0.10s")])
         self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], [])
+
+    def test_cd_prefixed_real_green_run_satisfies_tests(self):  # A2 edge: `cd repo && pytest`
+        cwd = self._cwd()
+        s = _artifact(cwd, "spec", "W", valid=True)
+        p = _artifact(cwd, "plan", "W", valid=True)
+        roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch(),
+                               _exec_fc_id("cd repo && pytest", "c1"), _fc_output("c1", 0, "3 passed")])
+        self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], [])
+
+    def test_echo_pytest_does_not_satisfy_tests_shape(self):  # A2 AC1: `echo pytest` (exit0) closed by SHAPE
+        cwd = self._cwd()
+        s = _artifact(cwd, "spec", "W", valid=True)
+        p = _artifact(cwd, "plan", "W", valid=True)
+        roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch(),
+                               _exec_fc_id(["echo", "pytest"], "c1"), _fc_output("c1", 0, "pytest")])
+        self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], ["tests"])
+
+    def test_echo_faked_result_line_does_not_satisfy_shape_before_output(self):  # A2: SHAPE gates before OUTPUT
+        cwd = self._cwd()
+        s = _artifact(cwd, "spec", "W", valid=True)
+        p = _artifact(cwd, "plan", "W", valid=True)
+        roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch(),
+                               _exec_fc_id(["echo", "pytest: 5 passed"], "c1"), _fc_output("c1", 0, "pytest: 5 passed")])
+        self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], ["tests"])
+
+    def test_version_invocation_satisfies_fail_open_signature(self):  # A2 DP-A2-SIG residual: --version accepted
+        # Accepted tradeoff: shape+exit0 satisfy; a missing result-signature does NOT block (truncation-safe).
+        cwd = self._cwd()
+        s = _artifact(cwd, "spec", "W", valid=True)
+        p = _artifact(cwd, "plan", "W", valid=True)
+        roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch(),
+                               _exec_fc_id("pytest --version", "c1"), _fc_output("c1", 0, "pytest 8.0.0")])
+        self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], [])
+
+    def test_substrate_absent_shape_only_satisfies(self):  # A2 AC5: no function_call_output -> fail-open
+        cwd = self._cwd()
+        s = _artifact(cwd, "spec", "W", valid=True)
+        p = _artifact(cwd, "plan", "W", valid=True)
+        roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch(), _exec_fc_id("pytest -q", "c1")])
+        self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], [])
+
+    def test_correlation_faked_echo_plus_real_failing_run_not_satisfied(self):  # A2 AC6: no borrowing exit codes
+        cwd = self._cwd()
+        s = _artifact(cwd, "spec", "W", valid=True)
+        p = _artifact(cwd, "plan", "W", valid=True)
+        roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch(),
+                               _exec_fc_id(["echo", "pytest"], "A"), _fc_output("A", 0, "pytest"),
+                               _exec_fc_id("pytest", "B"), _fc_output("B", 1, "1 failed")])
+        self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], ["tests"])
 
     def test_active_flow_missing_reported(self):  # AC3
         cwd = self._cwd()
@@ -511,6 +678,20 @@ class TestFlowStepGuardBehavior(_Tmp):
     def test_silent_all_satisfied(self):  # AC7
         cwd = self._cwd()
         lines = self._missing_tests_fixture(cwd, extra=[_exec_fc(["python3", "-m", "pytest"])])
+        out = _run_hook(self._stop(cwd, lines), {"AGENTIC_FLOW_GATE_BLOCK": "true"})
+        self.assertEqual(out.strip(), "")
+
+    def test_blocks_when_tests_only_echoed_under_env(self):  # A2: `echo pytest` does not satisfy -> block
+        cwd = self._cwd()
+        lines = self._missing_tests_fixture(cwd, extra=[_exec_fc_id(["echo", "pytest"], "c1"),
+                                                        _fc_output("c1", 0, "pytest")])
+        out = _run_hook(self._stop(cwd, lines), {"AGENTIC_FLOW_GATE_BLOCK": "true"})
+        self.assertIn('"decision":"block"', out.replace(" ", ""))
+
+    def test_silent_when_real_green_run_under_env(self):  # A2: exit0 real run -> satisfied -> silent
+        cwd = self._cwd()
+        lines = self._missing_tests_fixture(cwd, extra=[_exec_fc_id("python -m pytest -q", "c1"),
+                                                        _fc_output("c1", 0, "7 passed")])
         out = _run_hook(self._stop(cwd, lines), {"AGENTIC_FLOW_GATE_BLOCK": "true"})
         self.assertEqual(out.strip(), "")
 

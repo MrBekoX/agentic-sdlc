@@ -72,6 +72,18 @@ def _exec_fc(cmd_argv):
                                    "arguments": json.dumps({"cmd": cmd_argv})})
 
 
+def _exec_fc_id(cmd_argv, call_id):
+    """response_item function_call exec_command carrying a call_id (A2: correlates to its output)."""
+    return _line("response_item", {"type": "function_call", "name": "exec_command",
+                                   "arguments": json.dumps({"cmd": cmd_argv}), "call_id": call_id})
+
+
+def _fc_output(call_id, exit_code, body=""):
+    """response_item function_call_output: codex-added `Exit code: N` line + (truncated) combined output."""
+    text = f"Exit code: {exit_code}" + (f"\n{body}" if body else "")
+    return _line("response_item", {"type": "function_call_output", "call_id": call_id, "output": text})
+
+
 def _v4a_add(path, body_lines=("x = 1",)):
     out = ["*** Begin Patch", f"*** Add File: {path}"]
     out += ["+" + b for b in body_lines]
@@ -449,6 +461,22 @@ class TestFlowOrderGuard(_Tmp):
         # is demanded and the edit is ALLOWED. (Before B2 this DENIED, the documented DP-SCOPE-FLOW gap.)
         cwd = self._cwd()
         roll = [_exec_fc(["python3", "-m", "pytest"])]  # a test ran before the edit; no spec/plan
+        out = _run_hook(self._pre(cwd, _src_redirect_cmd(), rollout_lines=roll), ENV_ON)
+        self.assertEqual(out.strip(), "")
+
+    def test_echo_pytest_before_edit_not_accepted_shape(self):  # A2 SHAPE gate on flow-ORDER
+        # `echo pytest` prints the word and runs nothing; the shape gate rejects it as before-edit
+        # evidence, so a source edit with no real prior run is still DENIED.
+        cwd = self._cwd()
+        roll = [_exec_fc_id(["echo", "pytest"], "c1"), _fc_output("c1", 0, "pytest")]
+        out = _run_hook(self._pre(cwd, _src_redirect_cmd(), rollout_lines=roll), ENV_ON)
+        self.assertTrue(_is_deny(out))
+
+    def test_red_run_before_edit_still_counts_exit_agnostic(self):  # A2/HB6: TDD RED run counts for ordering
+        # flow-ORDER is exit-agnostic: a failing test written FIRST (TDD red) is still a real before-edit
+        # test run, so the following source edit is ALLOWED. (Only flow-STEP requires exit0.)
+        cwd = self._cwd()
+        roll = [_exec_fc_id("pytest", "c1"), _fc_output("c1", 1, "1 failed")]
         out = _run_hook(self._pre(cwd, _src_redirect_cmd(), rollout_lines=roll), ENV_ON)
         self.assertEqual(out.strip(), "")
 

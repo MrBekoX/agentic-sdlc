@@ -14,13 +14,24 @@ import { readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { loadRequirements, blockFlag, isSourceFile } from './flow-evidence.mjs';
+import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation } from './flow-evidence.mjs';
 import { readRolloutSignals } from './codex-rollout.mjs';
 
 export const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
 export { blockFlag };
 
 const ORDER = ['spec', 'plan', 'tests']; // canonical fixed emission order (DP-ORDER, AC25/AC30)
+
+// A2 flow-STEP GREEN test: exit0 is the reliable additive gate. The result-signature
+// (outputHasTestSignature) is scanned advisory-only and is NOT required here - codex truncates large
+// logs, so a genuine green run's summary line can be missing, and requiring it would false-block those
+// runs (DP-A2-SIG: this is why `pytest --version` is accepted rather than caught). A nonzero exit is a
+// RED run and never counts (AC4, deliberately reversing AP2b's "exit code never inspected"). No
+// correlated exit code -> substrate absent -> FAIL-OPEN (shape already closed the echo forgery).
+function runIsGreen(r) {
+  if (typeof r.exitCode === 'number') return r.exitCode === 0;
+  return true; // substrate absent: fail-open to shape-only-satisfied
+}
 
 // Local re-implementation of the Claude engine's private runValidator (it is not exported, and the
 // byte-locked file must not change). Read-only subprocess: the artifact path is a SEPARATE argv (no
@@ -153,11 +164,19 @@ function stepMissing(step, workId, signals, req, cwd) {
     const s = runValidator('plan', planF, specF, cwd);
     return !(s === 0 || s === null);
   }
-  // command (tests): only the trusted static testCommand is ever compiled (Sink C, ReDoS-safe).
+  // command (tests): A2 SHAPE gate (always-on, command TEXT) + additive exit0 (fail-open on absent
+  // substrate). Only the trusted static testCommand is ever compiled (Sink C, ReDoS-safe).
   if (typeof req.testCommand !== 'string') return true;
   let re;
   try { re = new RegExp(req.testCommand, 'i'); } catch { return true; }
-  return !signals.commands.some((c) => re.test(c)); // BR3: exit code never inspected
+  // SHAPE floor: a run that actually STARTS with a runner (closes `echo pytest` and a forged
+  // `echo "...5 passed..."` before any output is read).
+  const shaped = (signals.commandRuns || []).filter((r) => isRealRunnerInvocation(r.command, re));
+  if (!shaped.length) return true; // no real runner invocation -> tests step missing
+  // ADDITIVE exit0: a shaped run GREENs iff it exited 0 (correlated by call_id from the codex
+  // `Exit code:` line, or the exec_command_end fallback). When NO shaped run has a correlated exit
+  // (older codex / a runtime that omits the carrier), runIsGreen fails open -> shape-only-satisfied.
+  return !shaped.some((r) => runIsGreen(r));
 }
 
 export function deriveFlowEvidenceWith(signals, req, cwd) {

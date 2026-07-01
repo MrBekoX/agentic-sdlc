@@ -203,6 +203,29 @@ class TestFlowStepGuard(unittest.TestCase):
         self.assertEqual(out.get("decision"), "block")
         self.assertIn("control", out.get("reason", "").lower())
 
+    def test_echoed_test_command_does_not_satisfy_tests_claude(self):  # A2 Claude SHAPE gate (command text only)
+        # `echo pytest` matches the testCommand regex as TEXT but is not a real runner invocation; the A2
+        # shape gate closes it on Claude too. (Claude exit/output substrate is unverified, so only the
+        # command-text SHAPE is enforced here — the Codex engine additionally checks exit0.)
+        events = [
+            skill(RCF), edit("src/app.py"), workflow("agentic-sdlc:spec-plan-draft"),
+            bash("echo pytest"),  # forged: prints the word, runs nothing
+            agent("agentic-sdlc:security-reviewer"),
+            agent("agentic-sdlc:implementation-auditor"), ev_text("Done."),
+        ]
+        out = self.run_guard(events, block=True)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("tests", _block_ids(out))
+
+    def test_real_runner_still_satisfies_tests_claude(self):  # A2: a genuine runner invocation still counts
+        events = [
+            skill(RCF), edit("src/app.py"), workflow("agentic-sdlc:spec-plan-draft"),
+            bash("python -m pytest -q"),
+            agent("agentic-sdlc:security-reviewer"),
+            agent("agentic-sdlc:implementation-auditor"), ev_text("Done."),
+        ]
+        self.assertEqual(self.run_guard(events, block=True), {})
+
     def test_feature_build_blocks_missing_spec(self):
         out = self.run_guard([skill(FB), edit("src/app.py"), ev_text("Built.")], block=True)
         self.assertEqual(out.get("decision"), "block")
@@ -370,6 +393,11 @@ class TestFlowOrderGuard(unittest.TestCase):
         events = [skill(SR), bash("py -3 -m unittest tests.test_characterization")]
         out = self.run_guard("src/app.py", events, block=True)
         self.assertEqual(out, {})
+
+    def test_safe_refactor_echoed_characterization_still_denies_claude(self):  # A2 Claude SHAPE gate (order)
+        events = [skill(SR), bash("echo pytest")]  # a printer, not a real characterization run
+        out = self.run_guard("src/app.py", events, block=True)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_pipeline_denies_source_edit_before_delegation(self):
         out = self.run_guard("src/app.py", [skill(PIPE)], block=True)

@@ -40,19 +40,6 @@ function assistantText(p) {
   return null;
 }
 
-// ALL text strings carried by a message line (assistant, agent, task_complete, AND user) — the
-// whole-rollout surface scanned for the sentinel (R3).
-function carrierTexts(p) {
-  const out = [];
-  if (!p || typeof p !== 'object') return out;
-  if (typeof p.message === 'string') out.push(p.message);                       // agent_message / user_message
-  if (typeof p.last_agent_message === 'string') out.push(p.last_agent_message); // task_complete
-  if (Array.isArray(p.content)) {
-    for (const c of p.content) if (c && typeof c.text === 'string') out.push(c.text); // message content (asst+user)
-  }
-  return out;
-}
-
 export function readRollout(path) {
   const EMPTY = { finalMessage: '', gateMarkerPresent: false, readable: false };
   if (!path || typeof path !== 'string') return EMPTY;
@@ -65,7 +52,6 @@ export function readRollout(path) {
     return EMPTY; // unreadable -> unconfirmable
   }
 
-  let gateMarkerPresent = false;
   let lastTaskComplete = null;
   let lastAssistant = null;
   for (const line of raw.split(/\r?\n/)) {
@@ -73,9 +59,6 @@ export function readRollout(path) {
     let o;
     try { o = JSON.parse(line); } catch { continue; } // tolerate a malformed line
     const p = payloadOf(o);
-    if (!gateMarkerPresent) {
-      for (const t of carrierTexts(p)) if (t.includes(GATE_MARKER)) { gateMarkerPresent = true; break; }
-    }
     const tc = taskCompleteText(p);
     if (tc != null) lastTaskComplete = tc;
     else {
@@ -84,6 +67,12 @@ export function readRollout(path) {
     }
   }
   const finalMessage = lastTaskComplete != null ? lastTaskComplete : (lastAssistant != null ? lastAssistant : '');
+  // A1 injection-hardening: the gate marker counts ONLY when it appears in the model's own FINAL
+  // message (where completion-claim-gate emits it), not anywhere in the rollout. This stops a bare
+  // literal echoed in an EARLIER assistant message or a quoted/injected carrier from silencing the
+  // backstop. Self-forgery/replay by the model in its own final message stay out of scope — the
+  // marker proves the ceremony ran, not that the evidence is real (that is A2's job).
+  const gateMarkerPresent = finalMessage.includes(GATE_MARKER);
   return { finalMessage, gateMarkerPresent, readable: true };
 }
 
@@ -91,7 +80,8 @@ export function readRollout(path) {
 // patch-style EDIT TARGETS a Codex session recorded, scoped to this rollout. Same fail-open
 // discipline as readRollout: missing/non-file/over-ceiling/unreadable -> EMPTY readable:false, so the
 // caller never blocks on an unconfirmable rollout. Pure: one read, JSON-decode per line, no eval,
-// no spawn. readRollout / GATE_MARKER / carrierTexts / payloadOf are untouched (AC20).
+// no spawn. GATE_MARKER / payloadOf are shared with readRollout above; readRollout's marker check
+// is scoped to the final message only (A1 injection-hardening).
 //
 // Carriers (DP-E union; carrier SHAPES stay labelled VERIFY, reused from AP1/AP2a probes):
 //   commands  - function_call exec_command {cmd}, AND event_msg exec_command_begin {command, parsed_cmd}.
@@ -105,8 +95,34 @@ function parseArgs(args) {
   return null;
 }
 
+// A2 substrate: extract the plain output text of a `function_call_output` payload. codex persists
+// either a bare string or an object carrying `content` (string, or a text-part array). Fail-soft null.
+function outputTextOf(o) {
+  if (typeof o === 'string') return o;
+  if (o && typeof o === 'object') {
+    if (typeof o.content === 'string') return o.content;
+    if (Array.isArray(o.content)) {
+      const t = o.content.filter((c) => c && typeof c.text === 'string').map((c) => c.text).join('\n');
+      return t || null;
+    }
+  }
+  return null;
+}
+
+// A2 substrate: codex prepends an `Exit code: N` line to an exec `function_call_output` (OFFICIAL-
+// SOURCE openai/codex rust-v0.142.x). Parse the FIRST line-anchored occurrence as the run's real exit
+// status. LINEAR ([ \t]* avoids any \s*-over-newline ambiguity). RESIDUAL: the combined stdout/stderr
+// is agent/tool-authored, so the exact placement of codex's own line vs. a tool-printed one needs a
+// LIVE rollout capture to pin down; matching the first line-anchored occurrence is the best-effort
+// heuristic within the bounded-backstop posture (flagged in the A2 report).
+export function parseCodexExitCode(text) {
+  if (typeof text !== 'string') return null;
+  const m = /(?:^|\n)[ \t]*Exit code:\s*(-?\d+)/.exec(text);
+  return m ? Number(m[1]) : null;
+}
+
 export function readRolloutSignals(path) {
-  const EMPTY = { commands: [], editTargets: [], readable: false };
+  const EMPTY = { commands: [], editTargets: [], commandRuns: [], readable: false };
   if (!path || typeof path !== 'string') return EMPTY;
   let raw;
   try {
@@ -119,6 +135,15 @@ export function readRolloutSignals(path) {
 
   const commands = [];
   const editTargets = [];
+  // A2: a per-invocation view of the recorded commands carrying their correlated exit code + output.
+  // `commandRuns` is parallel to `commands` (one entry per pushed command string); exitCode/output are
+  // filled AFTER the pass from the by-call_id maps below (the `function_call_output` for a
+  // `function_call exec_command`, or the defensive `exec_command_end`). A run with no correlated exit
+  // stays exitCode:null -> the flow-STEP consumer FAILS OPEN on it (substrate absent, no regression).
+  const commandRuns = [];
+  const outputByCallId = new Map(); // call_id -> function_call_output text (primary exit/output carrier)
+  const endByCallId = new Map();    // call_id -> { exitCode, output } from exec_command_end (defensive)
+  const pushCmd = (s, callId) => { commands.push(s); commandRuns.push({ command: s, callId: callId ?? null, exitCode: null, output: null }); };
   // A1/BR4a closure: a Codex shell-redirect WRITE is recorded as a raw command string (verified live:
   // exec_command {cmd:"printf 'hi' > note.txt"}), and codex often BUNDLES several writes into one
   // exec_command separated by newlines, so the single-write `extractWrittenContent` (which keys on a
@@ -159,18 +184,32 @@ export function readRolloutSignals(path) {
       if (p.name === 'exec_command') {
         const cmd = a && a.cmd;
         const s = Array.isArray(cmd) ? cmd.map((x) => String(x)).join(' ') : (typeof cmd === 'string' ? cmd : null);
-        if (s != null) { commands.push(s); pushRedirectTargets(s); }
+        if (s != null) { pushCmd(s, p.call_id); pushRedirectTargets(s); }
       } else if (p.name === 'apply_patch' || p.name === 'patch') {
         const patchText = a && a.input;
         if (typeof patchText === 'string') {
           for (const t of extractWrittenContent('apply_patch', patchText).targets) editTargets.push(t);
         }
       }
+    } else if (p.type === 'function_call_output') {
+      // A2 primary exit/output carrier: correlate to its `function_call` by call_id (either order).
+      if (p.call_id != null) {
+        const t = outputTextOf(p.output);
+        if (t != null) outputByCallId.set(p.call_id, t);
+      }
     } else if (p.type === 'exec_command_begin') {
-      if (typeof p.command === 'string' && p.command) { commands.push(p.command); pushRedirectTargets(p.command); }
+      if (typeof p.command === 'string' && p.command) { pushCmd(p.command, p.call_id); pushRedirectTargets(p.command); }
       if (Array.isArray(p.parsed_cmd)) {
         const toks = p.parsed_cmd.filter((x) => typeof x === 'string');
-        if (toks.length) commands.push(toks.join(' '));
+        if (toks.length) pushCmd(toks.join(' '), p.call_id);
+      }
+    } else if (p.type === 'exec_command_end') {
+      // A2 DEFENSIVE secondary exit carrier (a prior live probe saw event_msg exec_command_end with a
+      // structured exit_code). Correlated by call_id; used only when no function_call_output exit exists.
+      if (p.call_id != null) {
+        const ec = typeof p.exit_code === 'number' ? p.exit_code : null;
+        const ao = typeof p.aggregated_output === 'string' ? p.aggregated_output : null;
+        endByCallId.set(p.call_id, { exitCode: ec, output: ao });
       }
     } else if (p.type === 'patch_apply_begin') {
       for (const t of Object.keys(p.changes || {})) editTargets.push(t);
@@ -182,5 +221,17 @@ export function readRolloutSignals(path) {
       if (p.success !== false) for (const t of Object.keys(p.changes || {})) editTargets.push(t);
     }
   }
-  return { commands, editTargets, readable: true };
+  // A2 correlation pass: fill each run's exitCode/output from its call_id. The function_call_output's
+  // codex `Exit code:` line is primary; the exec_command_end structured exit_code is the fallback.
+  for (const run of commandRuns) {
+    if (run.callId == null) continue;
+    const out = outputByCallId.get(run.callId);
+    if (typeof out === 'string') { run.output = out; run.exitCode = parseCodexExitCode(out); }
+    if (run.exitCode == null && endByCallId.has(run.callId)) {
+      const e = endByCallId.get(run.callId);
+      if (typeof e.exitCode === 'number') run.exitCode = e.exitCode;
+      if (run.output == null && typeof e.output === 'string') run.output = e.output;
+    }
+  }
+  return { commands, editTargets, commandRuns, readable: true };
 }

@@ -25,6 +25,85 @@ export function blockFlag() {
   return /^(true|1|yes)$/i.test(String(process.env.AGENTIC_FLOW_GATE_BLOCK || ''));
 }
 
+// A2 SHAPE gate (cross-runtime, command-TEXT only): does a command actually INVOKE a test runner,
+// as opposed to merely mentioning one? A `{kind:command, matches:testCommand}` step used to be
+// satisfied by any command whose text matched the runner regex, so `echo pytest` (and even
+// `echo "...5 passed..."`) forged the evidence. Here we require a real invocation: split on shell
+// separators, strip a leading env-assignment prefix, and require SOME segment to actually START with
+// an allowlisted runner (or be `python[3] -m <runner>`), and to NOT be a no-op printer
+// (echo/printf/:/true/cat/head/tail/cd) or a `#` comment. Pure string/regex; every pattern is LINEAR
+// (disjoint classes, no nested quantifier) so an adversarial command cannot ReDoS the guard.
+const NOOP_FIRST = /^(?:echo|printf|:|true|cat|head|tail|cd)$/;
+// python | python3 | python3.11 | py, an optional launcher version flag (`-3`, `-3.11`), then `-m <mod>`.
+const PYTHON_DASH_M = /^(?:python[0-9.]*|py)(?:\s+-[0-9.]+)?\s+-m\s+(\S+)/;
+// Strip ONE leading `VAR=value` env-assignment (value quoted, or bare WITHOUT shell metacharacters so
+// a command-substitution value like `$(echo pytest)` is NOT swallowed). LINEAR (disjoint classes).
+const ENV_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s"'$`(){}|&;<>]*)\s+/;
+// A segment that (still) STARTS with an assignment is a standalone `NAME=value`, not a command — so a
+// bare `pytest=1` must not qualify just because the runner regex matches at the `=` word boundary.
+const ASSIGN_START = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+// Quote-aware split on shell statement/pipe boundaries (&&, ||, ;, |, newline). A separator INSIDE
+// single/double quotes is DATA (`echo ';pytest'`), never a boundary, so it cannot spawn a fragment
+// that spuriously "starts with a runner". Single linear pass.
+function splitSegments(str) {
+  const out = [];
+  let cur = '';
+  let q = ''; // active quote char, '' when unquoted
+  for (let i = 0; i < str.length; i++) {
+    const c = str[i];
+    if (q) { cur += c; if (c === q) q = ''; continue; }
+    if (c === "'" || c === '"') { q = c; cur += c; continue; }
+    if (c === '\n' || c === ';') { out.push(cur); cur = ''; continue; }
+    if (c === '|') { if (str[i + 1] === '|') i++; out.push(cur); cur = ''; continue; }
+    if (c === '&' && str[i + 1] === '&') { i++; out.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+export function isRealRunnerInvocation(command, testRe) {
+  if (!testRe) return false;
+  const str = String(command || '');
+  for (let seg of splitSegments(str)) {                   // quote-aware shell statement/pipe boundaries
+    seg = seg.trim();
+    if (!seg || seg.startsWith('#')) continue;            // empty or a comment segment
+    while (ENV_ASSIGN.test(seg)) seg = seg.replace(ENV_ASSIGN, ''); // drop leading env-assignments
+    seg = seg.trim();
+    if (!seg || ASSIGN_START.test(seg)) continue;         // empty, or a standalone NAME=value assignment
+    const first = seg.split(/\s+/)[0] || '';
+    if (NOOP_FIRST.test(first)) continue;                 // echo/printf/cat/... never RUN the tests
+    const pym = PYTHON_DASH_M.exec(seg);
+    if (pym) { if (testRe.test(pym[1])) return true; continue; } // python -m <runner> (HB7)
+    // Otherwise the segment must literally START with an allowlisted runner. testRe is non-global,
+    // so exec() is stateless and matches from the front; index 0 == "starts with the runner".
+    const m = testRe.exec(seg);
+    if (m && m.index === 0) return true;
+  }
+  return false;
+}
+
+// A2 advisory result-signature scanner (DP-A2-SIG). A broad, LINEAR match for the summary line a
+// runner prints on completion (pytest/jest/vitest `N passed|failed|...`, mocha `N passing`, cargo
+// `test result:`, go/unittest `ok`/`FAILED`, generic PASS/FAIL). The A2 flow-STEP gate does NOT
+// require this signature: codex truncates large logs, so a real green run's summary line can be
+// missing, and requiring it would false-block those runs (this is why `pytest --version` is accepted
+// rather than caught — see codex-flow-evidence.mjs). Exported for review + tests and reserved for a
+// future opt-in strict mode; exit0 remains the reliable gate.
+const TEST_RESULT_SIGNATURE = new RegExp([
+  '\\b\\d+\\s+(?:passed|failed|errors?|skipped)\\b', // pytest / jest / vitest
+  '\\b\\d+\\s+passing\\b',                            // mocha
+  '\\btest result:',                                 // cargo
+  '\\bok\\b',                                         // go / unittest OK
+  '\\bfailed\\b',                                     // unittest / go FAILED
+  '\\bpass\\b', '\\bfail\\b',                         // go PASS / FAIL (generic)
+].join('|'), 'i');
+
+export function outputHasTestSignature(text) {
+  return typeof text === 'string' && TEST_RESULT_SIGNATURE.test(text);
+}
+
 // Parse a transcript JSONL into a trace of observable facts. Fail-open to an empty trace.
 export function parseTranscript(transcriptPath) {
   const empty = { tools: [], commands: [], edits: [], lastText: '', raw: '' };
@@ -203,7 +282,11 @@ function evidenceSatisfied(item, trace, ctx) {
       const pat = ctx.req[item.matches] || item.matches;
       let re;
       try { re = new RegExp(pat, 'i'); } catch { return false; }
-      return trace.commands.some((c) => re.test(c));
+      // A2 SHAPE gate: a command satisfies a test-run step only if it actually invokes a runner
+      // (`echo pytest` / `echo "...5 passed..."` no longer count). Claude's Bash exit/output substrate
+      // is unverified (HB4), so only the command TEXT shape is enforced here; the Codex engine
+      // additionally checks exit0 from its rollout `Exit code:` carrier (deliberate asymmetry).
+      return trace.commands.some((c) => isRealRunnerInvocation(c, re));
     }
     default:
       return false;

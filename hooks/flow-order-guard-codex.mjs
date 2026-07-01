@@ -31,7 +31,7 @@ import { dirname, join } from 'node:path';
 import { readStdin } from './secret-patterns.mjs';
 import { extractWrittenContent } from './codex-write-signal.mjs';
 import { readRolloutSignals } from './codex-rollout.mjs';
-import { loadRequirements, isSourceFile } from './flow-evidence.mjs';
+import { loadRequirements, isSourceFile, isRealRunnerInvocation } from './flow-evidence.mjs';
 
 const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -131,9 +131,14 @@ export function orderDecision(signals, req, cwd) {
   // the active flow on Codex (DP1), so it accepts EITHER before-source-edit evidence: a validated
   // spec+plan pair OR a recorded test run this session. So a safe-refactor (or a test-first edit) that
   // ran tests before editing source is no longer falsely denied. Bad/absent testCommand -> skip (no throw).
+  //
+  // A2/HB6: the acceptance is the always-on SHAPE gate (isRealRunnerInvocation), so `echo pytest` no
+  // longer forges before-edit evidence. It stays EXIT-AGNOSTIC on purpose: a TDD RED run (a failing
+  // test written first) MUST still count as ordering evidence, so exit0 is NOT required here (only the
+  // flow-STEP Stop gate requires exit0).
   let testRe = null;
   try { if (req.testCommand) testRe = new RegExp(req.testCommand); } catch { testRe = null; }
-  if (testRe && signals.commands.some((c) => testRe.test(String(c)))) return { satisfied: true };
+  if (testRe && signals.commands.some((c) => isRealRunnerInvocation(c, testRe))) return { satisfied: true };
 
   // SATISFIED iff a single work id W has BOTH an in-session spec write AND an in-session plan write,
   // and both re-validate strict (the plan paired with the SAME-W spec, no fallback).
