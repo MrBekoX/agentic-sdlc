@@ -57,6 +57,18 @@ class TestCodexWriteParser(unittest.TestCase):
         self.assertLess(time.time() - t, 5.0, "heredoc parse should be bounded, not O(n^2)")
         self.assertIsInstance(r.get("parsed"), bool)  # returns a result, no hang/crash
 
+    def test_subshell_strip_is_linear(self):  # security: ReDoS in parseBash subshell strip (#6-C, twin of #5)
+        # A long INTERNAL whitespace run with no trailing ')' is the O(n^2) trap in the per-segment
+        # `.replace(/\s*\)$/, '')` strip: the start-unanchored greedy `\s*` retries from every index in
+        # the run. Reachable by default via scan-write-codex on every Bash command -> hang -> 20s hook
+        # timeout -> fail-open (secret scan skipped). ~15s at 300 KiB with the old regex; <1s linear.
+        import time
+        cmd = "echo " + " " * (300 * 1024) + "x"  # long internal whitespace, no trailing ')', < 512 KiB MAX
+        t = time.time()
+        r = self._parse("Bash", cmd)
+        self.assertLess(time.time() - t, 5.0, "subshell strip must be linear, not O(n^2)")
+        self.assertIsInstance(r.get("parsed"), bool)  # returns a result, no hang
+
     def test_apply_patch_added_lines_only(self):
         cmd = _apply_patch("a.txt", ["TOKEN = " + SECRET, "context"])
         r = self._parse("apply_patch", cmd)

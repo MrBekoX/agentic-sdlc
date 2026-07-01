@@ -66,7 +66,14 @@ function parseBash(cmd) {
   // 2) Segment on statement boundaries (quote-aware): ; && || | — NOT on \n (heredocs gone) and not
   //    structurally on (){}; strip a wrapping subshell so an in-subshell redirect is still seen.
   for (let seg of splitSegments(work)) {
-    seg = seg.trim().replace(/^\(\s*/, '').replace(/\s*\)$/, '').trim();
+    // Strip a wrapping subshell `( ... )`. LINEAR trim + single-char slices — deliberately NOT a
+    // `/\s*\)$/` regex: a greedy `\s*` before a `$` end-anchor is O(n^2) on a long internal whitespace
+    // run, a default-reachable ReDoS via scan-write-codex on every Bash command (#6-C; twin of the #5
+    // fix in codex-rollout.mjs stripWrappingSubshell; see lessons.md). Behavior-identical strip.
+    seg = seg.trim();
+    if (seg.startsWith('(')) seg = seg.slice(1);
+    if (seg.endsWith(')')) seg = seg.slice(0, -1);
+    seg = seg.trim();
     if (!seg || /^cd\b/.test(seg)) continue;            // a `cd` prefix is not a write
     if (!/(?:>>?)\s*\S+\s*$/.test(seg)) continue;        // no trailing redirect -> not a recognized write
     const m = /^(?:printf|echo)\b\s+([\s\S]*?)\s*>>?\s*(\S+)\s*$/.exec(seg);
