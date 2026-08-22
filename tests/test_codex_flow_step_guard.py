@@ -187,8 +187,32 @@ def _mark_write(rel):
 
 
 # ---- node drivers ----------------------------------------------------------
+# Large payloads go through STDIN, not argv. The ReDoS-linearity tests build 76-110 KB commands;
+# the surrounding comments assume the POSIX ~128 KB single-argv limit, but Windows CreateProcess
+# caps the WHOLE command line at 32767 characters, so those tests died with
+# "WinError 206: filename or extension is too long" and the ReDoS guards silently did not run on
+# Windows at all. Above the threshold the args are shipped as one JSON array on stdin and
+# process.argv is rebuilt inside node, so every script body below keeps using process.argv[N].
+_ARGV_SAFE = 4000
+
+
+def _node_argv_or_stdin(script, args):
+    if sum(len(a) for a in args) <= _ARGV_SAFE:
+        return ["node", "--input-type=module", "-e", script, *args], None
+    wrapped = (
+        "let _b='';process.stdin.setEncoding('utf8');"
+        # async: the wrapped script bodies use top-level `await import(...)`.
+        "process.stdin.on('data',d=>_b+=d).on('end',async()=>{"
+        "process.argv=['node',...JSON.parse(_b)];"
+        + script +
+        "});"
+    )
+    return ["node", "--input-type=module", "-e", wrapped], json.dumps(list(args))
+
+
 def _node(script, *args):
-    r = subprocess.run(["node", "--input-type=module", "-e", script, *args],
+    argv, payload = _node_argv_or_stdin(script, args)
+    r = subprocess.run(argv, input=payload,
                        capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     return r.stdout
@@ -817,7 +841,10 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # test_flow_guards / test_codex_flow_step_guard.
         # hooks/flow-requirements.json is NOT locked here — B1 deliberately broadened its testCommand
         # allowlist (a shared Claude+Codex config change, covered by its own recognition test).
-        "hooks/hooks-claude.json",
+        # hooks/hooks-claude.json RELEASED by the 2026-08-22 guard-bypass fix: its Bash-only matcher
+        # left every command guard inert on a Windows host without Git Bash, and its
+        # `if: Bash(git commit*)` filters never started the hook for a git alias. Covered by
+        # tests/test_secret_guard_bypasses.py::TestGuardWiring.
         "hooks/completion-claim-guard.mjs",
         "hooks/completion-claim-guard-codex.mjs",
     ]
