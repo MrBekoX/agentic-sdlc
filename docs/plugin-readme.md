@@ -120,7 +120,7 @@ The scripts are shared, but runtime wiring differs.
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
-## 11. Deterministic scripts (14)
+## 11. Deterministic scripts (15)
 
 | Script | Purpose |
 |---|---|
@@ -138,6 +138,7 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | `bump_version.py` | Sync version across manifests and `VERSION`. |
 | `task_brief.py` | Extract a plan task into a handoff file. |
 | `review_package.py` | Produce a git diff review package. |
+| `install_git_hooks.py` | Install the effect-layer `pre-commit` / `commit-msg` guards into a repository. Git runs those on the OPERATION, after it has resolved aliases, quoting and `$PATH`, so they see what the command-string guards structurally cannot. Never clobbers a foreign hook; `--check` / `--uninstall` supported. |
 
 ## Testing And Evidence
 

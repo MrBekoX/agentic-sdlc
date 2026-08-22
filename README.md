@@ -129,7 +129,7 @@ workflows/         Claude Code dynamic workflow scripts
 hooks/             Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/  Durable behavior contracts
 commands/          Manual slash-command definitions
-scripts/           14 Python helpers: probes, validators, eval runners, versioning
+scripts/           15 Python helpers: probes, validators, eval runners, versioning, git-hook install
 tests/             Unit tests, harness, fixtures, golden refs, eval seeds
 docs/              Component reference, boundaries, testing, release notes
 ```
@@ -185,7 +185,27 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 
 Claude Code also wires flow enforcement: `flow-order-guard.mjs` checks active-flow evidence before source edits, and `flow-step-guard.mjs` re-derives Stop-time evidence from artifacts, tool calls, and commands. Both read [`hooks/flow-requirements.json`](hooks/flow-requirements.json) through [`hooks/flow-evidence.mjs`](hooks/flow-evidence.mjs). Codex carries the same discipline through skills, contracts, explicit validators, and procedure transcripts in this release.
 
-A PreToolUse hook only ever sees the RAW command string. Git aliases are resolved deterministically through [`hooks/git-invocation.mjs`](hooks/git-invocation.mjs), but shell aliases and functions from `~/.bashrc`, `$PATH` shadowing, `eval` and variable indirection are applied by the shell after the hook has already decided, and the write surface (`tee`, `dd`, `base64`, any interpreter) is unbounded. Those are documented residuals, not oversights - deciding what an arbitrary shell command does is undecidable. The command guards are a backstop, not an enforcement boundary.
+Guarding happens at two layers, because one of them provably cannot be complete.
+
+**Command layer (PreToolUse).** Fast, runs before anything executes, and is the only layer that can stop a
+write *before* it lands. It reads the RAW command string. Git aliases are resolved deterministically through
+[`hooks/git-invocation.mjs`](hooks/git-invocation.mjs), but shell aliases and functions from `~/.bashrc`,
+`$PATH` shadowing, `eval` and variable indirection are applied by the shell *after* the hook has decided, and
+the write surface (`tee`, `dd`, `base64`, any interpreter) is unbounded. Those are documented residuals, not
+oversights - deciding what an arbitrary shell command does is undecidable.
+
+**Effect layer.** Closes exactly that class by never reading a command string:
+
+| Guard | Fires on | Why the command-layer residuals do not apply |
+|---|---|---|
+| repo `pre-commit` / `commit-msg` ([`scripts/install_git_hooks.py`](scripts/install_git_hooks.py)) | the git operation | git has already resolved its alias table; the shell has already done quote removal and `$PATH` lookup |
+| [`hooks/worktree-scan.mjs`](hooks/worktree-scan.mjs) (Stop) | bytes on disk | how they were written is irrelevant |
+
+Verified against the real techniques: a shell function wrapping `git commit`, an `eval`-assembled commit,
+`git $C` indirection, a secret inside an alias-supplied message, and writes via `tee`, `base64 -d` and
+`python -c` are all caught. The documented limit of the effect layer is stated too: `git commit --no-verify`
+skips a client-side hook by git's design, and the Stop scan is detection - the bytes are already on disk.
+Non-negotiable enforcement belongs server-side (`pre-receive`) or in CI.
 
 Judgment-based checks, such as whether context was actually read or test output was understood, live in skills and contracts rather than hook scripts. See [`hooks/README.md`](hooks/README.md).
 

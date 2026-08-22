@@ -84,6 +84,14 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/flow-step-guard.mjs"],
             "timeout": 30,
             "statusMessage": "Flow-step guard..."
+          },
+          {
+            "$comment": "Effect-layer DETECTION: scans the bytes that actually landed in the working tree, so the write form (tee/dd/base64/python -c/any redirect) is irrelevant — the class the command-string write guard documents as out of reach. Advisory by default; AGENTIC_WORKTREE_SCAN_BLOCK=true escalates it.",
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/worktree-scan.mjs"],
+            "timeout": 20,
+            "statusMessage": "Working-tree secret scan..."
           }
         ]
       }
