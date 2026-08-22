@@ -20,6 +20,17 @@ Each entry includes:
 
 ---
 
+## 2026-08-23 — When a layer is provably incomplete, add a layer; do not keep patching it
+
+- **Task / context:** After ten adversarial rounds hardened the PreToolUse command guards, the loop was still producing real findings. The remaining gaps were not bugs — they were the layer's definition.
+- **Symptom:** Every surviving bypass shared one shape: something the SHELL resolves after the hook has already decided. A shell function named `gc` wrapping `git commit`; `eval "$(printf 'git com'; printf 'mit')"`; `C=commit; git $C`; and writes through `tee`, `base64 -d` or `python -c` — none of which a command-string reader can see, and no amount of parser work changes that. Patching harder was producing narrower and narrower fixes (a mid-name `.pub.`, a `printf` octal escape) while the structural hole stayed open.
+- **Root cause:** The guard was installed at the wrong altitude. A PreToolUse hook receives a STRING and must predict an EFFECT; deciding what an arbitrary shell command does is undecidable, so the layer can only ever be a probabilistic backstop. Ten rounds of fixes raised its recall — they could not change its category.
+- **Correct fix:** Add layers that observe the effect instead of predicting it. Git runs `pre-commit` / `pre-merge-commit` / `commit-msg` / `prepare-commit-msg` on the OPERATION, after it has resolved its own alias table and the shell has done quote removal and `$PATH` lookup; a Stop-time scan reads bytes on disk, so the write form is irrelevant. Both reuse the SAME hardened detection primitives, so the ten rounds' work carries over untouched — the new layers add reach, not a second scanner to keep in sync. Measured result: 12/12 of the previously-unreachable techniques are now caught, controls still clean.
+- **Preventive rule / automated check:** Before hardening a guard for another round, ask what LAYER it sits at and whether the residuals are bugs or definitional. If the residual list is "everything the runtime resolves after we decide", stop patching and add an observation point lower down. Then state each layer's limit in its own file header — `--no-verify`, `core.hooksPath=/dev/null`, `Stop` not firing on user interrupt — and pin them with tests, so the layering is never mistaken for completeness. Two details that only showed up by reading the primary docs and testing: `prepare-commit-msg` is the one commit-path hook `--no-verify` does NOT suppress (so it is the strongest client-side slot, not `pre-commit`), and `git ls-files --others --exclude-standard` hides gitignored files — which is exactly where `.env` lives.
+- **Related files & tests:** `hooks/git-hook-scan.mjs`, `hooks/worktree-scan.mjs`, `scripts/install_git_hooks.py`; `tests/test_effect_layer_guards.py`.
+
+---
+
 ## 2026-08-23 — Enumerate the decoding layers between the string you inspect and the bytes that land
 
 - **Task / context:** Rounds 5–9 of the adversarial loop over the PreToolUse guards. The loop ran until each round's findings were exotic rather than routine; 22 distinct defects were closed across nine rounds.

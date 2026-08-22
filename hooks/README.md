@@ -43,6 +43,8 @@ Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve t
 | `flow-step-guard-codex.mjs` | Not wired | `Stop` | Codex evidence-only flow-step backstop: re-derives active-flow evidence from THIS rollout's in-session spec/plan writes (session-scoped — committed prior-session artifacts never activate a flow), recorded commands, and patch edit targets; warns by default and blocks missing `stop:block` steps when `AGENTIC_FLOW_GATE_BLOCK=true`. Fail-open; output names only step ids, never rollout bytes/work-id. |
 | `flow-evidence.mjs` | Shared library | Shared library | Evidence engine used by `flow-order-guard.mjs` and `flow-step-guard.mjs`. |
 | `codex-flow-evidence.mjs` | Not wired | Shared library | Pure session-scoped flow-evidence derivation for `flow-step-guard-codex.mjs`: active-flow by in-session artifact write, same-work-id spec/plan pairing (no fallback), `validate_artifacts.py --strict` subprocess, fail-open. Reuses the byte-locked `flow-evidence.mjs` read-only helpers (`loadRequirements`/`blockFlag`/`isSourceFile`). |
+| `worktree-scan.mjs` | `Stop` | Not wired (VERIFY - the Codex Stop payload and output contract were not probed) | Effect-layer DETECTION: scans the bytes that actually landed in the working tree (uncommitted tracked changes plus untracked files) rather than any command string, so the write form is irrelevant - `tee`, `dd`, `base64`, `python -c` and unrecognized redirects all surface identically. That is precisely the class `scan-write-codex.mjs` documents as out of reach. Scans untracked files INCLUDING gitignored ones - `.env` is both the likeliest home for a secret and almost always gitignored, so `--exclude-standard` alone skipped exactly the file that matters; vendored trees (`node_modules`, `.venv`, `dist`, ...) are excluded instead. Advisory by default via `systemMessage` (stderr from a hook that exits 0 never reaches the transcript); `AGENTIC_WORKTREE_SCAN_BLOCK=true` escalates to a Stop block. Per-session dedup, bounded (200 files / 256 KiB each / 4 MiB total), fail-open, values masked. |
+| `git-hook-scan.mjs` | Repo git hook | Repo git hook | Effect-layer PREVENTION, invoked from a repository's own `pre-commit` and `pre-merge-commit` (staged content + credential filenames; `git merge` runs the latter, NOT `pre-commit`), `commit-msg` (the message), and `prepare-commit-msg` - the one commit-path hook git does NOT suppress under `--no-verify`, and which can read both the staged index and the message. Runs on the git OPERATION, after git has resolved its alias table and the shell has done quote removal and `$PATH` lookup, so `git ci`, `g'i't commit`, a shell function named `git` and `eval` all reach it identically. Documented bypass: `git commit --no-verify`. Install with `scripts/install_git_hooks.py`. |
 | `shell-quoting.mjs` | Shared library | Shared library | Pure ANSI-C quoting decoder (`$'...'`). The shell decodes those escapes BEFORE the command runs, so `git commit -m $'\x73\x6b...'` records `sk-...` in history and `echo $'...' > f` writes it to disk while the raw hook input carries no vendor-shaped text. Both the commit-message scan and the write extractor decode through this module first. |
 | `git-invocation.mjs` | Shared library | Shared library | Resolves which git subcommands a command line will actually run, expanding git aliases (chains, `!shell` aliases, `-c alias.x=y`), global options, wrappers, quoted command names, and subshell/brace-group wrappers. `-C` is scoped PER STATEMENT and applied cumulatively the way git does (`git -C a -C b` == `cd a/b`); ask for the directories of the calls you care about with `targetCwdsFor` (a command line can carry more than one commit, and each is scanned in its own repository). Commit-message extraction covers `-m`, `--message`, bundled short options (`-am"msg"`), and `-F` files read from the repository of the statement that names them. Cannot see SHELL aliases/functions, `$PATH` shadowing or `eval` — those resolve after the hook has decided (documented in the file header). |
 | `scan-commit-names.mjs` | Shared library | Shared library | Linear credential-filename matcher for `scan-commit.mjs`, including derived copies (`id_rsa.bak`, `.npmrc.old`, `server.key.bak`) while leaving ordinary files (`notes.bak`, `keys.md`, `api.keys.json`) clean. Deliberately NOT a regex: the pattern that first implemented derived suffixes backtracked catastrophically (20.6 s at 12 dotted suffixes) on an agent-influenced filename. |
@@ -53,6 +55,44 @@ Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve t
 `flow-requirements.json` is the shared source for active-flow step definitions and source-file extensions. The live flow hooks read it at runtime, and `tests/test_flow_requirements.py` validates that its skill, workflow, agent, and validator references resolve.
 
 All scripts are generic: no shell for git operations, path-normalized skip lists, no embedded real secrets, and fail-open behavior on hook errors.
+
+## Effect Layer: What It Closes, And What It Does Not
+
+The command guards read the raw command string and cannot be complete - shell aliases and
+functions, `$PATH` shadowing, `eval` and variable indirection resolve after the hook has decided,
+and the write surface is unbounded. The effect layer closes that class by never reading a command:
+git runs `pre-commit`/`pre-merge-commit`/`commit-msg`/`prepare-commit-msg` on the OPERATION, and
+`worktree-scan.mjs` reads bytes on disk.
+
+Verified by execution: a shell function wrapping `git commit`, an `eval`-assembled commit,
+`git $C` indirection, a secret inside an alias-supplied message, `git commit --no-verify`, a
+non-fast-forward merge commit, writes via `tee` / `base64 -d` / `python -c`, and a gitignored
+`.env` are all caught.
+
+Stated limits, so nobody reads more into this than it delivers:
+
+- `git -c core.hooksPath=/dev/null commit` disables all hooks - git documents this. A client-side
+  hook is a fast local backstop; non-negotiable enforcement belongs server-side (`pre-receive`) or
+  in CI.
+- `Stop` does not fire on a user interrupt or an API error, so the working-tree scan can be skipped.
+- The Stop scan is DETECTION: the bytes are already on disk when it runs. Prevention for the commit
+  path is the git hook.
+- A timed-out hook renders no decision at all, which is why the scan is bounded.
+
+### Codex
+
+`worktree-scan.mjs` is portable in principle - Codex has a `Stop` event that runs with the session
+cwd - but it is NOT wired there yet (VERIFY), for three documented reasons:
+
+1. Codex's `Stop` inverts the block semantics: `decision: "block"` does not reject the turn, it
+   continues it using `reason` as a new user prompt. Wiring the Claude output shape unchanged would
+   produce a prompt loop, not a warning.
+2. Under Codex's default `workspace-write` sandbox, `<writable_root>/.git` is read-only, so the git
+   hooks cannot be installed from inside a Codex session at all. Run
+   `scripts/install_git_hooks.py` outside the sandbox.
+3. Codex ships its own managed `prepare-commit-msg` hook for commit co-author attribution. Git runs
+   exactly one file per hook name, so the two cannot coexist silently - the installer's
+   refuse-on-foreign-hook behaviour is what keeps that collision visible instead of destructive.
 
 ## Conceptual Hooks
 

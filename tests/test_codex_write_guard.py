@@ -261,7 +261,7 @@ class TestCodexWriteGuardWiring(unittest.TestCase):
             # Windows host with no Git Bash, and a subcommand-level `if` never starts the hook
             # for a git alias). NOTE: this lock is byte-exact and therefore line-ending
             # sensitive; recompute it on the same checkout style it was recorded on.
-            "hooks/hooks-claude.json": "ec42d0ade8fcfe4171e85eb611c29fe00080d1a7eeec0c3c08518d13f2694c9c",
+            "hooks/hooks-claude.json": "e50dbe053f4cc59a1b2ce23fc1cc6b96581a1f0f28048b1bc31aa544c0e3ed39",
         }
         for rel, want in digests.items():
             got = hashlib.sha256((REPO / rel).read_bytes()).hexdigest()
