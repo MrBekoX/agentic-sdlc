@@ -1,0 +1,1253 @@
+"""RED regression coverage for the guard bypasses confirmed by the 2026-08-22 adversarial
+multi-lens security review of the secret/commit/branch guards.
+
+Every case here was verified BY EXECUTION before any fix: a high-confidence, structurally
+valid secret reaches its sink (a commit, or a file on disk) while the guard reports success.
+These are fail-OPEN paths, not style issues.
+
+No literal secret-shaped string appears in this file: every token is CONSTRUCTED at runtime
+from synthetic parts.
+
+Findings covered (severity as assessed against the guards' own threat model):
+  F1  codex-write-signal.extractLiteral truncates a multi-token echo/printf payload; the guard
+      scans the empty string and still reports parsed:true, while the shell writes the full
+      payload including the secret.                                              (critical)
+  F2  scan-commit / branch-guard gate their whole logic on the literal substring commit|push
+      in the raw command, so a git alias (git config alias.ci 'commit -a'; git ci) disarms
+      both guards entirely.                                                          (high)
+  F3  scan-commit never scans the commit MESSAGE, so a secret passed via -m is written to
+      permanent git history unscanned.                                               (high)
+  F4  secret-patterns.looksPlaceholder is applied to the WHOLE match for the nine HIGH
+      patterns that carry no valueGroup, so a vendor-shaped token that happens to contain
+      'xxxx' / 'example' / '<' is discarded as a placeholder.                        (high)
+  F5  scan-commit SECRET_FILENAME misses derived credential filenames (id_rsa.bak).  (medium)
+  F6  Word-boundary-anchored fixed-length token patterns miss a token that is adjacent to
+      another word character.                                                        (medium)
+
+Each class also asserts CONTROL cases: a clean input must stay allowed, and a plain secret
+must stay blocked. A fix that simply blocks everything fails these.
+"""
+import json
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+NODE = shutil.which("node")
+GIT = shutil.which("git")
+
+# --- Synthetic tokens, assembled so no secret-shaped literal exists in this source. ---
+# Every token here is NON-DEGENERATE (no single character dominates it), because a real vendor
+# token never is. A token built from one repeated character is a documentation placeholder, and
+# suppressing THOSE is legitimate — that case is asserted separately below.
+_A = "a1B2"
+_R16 = "4eC39HqLyjWDarjt"                       # 16 mixed-case/digit chars, no dominant character
+GH_CLEAN = "ghp_" + _A * 9                      # ghp_ + 36
+GH_XXXX = "ghp_" + "xxxx" + _A * 8              # ghp_ + 36, carries an xxxx run but is otherwise real
+AWS_CLEAN = "AKIA" + "IOSFODNN7EXAMPL2"         # AKIA + 16 (not the AWS doc sample: trailing 2)
+AWS_XXXX = "AKIA" + "XXXX" + "IOSFODNN7EXA"     # AKIA + 16, uppercase run, rest realistic
+STRIPE_CLEAN = "sk_" + "live_" + _R16
+STRIPE_XXXX = "sk_" + "test_" + "xxxx" + _R16
+OPENAI_XXXX = "sk-" + "xxxx" + "T3BlbkFJabc123XYZ789"
+GOOGLE_CLEAN = "AIza" + _A * 8 + "abc"          # AIza + 35
+
+# Genuine documentation placeholders: a single repeated run. These MUST stay suppressed, or every
+# README that shows a token shape starts blocking commits.
+GH_PLACEHOLDER = "ghp_" + "x" * 36
+AWS_PLACEHOLDER = "AKIA" + "X" * 16
+
+HEREDOC_WRITE = "cat <<'XEOFX' > f\n{}\nXEOFX"
+
+
+def _node_json(module_expr, stdin_text):
+    """Run a tiny node program that imports a hook module and prints JSON."""
+    src = (
+        "let c='';process.stdin.setEncoding('utf8');"
+        "process.stdin.on('data',d=>c+=d).on('end',()=>"
+        + module_expr +
+        ".catch(e=>{process.stderr.write(String(e&&e.message||e));process.exit(3)}))"
+    )
+    proc = subprocess.run(
+        [NODE, "-e", src], input=stdin_text,
+        cwd=str(REPO), capture_output=True, text=True, encoding="utf-8",
+    )
+    assert proc.returncode == 0, "node errored: " + proc.stderr
+    return json.loads(proc.stdout)
+
+
+def scan_high(text):
+    """secret-patterns.scanLines(text, HIGH) -> list of findings."""
+    return _node_json(
+        "import('./hooks/secret-patterns.mjs')"
+        ".then(m=>process.stdout.write(JSON.stringify(m.scanLines(c,m.HIGH))))",
+        text,
+    )
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestPlaceholderFilterOnVendorTokens(unittest.TestCase):
+    """F4 - the placeholder heuristic must not suppress a structurally valid vendor token.
+
+    looksPlaceholder exists to skip user-authored right-hand-side values like
+    `password=<your-password>` (agentic-sdlc:allow-secret). Nine of the eleven HIGH patterns
+    have no valueGroup, so the
+    value it inspects is the ENTIRE matched token - one that already passed a strict,
+    vendor-published shape test. A token is not a placeholder because of the characters
+    inside it.
+    """
+
+    def test_vendor_token_with_placeholder_run_is_still_detected(self):
+        cases = {
+            "github-xxxx": "TOKEN = " + GH_XXXX,
+            "aws-XXXX": "KEY = " + AWS_XXXX,
+            "stripe-xxxx": "STRIPE = " + STRIPE_XXXX,
+            "openai-xxxx": "OPENAI = " + OPENAI_XXXX,
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self.assertTrue(
+                    scan_high(line),
+                    label + ": vendor-shaped token suppressed as a placeholder (fail-open)",
+                )
+
+    def test_captured_value_with_placeholder_word_is_still_detected(self):
+        # password-literal and json-credential DO use a valueGroup, so the heuristic legitimately
+        # applies - but only to obvious template text, never to a value that merely CONTAINS a
+        # placeholder-ish word next to real entropy.
+        cases = {
+            "password-example": "password=MyRealSecret" + "Example" + "8412",  # agentic-sdlc:allow-secret
+            "json-cred-angle": '"api_secret": "' + "q7" + "<" + "Wm4" + _A * 4 + '"',
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self.assertTrue(scan_high(line), label + ": real value suppressed (fail-open)")
+
+    def test_true_placeholders_stay_suppressed(self):
+        # CONTROL: the heuristic must keep working where it belongs, or the fix is just
+        # "delete the filter" and every template file becomes a false positive.
+        for line in [
+            "password=<your-password-here>",
+            "password=${DB_PASSWORD}",
+            "password=CHANGE_ME",
+            '"client_secret": "your-client-secret-goes-here"',
+            "password=process.env.DB_PASS",
+        ]:
+            with self.subTest(line=line):
+                self.assertEqual(scan_high(line), [], "false positive on template: " + line)
+
+    def test_clean_prose_is_not_flagged(self):
+        # CONTROL: no finding on ordinary text.
+        self.assertEqual(scan_high("just a normal line of documentation about passwords"), [])
+
+    def test_degenerate_documentation_tokens_stay_suppressed(self):
+        # CONTROL, and the reason the keyword filter existed at all: a token that is one repeated
+        # run is a doc placeholder, not a credential. Removing the keyword rule must not turn every
+        # README token shape into a blocked commit.
+        cases = {
+            "github-all-x": "TOKEN = " + GH_PLACEHOLDER,
+            "aws-all-X": "KEY = " + AWS_PLACEHOLDER,
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self.assertEqual(scan_high(line), [], label + ": doc placeholder now blocks commits")
+
+    def test_published_doc_samples_stay_suppressed(self):
+        # CONTROL: the canonical vendor documentation keys appear in countless READMEs. They are
+        # suppressed by an EXACT-value allowlist, which cannot suppress a class the way the old
+        # substring rule did.
+        for label, line in {
+            "aws-docs": "KEY = " + "AKIA" + "IOSFODNN7EXAMPLE",
+            "google-docs": "KEY = " + "AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe",
+        }.items():
+            with self.subTest(case=label):
+                self.assertEqual(scan_high(line), [], label + ": published doc sample blocks commits")
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestTokenBoundaryAnchoring(unittest.TestCase):
+    """F6 - a fixed-length token pattern closed with a word boundary is defeated by one
+    adjacent word character. Open-ended patterns (stripe {16,}) are unaffected, which is
+    exactly why this is a pattern-construction defect and not a detection-strategy one."""
+
+    def test_token_adjacent_to_word_character_is_still_detected(self):
+        # The two realistic shapes. `_` is a \w character, so a leading `\b` never fires on an
+        # env-var-prefixed token; and a trailing `\b` after a FIXED length drops the token as soon
+        # as one more word character follows.
+        cases = {
+            "github-underscore-prefix": "MYAPP_" + GH_CLEAN,
+            "stripe-underscore-prefix": "STRIPE_" + STRIPE_CLEAN,
+            "google-underscore-prefix": "GOOGLE_" + GOOGLE_CLEAN,
+            "github-trailing": "TOKEN=" + GH_CLEAN + "X",
+            "aws-trailing": "KEY=" + AWS_CLEAN + "C",
+            "google-trailing": "KEY=" + GOOGLE_CLEAN + "9",
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self.assertTrue(scan_high(line), label + ": boundary anchor caused a miss")
+
+    def test_prefix_inside_a_word_is_not_flagged(self):
+        # CONTROL for dropping the anchors: `sk-` must not match inside an ordinary word, or every
+        # `task-<20 chars>` identifier becomes a blocked "openai-key".
+        for line in [
+            "const task-abcdefghij0123456789 = 1",
+            "risk-assessment-report-2026-08-22-final",
+            "https://example.com/disk-usage-abcdefghij0123",
+        ]:
+            with self.subTest(line=line):
+                self.assertEqual(scan_high(line), [], "false positive inside a word: " + line)
+
+    def test_plain_tokens_remain_detected(self):
+        # CONTROL: the anchoring fix must not lose the ordinary case.
+        cases = {
+            "github": "TOKEN=" + GH_CLEAN,
+            "aws": "KEY=" + AWS_CLEAN,
+            "google": "KEY=" + GOOGLE_CLEAN,
+            "stripe": "S=" + STRIPE_CLEAN,
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self.assertTrue(scan_high(line), label + ": regression on the plain case")
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestCodexWriteLiteralTruncation(unittest.TestCase):
+    """F1 - extractLiteral returns only the first quoted or bare token of an echo/printf
+    payload and silently discards the rest, while the shell writes all of it.
+
+    Verified before the fix:
+        echo "" <token> > notes.txt   ->  addedContent='', targets=['notes.txt'], parsed=true
+    and the shell really does write the token to notes.txt.
+    """
+
+    HOOK = REPO / "hooks" / "scan-write-codex.mjs"
+
+    def _parse(self, command, tool_name="Bash"):
+        return _node_json(
+            "import('./hooks/codex-write-signal.mjs')"
+            ".then(m=>process.stdout.write(JSON.stringify("
+            "m.extractWrittenContent(" + json.dumps(tool_name) + ",c))))",
+            command,
+        )
+
+    def _run_hook(self, command, tool_name="Bash"):
+        payload = {
+            "tool_name": tool_name, "hook_event_name": "PreToolUse",
+            "tool_input": {"command": command}, "cwd": "/repo",
+            "session_id": "s", "transcript_path": "/x",
+        }
+        proc = subprocess.run(
+            [NODE, str(self.HOOK)], input=json.dumps(payload),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def _assert_denied(self, command):
+        out = self._run_hook(command)
+        self.assertEqual(
+            out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny",
+            "write not denied, secret reaches disk: " + repr(command[:60]) + " -> " + repr(out),
+        )
+        self.assertNotIn(GH_CLEAN, json.dumps(out), "deny reason must mask the secret")
+
+    def test_multi_token_payload_write_is_denied(self):
+        cases = {
+            "empty-quote-prefix": 'echo "" ' + GH_CLEAN + " > notes.txt",
+            "empty-single-quote-prefix": "echo '' " + GH_CLEAN + " > notes.txt",
+            "short-bareword-prefix": "echo x " + GH_CLEAN + " > notes.txt",
+            "trailing-extra-token": "echo " + GH_CLEAN + " extra > notes.txt",
+            "two-quoted-tokens": 'echo "a" "' + GH_CLEAN + '" > notes.txt',
+            "printf-multi-arg": "printf '%s' " + GH_CLEAN + " > notes.txt",
+            "append-form": 'echo "" ' + GH_CLEAN + " >> notes.txt",
+        }
+        for label, cmd in cases.items():
+            with self.subTest(case=label):
+                self._assert_denied(cmd)
+
+    def test_parser_never_claims_parsed_while_dropping_payload(self):
+        # The honest-coverage contract: if the parser cannot account for the whole payload of a
+        # recognized write, it must not both (a) return content missing that payload and
+        # (b) report parsed=true. Silent under-reporting is what made F1 exploitable.
+        cases = {
+            "empty-quote-prefix": 'echo "" ' + GH_CLEAN + " > notes.txt",
+            "short-bareword-prefix": "echo x " + GH_CLEAN + " > notes.txt",
+            "trailing-extra-token": "echo " + GH_CLEAN + " extra > notes.txt",
+        }
+        for label, cmd in cases.items():
+            with self.subTest(case=label):
+                res = self._parse(cmd)
+                covered = GH_CLEAN in (res.get("addedContent") or "")
+                self.assertTrue(
+                    covered or res.get("parsed") is False,
+                    label + ": payload dropped AND parsed=true -> silent under-report: " + repr(res),
+                )
+
+    def test_single_literal_forms_still_denied(self):
+        # CONTROL: the forms that already worked must keep working.
+        self._assert_denied("printf '" + GH_CLEAN + "' > f")
+        self._assert_denied("echo '" + GH_CLEAN + "' >> f")
+        self._assert_denied(HEREDOC_WRITE.format(GH_CLEAN))
+
+    def test_clean_multi_token_write_is_allowed(self):
+        # CONTROL: over-approximating the payload must not block ordinary multi-token writes.
+        for cmd in [
+            'echo "" hello world > notes.txt',
+            "echo build ok > status.txt",
+            "printf '%s' done > status.txt",
+        ]:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self._run_hook(cmd), {}, "false block on clean write: " + cmd)
+
+    def test_expansion_dependent_write_still_allowed(self):
+        # CONTROL: an expansion-only payload carries no literal secret and must not be blocked.
+        for cmd in ["printf '%s' \"$TOKEN\" > f", "echo $TOKEN > f"]:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self._run_hook(cmd), {})
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node or git not available")
+class TestGitAliasGuardBypass(unittest.TestCase):
+    """F2 - both guards gate on the literal substring commit|push in the raw command string.
+    A git alias performs a real commit while that substring is absent, so the entire guard is
+    skipped. Setting the alias (git config alias.ci ...) matches neither guard either."""
+
+    SCAN = REPO / "hooks" / "scan-commit.mjs"
+    BRANCH = REPO / "hooks" / "branch-guard.mjs"
+
+    def _repo_with_staged_secret(self, td):
+        subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+        subprocess.run(["git", "config", "alias.ci", "commit -a"], cwd=td, check=True, capture_output=True)
+        subprocess.run(["git", "config", "alias.publish", "push origin main"], cwd=td, check=True, capture_output=True)
+        p = Path(td) / "config.txt"
+        p.write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "config.txt"], cwd=td, check=True, capture_output=True)
+
+    def _run(self, hook, command, cwd):
+        proc = subprocess.run(
+            [NODE, str(hook)], cwd=cwd,
+            input=json.dumps({"tool_input": {"command": command}}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def test_aliased_commit_is_still_scanned(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._repo_with_staged_secret(td)
+            cases = {
+                "alias": "git ci -m wip",
+                "alias-with-global-opt": "git --no-pager ci -m wip",
+                "alias-with-C": "git -C . ci -m wip",
+                "inline-config-alias": "git -c alias.zz=commit zz -m wip",
+            }
+            for label, cmd in cases.items():
+                with self.subTest(case=label):
+                    out = self._run(self.SCAN, cmd, td)
+                    self.assertEqual(
+                        out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny",
+                        label + ": staged secret committed unscanned via alias -> " + repr(out),
+                    )
+
+    def test_plain_commit_still_scanned(self):
+        # CONTROL: the ordinary path must keep working.
+        with tempfile.TemporaryDirectory() as td:
+            self._repo_with_staged_secret(td)
+            out = self._run(self.SCAN, "git commit -m wip", td)
+            self.assertEqual(out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+
+    def test_read_only_git_commands_stay_allowed(self):
+        # CONTROL: resolving aliases must not turn every git call into a scan-and-deny.
+        with tempfile.TemporaryDirectory() as td:
+            self._repo_with_staged_secret(td)
+            for cmd in ["git status", "git log --oneline", "git diff --cached", "git branch -a"]:
+                with self.subTest(cmd=cmd):
+                    self.assertEqual(self._run(self.SCAN, cmd, td), {}, "false block: " + cmd)
+
+    def test_alias_shadowing_a_builtin_is_ignored_like_git_ignores_it(self):
+        # CONTROL: git does NOT honour an alias that hides an existing command - verified live,
+        # `alias.status = "commit -a"` still runs status. A resolver that expanded it anyway would
+        # DENY a read-only command whenever a secret happened to be staged.
+        with tempfile.TemporaryDirectory() as td:
+            self._repo_with_staged_secret(td)
+            subprocess.run(["git", "config", "alias.status", "commit -a"],
+                           cwd=td, check=True, capture_output=True)
+            self.assertEqual(
+                self._run(self.SCAN, "git status", td), {},
+                "read-only `git status` denied because a shadowing alias was expanded",
+            )
+
+    def test_branch_guard_sees_aliased_commit_on_main(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._repo_with_staged_secret(td)
+            out = self._run(self.BRANCH, "git ci -m wip", td)
+            self.assertTrue(
+                out, "branch-guard silent on an aliased commit to main (guard fully skipped)",
+            )
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node or git not available")
+class TestCommitMessageScan(unittest.TestCase):
+    """F3 - the commit MESSAGE is part of the commit and is persisted forever by git, but
+    scan-commit builds its corpus only from the staged diff and the staged filenames."""
+
+    HOOK = REPO / "hooks" / "scan-commit.mjs"
+
+    def _run(self, command, td):
+        proc = subprocess.run(
+            [NODE, str(self.HOOK)], cwd=td,
+            input=json.dumps({"tool_input": {"command": command}}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def _clean_repo(self, td):
+        subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+        p = Path(td) / "readme.txt"
+        p.write_text("nothing secret here\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "readme.txt"], cwd=td, check=True, capture_output=True)
+
+    def test_secret_in_commit_message_is_denied(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._clean_repo(td)
+            cases = {
+                "dash-m-double-quote": 'git commit -m "rotate ' + GH_CLEAN + '"',
+                "dash-m-single-quote": "git commit -m 'rotate " + GH_CLEAN + "'",
+                "dash-m-joined": 'git commit -m"' + GH_CLEAN + '"',
+                "long-message-flag": 'git commit --message="' + GH_CLEAN + '"',
+            }
+            for label, cmd in cases.items():
+                with self.subTest(case=label):
+                    out = self._run(cmd, td)
+                    self.assertEqual(
+                        out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny",
+                        label + ": secret persisted into git history unscanned -> " + repr(out),
+                    )
+
+    def test_ordinary_message_allowed(self):
+        # CONTROL: normal messages must not be blocked.
+        with tempfile.TemporaryDirectory() as td:
+            self._clean_repo(td)
+            for cmd in [
+                'git commit -m "fix: handle empty payload"',
+                "git commit -m 'chore: bump version to 0.4.0'",
+                'git commit -m "docs: explain the token refresh flow"',
+            ]:
+                with self.subTest(cmd=cmd):
+                    self.assertEqual(self._run(cmd, td), {}, "false block: " + cmd)
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node or git not available")
+class TestDerivedCredentialFilenames(unittest.TestCase):
+    """F5 - SECRET_FILENAME anchors the exact name, so a copy/backup of a credential file
+    (id_rsa.bak) is committed without the filename check firing. A DER/binary key body has no
+    header line for the content scan to catch, so the filename check is the only control."""
+
+    HOOK = REPO / "hooks" / "scan-commit.mjs"
+
+    def _scan(self, name, content="binary-key-body-not-pem\n"):
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            p = Path(td) / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+            subprocess.run(["git", "add", "--", name], cwd=td, check=True, capture_output=True)
+            proc = subprocess.run(
+                [NODE, str(self.HOOK)], cwd=td,
+                input=json.dumps({"tool_input": {"command": "git commit -m test"}}),
+                capture_output=True, text=True, encoding="utf-8",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def test_derived_credential_filenames_are_caught(self):
+        for name in ["id_rsa.bak", "id_rsa.backup", "id_ed25519.old", ".npmrc.old", "server.key.bak"]:
+            with self.subTest(name=name):
+                out = self._scan(name)
+                self.assertEqual(
+                    out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny",
+                    name + ": derived credential file committed unflagged -> " + repr(out),
+                )
+
+    def test_exact_credential_filenames_still_caught(self):
+        # CONTROL: the original names must keep working.
+        for name in ["id_rsa", "server.pem", ".npmrc", "cert.p12"]:
+            with self.subTest(name=name):
+                out = self._scan(name)
+                self.assertEqual(out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+
+    def test_ordinary_filenames_allowed(self):
+        # CONTROL: broadening the pattern must not catch normal source files.
+        for name in ["main.py", "keyboard.js", "monkey.txt", "notes.bak", "keys.md"]:
+            with self.subTest(name=name):
+                self.assertEqual(self._scan(name, "hello\n"), {}, "false block on " + name)
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node or git not available")
+class TestFixResiduals(unittest.TestCase):
+    """Second round. An adversarial re-review of the FIX found five defects the fix itself
+    introduced or left behind; all five were reproduced by execution before being closed.
+
+      R1  Both guards added a cheap `/\\bgit\\b/` pre-filter that runs BEFORE the quote-aware
+          tokenizer, so `g'i't commit` exits early - the pre-filter defeats the very obfuscation
+          handling the new resolver was written for.
+      R2  UNREAD_WRITE recognizes `sed -i` but not GNU long-form `sed --in-place`, so that write
+          still came back parsed:true (the exact CWE-636 shape the fix claimed to remove).
+      R3  The commit-message scan tokenizes only the typed command, so a secret living inside the
+          ALIAS definition (`alias.ci = "commit -a -m '<token>'"`) is never scanned.
+      R4  Alias lookup and the git reads all use the hook process cwd, so `git -C ../other ci`
+          resolves against the wrong repository and the guard skips a real commit.
+      R5  SECRET_FILENAME was rebuilt with `(?:\\.[A-Za-z0-9]{1,8}|~)*$` - a repeated ambiguous
+          group before an end anchor. Measured 459 ms / 1.16 s / 20.6 s at 8 / 10 / 12 groups:
+          catastrophic backtracking introduced BY the fix, in a guard that runs on every commit.
+    """
+
+    SCAN = REPO / "hooks" / "scan-commit.mjs"
+
+    def _run(self, command, cwd, hook=None):
+        proc = subprocess.run(
+            [NODE, str(hook or self.SCAN)], cwd=cwd,
+            input=json.dumps({"tool_input": {"command": command}, "cwd": cwd}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def _decision(self, out):
+        return out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+    def _repo(self, td, *, alias=None, staged_secret=True):
+        subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+        if alias:
+            subprocess.run(["git", "config", "alias." + alias[0], alias[1]],
+                           cwd=td, check=True, capture_output=True)
+        body = ("TOKEN = " + GH_CLEAN + "\n") if staged_secret else "clean\n"
+        Path(td, "config.txt").write_text(body, encoding="utf-8")
+        subprocess.run(["git", "add", "--", "config.txt"], cwd=td, check=True, capture_output=True)
+
+    def test_r1_quote_obfuscated_git_is_still_scanned(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._repo(td)
+            for label, cmd in {
+                "split-quotes": "g'i't commit -m wip",
+                "quoted-name": '"git" commit -m wip',
+                "backslash": "g\\it commit -m wip",
+            }.items():
+                with self.subTest(case=label):
+                    self.assertEqual(
+                        self._decision(self._run(cmd, td)), "deny",
+                        label + ": cheap pre-filter skipped the quote-aware resolver",
+                    )
+
+    def test_r2_sed_long_option_is_not_claimed_as_parsed(self):
+        res = _node_json(
+            "import('./hooks/codex-write-signal.mjs')"
+            ".then(m=>process.stdout.write(JSON.stringify(m.extractWrittenContent('Bash',c))))",
+            "sed --in-place 's/x/y/' f.env",
+        )
+        self.assertFalse(
+            res.get("parsed"),
+            "sed --in-place is an unread write; parsed must not claim full coverage: " + repr(res),
+        )
+
+    def test_r3_secret_inside_the_alias_message_is_scanned(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._repo(td, alias=("ci", "commit -a -m '" + GH_CLEAN + "'"), staged_secret=False)
+            self.assertEqual(
+                self._decision(self._run("git ci", td)), "deny",
+                "secret in the alias's own -m reached history unscanned",
+            )
+
+    def test_r4_dash_C_target_repo_is_resolved(self):
+        with tempfile.TemporaryDirectory() as base:
+            other = Path(base, "other"); other.mkdir()
+            here = Path(base, "here"); here.mkdir()
+            self._repo(str(other), alias=("ci", "commit -a"))
+            self._repo(str(here), staged_secret=False)      # no alias, no secret here
+            self.assertEqual(
+                self._decision(self._run("git -C ../other ci -m wip", str(here))), "deny",
+                "-C target repo not resolved: alias + staged secret in the OTHER repo went unscanned",
+            )
+
+    def test_r5_derived_filename_match_is_linear(self):
+        import time
+        # 12 groups measured 20.6 s with the backtracking regex; a linear matcher is ~0 ms.
+        name = "id_rsa" + ".a" * 24 + "!"
+        res = _node_json(
+            "import('./hooks/scan-commit-names.mjs')"
+            ".then(m=>process.stdout.write(JSON.stringify(m.isCredentialFilename(c))))",
+            name,
+        )
+        self.assertIsInstance(res, bool)
+
+    def test_r5_timing_stays_flat(self):
+        import time
+        t = time.time()
+        for n in (12, 18, 24):
+            _node_json(
+                "import('./hooks/scan-commit-names.mjs')"
+                ".then(m=>process.stdout.write(JSON.stringify(m.isCredentialFilename(c))))",
+                "id_rsa" + ".a" * n + "!",
+            )
+        self.assertLess(time.time() - t, 10.0, "derived-suffix matching is not linear")
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node or git not available")
+class TestRoundThreeResiduals(unittest.TestCase):
+    """Third adversarial round against the round-2 result. All three reproduced by execution.
+
+      S1  `commit -a/--all` widening still regex-tested the RAW typed command, so an alias that
+          supplies `-a` (`alias.ci = "commit -a -m wip"`) swept an unstaged tracked secret into
+          the commit while only the STAGED diff was scanned. Same class as the message bug: the
+          resolver's expansion was available and not consulted.
+      S2  The heredoc reader matched `<<EOF` but not the tab-stripping `<<-EOF` form, so that
+          write was neither read nor marked unread - `parsed:true` with empty content again.
+      S3  `git -C a -C b` is CUMULATIVE in git (verified: it resolves to a/b), but only dirs[0]
+          was used, pointing every git read at a strict ancestor of the real target repo.
+    """
+
+    SCAN = REPO / "hooks" / "scan-commit.mjs"
+
+    def _run(self, command, cwd):
+        proc = subprocess.run(
+            [NODE, str(self.SCAN)], cwd=cwd,
+            input=json.dumps({"tool_input": {"command": command}, "cwd": cwd}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        return out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+    def test_s1_alias_supplied_dash_a_scans_unstaged_tracked_changes(self):
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "t@e.st"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "t"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "config", "alias.ci", "commit -a -m wip"], cwd=td, check=True, capture_output=True)
+            f = Path(td, "config.txt")
+            f.write_text("clean\n", encoding="utf-8")
+            subprocess.run(["git", "add", "--", "config.txt"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "base"], cwd=td, check=True, capture_output=True)
+            # Tracked, MODIFIED, deliberately NOT staged - only `-a` sweeps it in.
+            f.write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+            self.assertEqual(
+                self._run("git ci", td), "deny",
+                "alias-supplied -a swept an unstaged tracked secret in; only the staged diff was scanned",
+            )
+
+    def test_s2_tab_stripping_heredoc_is_read_or_declared_unread(self):
+        res = _node_json(
+            "import('./hooks/codex-write-signal.mjs')"
+            ".then(m=>process.stdout.write(JSON.stringify(m.extractWrittenContent('Bash',c))))",
+            "cat <<-EOF > s.txt\n" + GH_CLEAN + "\nEOF",
+        )
+        covered = GH_CLEAN in (res.get("addedContent") or "")
+        self.assertTrue(
+            covered or res.get("parsed") is False,
+            "<<- heredoc neither read nor marked unread: " + repr(res),
+        )
+
+    def test_s2_tab_stripping_heredoc_write_is_denied(self):
+        payload = {
+            "tool_name": "Bash", "hook_event_name": "PreToolUse",
+            "tool_input": {"command": "cat <<-EOF > s.txt\n" + GH_CLEAN + "\nEOF"},
+            "cwd": "/repo", "session_id": "s", "transcript_path": "/x",
+        }
+        proc = subprocess.run(
+            [NODE, str(REPO / "hooks" / "scan-write-codex.mjs")], input=json.dumps(payload),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        self.assertEqual(
+            out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny",
+            "secret written through a <<- heredoc reached disk",
+        )
+
+    def test_s3_repeated_dash_C_is_cumulative(self):
+        with tempfile.TemporaryDirectory() as base:
+            deep = Path(base, "a", "b")
+            deep.mkdir(parents=True)
+            subprocess.run(["git", "init", "-b", "main"], cwd=deep, check=True, capture_output=True)
+            subprocess.run(["git", "config", "alias.ci", "commit -a"], cwd=deep, check=True, capture_output=True)
+            Path(deep, "config.txt").write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+            subprocess.run(["git", "add", "--", "config.txt"], cwd=deep, check=True, capture_output=True)
+            self.assertEqual(
+                self._run("git -C a -C b ci -m wip", base), "deny",
+                "repeated -C resolved to the ancestor, so the real target repo was never scanned",
+            )
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node or git not available")
+class TestRoundFourResiduals(unittest.TestCase):
+    """Fourth adversarial round. All three reproduced by execution.
+
+      T1  A wrapping subshell `( ... )` or brace group `{ ...; }` made the whole statement
+          invisible: the first token is `(git`, whose basename is not `git`, so the resolver
+          returned nothing and BOTH guards exited. destructive-command-guard.mjs has stripped
+          these wrappers for a long time; the new resolver did not.
+      T2  `-C` values were collected into ONE array across every statement, so an unrelated
+          `git -C /tmp status` earlier on the line redirected the COMMIT's diff read to /tmp.
+      T3  `id_rsa.pub` was treated as a credential. A public key is the half you are meant to
+          commit; denying it is a false block that pushes people to switch the guard off.
+    """
+
+    SCAN = REPO / "hooks" / "scan-commit.mjs"
+    BRANCH = REPO / "hooks" / "branch-guard.mjs"
+
+    def _run(self, command, cwd, hook=None):
+        proc = subprocess.run(
+            [NODE, str(hook or self.SCAN)], cwd=cwd,
+            input=json.dumps({"tool_input": {"command": command}, "cwd": cwd}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def _decision(self, out):
+        return out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+    def _repo(self, td):
+        subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+        Path(td, "config.txt").write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "config.txt"], cwd=td, check=True, capture_output=True)
+
+    def test_t1_group_wrapped_commit_is_still_scanned(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._repo(td)
+            for label, cmd in {
+                "subshell": "(git commit -am x)",
+                "brace-group": "{ git commit -am x; }",
+                "nested-subshell": "((git commit -am x))",
+                "subshell-with-cd": "(cd . && git commit -am x)",
+            }.items():
+                with self.subTest(case=label):
+                    self.assertEqual(
+                        self._decision(self._run(cmd, td)), "deny",
+                        label + ": group wrapper made the commit invisible to the resolver",
+                    )
+
+    def test_t1_group_wrapped_push_reaches_branch_guard(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._repo(td)
+            self.assertTrue(
+                self._run("(git push --force origin main)", td, hook=self.BRANCH),
+                "branch-guard silent on a group-wrapped force-push to main",
+            )
+
+    def test_t2_unrelated_dash_C_does_not_redirect_the_commit_scan(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._repo(td)
+            other = Path(td, "elsewhere"); other.mkdir()
+            self.assertEqual(
+                self._decision(self._run("git -C elsewhere status; git commit -am x", td)), "deny",
+                "a -C from an unrelated statement redirected the commit's own diff read",
+            )
+
+    def test_t3_public_keys_are_not_blocked(self):
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            for name in ["id_rsa.pub", "id_ed25519.pub", "deploy.key.pub"]:
+                Path(td, name).write_text("ssh-rsa AAAAB3NzaC1yc2E user@host\n", encoding="utf-8")
+                subprocess.run(["git", "add", "--", name], cwd=td, check=True, capture_output=True)
+            self.assertEqual(
+                self._decision(self._run("git commit -m 'add public keys'", td)), "allow",
+                "public keys are meant to be committed; denying them is a false block",
+            )
+
+    def test_t3_private_keys_are_still_blocked(self):
+        # CONTROL: the .pub carve-out must not weaken the private-key check.
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            Path(td, "id_rsa").write_text("binary-key-body\n", encoding="utf-8")
+            subprocess.run(["git", "add", "--", "id_rsa"], cwd=td, check=True, capture_output=True)
+            self.assertEqual(self._decision(self._run("git commit -m x", td)), "deny")
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node or git not available")
+class TestRoundFiveResiduals(unittest.TestCase):
+    """Fifth adversarial round. Two distinct defects (three lenses reported the first one).
+
+      U1  A command line can carry more than one commit. `targetCwdFor` picked the FIRST matching
+          call, so `git -C a commit ... && git -C b commit ...` scanned only `a` and let `b`'s
+          staged secret through while reporting clean.
+      U2  git bundles short options: `git commit -am"<msg>"` is `-a -m "<msg>"`. The message
+          reader only recognized a literal `-m` prefix, so the token `-am<msg>` fell through and
+          a secret pasted there was committed unscanned.
+    """
+
+    SCAN = REPO / "hooks" / "scan-commit.mjs"
+
+    def _decision(self, command, cwd):
+        proc = subprocess.run(
+            [NODE, str(self.SCAN)], cwd=cwd,
+            input=json.dumps({"tool_input": {"command": command}, "cwd": cwd}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        return out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+    def _init(self, path, *, secret):
+        subprocess.run(["git", "init", "-b", "main"], cwd=path, check=True, capture_output=True)
+        body = ("TOKEN = " + GH_CLEAN + "\n") if secret else "clean\n"
+        Path(path, "config.txt").write_text(body, encoding="utf-8")
+        subprocess.run(["git", "add", "--", "config.txt"], cwd=path, check=True, capture_output=True)
+
+    def test_u1_every_commit_target_repo_is_scanned(self):
+        with tempfile.TemporaryDirectory() as base:
+            a = Path(base, "repoA"); a.mkdir()
+            b = Path(base, "repoB"); b.mkdir()
+            self._init(str(a), secret=False)     # decoy: clean, and listed FIRST
+            self._init(str(b), secret=True)      # the real one, carrying the secret
+            self.assertEqual(
+                self._decision("git -C repoA commit -m ok && git -C repoB commit -m ok2", base),
+                "deny",
+                "only the first commit's repo was scanned; the second one's secret went through",
+            )
+
+    def test_u1_single_repo_still_scanned(self):
+        # CONTROL: the ordinary single-commit path must be unaffected.
+        with tempfile.TemporaryDirectory() as td:
+            self._init(td, secret=True)
+            self.assertEqual(self._decision("git commit -m x", td), "deny")
+
+    def test_u2_bundled_short_option_message_is_scanned(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._init(td, secret=False)
+            for label, cmd in {
+                "attached -am": 'git commit -am"' + GH_CLEAN + '"',
+                "attached -qam": 'git commit -qam"' + GH_CLEAN + '"',
+                "separate -am": "git commit -am " + GH_CLEAN,
+            }.items():
+                with self.subTest(case=label):
+                    self.assertEqual(
+                        self._decision(cmd, td), "deny",
+                        label + ": bundled short option hid the message from the scanner",
+                    )
+
+    def test_u2_ordinary_bundled_flags_not_treated_as_messages(self):
+        # CONTROL: flags that carry no message must not swallow the next token as one.
+        with tempfile.TemporaryDirectory() as td:
+            self._init(td, secret=False)
+            for cmd in ["git commit --amend --no-edit", "git commit -a -m 'ordinary message'"]:
+                with self.subTest(cmd=cmd):
+                    self.assertEqual(self._decision(cmd, td), "allow", "false block: " + cmd)
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node or git not available")
+class TestRoundSixResidual(unittest.TestCase):
+    """Sixth adversarial round: one finding, introduced by round five's multi-repo loop.
+
+      V1  `-F <file>` was resolved by trying every commit repo in order and taking the first
+          readable hit, so a clean `repoA/msg.txt` masked the secret in `repoB/msg.txt`. A message
+          file belongs to the statement that names it, not to the command line.
+    """
+
+    SCAN = REPO / "hooks" / "scan-commit.mjs"
+
+    def _decision(self, command, cwd):
+        proc = subprocess.run(
+            [NODE, str(self.SCAN)], cwd=cwd,
+            input=json.dumps({"tool_input": {"command": command}, "cwd": str(cwd)}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        return out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+    def _repo(self, base, name, message):
+        d = Path(base, name)
+        d.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=d, check=True, capture_output=True)
+        Path(d, "r.txt").write_text("clean\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "r.txt"], cwd=d, check=True, capture_output=True)
+        Path(d, "msg.txt").write_text(message, encoding="utf-8")
+
+    def test_v1_message_file_is_read_from_its_own_repo(self):
+        with tempfile.TemporaryDirectory() as base:
+            self._repo(base, "repoA", "just a normal message\n")     # clean, listed FIRST
+            self._repo(base, "repoB", "rotate " + GH_CLEAN + "\n")   # the one with the secret
+            self.assertEqual(
+                self._decision("git -C repoA commit -F msg.txt && git -C repoB commit -F msg.txt", base),
+                "deny",
+                "a same-named clean message file in an earlier repo masked the real one",
+            )
+
+    def test_v1_ordinary_message_file_still_allowed(self):
+        # CONTROL: a clean -F message must not be blocked.
+        with tempfile.TemporaryDirectory() as base:
+            self._repo(base, "repoA", "chore: ordinary release notes\n")
+            self.assertEqual(self._decision("git -C repoA commit -F msg.txt", base), "allow")
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node or git not available")
+class TestRoundSevenResiduals(unittest.TestCase):
+    r"""Seventh adversarial round. Four findings, all reproduced by execution.
+
+      W1/W4  bash ANSI-C quoting `$'...'` is decoded by the SHELL before the command runs, so
+             `git commit -m $'\x73\x6b\x2dlive...'` records `sk-live-...` in permanent history
+             while the raw token carries no vendor-shaped text. Neither the message scan nor the
+             write extractor decoded it, and the write extractor also returned parsed:true.
+      W2     branch-guard was left on the singular resolver after scan-commit moved to the plural
+             one, so only the first repo's branch was checked in a multi-repo command.
+      W3     FALSE BLOCK: the `-a`/`--all` sweep test ran over raw statement text, so an ordinary
+             `git commit -m "docs: describe -a flag behavior"` pulled the whole working tree in.
+    """
+
+    SCAN = REPO / "hooks" / "scan-commit.mjs"
+    BRANCH = REPO / "hooks" / "branch-guard.mjs"
+    BS = chr(92)   # a real backslash, built here so no shell/py escaping games change the input
+
+    def _ansi_c(self, text):
+        """The `$'...'` spelling of `text`, every character as a \\xHH escape."""
+        return "$'" + "".join(self.BS + "x%02x" % ord(c) for c in text) + "'"
+
+    def _run(self, command, cwd, hook=None):
+        proc = subprocess.run(
+            [NODE, str(hook or self.SCAN)], cwd=cwd,
+            input=json.dumps({"tool_input": {"command": command}, "cwd": str(cwd)}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def _decision(self, out):
+        return out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+    def _repo(self, path, *, branch="feature", staged="clean\n"):
+        subprocess.run(["git", "init", "-b", branch], cwd=path, check=True, capture_output=True)
+        Path(path, "r.txt").write_text(staged, encoding="utf-8")
+        subprocess.run(["git", "add", "--", "r.txt"], cwd=path, check=True, capture_output=True)
+
+    def test_w1_ansi_c_quoted_message_is_decoded_and_scanned(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._repo(td)
+            cmd = "git commit -m " + self._ansi_c(GH_CLEAN)
+            self.assertEqual(
+                self._decision(self._run(cmd, td)), "deny",
+                "ANSI-C quoted message decoded by bash but not by the scanner",
+            )
+
+    def test_w4_ansi_c_quoted_write_is_decoded_and_denied(self):
+        cmd = "echo " + self._ansi_c(GH_CLEAN) + " > out.txt"
+        payload = {
+            "tool_name": "Bash", "hook_event_name": "PreToolUse",
+            "tool_input": {"command": cmd}, "cwd": "/repo",
+        }
+        proc = subprocess.run(
+            [NODE, str(REPO / "hooks" / "scan-write-codex.mjs")], input=json.dumps(payload),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        self.assertEqual(
+            out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny",
+            "ANSI-C quoted payload decoded by bash but not by the write extractor",
+        )
+
+    def test_w2_branch_guard_checks_every_repo(self):
+        with tempfile.TemporaryDirectory() as base:
+            feat = Path(base, "featureRepo"); feat.mkdir()
+            main = Path(base, "mainRepo"); main.mkdir()
+            self._repo(str(feat), branch="feature")   # not protected, listed FIRST
+            self._repo(str(main), branch="main")      # protected, listed SECOND
+            out = self._run("git -C featureRepo commit -m a && git -C mainRepo commit -m b", base,
+                            hook=self.BRANCH)
+            self.assertTrue(
+                out, "branch-guard checked only the first repo and missed the commit to main",
+            )
+
+    def test_w3_dash_a_inside_the_message_does_not_sweep(self):
+        # FALSE BLOCK regression: an unstaged tracked file carrying a secret must NOT be pulled in
+        # by a commit that never uses -a. The word "-a" appearing in the message is not a flag.
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "t@e.st"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "t"], cwd=td, check=True, capture_output=True)
+            other = Path(td, "other.txt")
+            other.write_text("clean\n", encoding="utf-8")
+            Path(td, "staged.txt").write_text("clean\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "base"], cwd=td, check=True, capture_output=True)
+            other.write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")   # tracked, UNSTAGED
+            self.assertEqual(
+                self._decision(self._run('git commit -m "docs: describe -a flag behavior"', td)),
+                "allow",
+                "a literal '-a' in the message text pulled unstaged work into the scan",
+            )
+
+    def test_x1_ansi_c_encoded_command_name_reaches_the_resolver(self):
+        # Round 8: the cheap pre-filter ran on the RAW command, before ANSI-C expansion, so
+        # `$'\x67\x69\x74' commit` (which bash executes as `git commit`) exited before the resolver
+        # ever ran. Third instance of "a pre-filter must be a strict superset of what it guards".
+        with tempfile.TemporaryDirectory() as td:
+            self._repo(td, branch="main", staged="TOKEN = " + GH_CLEAN + "\n")
+            cmd = self._ansi_c("git") + " commit -am wip"
+            self.assertEqual(
+                self._decision(self._run(cmd, td)), "deny",
+                "ANSI-C encoded command name skipped the pre-filter and disabled the guard",
+            )
+
+    def test_x1_non_git_commands_still_exit_cheaply(self):
+        # CONTROL: widening the probe must not make every unrelated command do git work.
+        with tempfile.TemporaryDirectory() as td:
+            self._repo(td)
+            for cmd in ["npm test", "python -m pytest", "ls -la"]:
+                with self.subTest(cmd=cmd):
+                    self.assertEqual(self._run(cmd, td), {}, "false trigger on: " + cmd)
+
+    def test_w3_real_dash_a_still_sweeps(self):
+        # CONTROL: an actual -a must still pull the unstaged tracked change in.
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "t@e.st"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "t"], cwd=td, check=True, capture_output=True)
+            f = Path(td, "other.txt")
+            f.write_text("clean\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "base"], cwd=td, check=True, capture_output=True)
+            f.write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+            self.assertEqual(self._decision(self._run("git commit -am wip", td)), "deny")
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestRoundNineResiduals(unittest.TestCase):
+    r"""Ninth adversarial round. Two distinct defects, both introduced by earlier rounds' fixes.
+
+      Y1  The `.pub` carve-out added in round four matched `pub` ANYWHERE in the dotted tail, so
+          `secrets.pub.pem`, `config.pub.p12` and `id_rsa.pub.ppk` escaped the credential-filename
+          check entirely — and those formats are usually binary, so the content scan is no backstop.
+      Y2  POSIX `printf` decodes backslash escapes in its FORMAT string unconditionally (no -e
+          needed), and `echo -e` does the same, so `printf '\163\153\137...' > f` writes
+          `sk_live_...` while the extractor saw `163153137...` and reported parsed:true.
+    """
+
+    BS = chr(92)
+
+    def _parse(self, command):
+        return _node_json(
+            "import('./hooks/codex-write-signal.mjs')"
+            ".then(m=>process.stdout.write(JSON.stringify(m.extractWrittenContent('Bash',c))))",
+            command,
+        )
+
+    def _names(self, name):
+        return _node_json(
+            "import('./hooks/scan-commit-names.mjs')"
+            ".then(m=>process.stdout.write(JSON.stringify(m.isCredentialFilename(c))))",
+            name,
+        )
+
+    def test_y1_pub_only_exempts_the_terminal_suffix(self):
+        for name in ["secrets.pub.pem", "config.pub.p12", "id_rsa.pub.ppk", "keystore.pub.jks"]:
+            with self.subTest(name=name):
+                self.assertTrue(
+                    self._names(name),
+                    name + ": a mid-name `.pub.` disabled the credential-filename check",
+                )
+
+    def test_y1_real_public_keys_still_exempt(self):
+        # CONTROL: the genuine public-key shape must stay allowed.
+        for name in ["id_rsa.pub", "id_ed25519.pub", "deploy.key.pub"]:
+            with self.subTest(name=name):
+                self.assertFalse(self._names(name), name + ": false block on a public key")
+
+    def test_y1_ordinary_and_credential_names_unchanged(self):
+        for name, want in [("id_rsa", True), ("server.key", True), ("cert.p12", True),
+                           ("notes.bak", False), ("keys.md", False), ("main.py", False)]:
+            with self.subTest(name=name):
+                self.assertEqual(self._names(name), want)
+
+    def _escaped(self, text, style):
+        if style == "octal":
+            return "".join(self.BS + oct(ord(c))[2:].rjust(3, "0") for c in text)
+        return "".join(self.BS + "x%02x" % ord(c) for c in text)
+
+    def test_y2_printf_escape_sequences_are_decoded(self):
+        for style in ("octal", "hex"):
+            with self.subTest(style=style):
+                cmd = "printf '" + self._escaped(GH_CLEAN, style) + "' > out.txt"
+                res = self._parse(cmd)
+                self.assertIn(
+                    GH_CLEAN, res.get("addedContent") or "",
+                    style + ": printf decodes these escapes itself; the guard did not",
+                )
+
+    def test_y2_escaped_write_is_denied_end_to_end(self):
+        cmd = "printf '" + self._escaped(GH_CLEAN, "octal") + "' > out.txt"
+        payload = {
+            "tool_name": "Bash", "hook_event_name": "PreToolUse",
+            "tool_input": {"command": cmd}, "cwd": "/repo",
+        }
+        proc = subprocess.run(
+            [NODE, str(REPO / "hooks" / "scan-write-codex.mjs")], input=json.dumps(payload),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+
+    def test_y2_clean_writes_still_allowed(self):
+        # CONTROL: decoding must not invent findings in ordinary text.
+        for cmd in ["printf 'just a note' > f", "printf 'path C:\\\\tmp\\\\x' > f",
+                    "echo build ok > status.txt"]:
+            with self.subTest(cmd=cmd):
+                res = self._parse(cmd)
+                self.assertNotIn("ghp_", res.get("addedContent") or "")
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestRoundTenResiduals(unittest.TestCase):
+    """Tenth adversarial round. Two distinct defects, both from the previous rounds' own fixes.
+
+      Z1  Round nine narrowed the `.pub` carve-out to the TERMINAL suffix, which still let
+          `cert.p12.pub` through: appending `.pub` to any credential container defeated the
+          filename check, and those formats are binary so the content scan is no backstop.
+      Z2  The printf/echo branch tested for `$` without knowing about quoting, so
+          `echo 'password=p$ssw0rd...' > f` (agentic-sdlc:allow-secret) — a fully literal write
+          extractor declares it covers — was skipped as expansion-dependent. The heredoc path
+          one block above already checked its delimiter's quoting; this branch did not.
+    """
+
+    def _parse(self, command):
+        return _node_json(
+            "import('./hooks/codex-write-signal.mjs')"
+            ".then(m=>process.stdout.write(JSON.stringify(m.extractWrittenContent('Bash',c))))",
+            command,
+        )
+
+    def _names(self, name):
+        return _node_json(
+            "import('./hooks/scan-commit-names.mjs')"
+            ".then(m=>process.stdout.write(JSON.stringify(m.isCredentialFilename(c))))",
+            name,
+        )
+
+    def test_z1_pub_after_a_container_extension_is_still_flagged(self):
+        for name in ["cert.p12.pub", "secrets.pfx.pub", "keystore.jks.pub", "key.ppk.pub"]:
+            with self.subTest(name=name):
+                self.assertTrue(
+                    self._names(name),
+                    name + ": appending .pub to a credential container defeated the check",
+                )
+
+    def test_z1_genuine_public_key_shapes_stay_exempt(self):
+        # CONTROL: `.pub` next to a base name or a .key/.pem sibling is a real keypair half.
+        for name in ["id_rsa.pub", "id_ed25519.pub", "deploy.key.pub", "server.pem.pub"]:
+            with self.subTest(name=name):
+                self.assertFalse(self._names(name), name + ": false block on a public key")
+
+    def test_z2_single_quoted_dollar_is_literal_and_scanned(self):
+        res = self._parse(
+            "echo 'password=p$ssw0rd_SECRET_VALUE_1234567' > config.env")  # agentic-sdlc:allow-secret
+        self.assertIn(
+            "p$ssw0rd", res.get("addedContent") or "",
+            "single-quoted $ is not an expansion; bash writes it literally: " + repr(res),
+        )
+        self.assertTrue(res.get("parsed"), "a fully literal write must be reported as accounted for")
+
+    def test_z2_real_expansions_still_suppressed(self):
+        # CONTROL: where bash really does expand, the content is unknown and must stay unscanned.
+        for cmd in ['echo "$TOKEN" > f', "echo $TOKEN > f", 'printf "$(cat s)" > f',
+                    'echo "${HOME}" > f']:
+            with self.subTest(cmd=cmd):
+                res = self._parse(cmd)
+                self.assertFalse(res.get("parsed"), cmd + ": real expansion must clear parsed")
+                self.assertEqual(res.get("addedContent"), "")
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestInlineAllowlistMarker(unittest.TestCase):
+    """An explicit, per-line escape hatch — the mechanism every mature scanner ships.
+
+    Documenting a bypass requires writing the shape you are documenting, so this repo's own
+    comments and lessons.md trip the scanner. Without an escape hatch the guard cries wolf on the
+    files that explain it, and a guard that fires on ordinary work gets switched off.
+
+    The rule the research settled on: suppression must be per-line and visible in review, never a
+    pattern that silences a whole token class (detect-secrets' `pragma: allowlist secret`,
+    gitleaks' `gitleaks:allow`). One marked line is auditable in a diff; a broadened regex is not.
+    """
+
+    def test_marked_line_is_skipped(self):
+        line = "TOKEN = " + GH_CLEAN + "   # agentic-sdlc:allow-secret documented example"
+        self.assertEqual(scan_high(line), [], "an explicitly marked line was still reported")
+
+    def test_marker_only_affects_its_own_line(self):
+        text = (
+            "safe = " + GH_CLEAN + "  # agentic-sdlc:allow-secret\n"
+            "real = " + GH_CLEAN + "\n"
+        )
+        found = scan_high(text)
+        self.assertEqual(len(found), 1, "the marker leaked to a neighbouring line: " + repr(found))
+        self.assertEqual(found[0]["line"], 2)
+
+    def test_unmarked_secret_still_blocked(self):
+        # CONTROL: the hatch must not weaken the default.
+        self.assertTrue(scan_high("TOKEN = " + GH_CLEAN))
+
+
+class TestGuardWiring(unittest.TestCase):
+    """F7 - the wiring itself must not gate a security guard behind a filter that a legitimate
+    spelling of the same operation escapes.
+
+    Two documented facts drive this (code.claude.com/docs/en/hooks, fetched 2026-08-22):
+      * "On Windows without Git Bash, the tool is enabled automatically and Claude Code doesn't
+        register the Bash tool at all. A hook that matches only `Bash` never fires there."
+        -> a Bash-only matcher makes every command guard inert on such a host.
+      * "Because the `if` filter is best-effort, use the permission system rather than a hook to
+        enforce a hard allow or deny."
+        -> an `if` narrowed to `Bash(git commit*)` removes the guard entirely for `git ci`.
+    """
+
+    CLAUDE_WIRING = REPO / "hooks" / "hooks-claude.json"
+    # Guards whose whole purpose is to inspect a shell command before it runs.
+    COMMAND_GUARDS = ("scan-commit.mjs", "destructive-command-guard.mjs", "branch-guard.mjs")
+
+    def setUp(self):
+        self.wiring = json.loads(self.CLAUDE_WIRING.read_text(encoding="utf-8"))
+
+    def _pre_tool_use_entries(self):
+        for group in self.wiring["hooks"]["PreToolUse"]:
+            for hook in group.get("hooks", []):
+                yield group.get("matcher", ""), hook
+
+    def _entries_for(self, guard):
+        return [
+            (matcher, hook) for matcher, hook in self._pre_tool_use_entries()
+            if guard in json.dumps(hook)
+        ]
+
+    def test_command_guards_cover_the_powershell_tool(self):
+        for guard in self.COMMAND_GUARDS:
+            entries = self._entries_for(guard)
+            self.assertTrue(entries, guard + ": not wired on PreToolUse at all")
+            for matcher, _hook in entries:
+                with self.subTest(guard=guard, matcher=matcher):
+                    self.assertIn(
+                        "PowerShell", matcher,
+                        guard + ": matcher " + repr(matcher) + " is Bash-only; on a Windows host "
+                        "without Git Bash the Bash tool is never registered and this guard "
+                        "never fires.",
+                    )
+
+    def test_command_guards_are_not_gated_behind_a_subcommand_filter(self):
+        # An `if` naming a specific git SUBCOMMAND is the bypassable shape: `git ci` (a git
+        # alias for commit) does not match `Bash(git commit*)`, so the hook process never starts
+        # and the guard cannot make a decision at all. A tool-level or `git *`-level filter is
+        # fine; a subcommand-level one is not.
+        for guard in self.COMMAND_GUARDS:
+            for matcher, hook in self._entries_for(guard):
+                cond = hook.get("if")
+                if cond is None:
+                    continue
+                with self.subTest(guard=guard, cond=cond):
+                    self.assertNotRegex(
+                        cond, r"\((?:git|.*\s)\s*(?:commit|push|merge|rebase)",
+                        guard + ": `if` " + repr(cond) + " filters on a git subcommand; an alias "
+                        "for that subcommand escapes the filter and the guard never runs.",
+                    )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -180,10 +180,12 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 
 | Runtime | Hook wiring |
 |---|---|
-| Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. |
-| Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`; `SessionStart` bootstrap only after Codex hook review/trust. |
+| Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. The command guards match `Bash|PowerShell` and carry no `if` filter — a `Bash`-only matcher is inert on a Windows host without Git Bash, and a subcommand-level `if` never starts the hook for a git alias, so each guard self-gates internally instead. |
+| Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`, after Codex hook review/trust: `SessionStart` bootstrap **plus** native blocking `PreToolUse` command guards, a pre-write secret guard, and two `Stop` backstops. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md) for the exact set and its documented coverage gaps. |
 
 Claude Code also wires flow enforcement: `flow-order-guard.mjs` checks active-flow evidence before source edits, and `flow-step-guard.mjs` re-derives Stop-time evidence from artifacts, tool calls, and commands. Both read [`hooks/flow-requirements.json`](hooks/flow-requirements.json) through [`hooks/flow-evidence.mjs`](hooks/flow-evidence.mjs). Codex carries the same discipline through skills, contracts, explicit validators, and procedure transcripts in this release.
+
+A PreToolUse hook only ever sees the RAW command string. Git aliases are resolved deterministically through [`hooks/git-invocation.mjs`](hooks/git-invocation.mjs), but shell aliases and functions from `~/.bashrc`, `$PATH` shadowing, `eval` and variable indirection are applied by the shell after the hook has already decided, and the write surface (`tee`, `dd`, `base64`, any interpreter) is unbounded. Those are documented residuals, not oversights - deciding what an arbitrary shell command does is undecidable. The command guards are a backstop, not an enforcement boundary.
 
 Judgment-based checks, such as whether context was actually read or test output was understood, live in skills and contracts rather than hook scripts. See [`hooks/README.md`](hooks/README.md).
 

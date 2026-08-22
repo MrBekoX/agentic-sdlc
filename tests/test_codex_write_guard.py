@@ -256,7 +256,12 @@ class TestCodexWriteGuardWiring(unittest.TestCase):
     def test_claude_side_byte_identical(self):  # AC12
         digests = {
             "hooks/scan-write.mjs": "c1fbd3b247beb203e7fd8ba1d1b5ce2850c0d852dd45bbe90f696a2001dfdcf7",
-            "hooks/hooks-claude.json": "bfe922395874524686009912ae6424a066cf69bdbc2b4b5fed8a16cee4eb8402",
+            # Refreshed by the 2026-08-22 guard-bypass fix: the Bash-only matcher and the
+            # `if: Bash(git commit*)` filters were removed (a Bash-only matcher is inert on a
+            # Windows host with no Git Bash, and a subcommand-level `if` never starts the hook
+            # for a git alias). NOTE: this lock is byte-exact and therefore line-ending
+            # sensitive; recompute it on the same checkout style it was recorded on.
+            "hooks/hooks-claude.json": "ec42d0ade8fcfe4171e85eb611c29fe00080d1a7eeec0c3c08518d13f2694c9c",
         }
         for rel, want in digests.items():
             got = hashlib.sha256((REPO / rel).read_bytes()).hexdigest()

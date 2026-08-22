@@ -189,8 +189,32 @@ def _atomic_bundle_cmd(work_id="W"):
 
 
 # ---- node / subprocess drivers ---------------------------------------------
+# Large payloads go through STDIN, not argv. The ReDoS-linearity tests build 76-110 KB commands;
+# the surrounding comments assume the POSIX ~128 KB single-argv limit, but Windows CreateProcess
+# caps the WHOLE command line at 32767 characters, so those tests died with
+# "WinError 206: filename or extension is too long" and the ReDoS guards silently did not run on
+# Windows at all. Above the threshold the args are shipped as one JSON array on stdin and
+# process.argv is rebuilt inside node, so every script body below keeps using process.argv[N].
+_ARGV_SAFE = 4000
+
+
+def _node_argv_or_stdin(script, args):
+    if sum(len(a) for a in args) <= _ARGV_SAFE:
+        return ["node", "--input-type=module", "-e", script, *args], None
+    wrapped = (
+        "let _b='';process.stdin.setEncoding('utf8');"
+        # async: the wrapped script bodies use top-level `await import(...)`.
+        "process.stdin.on('data',d=>_b+=d).on('end',async()=>{"
+        "process.argv=['node',...JSON.parse(_b)];"
+        + script +
+        "});"
+    )
+    return ["node", "--input-type=module", "-e", wrapped], json.dumps(list(args))
+
+
 def _node(script, *args):
-    r = subprocess.run(["node", "--input-type=module", "-e", script, *args],
+    argv, payload = _node_argv_or_stdin(script, args)
+    r = subprocess.run(argv, input=payload,
                        capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     return r.stdout
@@ -572,6 +596,17 @@ class TestOrderWiring(unittest.TestCase):
 # ---- BR8/§7: the FULL regression surface stays byte-identical ---------------
 class TestRegressionSurfaceUntouched(unittest.TestCase):
     BYTE_LOCKED = [
+        # RELEASED by the 2026-08-22 guard-bypass fix (same convention as codex-rollout.mjs above:
+        # a locked file that becomes a fix target moves out of the lock and into its own regression
+        # test). These five carried confirmed fail-open paths found by an adversarial multi-lens
+        # review and re-verified by execution; every one is now covered by
+        # tests/test_secret_guard_bypasses.py, which asserts both the closed bypass AND a control
+        # case proving the guard did not simply start blocking everything:
+        #   hooks/secret-patterns.mjs     - placeholder filter applied to vendor tokens;  anchoring
+        #   hooks/codex-write-signal.mjs  - extractLiteral payload truncation; dishonest `parsed`
+        #   hooks/scan-commit.mjs         - git-alias gate bypass; unscanned commit message; filenames
+        #   hooks/branch-guard.mjs        - git-alias gate bypass
+        #   hooks/hooks-claude.json       - Bash-only matcher; bypassable `if` subcommand filter
         # Claude flow files (spec §7).
         "hooks/flow-order-guard.mjs",
         "hooks/flow-step-guard.mjs",
@@ -581,7 +616,6 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # pairing); their new behavior is covered by test_flow_guards / test_codex_flow_step_guard.
         # hooks/flow-requirements.json is NOT locked here — B1 broadened its testCommand allowlist
         # (a shared config change, covered by the AP2b recognition test).
-        "hooks/hooks-claude.json",
         "hooks/completion-claim-guard.mjs",
         # AP2a/AP2b Codex modules (reused read-only).
         # NOTE: hooks/codex-rollout.mjs is intentionally NOT locked here — a DP-LIVE follow-up fix
@@ -593,15 +627,11 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # extractor byte-untouched (the precise recognizer re-implements its pattern rather than editing it),
         # and the spec Must-not-change names it a protected surface; its prior ReDoS follow-up is at HEAD, so
         # locking-to-HEAD is consistent — this is the only automated enforcement of that Must-not-change item.
-        "hooks/codex-write-signal.mjs",
         # AP1 command/write guards + reused pattern source (this slice edits the very
         # Bash|apply_patch block scan-write-codex.mjs lives in, so its bytes must be locked).
         # hooks/scan-write-codex.mjs is NOT locked here — a security follow-up sanitized the target
         # path in its deny reason (prompt-injection fix); it is covered by the AP1 write-guard suite.
-        "hooks/scan-commit.mjs",
         "hooks/destructive-command-guard.mjs",
-        "hooks/branch-guard.mjs",
-        "hooks/secret-patterns.mjs",
     ]
 
     def test_locked_files_byte_identical_to_head(self):  # BR8
