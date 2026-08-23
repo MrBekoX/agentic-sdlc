@@ -41,6 +41,8 @@ mcps/
 .claude/
 # OpenCode local tool workspace (node_modules + config; local tooling, not distributed)
 .opencode/
+# Omo local run-continuation state (per-session tool state, not distributed)
+.omo/
 settings.local.json
 *.lock
 scheduled_tasks.lock

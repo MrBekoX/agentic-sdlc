@@ -57,6 +57,18 @@ class TestCodexWriteParser(unittest.TestCase):
         self.assertLess(time.time() - t, 5.0, "heredoc parse should be bounded, not O(n^2)")
         self.assertIsInstance(r.get("parsed"), bool)  # returns a result, no hang/crash
 
+    def test_subshell_strip_is_linear(self):  # security: ReDoS in parseBash subshell strip (#6-C, twin of #5)
+        # A long INTERNAL whitespace run with no trailing ')' is the O(n^2) trap in the per-segment
+        # `.replace(/\s*\)$/, '')` strip: the start-unanchored greedy `\s*` retries from every index in
+        # the run. Reachable by default via scan-write-codex on every Bash command -> hang -> 20s hook
+        # timeout -> fail-open (secret scan skipped). ~15s at 300 KiB with the old regex; <1s linear.
+        import time
+        cmd = "echo " + " " * (300 * 1024) + "x"  # long internal whitespace, no trailing ')', < 512 KiB MAX
+        t = time.time()
+        r = self._parse("Bash", cmd)
+        self.assertLess(time.time() - t, 5.0, "subshell strip must be linear, not O(n^2)")
+        self.assertIsInstance(r.get("parsed"), bool)  # returns a result, no hang
+
     def test_apply_patch_added_lines_only(self):
         cmd = _apply_patch("a.txt", ["TOKEN = " + SECRET, "context"])
         r = self._parse("apply_patch", cmd)
@@ -244,7 +256,12 @@ class TestCodexWriteGuardWiring(unittest.TestCase):
     def test_claude_side_byte_identical(self):  # AC12
         digests = {
             "hooks/scan-write.mjs": "c1fbd3b247beb203e7fd8ba1d1b5ce2850c0d852dd45bbe90f696a2001dfdcf7",
-            "hooks/hooks-claude.json": "bfe922395874524686009912ae6424a066cf69bdbc2b4b5fed8a16cee4eb8402",
+            # Refreshed by the 2026-08-22 guard-bypass fix: the Bash-only matcher and the
+            # `if: Bash(git commit*)` filters were removed (a Bash-only matcher is inert on a
+            # Windows host with no Git Bash, and a subcommand-level `if` never starts the hook
+            # for a git alias). NOTE: this lock is byte-exact and therefore line-ending
+            # sensitive; recompute it on the same checkout style it was recorded on.
+            "hooks/hooks-claude.json": "e50dbe053f4cc59a1b2ce23fc1cc6b96581a1f0f28048b1bc31aa544c0e3ed39",
         }
         for rel, want in digests.items():
             got = hashlib.sha256((REPO / rel).read_bytes()).hexdigest()

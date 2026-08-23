@@ -145,4 +145,9 @@ Detail per step → `playbook.md`. The Spec/Plan author⇄critic phases (4–5) 
 ## Finalize
 Only when: code done · relevant + full tests run with output shown · both security passes done · lint/typecheck/build + secret-scan reported · diff reviewed · `implementasyon-control` clean. Then invoke `completion-claim-gate` with the exact evidence you will claim, and only after that produce the **Final Implementation Report** (`templates.md`). No evidence → no "done"; report the honest current state instead.
 
+## Artifact layout & per-package evidence
+Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`). Per-package plan change-detection runs as a filesystem scan, not a `git status` query; the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
+
+On **Finalize**, persist the Final Implementation Report to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — **per-package only** (flat packages get no evidence), using the slug emitted by `resolve_work_package.py` (never re-derived). A re-run **overwrites** this single canonical file in place (last run wins; no per-run/timestamp suffix). Evidence is git-ignored and has **no validator** — it never gates resolution. This write is performed by the **main pipeline finalize step**, not the read-only `implementation-auditor` sub-agent.
+
 **References:** step detail + Lite Mode → `playbook.md` · artifact/report templates → `templates.md`.

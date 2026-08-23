@@ -120,7 +120,7 @@ The scripts are shared, but runtime wiring differs.
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
-## 11. Deterministic scripts (14)
+## 11. Deterministic scripts (15)
 
 | Script | Purpose |
 |---|---|
@@ -138,6 +138,7 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | `bump_version.py` | Sync version across manifests and `VERSION`. |
 | `task_brief.py` | Extract a plan task into a handoff file. |
 | `review_package.py` | Produce a git diff review package. |
+| `install_git_hooks.py` | Install the effect-layer `pre-commit` / `commit-msg` guards into a repository. Git runs those on the OPERATION, after it has resolved aliases, quoting and `$PATH`, so they see what the command-string guards structurally cannot. Never clobbers a foreign hook; `--check` / `--uninstall` supported. |
 
 ## Testing And Evidence
 
@@ -168,6 +169,14 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 - Hooks fail open where necessary so a hook fault does not break a session.
 - `validate_artifacts.py` is structural; it cannot prove that a spec is semantically about the requested task.
 - Live routing is model-dependent and must be evidenced per runtime, model, and run.
+
+## Artifact Layouts And Per-Package Evidence
+
+Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
+
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+
+Per-package plan change-detection runs as a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
 
 ## Cross-References
 

@@ -57,6 +57,23 @@
         "\\bgit\\s+push\\b",
         "\\bgit\\s+merge\\b"
       ]
+    },
+    {
+      "id": "agentic-sdlc-pipeline-per-package",
+      "_comment": "Per-package dual-layout coverage (AC16). required_patterns positively assert the per-package docs/agentic-sdlc/<slug>/spec|plan/ forms via a flat|per-package alternation: for a per-package transcript (no flat paths) only the per-package branch can match, so the case strictly demands the singular form there, while the flat fixtures keep passing via the flat branch (dual-layout parity). The per-package content-depth proof lives in tests/test_procedure_eval.py (evaluate_artifact_depth direct calls); this case must NOT set check_artifact_depth, because it also runs against the shallow-stub flat fixtures.",
+      "prompt": "Use /agentic-sdlc-pipeline to add a small production-impacting feature using the per-package artifact layout: write the spec and plan under docs/agentic-sdlc/<slug>/spec/ and docs/agentic-sdlc/<slug>/plan/. Follow spec, plan, TDD, security review, implementation control, and do not commit, push, or merge.",
+      "required_artifacts": [
+        "docs/agentic-sdlc/"
+      ],
+      "required_patterns": [
+        "docs/agentic-sdlc/(?:specs|[a-z0-9][a-z0-9-]*/spec)/",
+        "docs/agentic-sdlc/(?:plans|[a-z0-9][a-z0-9-]*/plan)/"
+      ],
+      "forbidden_commands": [
+        "\\bgit\\s+commit\\b",
+        "\\bgit\\s+push\\b",
+        "\\bgit\\s+merge\\b"
+      ]
     }
   ]
 }

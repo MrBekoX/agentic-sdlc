@@ -45,6 +45,27 @@ class TestHookSyntax(unittest.TestCase):
 
 
 @unittest.skipIf(NODE is None, "node not available — static JS check skipped (not passed)")
+class TestHookSourcesAreText(unittest.TestCase):
+    """A hook source must stay TEXT, or git stores it as a binary blob and its diffs become
+    unreviewable — the worst possible property for a security guard.
+
+    This fired for real: `worktree-scan.mjs` used a raw NUL byte as a hash-key separator, so
+    `git diff` reported `Bin 0 -> 7566 bytes` and the whole file was invisible in review. Write
+    control characters as escape sequences (`'\\u0000'`), never as raw bytes.
+    """
+
+    def test_no_control_bytes_in_hook_or_workflow_sources(self):
+        for path in sorted(HOOKS_DIR.glob("*.mjs")) + sorted(WORKFLOWS_DIR.glob("*.js")):
+            with self.subTest(file=path.name):
+                raw = path.read_bytes()
+                bad = sorted({b for b in raw if b < 9 or 13 < b < 32})
+                self.assertEqual(
+                    bad, [],
+                    f"{path.name} carries raw control byte(s) {bad}; git will treat it as binary "
+                    "and its diffs will not be reviewable. Use an escape sequence instead.",
+                )
+
+
 class TestWorkflowSyntax(unittest.TestCase):
     def test_every_workflow_js_parses_in_runtime_wrapper(self):
         js = sorted(WORKFLOWS_DIR.glob("*.js"))

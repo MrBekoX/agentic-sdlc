@@ -129,7 +129,7 @@ workflows/         Claude Code dynamic workflow scripts
 hooks/             Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/  Durable behavior contracts
 commands/          Manual slash-command definitions
-scripts/           14 Python helpers: probes, validators, eval runners, versioning
+scripts/           15 Python helpers: probes, validators, eval runners, versioning, git-hook install
 tests/             Unit tests, harness, fixtures, golden refs, eval seeds
 docs/              Component reference, boundaries, testing, release notes
 ```
@@ -180,10 +180,32 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 
 | Runtime | Hook wiring |
 |---|---|
-| Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. |
-| Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`; `SessionStart` bootstrap only after Codex hook review/trust. |
+| Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. The command guards match `Bash|PowerShell` and carry no `if` filter — a `Bash`-only matcher is inert on a Windows host without Git Bash, and a subcommand-level `if` never starts the hook for a git alias, so each guard self-gates internally instead. |
+| Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`, after Codex hook review/trust: `SessionStart` bootstrap **plus** native blocking `PreToolUse` command guards, a pre-write secret guard, and two `Stop` backstops. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md) for the exact set and its documented coverage gaps. |
 
 Claude Code also wires flow enforcement: `flow-order-guard.mjs` checks active-flow evidence before source edits, and `flow-step-guard.mjs` re-derives Stop-time evidence from artifacts, tool calls, and commands. Both read [`hooks/flow-requirements.json`](hooks/flow-requirements.json) through [`hooks/flow-evidence.mjs`](hooks/flow-evidence.mjs). Codex carries the same discipline through skills, contracts, explicit validators, and procedure transcripts in this release.
+
+Guarding happens at two layers, because one of them provably cannot be complete.
+
+**Command layer (PreToolUse).** Fast, runs before anything executes, and is the only layer that can stop a
+write *before* it lands. It reads the RAW command string. Git aliases are resolved deterministically through
+[`hooks/git-invocation.mjs`](hooks/git-invocation.mjs), but shell aliases and functions from `~/.bashrc`,
+`$PATH` shadowing, `eval` and variable indirection are applied by the shell *after* the hook has decided, and
+the write surface (`tee`, `dd`, `base64`, any interpreter) is unbounded. Those are documented residuals, not
+oversights - deciding what an arbitrary shell command does is undecidable.
+
+**Effect layer.** Closes exactly that class by never reading a command string:
+
+| Guard | Fires on | Why the command-layer residuals do not apply |
+|---|---|---|
+| repo `pre-commit` / `commit-msg` ([`scripts/install_git_hooks.py`](scripts/install_git_hooks.py)) | the git operation | git has already resolved its alias table; the shell has already done quote removal and `$PATH` lookup |
+| [`hooks/worktree-scan.mjs`](hooks/worktree-scan.mjs) (Stop) | bytes on disk | how they were written is irrelevant |
+
+Verified against the real techniques: a shell function wrapping `git commit`, an `eval`-assembled commit,
+`git $C` indirection, a secret inside an alias-supplied message, and writes via `tee`, `base64 -d` and
+`python -c` are all caught. The documented limit of the effect layer is stated too: `git commit --no-verify`
+skips a client-side hook by git's design, and the Stop scan is detection - the bytes are already on disk.
+Non-negotiable enforcement belongs server-side (`pre-receive`) or in CI.
 
 Judgment-based checks, such as whether context was actually read or test output was understood, live in skills and contracts rather than hook scripts. See [`hooks/README.md`](hooks/README.md).
 
@@ -201,6 +223,14 @@ python3 -m unittest discover -s tests -v
 On Windows, use `py -3` for the same commands when `python3` is not on `PATH`.
 
 This proves metadata consistency, static skill wiring, fixture health, hook/workflow syntax, and unit behavior. It does not prove live model routing or live runtime obedience. Live Claude/Codex evals require the corresponding CLI and auth; do not claim a skill "works" or "triggers" without eval output or a transcript.
+
+## Artifact Layouts And Per-Package Evidence
+
+Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
+
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+
+Per-package plan change-detection runs as a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
 
 ## More Documentation
 

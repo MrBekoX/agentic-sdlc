@@ -116,3 +116,6 @@ Potential issues / Cleanups applied:
 ## Final Sync (main updated? / working tree)
 ## Follow-up Recommendations   # out-of-scope findings go here, never silently fixed
 ```
+
+### Where the Final Implementation Report is persisted (per-package evidence)
+For **per-package** work, the Final Implementation Report above — together with Security Analysis #1/#2, the Git Diff Review, and the test-run output — is persisted as the package's evidence artifact at the canonical path `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` (the per-package canonical layout `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`; the legacy flat layout `docs/agentic-sdlc/{specs,plans}/<id>.md` keeps no evidence). The `<slug>` is the one emitted by `resolve_work_package.py` (never re-derived). A re-run **overwrites** this single canonical file in place (last run wins; no timestamp suffix). Evidence is git-ignored and has **no validator**; it is **per-package only** (flat packages get none). The write is performed by the **main pipeline finalize step**, not the read-only `implementation-auditor` sub-agent. Per-package plan change-detection is a filesystem scan, not a `git status` query (`docs/` is git-ignored).

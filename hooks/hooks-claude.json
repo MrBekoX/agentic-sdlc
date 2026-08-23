@@ -3,13 +3,13 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "$comment": "Matcher covers BOTH shell tools. On Windows without Git Bash, Claude Code does not register the Bash tool at all, so a Bash-only matcher leaves every command guard inert (code.claude.com/docs/en/hooks). No `if` filter: it is documented as best-effort ('use the permission system rather than a hook to enforce a hard allow or deny'), and a subcommand-level filter such as Bash(git commit*) never starts the hook for a git alias like `git ci`. Each guard makes its own cheap early-exit decision instead.",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/scan-commit.mjs"],
-            "if": "Bash(git commit*)",
             "timeout": 20,
             "statusMessage": "Secret scan (commit)..."
           },
@@ -24,17 +24,8 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/branch-guard.mjs"],
-            "if": "Bash(git commit*)",
             "timeout": 15,
-            "statusMessage": "Branch guard (commit)..."
-          },
-          {
-            "type": "command",
-            "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/branch-guard.mjs"],
-            "if": "Bash(git push*)",
-            "timeout": 15,
-            "statusMessage": "Branch guard (push)..."
+            "statusMessage": "Branch guard (commit/push)..."
           }
         ]
       },
@@ -93,6 +84,14 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/flow-step-guard.mjs"],
             "timeout": 30,
             "statusMessage": "Flow-step guard..."
+          },
+          {
+            "$comment": "Effect-layer DETECTION: scans the bytes that actually landed in the working tree, so the write form (tee/dd/base64/python -c/any redirect) is irrelevant — the class the command-string write guard documents as out of reach. Advisory by default; AGENTIC_WORKTREE_SCAN_BLOCK=true escalates it.",
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/worktree-scan.mjs"],
+            "timeout": 20,
+            "statusMessage": "Working-tree secret scan..."
           }
         ]
       }

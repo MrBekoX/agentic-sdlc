@@ -10,6 +10,27 @@ import scripts.run_procedure_eval as procedure_eval
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
 
+PER_PACKAGE_FIXTURE = (
+    REPO / "tests" / "fixtures" / "transcripts"
+    / "agentic-sdlc-pipeline-procedure-per-package-pass.jsonl"
+)
+PER_PACKAGE_CASE_ID = "agentic-sdlc-pipeline-per-package"
+
+# A spec whose every required section clears the strict depth checks (mirrors the
+# known-good skill-depth-deep fixture). Reused to prove flat /specs/ classification
+# and per-package gate firing without coupling those tests to a fixture file.
+DEEP_SPEC = (
+    "# Spec\n\n"
+    "## Problem\nThe greet function hardcodes the trailing punctuation.\n\n"
+    "## Business Rules\nDefault output is unchanged when no suffix is given.\n\n"
+    "## Acceptance Criteria\n"
+    '- AC1: Given name Ada and no suffix, when greet runs, then it returns "Hello, Ada!".\n'
+    '- AC2: Given suffix "?", when greet runs, then it returns "Hello, Ada?".\n\n'
+    '## Edge Cases\nEmpty suffix returns "Hello, Ada" with no trailing punctuation.\n\n'
+    "## Definition of Done\nTests for AC1 and AC2 pass and default behaviour is preserved.\n\n"
+    "## Must-not-change\nThe single-argument call path keeps returning the exclamation mark.\n"
+)
+
 
 class TestProcedureEvalHarness(unittest.TestCase):
     def test_dry_run_validates_dev_flow_fixture(self):
@@ -228,3 +249,157 @@ class TestProcedureEvalHarness(unittest.TestCase):
                 text=True, encoding="utf-8",
             )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    # --- T10: per-package (singular /spec/, /plan/ segment) recognition ---
+
+    def test_recognizes_per_package_depth_and_artifacts(self):
+        # AC16: the per-package fixture passes the offline gate (both cases green),
+        # and its singular /spec/, /plan/ writes are recognized AND content-validated.
+        from run_procedure_eval import (
+            per_package_layout,
+            evaluate_artifact_depth,
+            trace_events,
+            load_json_lines,
+            Trace,
+            _record_tool,
+        )
+
+        # Path classification: singular segment -> (mode, slug, work_id).
+        self.assertEqual(
+            per_package_layout("docs/agentic-sdlc/work-x/spec/work-x.md"),
+            ("spec", "work-x", "work-x"),
+        )
+        self.assertEqual(
+            per_package_layout("docs/agentic-sdlc/work-x/plan/work-x.md"),
+            ("plan", "work-x", "work-x"),
+        )
+
+        # The deep per-package spec+plan content clears strict depth validation,
+        # and the per-package plan is paired with its same-slug spec (no shallow).
+        trace = trace_events(load_json_lines(PER_PACKAGE_FIXTURE))
+        depth_errors = evaluate_artifact_depth(trace, REPO)
+        self.assertEqual(
+            [e for e in depth_errors if e.startswith("shallow_artifact:")],
+            [],
+            depth_errors,
+        )
+
+        # The gate actually FIRES on per-package paths: a shallow per-package spec
+        # is flagged (proving recognition, not a silent skip).
+        shallow = Trace()
+        _record_tool(
+            shallow,
+            "Write",
+            {"file_path": "docs/agentic-sdlc/work-x/spec/work-x.md", "content": "spec"},
+        )
+        shallow_errors = evaluate_artifact_depth(shallow, REPO)
+        self.assertIn("shallow_artifact:docs/agentic-sdlc/work-x/spec/work-x.md", shallow_errors)
+
+        # End-to-end via the harness: both cases pass against the per-package fixture.
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_procedure_eval.py",
+                "--eval-set",
+                "tests/skills/procedure/agentic-sdlc-pipeline.json",
+                "--transcript",
+                str(PER_PACKAGE_FIXTURE),
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("procedure_eval=passed", proc.stdout)
+        self.assertIn(f"case_{PER_PACKAGE_CASE_ID}=passed", proc.stdout)
+
+    def test_reserved_slug_not_misfired(self):
+        # AC16/BR11: docs/agentic-sdlc/spec/spec/x.md is NOT a per-package artifact
+        # (reserved singular slug `spec`), so it is neither classified nor depth-checked.
+        from run_procedure_eval import per_package_layout, evaluate_artifact_depth, Trace, _record_tool
+
+        self.assertIsNone(per_package_layout("docs/agentic-sdlc/spec/spec/x.md"))
+        self.assertIsNone(per_package_layout("docs/agentic-sdlc/plan/plan/x.md"))
+
+        trace = Trace()
+        _record_tool(
+            trace,
+            "Write",
+            {"file_path": "docs/agentic-sdlc/spec/spec/x.md", "content": "spec"},
+        )
+        errors = evaluate_artifact_depth(trace, REPO)
+        # Not treated as a (per-package) artifact at all -> no shallow_artifact for it.
+        self.assertNotIn("shallow_artifact:docs/agentic-sdlc/spec/spec/x.md", errors)
+
+    def test_flat_specs_still_classified_as_spec(self):
+        # Guards the /spec/ vs /specs/ trap directly: a flat specs/<id>.md write must
+        # still be classified and validated as a SPEC (mode=spec), never as a plan.
+        from run_procedure_eval import per_package_layout, evaluate_artifact_depth, Trace, _record_tool
+
+        self.assertIsNone(per_package_layout("docs/agentic-sdlc/specs/flat-classify-x.md"))
+        self.assertIsNone(per_package_layout("docs/agentic-sdlc/plans/flat-classify-x.md"))
+
+        trace = Trace()
+        _record_tool(
+            trace,
+            "Write",
+            {"file_path": "docs/agentic-sdlc/specs/flat-classify-x.md", "content": DEEP_SPEC},
+        )
+        errors = evaluate_artifact_depth(trace, REPO)
+        # Validated as a deep spec -> passes; a misclassification as plan would fail
+        # under --strict (ac_source_missing / no tasks).
+        self.assertNotIn("shallow_artifact:docs/agentic-sdlc/specs/flat-classify-x.md", errors)
+
+    def test_flat_fixtures_still_pass(self):
+        # AC16/AC9: the three pre-existing flat pipeline fixtures stay GREEN once the
+        # second (per-package) case is added to the contract.
+        for fixture in (
+            "agentic-sdlc-pipeline-procedure-pass.jsonl",
+            "agentic-sdlc-pipeline-procedure-codex-adapter-pass.jsonl",
+            "agentic-sdlc-pipeline-procedure-codex-exec-current.jsonl",
+        ):
+            with self.subTest(fixture=fixture):
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "scripts/run_procedure_eval.py",
+                        "--eval-set",
+                        "tests/skills/procedure/agentic-sdlc-pipeline.json",
+                        "--transcript",
+                        f"tests/fixtures/transcripts/{fixture}",
+                    ],
+                    cwd=REPO,
+                    capture_output=True,
+                    text=True, encoding="utf-8",
+                )
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn("procedure_eval=passed", proc.stdout)
+
+    def test_slug_rule_parity_across_sources(self):
+        # BR2/BR11: the slug reserved-set and regex are triplicated by design (resolver,
+        # flow-guard JSON, offline gate). Pin them byte-identical so drift fails CI.
+        import json
+        import resolve_work_package as rwp
+        import run_procedure_eval as rpe
+
+        expected_reserved = {"specs", "plans", "evidence", "notes", "spec", "plan"}
+        expected_pattern = r"^[a-z0-9][a-z0-9-]{0,63}$"
+
+        flow = json.loads((REPO / "hooks" / "flow-requirements.json").read_text(encoding="utf-8"))
+        pp = flow["perPackageArtifact"]
+        json_reserved = set(pp["reservedSlugs"])
+        json_pattern = pp["slugPattern"]
+
+        # Each source matches the canonical values.
+        self.assertEqual(rwp.RESERVED_SLUGS, expected_reserved)
+        self.assertEqual(rwp.SLUG_RE.pattern, expected_pattern)
+        self.assertEqual(rpe.RESERVED_SLUGS, expected_reserved)
+        self.assertEqual(rpe.SLUG_RE.pattern, expected_pattern)
+        self.assertEqual(json_reserved, expected_reserved)
+        self.assertEqual(json_pattern, expected_pattern)
+
+        # And the three sources are identical to one another.
+        self.assertEqual(rwp.RESERVED_SLUGS, rpe.RESERVED_SLUGS)
+        self.assertEqual(rwp.RESERVED_SLUGS, json_reserved)
+        self.assertEqual(rwp.SLUG_RE.pattern, rpe.SLUG_RE.pattern)
+        self.assertEqual(rwp.SLUG_RE.pattern, json_pattern)

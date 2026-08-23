@@ -67,6 +67,10 @@ Return:
 3. Decision points, if any.
 4. Evidence: context read, contract(s) applied, workflow/degraded path, agent bindings, and validator result if saved.
 
+## Artifact layouts
+
+Specs resolve in two layouts: the legacy flat `docs/agentic-sdlc/specs/<id>.md` (back-compat) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`). Save to whichever layout the work package uses; the resolver discovers both.
+
 ## Tripwires
 
 - Producing HOW/tasks in a spec-only request.

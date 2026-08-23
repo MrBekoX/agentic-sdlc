@@ -10,6 +10,14 @@ Two kinds of guard live here:
 | Runtime | Config | Wired events in this release |
 |---|---|---|
 | Claude Code | `hooks/hooks-claude.json` via `.claude-plugin/plugin.json` | `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop` |
+
+> **Command-guard matcher is `Bash\|PowerShell`, with no `if` filter.** Both details are security-load-bearing.
+> On a Windows host without Git Bash, Claude Code does not register the Bash tool at all, so a `Bash`-only
+> matcher leaves every command guard inert. And an `if` narrowed to a git SUBCOMMAND (`Bash(git commit*)`)
+> never starts the hook for a git alias such as `git ci`, so the guard cannot decide at all — the docs call
+> `if` best-effort and say to use the permission system, not a hook filter, for a hard allow/deny. The
+> decision therefore lives inside each guard, which self-gates cheaply on `git`.
+
 | Codex | `hooks/hooks-codex.json` declared in `.codex-plugin/plugin.json`, after Codex hook review/trust | `SessionStart` + `PreToolUse` (`Bash` command guards: `scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs`; `Bash`+`apply_patch` pre-write secret guard: `scan-write-codex.mjs`, then env-gated flow-order pre-gate: `flow-order-guard-codex.mjs`) + `Stop` (completion-claim marker backstop: `completion-claim-guard-codex.mjs`; evidence-only flow-step backstop: `flow-step-guard-codex.mjs`) |
 
 The hook scripts are shared in this directory, but being present as a script is not the same as being wired by every runtime.
@@ -24,24 +32,67 @@ Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve t
 | `session-start-codex.mjs` | Not wired | `SessionStart` | Injects git status summary and Codex-specific AGENTIC-SDLC bootstrap reminder. |
 | `scan-write.mjs` | `PostToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | Scans newly written text for secrets; warns only. (Claude `Write`/`Edit` field shape; superseded on Codex by `scan-write-codex.mjs`.) |
 | `scan-write-codex.mjs` | Not wired | `PreToolUse` (`Bash`/`apply_patch`) | Codex-native pre-write secret guard: extracts the literal added content of recognized write forms (apply_patch V4A; `printf`/`echo` `>`/`>>`; literal heredocs) and DENIES a high-confidence secret before the write. Bounded backstop — NOT covered (fail-open): pipe/`tee`/`base64`/command-substitution and `$VAR`/`${...}`/`$(...)` expansion. |
-| `scan-commit.mjs` | `PreToolUse` (`git commit*`) | `PreToolUse` (`Bash`) | Scans added diff lines for high-confidence secrets; blocks commit. Self-gates to `git commit` internally, so Codex wires it without an `if` clause. |
-| `branch-guard.mjs` | `PreToolUse` (`git commit*` / `git push*`) | `PreToolUse` (`Bash`) | Warns on `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. Self-gates to `git commit`/`push` internally. |
+| `scan-commit.mjs` | `PreToolUse` (`Bash`/`PowerShell`) | `PreToolUse` (`Bash`) | Scans added diff lines **and the commit message** (`-m`/`--message`/`-F`) for high-confidence secrets; blocks the commit. Flags credential files by name, including derived copies (`id_rsa.bak`, `.npmrc.old`, `server.key.bak`). Self-gates internally by resolving the git subcommand through `git-invocation.mjs`, so a git alias (`alias.ci = commit -a`) is still scanned. |
+| `branch-guard.mjs` | `PreToolUse` (`Bash`/`PowerShell`) | `PreToolUse` (`Bash`) | Warns on `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. Self-gates internally through `git-invocation.mjs`, so an aliased commit/push is still seen. |
 | `destructive-command-guard.mjs` | `PreToolUse` shell command | `PreToolUse` (`Bash`) | Blocks deterministic destructive commands such as `git reset --hard`, forceful `git clean`, recursive `rm` including wrapper/path forms, and `Remove-Item -Recurse` including common aliases/wrappers. |
 | `flow-order-guard.mjs` | `PreToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired (Claude file; mechanism superseded on Codex by `flow-order-guard-codex.mjs`) | For active flows, checks current-turn pre-edit evidence before source edits; warns by default and denies when `AGENTIC_FLOW_GATE_BLOCK=true`. |
-| `flow-order-guard-codex.mjs` | Not wired | `PreToolUse` (`Bash`/`apply_patch`) | Codex env-gated **opt-in** pre-edit ordering gate (AP2c): **default silent**, and only under its own `AGENTIC_FLOW_ORDER_BLOCK` (independent of the flow-step `AGENTIC_FLOW_GATE_BLOCK`) does it DENY a production-source edit attempted before THIS session produced a validated spec AND matching plan (same work id, both written this session via apply_patch, each re-validated strict). Deliberately does NOT reuse `deriveFlowEvidence` (which would accept a committed-only partner — DP-EVID): it derives the in-session spec-write and plan-write sets separately. Fixed-preamble + bracketed `{spec, plan}` deny reason, no rollout/command/path/work-id bytes. Fail-open on unreadable rollout / malformed input / unrecognized edit form; an unresolvable artifact root denies (BR4b). |
+| `flow-order-guard-codex.mjs` | Not wired | `PreToolUse` (`Bash`/`apply_patch`) | Codex env-gated **opt-in** pre-edit ordering gate (AP2c): **default silent**, and only under its own `AGENTIC_FLOW_ORDER_BLOCK` (independent of the flow-step `AGENTIC_FLOW_GATE_BLOCK`) does it DENY a production-source edit attempted before THIS session produced a validated spec AND matching plan (same work id, both written this session via apply_patch, each re-validated strict). Deliberately does NOT reuse `deriveFlowEvidence` (which would accept a committed-only partner — DP-EVID): it derives the in-session spec-write and plan-write sets separately. **(B5 write-form symmetry)** the pending source edit it gates is recognized across apply_patch, `printf`/`echo` `>`/`>>` and heredocs, AND in-place `sed -i`, `tee`, and any command's plain `>`/`>>` redirect — matched precisely (quote/heredoc/`$`-expansion-aware, Bash-only, never over patch text), so choosing `sed`/`tee`/a non-`printf` redirect instead of a patch no longer bypasses the gate, and a multi-file `sed -i`/`tee` now surfaces every operand (not just the last/first). Deferred residuals (fail-open): `cat`/`dd` copy, `base64`, `$`-expansion targets, the `&>`/`&>>`/`>|`/`N>`/`>&N` redirect family, and a Bash command whose text literally contains `*** Begin Patch`. Fixed-preamble + bracketed `{spec, plan}` deny reason, no rollout/command/path/work-id bytes. Fail-open on unreadable rollout / malformed input / unrecognized edit form; an unresolvable artifact root denies (BR4b). |
 | `completion-claim-guard.mjs` | `Stop` | Not wired (Claude file; mechanism superseded on Codex by `completion-claim-guard-codex.mjs`) | Warns when a final completion claim appears without `completion-claim-gate`; blocks when `AGENTIC_COMPLETION_GATE_BLOCK=true`. |
 | `completion-claim-guard-codex.mjs` | Not wired | `Stop` | Codex completion-claim backstop: on a final completion claim without the `completion-claim-gate` **sentinel marker** in the rollout, emits a non-blocking advisory by default or blocks when `AGENTIC_COMPLETION_GATE_BLOCK=true`. Same env switch + copied claim/negation patterns as the Claude guard. |
 | `flow-step-guard.mjs` | `Stop` | Not wired (Claude file; mechanism superseded on Codex by `flow-step-guard-codex.mjs`) | Re-derives required active-flow evidence from validated artifacts, real tool calls, and commands; warns by default and blocks missing `stop:block` steps when `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `flow-step-guard-codex.mjs` | Not wired | `Stop` | Codex evidence-only flow-step backstop: re-derives active-flow evidence from THIS rollout's in-session spec/plan writes (session-scoped — committed prior-session artifacts never activate a flow), recorded commands, and patch edit targets; warns by default and blocks missing `stop:block` steps when `AGENTIC_FLOW_GATE_BLOCK=true`. Fail-open; output names only step ids, never rollout bytes/work-id. |
 | `flow-evidence.mjs` | Shared library | Shared library | Evidence engine used by `flow-order-guard.mjs` and `flow-step-guard.mjs`. |
 | `codex-flow-evidence.mjs` | Not wired | Shared library | Pure session-scoped flow-evidence derivation for `flow-step-guard-codex.mjs`: active-flow by in-session artifact write, same-work-id spec/plan pairing (no fallback), `validate_artifacts.py --strict` subprocess, fail-open. Reuses the byte-locked `flow-evidence.mjs` read-only helpers (`loadRequirements`/`blockFlag`/`isSourceFile`). |
-| `secret-patterns.mjs` | Shared library | Shared library | Secret-pattern scanner used by the scan hooks. |
-| `codex-write-signal.mjs` | Not wired | Shared library | Pure write-content extractor (apply_patch V4A + bounded literal Bash write forms) used by `scan-write-codex.mjs`. No shell, no I/O. |
+| `worktree-scan.mjs` | `Stop` | Not wired (VERIFY - the Codex Stop payload and output contract were not probed) | Effect-layer DETECTION: scans the bytes that actually landed in the working tree (uncommitted tracked changes plus untracked files) rather than any command string, so the write form is irrelevant - `tee`, `dd`, `base64`, `python -c` and unrecognized redirects all surface identically. That is precisely the class `scan-write-codex.mjs` documents as out of reach. Scans untracked files INCLUDING gitignored ones - `.env` is both the likeliest home for a secret and almost always gitignored, so `--exclude-standard` alone skipped exactly the file that matters; vendored trees (`node_modules`, `.venv`, `dist`, ...) are excluded instead. Advisory by default via `systemMessage` (stderr from a hook that exits 0 never reaches the transcript); `AGENTIC_WORKTREE_SCAN_BLOCK=true` escalates to a Stop block. Per-session dedup, bounded (200 files / 256 KiB each / 4 MiB total), fail-open, values masked. |
+| `git-hook-scan.mjs` | Repo git hook | Repo git hook | Effect-layer PREVENTION, invoked from a repository's own `pre-commit` and `pre-merge-commit` (staged content + credential filenames; `git merge` runs the latter, NOT `pre-commit`), `commit-msg` (the message), and `prepare-commit-msg` - the one commit-path hook git does NOT suppress under `--no-verify`, and which can read both the staged index and the message. Runs on the git OPERATION, after git has resolved its alias table and the shell has done quote removal and `$PATH` lookup, so `git ci`, `g'i't commit`, a shell function named `git` and `eval` all reach it identically. Documented bypass: `git commit --no-verify`. Install with `scripts/install_git_hooks.py`. |
+| `shell-quoting.mjs` | Shared library | Shared library | Pure ANSI-C quoting decoder (`$'...'`). The shell decodes those escapes BEFORE the command runs, so `git commit -m $'\x73\x6b...'` records `sk-...` in history and `echo $'...' > f` writes it to disk while the raw hook input carries no vendor-shaped text. Both the commit-message scan and the write extractor decode through this module first. |
+| `git-invocation.mjs` | Shared library | Shared library | Resolves which git subcommands a command line will actually run, expanding git aliases (chains, `!shell` aliases, `-c alias.x=y`), global options, wrappers, quoted command names, and subshell/brace-group wrappers. `-C` is scoped PER STATEMENT and applied cumulatively the way git does (`git -C a -C b` == `cd a/b`); ask for the directories of the calls you care about with `targetCwdsFor` (a command line can carry more than one commit, and each is scanned in its own repository). Commit-message extraction covers `-m`, `--message`, bundled short options (`-am"msg"`), and `-F` files read from the repository of the statement that names them. Cannot see SHELL aliases/functions, `$PATH` shadowing or `eval` — those resolve after the hook has decided (documented in the file header). |
+| `scan-commit-names.mjs` | Shared library | Shared library | Linear credential-filename matcher for `scan-commit.mjs`, including derived copies (`id_rsa.bak`, `.npmrc.old`, `server.key.bak`) while leaving ordinary files (`notes.bak`, `keys.md`, `api.keys.json`) clean. Deliberately NOT a regex: the pattern that first implemented derived suffixes backtracked catastrophically (20.6 s at 12 dotted suffixes) on an agent-influenced filename. |
+| `secret-patterns.mjs` | Shared library | Shared library | Secret-pattern scanner used by the scan hooks. Vendor-prefix tokens are never keyword-filtered: they are suppressed only when structurally degenerate (a repeated/sequential run, e.g. `ghp_xxxx…`) or an exact published doc sample. The template heuristic applies only to captured (user-authored) values, as anchored whole-value predicates. |
+| `codex-write-signal.mjs` | Not wired | Shared library | Pure write-content extractor (apply_patch V4A + bounded literal Bash write forms) used by `scan-write-codex.mjs`. No shell, no I/O. Scans the WHOLE `printf`/`echo` payload, not just its first quoted token. `parsed` means "accounted for the whole command" and defaults to false — an unread write form (`tee`/`dd`/`sed -i`/`cp`/`>|`/`&>`) clears it. |
 | `codex-rollout.mjs` | Not wired | Shared library | Pure Codex rollout reader (final assistant message + completion-claim-gate sentinel-marker presence) used by `completion-claim-guard-codex.mjs`. `node:fs` read only; no shell, no eval. |
 
 `flow-requirements.json` is the shared source for active-flow step definitions and source-file extensions. The live flow hooks read it at runtime, and `tests/test_flow_requirements.py` validates that its skill, workflow, agent, and validator references resolve.
 
 All scripts are generic: no shell for git operations, path-normalized skip lists, no embedded real secrets, and fail-open behavior on hook errors.
+
+## Effect Layer: What It Closes, And What It Does Not
+
+The command guards read the raw command string and cannot be complete - shell aliases and
+functions, `$PATH` shadowing, `eval` and variable indirection resolve after the hook has decided,
+and the write surface is unbounded. The effect layer closes that class by never reading a command:
+git runs `pre-commit`/`pre-merge-commit`/`commit-msg`/`prepare-commit-msg` on the OPERATION, and
+`worktree-scan.mjs` reads bytes on disk.
+
+Verified by execution: a shell function wrapping `git commit`, an `eval`-assembled commit,
+`git $C` indirection, a secret inside an alias-supplied message, `git commit --no-verify`, a
+non-fast-forward merge commit, writes via `tee` / `base64 -d` / `python -c`, and a gitignored
+`.env` are all caught.
+
+Stated limits, so nobody reads more into this than it delivers:
+
+- `git -c core.hooksPath=/dev/null commit` disables all hooks - git documents this. A client-side
+  hook is a fast local backstop; non-negotiable enforcement belongs server-side (`pre-receive`) or
+  in CI.
+- `Stop` does not fire on a user interrupt or an API error, so the working-tree scan can be skipped.
+- The Stop scan is DETECTION: the bytes are already on disk when it runs. Prevention for the commit
+  path is the git hook.
+- A timed-out hook renders no decision at all, which is why the scan is bounded.
+
+### Codex
+
+`worktree-scan.mjs` is portable in principle - Codex has a `Stop` event that runs with the session
+cwd - but it is NOT wired there yet (VERIFY), for three documented reasons:
+
+1. Codex's `Stop` inverts the block semantics: `decision: "block"` does not reject the turn, it
+   continues it using `reason` as a new user prompt. Wiring the Claude output shape unchanged would
+   produce a prompt loop, not a warning.
+2. Under Codex's default `workspace-write` sandbox, `<writable_root>/.git` is read-only, so the git
+   hooks cannot be installed from inside a Codex session at all. Run
+   `scripts/install_git_hooks.py` outside the sandbox.
+3. Codex ships its own managed `prepare-commit-msg` hook for commit co-author attribution. Git runs
+   exactly one file per hook name, so the two cannot coexist silently - the installer's
+   refuse-on-foreign-hook behaviour is what keeps that collision visible instead of destructive.
 
 ## Conceptual Hooks
 
@@ -57,6 +108,14 @@ These checkpoints require model judgment, so they live as flow gates in skills a
 | `pre-git-operation-check` | contract `08-git-safety`; `/git-safety-check`; `scan-commit.mjs`; `branch-guard.mjs`. |
 | `flow-step-evidence-check` | `flow-order-guard.mjs`; `flow-step-guard.mjs`; `hooks/flow-requirements.json`; implementation skills and `implementasyon-control`. |
 | `final-response-verification` | `implementasyon-control` plus `completion-claim-gate`; Claude `completion-claim-guard.mjs` is only a deterministic backstop. |
+
+## Artifact Layouts And Per-Package Evidence
+
+Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
+
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution, and no flow guard activates on an evidence write). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+
+Per-package plan change-detection runs as a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
 
 ## Adding Or Disabling Hooks
 

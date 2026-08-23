@@ -65,6 +65,10 @@ Return:
 4. Verification plan.
 5. Evidence: source WHAT, contract(s) applied, workflow/degraded path, agent bindings, and validator result if saved.
 
+## Artifact layouts
+
+Plans resolve in two layouts: the legacy flat `docs/agentic-sdlc/plans/<id>.md` (back-compat) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`). Save to whichever layout the work package uses; the resolver discovers both.
+
 ## Tripwires
 
 - Planning without a clear WHAT.

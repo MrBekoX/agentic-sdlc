@@ -30,8 +30,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readStdin } from './secret-patterns.mjs';
 import { extractWrittenContent } from './codex-write-signal.mjs';
-import { readRolloutSignals } from './codex-rollout.mjs';
-import { loadRequirements, isSourceFile } from './flow-evidence.mjs';
+import { readRolloutSignals, preciseWriteTargetsOf } from './codex-rollout.mjs';
+import { loadRequirements, isSourceFile, isRealRunnerInvocation } from './flow-evidence.mjs';
 
 const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -131,9 +131,14 @@ export function orderDecision(signals, req, cwd) {
   // the active flow on Codex (DP1), so it accepts EITHER before-source-edit evidence: a validated
   // spec+plan pair OR a recorded test run this session. So a safe-refactor (or a test-first edit) that
   // ran tests before editing source is no longer falsely denied. Bad/absent testCommand -> skip (no throw).
+  //
+  // A2/HB6: the acceptance is the always-on SHAPE gate (isRealRunnerInvocation), so `echo pytest` no
+  // longer forges before-edit evidence. It stays EXIT-AGNOSTIC on purpose: a TDD RED run (a failing
+  // test written first) MUST still count as ordering evidence, so exit0 is NOT required here (only the
+  // flow-STEP Stop gate requires exit0).
   let testRe = null;
   try { if (req.testCommand) testRe = new RegExp(req.testCommand); } catch { testRe = null; }
-  if (testRe && signals.commands.some((c) => testRe.test(String(c)))) return { satisfied: true };
+  if (testRe && signals.commands.some((c) => isRealRunnerInvocation(c, testRe))) return { satisfied: true };
 
   // SATISFIED iff a single work id W has BOTH an in-session spec write AND an in-session plan write,
   // and both re-validate strict (the plan paired with the SAME-W spec, no fallback).
@@ -193,7 +198,17 @@ async function main() {
   try {
     const command = input?.tool_input?.command;
     if (typeof command !== 'string' || !command) process.exit(0); // AC8 absent/non-string command
-    const { targets } = extractWrittenContent(String(input?.tool_name || ''), command);
+    // B5 (write-form symmetry): the current-edit target set is the bounded extractWrittenContent targets
+    // UNION the precise sed/tee/`>`,`>>` recognizer — but ONLY for genuine Bash commands, never over
+    // apply_patch text (BR8/DP4: a `>` inside added patch content must not be read as a redirect). The
+    // precise recognizer is quote/heredoc/expansion-aware, so a quoted/argument/expansion write-looking
+    // token never over-approximates into a spurious DENY (BR7). extractWrittenContent (byte-locked, shared
+    // with the secret guard) is untouched — precision is a filter layered on top, so recognition breadth
+    // matches the prior-evidence detector and the two cannot drift apart (the #5 root cause).
+    const toolName = String(input?.tool_name || '');
+    const isPatch = toolName === 'apply_patch' || command.includes('*** Begin Patch');
+    const base = extractWrittenContent(toolName, command).targets;
+    const targets = isPatch ? base : base.concat(preciseWriteTargetsOf(command));
     const req = loadRequirements();
     if (!targets.some((t) => isSourceFile(t, req))) process.exit(0); // BR2/AC6/AC9 no source target
     const cwd = (typeof input?.cwd === 'string' && input.cwd) ? input.cwd : process.cwd(); // DP-CWD

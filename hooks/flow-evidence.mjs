@@ -25,6 +25,85 @@ export function blockFlag() {
   return /^(true|1|yes)$/i.test(String(process.env.AGENTIC_FLOW_GATE_BLOCK || ''));
 }
 
+// A2 SHAPE gate (cross-runtime, command-TEXT only): does a command actually INVOKE a test runner,
+// as opposed to merely mentioning one? A `{kind:command, matches:testCommand}` step used to be
+// satisfied by any command whose text matched the runner regex, so `echo pytest` (and even
+// `echo "...5 passed..."`) forged the evidence. Here we require a real invocation: split on shell
+// separators, strip a leading env-assignment prefix, and require SOME segment to actually START with
+// an allowlisted runner (or be `python[3] -m <runner>`), and to NOT be a no-op printer
+// (echo/printf/:/true/cat/head/tail/cd) or a `#` comment. Pure string/regex; every pattern is LINEAR
+// (disjoint classes, no nested quantifier) so an adversarial command cannot ReDoS the guard.
+const NOOP_FIRST = /^(?:echo|printf|:|true|cat|head|tail|cd)$/;
+// python | python3 | python3.11 | py, an optional launcher version flag (`-3`, `-3.11`), then `-m <mod>`.
+const PYTHON_DASH_M = /^(?:python[0-9.]*|py)(?:\s+-[0-9.]+)?\s+-m\s+(\S+)/;
+// Strip ONE leading `VAR=value` env-assignment (value quoted, or bare WITHOUT shell metacharacters so
+// a command-substitution value like `$(echo pytest)` is NOT swallowed). LINEAR (disjoint classes).
+const ENV_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s"'$`(){}|&;<>]*)\s+/;
+// A segment that (still) STARTS with an assignment is a standalone `NAME=value`, not a command — so a
+// bare `pytest=1` must not qualify just because the runner regex matches at the `=` word boundary.
+const ASSIGN_START = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+// Quote-aware split on shell statement/pipe boundaries (&&, ||, ;, |, newline). A separator INSIDE
+// single/double quotes is DATA (`echo ';pytest'`), never a boundary, so it cannot spawn a fragment
+// that spuriously "starts with a runner". Single linear pass.
+function splitSegments(str) {
+  const out = [];
+  let cur = '';
+  let q = ''; // active quote char, '' when unquoted
+  for (let i = 0; i < str.length; i++) {
+    const c = str[i];
+    if (q) { cur += c; if (c === q) q = ''; continue; }
+    if (c === "'" || c === '"') { q = c; cur += c; continue; }
+    if (c === '\n' || c === ';') { out.push(cur); cur = ''; continue; }
+    if (c === '|') { if (str[i + 1] === '|') i++; out.push(cur); cur = ''; continue; }
+    if (c === '&' && str[i + 1] === '&') { i++; out.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+export function isRealRunnerInvocation(command, testRe) {
+  if (!testRe) return false;
+  const str = String(command || '');
+  for (let seg of splitSegments(str)) {                   // quote-aware shell statement/pipe boundaries
+    seg = seg.trim();
+    if (!seg || seg.startsWith('#')) continue;            // empty or a comment segment
+    while (ENV_ASSIGN.test(seg)) seg = seg.replace(ENV_ASSIGN, ''); // drop leading env-assignments
+    seg = seg.trim();
+    if (!seg || ASSIGN_START.test(seg)) continue;         // empty, or a standalone NAME=value assignment
+    const first = seg.split(/\s+/)[0] || '';
+    if (NOOP_FIRST.test(first)) continue;                 // echo/printf/cat/... never RUN the tests
+    const pym = PYTHON_DASH_M.exec(seg);
+    if (pym) { if (testRe.test(pym[1])) return true; continue; } // python -m <runner> (HB7)
+    // Otherwise the segment must literally START with an allowlisted runner. testRe is non-global,
+    // so exec() is stateless and matches from the front; index 0 == "starts with the runner".
+    const m = testRe.exec(seg);
+    if (m && m.index === 0) return true;
+  }
+  return false;
+}
+
+// A2 advisory result-signature scanner (DP-A2-SIG). A broad, LINEAR match for the summary line a
+// runner prints on completion (pytest/jest/vitest `N passed|failed|...`, mocha `N passing`, cargo
+// `test result:`, go/unittest `ok`/`FAILED`, generic PASS/FAIL). The A2 flow-STEP gate does NOT
+// require this signature: codex truncates large logs, so a real green run's summary line can be
+// missing, and requiring it would false-block those runs (this is why `pytest --version` is accepted
+// rather than caught — see codex-flow-evidence.mjs). Exported for review + tests and reserved for a
+// future opt-in strict mode; exit0 remains the reliable gate.
+const TEST_RESULT_SIGNATURE = new RegExp([
+  '\\b\\d+\\s+(?:passed|failed|errors?|skipped)\\b', // pytest / jest / vitest
+  '\\b\\d+\\s+passing\\b',                            // mocha
+  '\\btest result:',                                 // cargo
+  '\\bok\\b',                                         // go / unittest OK
+  '\\bfailed\\b',                                     // unittest / go FAILED
+  '\\bpass\\b', '\\bfail\\b',                         // go PASS / FAIL (generic)
+].join('|'), 'i');
+
+export function outputHasTestSignature(text) {
+  return typeof text === 'string' && TEST_RESULT_SIGNATURE.test(text);
+}
+
 // Parse a transcript JSONL into a trace of observable facts. Fail-open to an empty trace.
 export function parseTranscript(transcriptPath) {
   const empty = { tools: [], commands: [], edits: [], lastText: '', raw: '' };
@@ -72,16 +151,66 @@ export function activeFlowNames(trace, req) {
   return out;
 }
 
-function listArtifacts(cwd, role, req) {
-  const root = req.artifactRoots?.[role];
-  if (!root) return [];
-  try {
-    return readdirSync(join(cwd, root))
-      .filter((f) => f.endsWith('.md'))
-      .map((f) => join(cwd, root, f));
-  } catch {
-    return [];
+// Per-package slug safety (BR2/BR11), shared by every per-package recognizer below. The rule is
+// carried in flow-requirements.json (perPackageArtifact) and kept in lock-step with the resolver
+// and the offline procedure-eval by tests/test_procedure_eval.py::test_slug_rule_parity_across_sources.
+function isValidSlug(slug, pp) {
+  if (!slug || !pp) return false;
+  let re;
+  try { re = new RegExp(pp.slugPattern); } catch { return false; }
+  if (!re.test(slug)) return false;
+  return !(pp.reservedSlugs || []).includes(slug);
+}
+
+// Classify a path as a per-package artifact: docs/agentic-sdlc/<slug>/<subdir>/<basename>.md.
+// Returns the role ('spec'|'plan') for a valid, non-reserved slug whose subdir maps to a role;
+// the evidence subdir (and any reserved/invalid slug) returns null, so evidence is NEVER a
+// trigger or satisfier (AC12) and a reserved slug never shadows the flat roots (AC14/BR11).
+function perPackageRole(filePath, req) {
+  const pp = req?.perPackageArtifact;
+  if (!pp || typeof pp.base !== 'string' || !filePath) return null;
+  const norm = String(filePath).replace(/\\/g, '/');
+  const marker = `${pp.base}/`;
+  let idx = norm.indexOf(marker);
+  while (idx !== -1 && !(idx === 0 || norm[idx - 1] === '/')) idx = norm.indexOf(marker, idx + 1);
+  if (idx === -1) return null;
+  const parts = norm.slice(idx + marker.length).split('/').filter(Boolean);
+  if (parts.length !== 3 || !parts[2].endsWith('.md')) return null; // <slug>/<subdir>/<basename>.md
+  if (!isValidSlug(parts[0], pp)) return null;
+  for (const [role, sub] of Object.entries(pp.subdirs || {})) {
+    if (sub === parts[1]) return role;
   }
+  return null;
+}
+
+// Enumerate artifacts for a role. Flat <root>/*.md FIRST (flat readdir order preserved as a
+// prefix so the Stop-path flat spec[0] pairing is unchanged), then per-package
+// <base>/<slug>/<subdir>/*.md for every valid, non-reserved slug in sorted order (deterministic).
+function listArtifacts(cwd, role, req) {
+  const out = [];
+  const root = req.artifactRoots?.[role];
+  if (root) {
+    try {
+      for (const f of readdirSync(join(cwd, root))) {
+        if (f.endsWith('.md')) out.push(join(cwd, root, f));
+      }
+    } catch { /* flat root absent -> per-package only */ }
+  }
+  const pp = req.perPackageArtifact;
+  const subdir = pp?.subdirs?.[role];
+  if (pp && typeof pp.base === 'string' && subdir) {
+    let slugs;
+    try { slugs = readdirSync(join(cwd, pp.base)); } catch { slugs = []; }
+    for (const slug of slugs.sort()) {
+      if (!isValidSlug(slug, pp)) continue;
+      let files;
+      try { files = readdirSync(join(cwd, pp.base, slug, subdir)); } catch { continue; }
+      for (const f of files.sort()) {
+        if (f.endsWith('.md')) out.push(join(cwd, pp.base, slug, subdir, f));
+      }
+    }
+  }
+  return out;
 }
 
 function runValidator(mode, file, specFile, cwd) {
@@ -100,20 +229,42 @@ function runValidator(mode, file, specFile, cwd) {
   return null; // could not run any interpreter -> caller fails open
 }
 
+// Stop-path plan->spec pairing (BR10). A per-package plan pairs ONLY with its co-located
+// <base>/<slug>/spec/<basename>.md, and ONLY if that file is present in the enumerated spec
+// listing -- membership-key discipline: the returned path is the matching LISTING ENTRY, never a
+// reconstructed string. If the co-located spec is absent the plan stays unpaired (null) so it is
+// correctly unsatisfied rather than falsely paired with a foreign flat spec (which would pass/fail
+// on the wrong spec's AC coverage, since validate_artifacts has no plan<->spec work_id check). A
+// flat plan keeps today's behavior: the FIRST flat spec (flat entries are the listing prefix).
+function specForPlan(planFile, specs, req) {
+  if (!specs || !specs.length) return null;
+  if (perPackageRole(planFile, req) === 'plan') {
+    const planNorm = String(planFile).replace(/\\/g, '/');
+    const want = planNorm.replace(/\/plan\/([^/]+)$/, '/spec/$1');
+    if (want === planNorm) return null;
+    return specs.find((s) => String(s).replace(/\\/g, '/') === want) || null;
+  }
+  return specs.find((s) => perPackageRole(s, req) === null) || null; // first FLAT spec, or none
+}
+
 function artifactSatisfied(item, trace, ctx) {
   // Ordering (PreToolUse): count only a spec/plan WRITTEN this turn, not a pre-existing file --
   // otherwise any old artifact already in the repo would satisfy the gate and ordering would be a
   // no-op. Stop keeps the thorough existence+re-validate path below.
   if (ctx.sessionScoped) {
     const root = ctx.req.artifactRoots?.[item.role];
-    if (!root) return false;
-    return (trace.edits || []).some((e) => String(e).replace(/\\/g, '/').includes(root));
+    return (trace.edits || []).some((e) => {
+      const norm = String(e).replace(/\\/g, '/');
+      if (root && norm.includes(root)) return true;            // flat root written this turn
+      return perPackageRole(e, ctx.req) === item.role;          // or a per-package <slug>/<role>/ edit
+    });
   }
   const files = listArtifacts(ctx.cwd, item.role, ctx.req);
   if (!files.length) return false;
   if (!ctx.validate || !item.validate) return true; // cheap path: existence is enough
+  const specs = item.validate.mode === 'plan' ? listArtifacts(ctx.cwd, 'spec', ctx.req) : null;
   for (const f of files) {
-    const specFile = item.validate.mode === 'plan' ? (listArtifacts(ctx.cwd, 'spec', ctx.req)[0] || null) : null;
+    const specFile = item.validate.mode === 'plan' ? specForPlan(f, specs, ctx.req) : null;
     const status = runValidator(item.validate.mode, f, specFile, ctx.cwd);
     if (status === null) return true; // validator unavailable -> fail-open on existence
     if (status === 0) return true;    // a present, valid artifact
@@ -131,7 +282,11 @@ function evidenceSatisfied(item, trace, ctx) {
       const pat = ctx.req[item.matches] || item.matches;
       let re;
       try { re = new RegExp(pat, 'i'); } catch { return false; }
-      return trace.commands.some((c) => re.test(c));
+      // A2 SHAPE gate: a command satisfies a test-run step only if it actually invokes a runner
+      // (`echo pytest` / `echo "...5 passed..."` no longer count). Claude's Bash exit/output substrate
+      // is unverified (HB4), so only the command TEXT shape is enforced here; the Codex engine
+      // additionally checks exit0 from its rollout `Exit code:` carrier (deliberate asymmetry).
+      return trace.commands.some((c) => isRealRunnerInvocation(c, re));
     }
     default:
       return false;
