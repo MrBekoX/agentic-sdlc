@@ -9,7 +9,7 @@
 // reported `parsed:true`, claiming coverage it did not have.
 
 const SIMPLE = {
-  a: '', b: '\b', e: '', E: '', f: '\f', n: '\n',
+  a: '\u0007', b: '\b', e: '\u001b', E: '\u001b', f: '\f', n: '\n',
   r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?',
 };
 
