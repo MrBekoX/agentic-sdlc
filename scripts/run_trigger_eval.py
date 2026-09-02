@@ -25,9 +25,17 @@ import re
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import uuid
 from pathlib import Path
+
+try:
+    from scripts.eval_safety import require_slug, resolve_under
+    from scripts.sensitive_redaction import redact_text
+except ModuleNotFoundError:  # direct `python3 scripts/...` execution
+    from eval_safety import require_slug, resolve_under
+    from sensitive_redaction import redact_text
 
 
 def read_skill(skill_path):
@@ -35,7 +43,8 @@ def read_skill(skill_path):
     text = sk.read_text(encoding="utf-8")
     name = re.search(r"(?m)^name:\s*(.+)$", text)
     desc = re.search(r"(?m)^description:\s*(.+)$", text)
-    return (name.group(1).strip() if name else Path(skill_path).name,
+    skill_name = name.group(1).strip() if name else Path(skill_path).name
+    return (require_slug(skill_name, "skill name"),
             desc.group(1).strip() if desc else "")
 
 
@@ -250,10 +259,9 @@ def run_streaming(cmd, project_root, env, timeout, detector, transcript_path=Non
 
     reader = threading.Thread(target=read_stdout, daemon=True)
     reader.start()
-    transcript = None
+    captured = []
     if transcript_path:
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        transcript = transcript_path.open("w", encoding="utf-8")
     try:
         while True:
             if time.monotonic() > deadline:
@@ -265,16 +273,15 @@ def run_streaming(cmd, project_root, env, timeout, detector, transcript_path=Non
                 if proc.poll() is not None:
                     return False
                 continue
-            if transcript:
-                transcript.write(line)
-                transcript.flush()
+            if transcript_path:
+                captured.append(line)
             decision = detector.feed(line)
             if decision is not None:
                 kill_process_tree(proc)
                 return decision
     finally:
-        if transcript:
-            transcript.close()
+        if transcript_path:
+            transcript_path.write_text(redact_text("".join(captured)), encoding="utf-8")
         kill_process_tree(proc)
 
 
@@ -285,7 +292,7 @@ def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_bu
     if command_shim:
         cdir = Path(project_root) / "commands"
         cdir.mkdir(parents=True, exist_ok=True)
-        cf = cdir / f"{clean}.md"
+        cf = resolve_under(cdir, f"{clean}.md", "command shim")
         indented = "\n  ".join(skill_desc.split("\n"))
         cf.write_text(f"---\ndescription: |\n  {indented}\n---\n\n# {skill_name}\n\nThis skill handles: {skill_desc}\n", encoding="utf-8")
     try:
@@ -308,7 +315,7 @@ def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_bu
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         transcript_path = None
         if transcript_dir:
-            transcript_path = Path(transcript_dir) / f"{clean}.jsonl"
+            transcript_path = resolve_under(Path(transcript_dir), f"{clean}.jsonl", "transcript filename")
         return run_streaming(cmd, project_root, env, timeout, TriggerDetector(clean, skill_name), transcript_path)
     finally:
         if cf and cf.exists():
@@ -330,10 +337,19 @@ def main(argv=None):
     p.add_argument("--transcript-dir", default=None)
     p.add_argument("--bare", action="store_true", help="Run Claude Code in bare mode to isolate plugin trigger behavior from project context; requires ANTHROPIC_API_KEY or apiKeyHelper auth.")
     p.add_argument("--no-command-shim", action="store_true", help="Do not plant commands/<skill>-skill-*.md; use real plugin skills only. Prefer with --plugin-dir when testing this repo's installed plugin.")
-    p.add_argument("--project-root", default=str(Path(__file__).resolve().parents[1]))
+    p.add_argument("--project-root", type=Path)
+    p.add_argument(
+        "--allow-writable-project",
+        action="store_true",
+        help="Allow live Claude execution in an explicitly selected writable project root.",
+    )
     args = p.parse_args(argv)
 
     skill_name, skill_desc = read_skill(args.skill_path)
+    if args.project_root and not args.allow_writable_project:
+        p.error("--project-root requires --allow-writable-project")
+    if args.plugin_dir:
+        args.plugin_dir = Path(args.plugin_dir).resolve()
     queries = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))["queries"]
     if args.smoke:
         args.runs = 1
@@ -344,16 +360,18 @@ def main(argv=None):
 
     errors, fields = [], {"skill": skill_name, "runs_per_query": args.runs}
     passed = 0
-    for i, q in enumerate(queries):
-        triggers = sum(run_once(q["query"], skill_name, skill_desc, args.project_root, args.timeout, args.model, args.max_budget_usd, args.plugin_dir, args.transcript_dir, args.bare, not args.no_command_shim)
-                       for _ in range(args.runs))
-        rate = triggers / args.runs
-        ok = (rate >= args.threshold) if q["should_trigger"] else (rate < args.threshold)
-        fields[f"q{i}_should={str(q['should_trigger']).lower()}_rate"] = f"{rate:.2f}"
-        if ok:
-            passed += 1
-        else:
-            errors.append(f"q{i}_mismatch:should_trigger={q['should_trigger']},rate={rate:.2f}")
+    with tempfile.TemporaryDirectory(prefix="agentic-sdlc-trigger-") as td:
+        project_root = args.project_root.resolve() if args.project_root else Path(td)
+        for i, q in enumerate(queries):
+            triggers = sum(run_once(q["query"], skill_name, skill_desc, project_root, args.timeout, args.model, args.max_budget_usd, args.plugin_dir, args.transcript_dir, args.bare, not args.no_command_shim)
+                           for _ in range(args.runs))
+            rate = triggers / args.runs
+            ok = (rate >= args.threshold) if q["should_trigger"] else (rate < args.threshold)
+            fields[f"q{i}_should={str(q['should_trigger']).lower()}_rate"] = f"{rate:.2f}"
+            if ok:
+                passed += 1
+            else:
+                errors.append(f"q{i}_mismatch:should_trigger={q['should_trigger']},rate={rate:.2f}")
     fields["queries_passed"] = f"{passed}/{len(queries)}"
     fields["trigger_eval"] = "failed" if errors else "passed"
 

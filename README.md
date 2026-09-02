@@ -4,7 +4,7 @@
 
 > A local AGENTIC-SDLC plugin for **Claude Code** and **Codex**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
-> `Version 0.4.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
+> `Version 0.4.1` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
 
 ---
 
@@ -114,7 +114,7 @@ using-agentic-sdlc
 | Behavior-preserving restructure | `safe-refactor` |
 | Test-only coverage or repair | `test-authoring` |
 
-Gate and review skills also feed the pipeline at control points: `dispatch-strategy`, `security-audit`, `implementasyon-control`, and `completion-claim-gate`.
+Gate and review skills also feed the pipeline at control points: `dispatch-strategy`, `security-audit`, `implementation-control`, and `completion-claim-gate`.
 
 Important boundary: `spec-authoring` and `plan-authoring` are standalone prompt-level skills. The pipeline does not call them for its internal spec/plan phases. Claude Code uses the `spec-plan-draft` workflow; Codex uses the embedded author/critic adapter documented in the runtime-specific README.
 
@@ -124,12 +124,12 @@ Important boundary: `spec-authoring` and `plan-authoring` are standalone prompt-
 .claude-plugin/    Claude Code manifest, local marketplace metadata, runtime README
 .codex-plugin/     Codex manifest and runtime README
 skills/            Shared skill source: one directory per skill
-agents/            Read-only sub-agent role contracts
+agents/            Bounded sub-agent role contracts (review roles are tool-level read-only)
 workflows/         Claude Code dynamic workflow scripts
 hooks/             Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/  Durable behavior contracts
 commands/          Manual slash-command definitions
-scripts/           15 Python helpers: probes, validators, eval runners, versioning, git-hook install
+scripts/           17 Python helpers: probes, validators, eval runners, versioning, git-hook install
 tests/             Unit tests, harness, fixtures, golden refs, eval seeds
 docs/              Component reference, boundaries, testing, release notes
 ```
@@ -163,7 +163,7 @@ Skills live in root [`skills/`](skills/), not in `.claude/skills/` or `.codex/sk
 | `security-audit` | Security review with masked findings. |
 | `code-quality-review` | Maintainability and implementation-quality review. |
 | `feedback-triage` | Verify and apply reviewer, bot, PR, or CI feedback. |
-| `implementasyon-control` | Pre-final audit that the required flow was actually followed. |
+| `implementation-control` | Pre-final audit that the required flow was actually followed. |
 | `completion-claim-gate` | Same-turn evidence gate before any done/fixed/passing/ready claim. |
 
 ### Utilities
@@ -183,7 +183,7 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 | Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. The command guards match `Bash|PowerShell` and carry no `if` filter — a `Bash`-only matcher is inert on a Windows host without Git Bash, and a subcommand-level `if` never starts the hook for a git alias, so each guard self-gates internally instead. |
 | Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`, after Codex hook review/trust: `SessionStart` bootstrap **plus** native blocking `PreToolUse` command guards, a pre-write secret guard, and two `Stop` backstops. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md) for the exact set and its documented coverage gaps. |
 
-Claude Code also wires flow enforcement: `flow-order-guard.mjs` checks active-flow evidence before source edits, and `flow-step-guard.mjs` re-derives Stop-time evidence from artifacts, tool calls, and commands. Both read [`hooks/flow-requirements.json`](hooks/flow-requirements.json) through [`hooks/flow-evidence.mjs`](hooks/flow-evidence.mjs). Codex carries the same discipline through skills, contracts, explicit validators, and procedure transcripts in this release.
+Claude Code wires flow enforcement through `flow-order-guard.mjs` and `flow-step-guard.mjs`. Codex uses its own `flow-order-guard-codex.mjs` and `flow-step-guard-codex.mjs` adapters over the same [`hooks/flow-requirements.json`](hooks/flow-requirements.json); the Codex order gate is opt-in and its Stop gate can continue the turn but cannot undo effects.
 
 Guarding happens at two layers, because one of them provably cannot be complete.
 
@@ -198,13 +198,14 @@ oversights - deciding what an arbitrary shell command does is undecidable.
 
 | Guard | Fires on | Why the command-layer residuals do not apply |
 |---|---|---|
-| repo `pre-commit` / `commit-msg` ([`scripts/install_git_hooks.py`](scripts/install_git_hooks.py)) | the git operation | git has already resolved its alias table; the shell has already done quote removal and `$PATH` lookup |
+| repo git hooks ([`scripts/install_git_hooks.py`](scripts/install_git_hooks.py)) | the git operation | git has already resolved its alias table; the shell has already done quote removal and `$PATH` lookup; owned hashes are recorded under the repo's git directory and external/shared `core.hooksPath` writes require an explicit opt-in |
 | [`hooks/worktree-scan.mjs`](hooks/worktree-scan.mjs) (Stop) | bytes on disk | how they were written is irrelevant |
 
 Verified against the real techniques: a shell function wrapping `git commit`, an `eval`-assembled commit,
 `git $C` indirection, a secret inside an alias-supplied message, and writes via `tee`, `base64 -d` and
 `python -c` are all caught. The documented limit of the effect layer is stated too: `git commit --no-verify`
-skips a client-side hook by git's design, and the Stop scan is detection - the bytes are already on disk.
+skips `pre-commit` and `commit-msg`, while the installed `prepare-commit-msg` backstop still runs by Git's
+design; the Stop scan is detection because the bytes are already on disk.
 Non-negotiable enforcement belongs server-side (`pre-receive`) or in CI.
 
 Judgment-based checks, such as whether context was actually read or test output was understood, live in skills and contracts rather than hook scripts. See [`hooks/README.md`](hooks/README.md).
@@ -239,15 +240,27 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 - [`docs/testing.md`](docs/testing.md) - deterministic gate, live evals, transcript checks.
 - [`docs/troubleshooting.md`](docs/troubleshooting.md) - runtime loading, hooks, evals, and common failures.
 - [`docs/release-readiness.md`](docs/release-readiness.md) - release evidence checklist.
+- [`SECURITY.md`](SECURITY.md) - supported versions, private reporting, and hook/eval trust boundaries.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) - contribution gate and community expectations.
 
 ## Versioning
 
-Current version: `0.4.0`.
+Current version: `0.4.1`.
 
 ```bash
 python3 scripts/bump_version.py --check
-python3 scripts/bump_version.py 0.3.1
+python3 scripts/bump_version.py <next-version>
+python3 scripts/bump_version.py --release-check
 ```
+
+## Related Work And Acknowledgements
+
+[obra/superpowers](https://github.com/obra/superpowers) influenced this project's RED/GREEN/REFACTOR
+teaching loop, rationalization/red-flag review mechanics, and numbered completion-gate style. This
+repository independently adds dual-runtime packaging, durable behavior contracts, artifact validators,
+work-package evidence, and deterministic security/flow hooks. See
+[`skills/skill-authoring/references/house-notes.md`](skills/skill-authoring/references/house-notes.md)
+for the detailed derivation notes. Both projects are MIT licensed.
 
 ## License
 

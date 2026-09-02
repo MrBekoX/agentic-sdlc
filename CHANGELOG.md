@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased — skill-depth contract (PoC)
+## Unreleased
 
+## 0.4.1 - 2026-09-01
+
+- Renamed the mixed-language public skill ID `implementasyon-control` to `implementation-control` across discovery metadata, routing, hooks, docs, eval fixtures, and golden references.
 - Refreshed plugin documentation for the current Claude/Codex layer split: active flow guards, flow evidence config, deeper spec/plan validation, work-package resolution, router/procedure evals, and current test-suite coverage.
 - Procedure eval now validates written artifact **content** (a literal `"spec"`/`"plan"` stub is rejected as `shallow_artifact`), closing the gap where surface-trace transcripts passed.
 - Validator gained quality checks (`task_no_verification`, `deferred_work`, `security_handwave`) — quality + proportionality, **no numeric count floors**.

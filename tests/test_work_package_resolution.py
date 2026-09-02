@@ -1,6 +1,6 @@
 """Tests for resolve_work_package.py.
 
-The resolver picks the spec/plan pair for implementasyon-control. It is separate
+The resolver picks the spec/plan pair for implementation-control. It is separate
 from validate_artifacts.py: this module tests identity and selection, not content
 quality.
 """

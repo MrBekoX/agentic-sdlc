@@ -228,7 +228,7 @@ class TestGuardBehavior(unittest.TestCase):
         self.assertNotIn("SENTINEL_CLAIM_XYZ", out)  # the distinctive claim substring never leaks
 
 
-# ---- AC11: Claude byte-identical + regex parity ----------------------------
+# ---- AC11: Claude source + regex parity -------------------------------------
 class TestClaudeParity(unittest.TestCase):
     @staticmethod
     def _extract(pattern_name, text):
@@ -243,10 +243,11 @@ class TestClaudeParity(unittest.TestCase):
             self.assertEqual(self._extract(name, claude), self._extract(name, codex),
                              f"{name} regex drifted between Claude and Codex guards")
 
-    def test_claude_guard_byte_identical(self):  # AC11 / §10
+    def test_claude_guard_matches_head_except_approved_skill_rename(self):  # AC11 / §10
         head = _git_show("hooks/completion-claim-guard.mjs")
         self.assertIsNotNone(head, "completion-claim-guard.mjs not in HEAD")
-        self.assertEqual(CLAUDE_GUARD.read_text(encoding="utf-8"), head)
+        expected = head.replace("implementasyon-control", "implementation-control")
+        self.assertEqual(CLAUDE_GUARD.read_text(encoding="utf-8"), expected)
 
 
 # ---- AC12, AC13: Codex-only Stop wiring, AP1 untouched ----------------------

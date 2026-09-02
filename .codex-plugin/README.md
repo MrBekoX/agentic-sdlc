@@ -10,7 +10,7 @@ Codex reads:
 |---|---|
 | `.codex-plugin/plugin.json` | Codex plugin metadata and interface block. |
 | `skills/*/SKILL.md` | Shared skill source. |
-| `hooks/hooks-codex.json` | Codex hook config (declared in the manifest): SessionStart bootstrap only after hook review/trust. |
+| `hooks/hooks-codex.json` | Codex hook config: blocking `PreToolUse`, bootstrap `SessionStart`, and advisory/env-gated `Stop` backstops after hook review/trust. |
 
 The manifest points to:
 
@@ -55,7 +55,7 @@ Example `~/.agents/plugins/marketplace.json`:
 codex plugin add agentic-sdlc@personal
 ```
 
-Start a new Codex thread after install or reinstall so the runtime reloads plugin skills. If Codex reports bundled hooks pending review, open `/hooks` and trust the `SessionStart` hook before relying on startup context.
+Start a new Codex thread after install or reinstall so the runtime reloads plugin skills and hooks. If Codex reports bundled hooks pending review, open `/hooks` and review the plugin commands before relying on them.
 
 ## Runtime Root
 
@@ -94,7 +94,7 @@ Emit `Runtime: Codex` once. At each gate below, emit `Codex Adapter Gate: <gate>
 6. Draft and critic-review the plan inside `agentic-sdlc-pipeline`.
 7. Save `docs/agentic-sdlc/plans/<work_id>.md` and run `validate_artifacts.py --mode plan --strict`.
 8. Activate the selected core workflow skill before implementation edits.
-9. Activate `security-audit`, `implementasyon-control`, and `completion-claim-gate` at their gates.
+9. Activate `security-audit`, `implementation-control`, and `completion-claim-gate` at their gates.
 
 During Codex pipeline and eval runs, do not run recursive cleanup deletes for generated caches such as `__pycache__`. Leave or report them instead; cleanup is not a pipeline gate and may create permission-denial noise in procedure transcripts.
 
@@ -112,12 +112,12 @@ Focused skills are independently routable in Codex and also serve as pipeline bu
 | Test-only work | `test-authoring` |
 | Execution mechanism choice | `dispatch-strategy` |
 | Security gates | `security-audit` |
-| Pre-final audit | `implementasyon-control` |
+| Pre-final audit | `implementation-control` |
 | Final evidence claim | `completion-claim-gate` |
 
 ## Hooks In Codex
 
-The Codex manifest declares `"hooks": "./hooks/hooks-codex.json"`, which wires only `SessionStart` to `hooks/session-start-codex.mjs` through `${PLUGIN_ROOT}`. The config is deliberately NOT named `hooks/hooks.json`: Claude Code auto-loads that default filename, where `${PLUGIN_ROOT}` is undefined and the command would fail. Non-managed plugin-bundled command hooks require Codex review/trust before they run. Command-blocking guardrails remain Claude-only in this release; Codex guardrail behavior is carried by skills, contracts, manual checks, and explicit script runs where appropriate.
+The Codex manifest declares `"hooks": "./hooks/hooks-codex.json"`. It wires blocking `PreToolUse` guards for commit secrets, destructive shell commands, branch policy, literal writes, and opt-in flow ordering; `SessionStart` bootstrap context; and `Stop` continuation backstops for completion claims and flow evidence. Every path resolves through `${PLUGIN_ROOT}`. The config is deliberately NOT named `hooks/hooks.json`: Claude Code would auto-load that default filename with the wrong root variable. Non-managed plugin-bundled command hooks require Codex review/trust before they run. Several controls remain intentionally bounded: branch blocking and flow ordering are env-gated, Stop hooks continue the turn rather than undoing effects, and parser errors fail open.
 
 ## Requirements
 

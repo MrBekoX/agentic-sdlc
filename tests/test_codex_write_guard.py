@@ -78,6 +78,18 @@ class TestCodexWriteParser(unittest.TestCase):
         self.assertNotIn("Begin Patch", r["addedContent"])  # envelope excluded
         self.assertNotIn("Add File", r["addedContent"])
 
+    def test_apply_patch_content_beginning_with_double_plus_is_scanned(self):
+        cmd = _apply_patch("a.txt", ["++" + SECRET])
+        r = self._parse("apply_patch", cmd)
+        self.assertTrue(r["parsed"])
+        self.assertIn(SECRET, r["addedContent"])
+
+    def test_bash_literal_begin_patch_text_stays_on_bash_parser(self):
+        cmd = "printf '*** Begin Patch " + SECRET + "' > f.txt"
+        r = self._parse("Bash", cmd)
+        self.assertTrue(r["parsed"])
+        self.assertIn(SECRET, r["addedContent"])
+
     def test_multifile_patch_all_sections(self):
         cmd = ("*** Begin Patch\n*** Add File: a.txt\n+clean line\n"
                "*** Add File: b.txt\n+TOKEN = " + SECRET + "\n*** End Patch")
@@ -161,6 +173,12 @@ class TestCodexWriteGuardBehavior(unittest.TestCase):
 
     def test_apply_patch_secret_denied(self):  # AC1
         self._assert_deny(self._run("apply_patch", _apply_patch("a.txt", ["TOKEN = " + SECRET])))
+
+    def test_apply_patch_triple_plus_secret_denied(self):
+        self._assert_deny(self._run("apply_patch", _apply_patch("a.txt", ["++" + SECRET])))
+
+    def test_bash_begin_patch_literal_secret_denied(self):
+        self._assert_deny(self._run("Bash", "printf '*** Begin Patch " + SECRET + "' > f.txt"))
 
     def test_deny_reason_sanitizes_injected_target_path(self):  # security: no path reflection (prompt-injection)
         # The V4A `*** Add File: (.+)` capture is attacker-influenceable; the deny reason must reduce it

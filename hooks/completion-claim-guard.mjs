@@ -4,7 +4,7 @@
 // with AGENTIC_COMPLETION_GATE_BLOCK=true, blocks the stop so the gate runs.
 //
 // This is a DETERMINISTIC check (narrow claim pattern + gate-skill absence), complementing — not
-// replacing — the judgment gate inside completion-claim-gate / implementasyon-control. Whether the
+// replacing — the judgment gate inside completion-claim-gate / implementation-control. Whether the
 // evidence is GOOD stays a model judgment; this only catches the case where the gate was skipped
 // entirely. Narrow patterns + warn-by-default keep false positives low. Fail-open on any error.
 import { readFileSync } from 'node:fs';

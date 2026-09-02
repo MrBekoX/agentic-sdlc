@@ -50,7 +50,7 @@ class TestBannedTermsAbsent(unittest.TestCase):
 # --- AC #3: Assertion-contract sections present on full-conversion skills ---
 FULL_CONVERSION = [
     "root-cause-fix", "safe-refactor", "test-authoring", "security-audit",
-    "code-quality-review", "implementasyon-control", "feature-build",
+    "code-quality-review", "implementation-control", "feature-build",
 ]
 REQUIRED_SECTIONS = ("## Invariant", "## Tripwires", "## Proof", "## Excuse → check")
 
@@ -133,7 +133,7 @@ DEPTH_FORCING_SKILLS = [
     "spec-authoring", "plan-authoring",
     # full-conversion skills (also keep the Unicode Excuse → check from v0.3.0)
     "root-cause-fix", "safe-refactor", "test-authoring", "security-audit",
-    "code-quality-review", "implementasyon-control", "feature-build",
+    "code-quality-review", "implementation-control", "feature-build",
     # lighter / special skills (proportional depth, scaled to role)
     "completion-claim-gate", "mind-spark", "dispatch-strategy",
     "feedback-triage", "skill-authoring", "using-agentic-sdlc",

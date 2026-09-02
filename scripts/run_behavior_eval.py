@@ -25,7 +25,13 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+try:
+    from scripts.eval_safety import require_slug
+except ModuleNotFoundError:
+    from eval_safety import require_slug
 
 
 def load_eval(path: Path) -> list[dict]:
@@ -37,6 +43,7 @@ def load_eval(path: Path) -> list[dict]:
         for key in ("id", "prompt"):
             if not isinstance(case.get(key), str) or not case[key].strip():
                 raise ValueError(f"case missing string '{key}': {case!r}")
+        require_slug(case["id"], "case id")
         for key in ("required_patterns", "forbidden_patterns"):
             values = case.get(key, [])
             if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
@@ -77,12 +84,16 @@ def check_case(case: dict, transcript: str) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval-set", required=True, type=Path)
-    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--project-root", type=Path)
+    parser.add_argument("--allow-writable-project", action="store_true")
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--model")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--allow-missing-claude", action="store_true")
     args = parser.parse_args(argv)
+
+    if args.project_root and not args.allow_writable_project:
+        parser.error("--project-root requires --allow-writable-project")
 
     try:
         cases = load_eval(args.eval_set)
@@ -102,9 +113,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if args.allow_missing_claude else 2
 
     errors = []
-    for case in cases:
-        transcript = run_claude(case["prompt"], args.project_root, args.timeout, args.model)
-        errors.extend(check_case(case, transcript))
+    with tempfile.TemporaryDirectory(prefix="agentic-sdlc-behavior-") as td:
+        project_root = args.project_root.resolve() if args.project_root else Path(td)
+        for case in cases:
+            transcript = run_claude(case["prompt"], project_root, args.timeout, args.model)
+            errors.extend(check_case(case, transcript))
     for err in errors:
         print(f"error={err}")
     print(f"cases={len(cases)}")

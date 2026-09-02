@@ -214,9 +214,10 @@ function listArtifacts(cwd, role, req) {
 }
 
 function runValidator(mode, file, specFile, cwd) {
-  const candidates = process.platform === 'win32'
-    ? [['py', '-3'], ['python'], ['python3']]
-    : [['python3'], ['python']];
+  const configured = String(process.env.AGENTIC_SDLC_PYTHON || '').trim();
+  const candidates = (configured ? [[configured]] : []).concat(process.platform === 'win32'
+    ? [['python3'], ['python'], ['py', '-3']]
+    : [['python3'], ['python']]);
   const script = join(HOOK_DIR, '..', 'scripts', 'validate_artifacts.py');
   const tail = ['--mode', mode, '--file', file, '--strict'];
   if (mode === 'plan' && specFile) tail.push('--spec', specFile);
@@ -224,6 +225,7 @@ function runValidator(mode, file, specFile, cwd) {
     const r = spawnSync(c[0], [...c.slice(1), script, ...tail], { encoding: 'utf8', cwd, timeout: 10000 });
     if (r.error) continue;          // interpreter not found — try next
     if (r.status === null) continue; // spawn failed
+    if (/unable to create process using/i.test(String(r.stderr || ''))) continue;
     return r.status;                 // 0 = pass, non-zero = fail (e.g. a stub)
   }
   return null; // could not run any interpreter -> caller fails open

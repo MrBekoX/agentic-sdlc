@@ -9,6 +9,7 @@
 // runtime shell indirection that is statically undecidable (eval "$(...)", a=rm;$a, rm$IFS-rf).
 // The permission prompt remains the primary control; this guard only catches the common cases.
 import { readStdin } from './secret-patterns.mjs';
+import { expandAnsiCQuotes } from './shell-quoting.mjs';
 
 const BLOCKED = [
   {
@@ -50,7 +51,44 @@ const WRAPPERS = {
 // Shells whose `-c <payload>` (and `eval <payload>`) run an inline command we must inspect.
 const SHELL_NAMES = ['powershell', 'pwsh', 'bash', 'sh', 'zsh', 'dash', 'ksh'];
 
-function rawCommandSegments(cmd) {
+function removeBashLineContinuations(cmd) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < cmd.length; i += 1) {
+    const ch = cmd[i];
+    if (ch === "'" && quote === null) {
+      quote = "'";
+      out += ch;
+      continue;
+    }
+    if (ch === "'" && quote === "'") {
+      quote = null;
+      out += ch;
+      continue;
+    }
+    if (ch === '"' && quote !== "'") {
+      quote = quote === '"' ? null : '"';
+      out += ch;
+      continue;
+    }
+    // Bash removes backslash-newline before tokenization outside single quotes, including inside
+    // double quotes. Preserve ordinary backslashes for the one unescape pass in the tokenizer.
+    if (ch === '\\' && quote !== "'") {
+      if (cmd[i + 1] === '\n') {
+        i += 1;
+        continue;
+      }
+      if (cmd[i + 1] === '\r' && cmd[i + 2] === '\n') {
+        i += 2;
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return out;
+}
+
+function rawCommandSegments(cmd, protectEscapedSeparators = false) {
   const segments = [];
   let segment = '';
   let quote = null;
@@ -65,6 +103,18 @@ function rawCommandSegments(cmd) {
       } else if (ch === quote) {
         quote = null;
       }
+      continue;
+    }
+    if (protectEscapedSeparators && escaped) {
+      // Keep the pair intact. tokenizePreservingQuotes() performs the ONE Bash unescape pass;
+      // consuming it here as well turns safe r\\\\m into rm and creates a false denial.
+      segment += ch;
+      escaped = false;
+      continue;
+    }
+    if (protectEscapedSeparators && ch === '\\') {
+      segment += ch;
+      escaped = true;
       continue;
     }
     if (ch === '"' || ch === "'") {
@@ -83,23 +133,37 @@ function rawCommandSegments(cmd) {
   return segments;
 }
 
-function tokenizePreservingQuotes(text) {
+function tokenizePreservingQuotes(text, unescapeUnquoted = false) {
   const tokens = [];
   let token = '';
   let quote = null;
   let escaped = false;
-  for (const ch of text) {
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
     if (quote) {
       if (escaped) {
         token += ch;
         escaped = false;
       } else if (ch === '\\' && quote === '"') {
-        escaped = true;
+        // In Bash double quotes, backslash is special only before $, backtick, quote, backslash,
+        // or newline. Generic/PowerShell view preserves it, and Bash view preserves \m too.
+        const next = text[i + 1];
+        if (unescapeUnquoted && next && /[$`"\\\r\n]/.test(next)) escaped = true;
+        else token += ch;
       } else if (ch === quote) {
         quote = null;
       } else {
         token += ch;
       }
+      continue;
+    }
+    if (unescapeUnquoted && escaped) {
+      token += ch;
+      escaped = false;
+      continue;
+    }
+    if (unescapeUnquoted && ch === '\\') {
+      escaped = true;
       continue;
     }
     if (ch === '"' || ch === "'") {
@@ -127,25 +191,44 @@ function commandName(token) {
   return basename(token).toLowerCase().replace(/\.exe$/, '');
 }
 
-function commandTokens(cmd) {
+function commandTokensOne(cmd, unescapeUnquoted) {
+  const source = unescapeUnquoted
+    ? expandAnsiCQuotes(removeBashLineContinuations(cmd))
+    : cmd;
   // Segment on UNQUOTED separators, then tokenize each segment with quote REMOVAL (not blanking).
   // A quoted command name still runs the command in a shell ("rm"/'rm'/r"m" all execute rm), so
   // unquoting per token — instead of erasing quoted spans before tokenizing — keeps the real
   // command name visible to the checks below while still treating a quoted argument blob
   // (echo "rm -rf x") as a single non-command token.
-  const tokens = rawCommandSegments(cmd).map(tokenizePreservingQuotes).map(unwrapCommand).filter((items) => items.length);
-  const wrapped = rawCommandSegments(cmd).flatMap(shellPayloads).flatMap(commandTokens);
+  const segments = rawCommandSegments(source, unescapeUnquoted);
+  const tokens = segments
+    .map((segment) => tokenizePreservingQuotes(segment, unescapeUnquoted))
+    .map(unwrapCommand)
+    .filter((items) => items.length);
+  const wrapped = segments
+    .flatMap((segment) => shellPayloads(segment, unescapeUnquoted))
+    // Each explicit shell starts a new parsing layer. A payload single-quoted for the outer shell
+    // can contain a backslash-newline or ANSI-C quote that only the INNER bash/sh realizes.
+    .flatMap((payload) => commandTokensOne(payload.text, payload.bashSemantics));
   return tokens.concat(wrapped);
 }
 
-function shellPayloads(segment) {
-  const tokens = tokenizePreservingQuotes(segment);
+function commandTokens(cmd, bashSemantics = false) {
+  const raw = commandTokensOne(cmd, false);
+  if (!bashSemantics) return raw;
+  // Preserve the generic/PowerShell view and add a Bash-realized view. The union prevents Bash
+  // quote removal from hiding Windows-style paths while still exposing r\m and $'\\x72\\x6d'.
+  return raw.concat(commandTokensOne(cmd, true));
+}
+
+function shellPayloads(segment, unescapeUnquoted) {
+  const tokens = tokenizePreservingQuotes(segment, unescapeUnquoted);
   const payloads = [];
   for (let i = 0; i < tokens.length; i += 1) {
     const name = commandName(tokens[i]);
     if (name === 'eval') {
       const payload = tokens.slice(i + 1).join(' ').trim();
-      if (payload) payloads.push(payload);
+      if (payload) payloads.push({ text: payload, bashSemantics: unescapeUnquoted });
       continue;
     }
     if (!SHELL_NAMES.includes(name)) continue;
@@ -153,7 +236,12 @@ function shellPayloads(segment) {
       // bash/sh/zsh/dash/ksh: -c (also -lc/-ic); powershell/pwsh: -Command / -c / /c.
       if (/^(?:-command|\/c|-[a-z]*c)$/i.test(tokens[j])) {
         const payload = tokens.slice(j + 1).join(' ').trim();
-        if (payload) payloads.push(payload);
+    if (payload) {
+      payloads.push({
+        text: payload,
+        bashSemantics: ['bash', 'sh', 'zsh', 'dash', 'ksh'].includes(name),
+      });
+    }
         break;
       }
     }
@@ -239,16 +327,16 @@ function hasRemoveItemRecursiveFlag(args) {
   return args.some((arg) => /^-r(?:e(?:c\w*)?)?$/i.test(arg));
 }
 
-function hasRecursiveRm(cmd) {
-  return commandTokens(cmd).some((tokens) => {
+function hasRecursiveRm(cmd, bashSemantics) {
+  return commandTokens(cmd, bashSemantics).some((tokens) => {
     const name = commandName(tokens[0]);
     return name === 'rm' && hasRmRecursiveFlag(tokens.slice(1));
   });
 }
 
-function hasRecursiveRemoveItem(cmd) {
+function hasRecursiveRemoveItem(cmd, bashSemantics) {
   const names = new Set(['remove-item', 'ri', 'del', 'erase', 'rd', 'rmdir', 'rm']);
-  return commandTokens(cmd).some((tokens) => {
+  return commandTokens(cmd, bashSemantics).some((tokens) => {
     const name = commandName(tokens[0]);
     return names.has(name) && hasRemoveItemRecursiveFlag(tokens.slice(1));
   });
@@ -270,16 +358,16 @@ function gitSubcommand(tokens) {
   return tokens.slice(i);
 }
 
-function hasGitResetHard(cmd) {
-  return commandTokens(cmd).some((tokens) => {
+function hasGitResetHard(cmd, bashSemantics) {
+  return commandTokens(cmd, bashSemantics).some((tokens) => {
     if (commandName(tokens[0]) !== 'git') return false;
     const sub = gitSubcommand(tokens);
     return sub[0] === 'reset' && sub.slice(1).some((arg) => arg === '--hard');
   });
 }
 
-function hasGitCleanForce(cmd) {
-  return commandTokens(cmd).some((tokens) => {
+function hasGitCleanForce(cmd, bashSemantics) {
+  return commandTokens(cmd, bashSemantics).some((tokens) => {
     if (commandName(tokens[0]) !== 'git') return false;
     const sub = gitSubcommand(tokens);
     if (sub[0] !== 'clean') return false;
@@ -308,9 +396,10 @@ const raw = await readStdin();
 let input = {};
 try { input = JSON.parse(raw || '{}'); } catch { /* fail open */ }
 const cmd = String(input?.tool_input?.command || '');
+const bashSemantics = String(input?.tool_name || '') === 'Bash';
 
 for (const finding of BLOCKED) {
-  const blocked = finding.check ? finding.check(cmd) : finding.re.test(cmd);
+  const blocked = finding.check ? finding.check(cmd, bashSemantics) : finding.re.test(cmd);
   if (blocked) {
     deny(finding);
     process.exit(0);

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-gate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Version consistency
+        run: python scripts/bump_version.py --release-check
+      - name: Static checks
+        run: python scripts/check_all.py
+      - name: Skill harness
+        run: python tests/skills/harness.py
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v

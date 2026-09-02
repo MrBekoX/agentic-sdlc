@@ -38,7 +38,7 @@ export function extractWrittenContent(toolName, command) {
   // the segment literal and returned parsed:true over content that was never going to be written.
   const cmd = expandAnsiCQuotes(String(command || ''));
   if (!cmd || cmd.length > MAX) return { addedContent: '', targets: [], parsed: false };
-  if (toolName === 'apply_patch' || cmd.includes('*** Begin Patch')) return parseApplyPatch(cmd);
+  if (toolName === 'apply_patch') return parseApplyPatch(cmd);
   return parseBash(cmd);
 }
 
@@ -57,7 +57,6 @@ function parseApplyPatch(cmd) {
     if (m) { targets.push(m[1].trim()); continue; }
     if (/^\*\*\* /.test(line)) continue;                 // *** Begin/End Patch, *** Delete File:
     if (/^@@/.test(line)) continue;                      // hunk header
-    if (line.startsWith('+++') || line.startsWith('---')) continue; // unified file markers
     if (line.startsWith('+')) added.push(line.slice(1)); // an added content line
   }
   return { addedContent: added.join('\n'), targets, parsed: true };
@@ -227,4 +226,3 @@ function splitSegments(s) {
   if (cur) segs.push(cur);
   return segs;
 }
-

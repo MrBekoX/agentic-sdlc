@@ -2,7 +2,7 @@
 
 Asserts the wiring between skills/agents/workflows/commands/hooks/scripts is intact:
 - golden must_reference entries both APPEAR in the SKILL.md and RESOLVE to a real component
-  (e.g. agentic-sdlc-pipeline -> root-cause-fix/feature-build/safe-refactor/test-authoring, implementasyon-control ->
+  (e.g. agentic-sdlc-pipeline -> root-cause-fix/feature-build/safe-refactor/test-authoring, implementation-control ->
   implementation-auditor, spec-plan-draft workflow -> spec-plan-author/critic agents).
 - every ${CLAUDE_PLUGIN_ROOT}/<path> referenced in skills/hooks resolves to a real repo file.
 - hooks.json is valid JSON and each referenced .mjs exists.
@@ -90,7 +90,7 @@ class TestSkillCrossReferences(unittest.TestCase):
             "mind-spark",
             "security-audit",
             "code-quality-review",
-            "implementasyon-control",
+            "implementation-control",
         ]
         for skill in skills:
             text = (h.SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
@@ -98,8 +98,8 @@ class TestSkillCrossReferences(unittest.TestCase):
                 if "Workflow" in text or "workflow" in text:
                     self.assertRegex(text, r"Claude Code|runtime|adapter|unavailable|degraded")
 
-    def test_implementasyon_control_references_auditor_agent(self):
-        text = (h.SKILLS_DIR / "implementasyon-control" / "SKILL.md").read_text(encoding="utf-8")
+    def test_implementation_control_references_auditor_agent(self):
+        text = (h.SKILLS_DIR / "implementation-control" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("implementation-auditor", text)
         self.assertIn("implementation-auditor", h.agent_names())
 
@@ -133,6 +133,8 @@ class TestSkillCrossReferences(unittest.TestCase):
             "Do not choose a mechanism directly",
             "same-purpose process skill",
             "superpowers:brainstorming",
+            "choose one process owner per phase",
+            "Never stack both",
             "Any-language clear implementation prompts",
             "`feature-build`",
             "Any-language final audit or process audit prompt",
@@ -191,8 +193,8 @@ class TestSkillCrossReferences(unittest.TestCase):
         self.assertIn("stay in `plan-authoring`", text)
         self.assertIn("do not defer activation", text)
 
-    def test_implementasyon_control_description_covers_final_flow_audit_prompts(self):
-        art = h.load_markdown_artifact(h.SKILLS_DIR / "implementasyon-control" / "SKILL.md")
+    def test_implementation_control_description_covers_final_flow_audit_prompts(self):
+        art = h.load_markdown_artifact(h.SKILLS_DIR / "implementation-control" / "SKILL.md")
         desc = h.frontmatter_value(art["frontmatter"], "description")
         self.assertIn("pre-final audit", desc)
         self.assertIn("in any language", desc)

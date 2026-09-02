@@ -20,11 +20,10 @@
 // "No in-session validated spec+plan pair found" is the DENY trigger, NOT a fail-open state (BR4) -
 // and an unresolvable artifact root (wrong/absent cwd) likewise DENIES (BR4b).
 //
-// runValidator/findArtifactFile/workIdOf are re-implemented locally (about 30 lines) because the
-// byte-locked codex-flow-evidence.mjs does not export them - exactly how codex-flow-evidence.mjs
-// itself re-implemented the byte-locked flow-evidence.mjs private runValidator. Everything else is
-// imported read-only.
-import { readdirSync, realpathSync } from 'node:fs';
+// The validator remains local because the byte-locked evidence engine does not export it. Artifact
+// lookup, per-package role classification, and work-id extraction are imported from that engine so
+// the Stop and pre-edit gates cannot drift on flat vs per-package resolution.
+import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -32,6 +31,7 @@ import { readStdin } from './secret-patterns.mjs';
 import { extractWrittenContent } from './codex-write-signal.mjs';
 import { readRolloutSignals, preciseWriteTargetsOf } from './codex-rollout.mjs';
 import { loadRequirements, isSourceFile, isRealRunnerInvocation } from './flow-evidence.mjs';
+import { findArtifactFile, perPackageRole, workIdOf } from './codex-flow-evidence.mjs';
 
 const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -44,9 +44,10 @@ const ORDER_BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_FLOW_ORDER
 // the artifact path is a SEPARATE argv (no shell). Returns the exit code, or null when no
 // interpreter can run -> caller fails open (BR3a/AC19).
 function runValidator(mode, file, specFile, cwd) {
-  const candidates = process.platform === 'win32'
-    ? [['py', '-3'], ['python'], ['python3']]
-    : [['python3'], ['python']];
+  const configured = String(process.env.AGENTIC_SDLC_PYTHON || '').trim();
+  const candidates = (configured ? [[configured]] : []).concat(process.platform === 'win32'
+    ? [['python3'], ['python'], ['py', '-3']]
+    : [['python3'], ['python']]);
   const script = join(HOOK_DIR, '..', 'scripts', 'validate_artifacts.py');
   const tail = ['--mode', mode, '--file', file, '--strict'];
   if (mode === 'plan' && specFile) tail.push('--spec', specFile);
@@ -54,32 +55,10 @@ function runValidator(mode, file, specFile, cwd) {
     const r = spawnSync(c[0], [...c.slice(1), script, ...tail], { encoding: 'utf8', cwd, timeout: 10000 });
     if (r.error) continue;           // interpreter not found -> try next
     if (r.status === null) continue; // spawn failed
+    if (/unable to create process using/i.test(String(r.stderr || ''))) continue;
     return r.status;                 // 0 = pass, non-zero = fail (e.g. a stub)
   }
   return null; // could not run any interpreter -> caller fails open
-}
-
-// Sink-B artifact lookup (spec §6): the sanitized work-id is ONLY a membership key against the
-// trusted readdirSync listing; the path handed to the validator is joined from the matched LISTING
-// ENTRY, never from a work-id-constructed string. A crafted/traversing work-id reduces to a bare
-// token that matches no entry -> null -> step unsatisfied, no path escape.
-function findArtifactFile(cwd, role, req, workId) {
-  const root = req.artifactRoots?.[role];
-  if (!root) return null;
-  let entries;
-  try { entries = readdirSync(join(cwd, root)); } catch { return null; }
-  const want = workId + '.md';
-  const match = entries.find((e) => e === want);
-  return match ? join(cwd, root, match) : null;
-}
-
-// Reduce a rollout edit-target path to a bare work-id base-name; reject traversal/empty.
-function workIdOf(target) {
-  const id = String(target).replace(/\\/g, '/').split('/').pop()
-    .replace(/\.md$/i, '')
-    .replace(/[^A-Za-z0-9._-]/g, '');
-  if (!id || id.includes('..')) return null;
-  return id;
 }
 
 // A same-work-id spec exists on disk AND re-validates strict (or no interpreter -> fail-open).
@@ -109,18 +88,21 @@ export function orderDecision(signals, req, cwd) {
   if (!signals || !signals.readable) return { unconfirmable: true };
   const specRoot = req.artifactRoots?.spec;
   const planRoot = req.artifactRoots?.plan;
-  if (!specRoot || !planRoot) return { unconfirmable: true }; // corrupt/empty requirements (BR4)
+  const pp = req.perPackageArtifact;
+  const perPackageReady = typeof pp?.base === 'string' && pp?.subdirs?.spec && pp?.subdirs?.plan;
+  if ((!specRoot || !planRoot) && !perPackageReady) return { unconfirmable: true };
 
   // In-session SPEC writes and PLAN writes, derived SEPARATELY from this rollout's edit targets.
   const specIds = [];
   const planIds = [];
   for (const t of signals.editTargets) {
     const norm = String(t).replace(/\\/g, '/');
-    if (norm.includes(specRoot)) {
+    const packageRole = perPackageRole(t, req);
+    if ((specRoot && norm.includes(specRoot)) || packageRole === 'spec') {
       const id = workIdOf(t);
       if (id && !specIds.includes(id)) specIds.push(id);
     }
-    if (norm.includes(planRoot)) {
+    if ((planRoot && norm.includes(planRoot)) || packageRole === 'plan') {
       const id = workIdOf(t);
       if (id && !planIds.includes(id)) planIds.push(id);
     }
@@ -206,7 +188,7 @@ async function main() {
     // with the secret guard) is untouched — precision is a filter layered on top, so recognition breadth
     // matches the prior-evidence detector and the two cannot drift apart (the #5 root cause).
     const toolName = String(input?.tool_name || '');
-    const isPatch = toolName === 'apply_patch' || command.includes('*** Begin Patch');
+    const isPatch = toolName === 'apply_patch';
     const base = extractWrittenContent(toolName, command).targets;
     const targets = isPatch ? base : base.concat(preciseWriteTargetsOf(command));
     const req = loadRequirements();

@@ -196,7 +196,7 @@ class TestFlowStepGuard(unittest.TestCase):
             workflow("agentic-sdlc:spec-plan-draft"),
             bash("py -3 -m unittest tests.test_app"),
             agent("agentic-sdlc:security-reviewer"),
-            ev_text("I ran implementasyon-control and the implementation-auditor agent; all good."),
+            ev_text("I ran implementation-control and the implementation-auditor agent; all good."),
             edit("src/app.py"),
         ]
         out = self.run_guard(events, block=True)
@@ -267,7 +267,7 @@ class TestFlowStepGuard(unittest.TestCase):
             edit("src/app.py"),
             bash("py -3 -m unittest tests.test_app"),
             skill("agentic-sdlc:security-audit"),
-            skill("agentic-sdlc:implementasyon-control"),
+            skill("agentic-sdlc:implementation-control"),
             ev_text("Done."),
         ]
         self.assertEqual(self.run_guard(events, block=True), {})

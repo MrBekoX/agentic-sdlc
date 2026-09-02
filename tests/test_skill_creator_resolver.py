@@ -37,6 +37,27 @@ class TestSkillCreatorResolver(unittest.TestCase):
         self.assertEqual(source, "skill_creator_root")
         self.assertEqual(path, root)
 
+    def test_rejects_shape_compatible_wrong_skill(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "skill-creator"
+            make_skill_creator_root(root)
+            (root / "SKILL.md").write_text("---\nname: impostor\n---\n", encoding="utf-8")
+            with mock.patch.dict("os.environ", {"SKILL_CREATOR_ROOT": str(root)}, clear=True):
+                self.assertIsNone(resolver.discover())
+
+    def test_does_not_recursively_scan_arbitrary_cache(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            make_skill_creator_root(home / ".claude/plugins/cache/untrusted/pkg/skill-creator")
+            with (
+                mock.patch.object(resolver, "home", return_value=home),
+                mock.patch.object(resolver, "codex_home", return_value=Path(tmp) / "codex"),
+                mock.patch.dict("os.environ", {}, clear=True),
+            ):
+                self.assertIsNone(resolver.discover())
+
     def test_missing_reports_install_command_without_installing(self):
         resolver = load_resolver()
         with tempfile.TemporaryDirectory() as tmp:

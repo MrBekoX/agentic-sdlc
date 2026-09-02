@@ -55,7 +55,7 @@ A spec whose security section is only "treat as safe string handling only" and w
 2. Read only the local context needed to avoid an off-target spec.
 3. Use `spec-plan-draft` only when the runtime exposes the named Claude Code Workflow. In Codex (the other supported runtime) or a degraded runtime, run the author (`spec-plan-author`) -> critic (`spec-plan-critic`) -> revise adapter (loop author->critic->revise for up to 2 rounds until the critic returns clean, then present the **revised** draft and any residual decision points — never stop at the critic's first findings; feed them back and revise before presenting). The critic pass is **mandatory and must run in a fresh context** (a separate subagent/specialist) wherever the runtime exposes one; a same-context inline critic is a **degraded** path that must be flagged `Delegation Degraded: fresh-context critic unavailable` and held to extra scrutiny — never presented as an equal substitute. State the adapter path used.
 4. If a durable artifact is requested or the work is substantial, save the spec as `docs/agentic-sdlc/specs/<work_id>.md` with `work_id` and `status` frontmatter.
-5. Validate saved specs with `python "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/agentic-sdlc/specs/<work_id>.md`, resolving `<runtime-root>` from the active runtime as described in `docs/runtime-adapter.md`.
+5. Validate saved specs with `python3 "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/agentic-sdlc/specs/<work_id>.md`, resolving `<runtime-root>` from the active runtime as described in `docs/runtime-adapter.md`.
 6. Present decision points and stop. Do not continue to plan or implementation unless the user asks.
 
 ## Output

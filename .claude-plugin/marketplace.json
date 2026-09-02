@@ -9,7 +9,7 @@
     {
       "name": "agentic-sdlc",
       "description": "Claude Code skill library for gated spec, plan, TDD, security, and review workflows",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "source": "./",
       "author": {
         "name": "Beko",

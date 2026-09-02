@@ -1,11 +1,11 @@
 ---
-name: implementasyon-control
+name: implementation-control
 description: Use first for a pre-final audit in any language that the implementation followed the required flow across spec, plan, TDD, tests run, security pass, scoped diff, and final evidence. Treat requests to audit the spec-plan-TDD-security flow before the final response as active audit tasks, not passive session preferences. Invoke this skill as the first action, before running git diff/status/log or reading files and even when evidence is missing, because its auditor inspects the diff itself; then report missing evidence and do not gather the diff or ask what to do first. Not for starting new implementation.
 ---
 
-# Skill: implementasyon-control
+# Skill: implementation-control
 
-> **Argument:** `/implementasyon-control $ARGUMENTS`. Match the user's language; keep the report headings in English. This skill **audits**, it does not implement.
+> **Argument:** `/implementation-control $ARGUMENTS`. Match the user's language; keep the report headings in English. This skill **audits**, it does not implement.
 
 Runs before the final response of any implementation flow to confirm the work was done properly — not just that code exists. For a thorough audit it delegates to the **`implementation-auditor`** agent or runtime equivalent (fresh context, sees the diff and the resolved work package, not the reasoning that produced them).
 
@@ -58,7 +58,7 @@ A report that marks every step PASS with the same justification ("flow was follo
 - Any missing step?
 
 ## Procedure
-1. Resolve the work package before reading the spec/plan. If the user supplied `plan:` or `spec:` paths, pass them explicitly: `python "<runtime-root>/scripts/resolve_work_package.py" --plan <path>` or `--spec <path>`. Otherwise run `python "<runtime-root>/scripts/resolve_work_package.py"` and let it match current branch, then changed canonical plans.
+1. Resolve the work package before reading the spec/plan. If the user supplied `plan:` or `spec:` paths, pass them explicitly: `python3 "<runtime-root>/scripts/resolve_work_package.py" --plan <path>` or `--spec <path>`. Otherwise run `python3 "<runtime-root>/scripts/resolve_work_package.py"` and let it match current branch, then changed canonical plans.
 2. If resolution fails or returns multiple candidates, do **not** guess. Emit PARTIAL/FAIL with `spec/plan artifact ambiguous or missing`, list the candidates/error lines, and block the final answer until the intended plan path is supplied or the artifacts are fixed.
 3. Gather evidence from the resolved spec, resolved plan, the `git diff`, the test output, and the security-analysis notes.
 4. **Delegate to the `implementation-auditor` agent** or runtime fresh-context equivalent for an independent pass (mandatory — self-attestation by the implementer is not an audit; F6). If the runtime supports a fresh-context specialist, use it. If it does not, record `Delegation Degraded: fresh-context specialist unavailable`, perform the pass in the main loop, and mark the result non-independent.

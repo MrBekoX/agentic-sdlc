@@ -1,7 +1,9 @@
 import json
+import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from unittest import mock
 
 from scripts import run_routing_eval as runner
 
@@ -25,7 +27,7 @@ class TestRoutingEval(unittest.TestCase):
         self.assertEqual([index for index, _ in scenarios], [9, 11])
         self.assertEqual(
             [scenario["expected"] for _, scenario in scenarios],
-            ["feedback-triage", "implementasyon-control"],
+            ["feedback-triage", "implementation-control"],
         )
 
     def test_fixture_includes_language_independent_mind_spark_case(self):
@@ -84,13 +86,13 @@ class TestRoutingEval(unittest.TestCase):
         prompt = runner.build_codex_prompt(
             "Final cevaptan once spec/plan/TDD/guvenlik akisinin gercekten takip edildigini denetle.",
             [
-                ("implementasyon-control", "Use for final implementation audit."),
+                ("implementation-control", "Use for final implementation audit."),
                 ("completion-claim-gate", "Use before done/fixed/passing claims."),
             ],
         )
 
         self.assertIn("Final implementation or process audit", prompt)
-        self.assertIn("implementasyon-control", prompt)
+        self.assertIn("implementation-control", prompt)
         self.assertIn("completion-claim-gate only", prompt)
 
     def test_extract_codex_error_reports_model_access_failure(self):
@@ -148,6 +150,55 @@ class TestRoutingEval(unittest.TestCase):
         self.assertIn('model_reasoning_effort="low"', cmd)
         self.assertEqual(cmd[cmd.index("-s") + 1], "read-only")
         self.assertEqual(cmd[-1], "-")
+
+    def test_explicit_project_root_requires_writable_opt_in(self):
+        with tempfile.TemporaryDirectory() as td, self.assertRaises(SystemExit) as raised:
+            runner.main([
+                "--eval-set",
+                str(REPO / "tests/skills/routing/using-agentic-sdlc.json"),
+                "--project-root",
+                td,
+                "--smoke",
+            ])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_default_live_working_directory_is_ephemeral_and_not_plugin_source(self):
+        observed = {}
+
+        def capture(args, scenarios, skills):
+            observed["project_root"] = args.project_root
+            observed["plugin_dir"] = args.plugin_dir
+            self.assertTrue(args.project_root.is_dir())
+            return 0
+
+        with mock.patch.object(runner, "run_loaded_eval", side_effect=capture):
+            result = runner.main([
+                "--eval-set",
+                str(REPO / "tests/skills/routing/using-agentic-sdlc.json"),
+                "--smoke",
+            ])
+        self.assertEqual(result, 0)
+        self.assertEqual(observed["plugin_dir"], REPO)
+        self.assertNotEqual(observed["project_root"], REPO)
+        self.assertFalse(observed["project_root"].exists())
+
+    def test_claude_command_uses_plugin_source_separate_from_cwd(self):
+        source = REPO
+        with tempfile.TemporaryDirectory() as td:
+            args = Namespace(
+                project_root=Path(td),
+                plugin_dir=source,
+                model="haiku",
+                max_turns=1,
+                max_budget_usd="0.01",
+                timeout=1,
+            )
+            with mock.patch.object(runner.subprocess, "Popen", side_effect=FileNotFoundError) as popen:
+                _, error = runner.run_claude("route", args, None)
+            self.assertEqual(error, "claude_missing")
+            command = popen.call_args.args[0]
+            self.assertEqual(command[command.index("--plugin-dir") + 1], str(source))
+            self.assertEqual(popen.call_args.kwargs["cwd"], Path(td))
 
 
 if __name__ == "__main__":

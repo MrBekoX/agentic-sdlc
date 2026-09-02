@@ -20,6 +20,8 @@ VERSION_FILE = REPO / "VERSION"
 PLUGIN_JSON = REPO / ".claude-plugin" / "plugin.json"
 MARKETPLACE_JSON = REPO / ".claude-plugin" / "marketplace.json"
 CODEX_PLUGIN_JSON = REPO / ".codex-plugin" / "plugin.json"
+README = REPO / "README.md"
+CHANGELOG = REPO / "CHANGELOG.md"
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 
 
@@ -40,10 +42,11 @@ def current_versions() -> dict[str, str]:
         ".claude-plugin/plugin.json": plugin.get("version", ""),
         ".claude-plugin/marketplace.json": marketplace["plugins"][0].get("version", ""),
         ".codex-plugin/plugin.json": codex_plugin.get("version", ""),
+        "README.md": (re.search(r"`Version ([^`]+)`", README.read_text(encoding="utf-8")) or [None, ""])[1],
     }
 
 
-def check() -> int:
+def check(release: bool = False) -> int:
     versions = current_versions()
     for key in sorted(versions):
         print(f"{key}={versions[key]}")
@@ -51,6 +54,17 @@ def check() -> int:
     if len(unique) != 1:
         print("version_check=failed")
         return 1
+    if release:
+        version = next(iter(unique))
+        changelog = CHANGELOG.read_text(encoding="utf-8")
+        unreleased = re.search(r"(?ms)^## Unreleased[^\n]*\n(.*?)(?=^## |\Z)", changelog)
+        if unreleased and unreleased.group(1).strip():
+            print("release_check=failed:nonempty_unreleased")
+            return 1
+        if not re.search(rf"(?m)^## {re.escape(version)} - \d{{4}}-\d{{2}}-\d{{2}}$", changelog):
+            print("release_check=failed:missing_changelog_release")
+            return 1
+        print("release_check=passed")
     print("version_check=passed")
     return 0
 
@@ -77,11 +91,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("version", nargs="?")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--release-check", action="store_true")
     args = parser.parse_args(argv)
-    if args.check:
-        return check()
+    if args.check or args.release_check:
+        return check(release=args.release_check)
     if not args.version:
-        parser.error("version is required unless --check is used")
+        parser.error("version is required unless --check or --release-check is used")
     return bump(args.version)
 
 

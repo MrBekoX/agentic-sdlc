@@ -2,7 +2,7 @@
 
 This is an identity resolver, not a content validator. `validate_artifacts.py`
 still checks the markdown body. This script answers which spec/plan pair
-`implementasyon-control` should audit and refuses ambiguous choices.
+`implementation-control` should audit and refuses ambiguous choices.
 
 Output is sorted `key=value` lines. Exit 1 on failed resolution.
 """

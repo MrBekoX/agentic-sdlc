@@ -92,9 +92,9 @@ Re-run the full suite after refactor; **show output**. (Loop A applies again if 
 ### 12. Final Review
 Review `git diff`: summarize changed files, remaining risks, anything left open. Confirm only intended files changed and no secrets are present.
 
-### 13. Implementation Control (mandatory) — run `implementasyon-control`
-Trigger the **`implementasyon-control`** skill to audit that steps 1–12 were truly done.
-**Loop C — control reports a gap:** complete the missing step → re-run `implementasyon-control`. **If a critical step is missing, do NOT give the final answer** — finish it or tell the user clearly.
+### 13. Implementation Control (mandatory) — run `implementation-control`
+Trigger the **`implementation-control`** skill to audit that steps 1–12 were truly done.
+**Loop C — control reports a gap:** complete the missing step → re-run `implementation-control`. **If a critical step is missing, do NOT give the final answer** — finish it or tell the user clearly.
 
 ### 14. Final Response
 Report: what was fixed · which files changed · which tests ran (with result) · remaining risks · any action the user must take.

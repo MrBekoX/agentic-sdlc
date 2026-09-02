@@ -66,7 +66,7 @@ try {
   if (blockFlag() && block.length) {
     emit({
       decision: 'block',
-      reason: `${block[0].flow}: required step(s) [${block.map((m) => m.id).join(', ')}] have no evidence this turn. Produce them before finishing - write+validate the spec/plan, run the tests, and invoke implementasyon-control. Evidence is re-derived, not taken from text.`,
+      reason: `${block[0].flow}: required step(s) [${block.map((m) => m.id).join(', ')}] have no evidence this turn. Produce them before finishing - write+validate the spec/plan, run the tests, and invoke implementation-control. Evidence is re-derived, not taken from text.`,
       systemMessage: 'flow-step-guard: blocked - required flow steps lack evidence.',
     });
   } else if (block.length || warn.length || heuristic) {

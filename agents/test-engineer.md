@@ -1,7 +1,7 @@
 ---
 name: test-engineer
 description: Designs test strategy, recommends regression tests, finds coverage-risk gaps, and checks whether existing tests are actually meaningful. Use when planning tests for a change or auditing test quality. Read-only analysis.
-tools: Glob, Grep, Read, NotebookRead, Bash, WebFetch, WebSearch
+tools: Glob, Grep, Read, Bash, WebFetch, WebSearch
 model: inherit
 ---
 

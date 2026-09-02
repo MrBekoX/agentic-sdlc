@@ -13,6 +13,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from scripts.sensitive_redaction import redact_text
+except ModuleNotFoundError:
+    from sensitive_redaction import redact_text
+
 
 def _slug(ref: str) -> str:
     """Make a ref safe to embed in the output filename: a ref like `origin/main` or a crafted
@@ -69,8 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error={exc}")
         return 1
 
-    out.write_text(
-        "\n".join([
+    package = "\n".join([
             "# Review Package",
             "",
             f"Range: `{args.base}..{args.head}`",
@@ -90,9 +94,12 @@ def main(argv: list[str] | None = None) -> int:
             diff,
             "```",
             "",
-        ]),
-        encoding="utf-8",
-    )
+        ])
+    try:
+        out.write_text(redact_text(package), encoding="utf-8")
+    except RuntimeError as exc:
+        print(f"error={exc}")
+        return 1
     print(out)
     return 0
 

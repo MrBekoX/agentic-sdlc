@@ -14,10 +14,10 @@ NODE = shutil.which("node")
 
 @unittest.skipIf(NODE is None, "node not available")
 class TestDestructiveCommandGuard(unittest.TestCase):
-    def run_hook(self, command):
+    def run_hook(self, command, tool_name="Bash"):
         proc = subprocess.run(
             [NODE, str(REPO / "hooks" / "destructive-command-guard.mjs")],
-            input=json.dumps({"tool_input": {"command": command}}),
+            input=json.dumps({"tool_name": tool_name, "tool_input": {"command": command}}),
             capture_output=True,
             text=True, encoding="utf-8",
         )
@@ -25,13 +25,18 @@ class TestDestructiveCommandGuard(unittest.TestCase):
         return json.loads(proc.stdout) if proc.stdout.strip() else {}
 
     def test_blocks_git_reset_hard(self):
-        out = self.run_hook("git reset --hard HEAD")
-        decision = out["hookSpecificOutput"]["permissionDecision"]
-        self.assertEqual(decision, "deny")
+        for command in ("git reset --hard HEAD", r"g\it reset --hard HEAD",
+                        r"$'\x67\x69\x74' reset --hard HEAD"):
+            with self.subTest(command=command):
+                out = self.run_hook(command)
+                decision = out["hookSpecificOutput"]["permissionDecision"]
+                self.assertEqual(decision, "deny")
 
     def test_blocks_recursive_rm_forms(self):
         blocked = [
             "rm -rf ./tmp",
+            r"r\m -rf ./tmp",
+            r"$'\x72\x6d' -rf ./tmp",
             "rm -fr ./tmp",
             "rm -r -f ./tmp",
             "rm --recursive --force ./tmp",
@@ -44,6 +49,7 @@ class TestDestructiveCommandGuard(unittest.TestCase):
             "echo $(rm -rf ./tmp)",
             "/bin/rm -rf ./tmp",
             "sudo rm -rf ./tmp",
+            r"su\do rm -rf ./tmp",
             "command rm -rf ./tmp",
             "git status; sudo rm -rf ./tmp",
             "sudo -E rm -rf ./tmp",
@@ -53,6 +59,11 @@ class TestDestructiveCommandGuard(unittest.TestCase):
             "env -u FOO rm -rf ./tmp",
             "rm.exe -rf ./tmp",
             "rm ./tmp -Recurse",
+            "r\\\nm -rf ./tmp",
+            "r\\\r\nm -rf ./tmp",
+            "bash -c 'r\\\nm -rf ./tmp'",
+            "sh -c 'r\\\r\nm -rf ./tmp'",
+            "bash -c \"$'\\x72\\x6d' -rf ./tmp\"",
         ]
         for command in blocked:
             with self.subTest(command=command):
@@ -99,6 +110,12 @@ class TestDestructiveCommandGuard(unittest.TestCase):
             "printf '; rm -rf ./tmp'",
             'echo "rm -rf ./tmp"',
             "Write-Output '; Remove-Item ./tmp -Recurse'",
+            r"r\\m -rf ./tmp",
+            r'"r\m" -rf ./tmp',
+            r'r"\m" -rf ./tmp',
+            "\"$'\\x72\\x6d'\" -rf ./tmp",
+            r"bash -c 'r\\m -rf ./tmp'",
+            "bash -c '\"r\\m\" -rf ./tmp'",
         ]
         for command in allowed:
             with self.subTest(command=command):
@@ -299,7 +316,7 @@ class TestSessionStartHook(unittest.TestCase):
         self.assertIn("agentic-sdlc:mind-spark", context)
         self.assertIn("agentic-sdlc:plan-authoring", context)
         self.assertIn("never ask for bug details first", context)
-        self.assertIn("agentic-sdlc:implementasyon-control", context)
+        self.assertIn("agentic-sdlc:implementation-control", context)
         self.assertIn("agentic-sdlc:completion-claim-gate", context)
         self.assertIn("fresh evidence", context)
         self.assertIn("Skill tool", context)
@@ -336,8 +353,8 @@ class TestCodexSessionStartHook(unittest.TestCase):
         self.assertNotIn("Skill tool", context)
         self.assertNotIn("calling the Skill tool", context)
         # AP2c (AC15): flow-order is now wired, so the bootstrap must drop the "unwired" claim, name
-        # the wired adapter, mark the AP2 envelope complete, and state the shared-env warn->block
-        # coupling (AC16) — while preserving every assertion above.
+        # the wired adapter, mark the AP2 envelope complete, and state the flow-step warn->block
+        # switch (the ordering switch is independent) — while preserving every assertion above.
         self.assertNotIn("Only flow-order path-gating remains unwired", context)
         self.assertIn("flow-order-guard-codex", context)
         self.assertIn("AP2", context)

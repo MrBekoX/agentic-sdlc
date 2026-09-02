@@ -1,7 +1,7 @@
 ---
 name: software-architect
 description: Reviews architectural decisions — layer/boundary violations, unnecessary abstractions, and risk in large changes. Use before big structural changes or to validate a design against the existing architecture. Read-only analysis.
-tools: Glob, Grep, Read, NotebookRead, WebFetch, WebSearch
+tools: Glob, Grep, Read, WebFetch, WebSearch
 model: inherit
 ---
 

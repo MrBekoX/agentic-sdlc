@@ -13,6 +13,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from scripts.sensitive_redaction import redact_text
+except ModuleNotFoundError:
+    from sensitive_redaction import redact_text
+
 
 def extract_task(text: str, number: int) -> str:
     start_re = re.compile(rf"(?m)^(?:#{1,6}\s*)?(?:Task|Görev|Gorev)\s+{number}\b[:.\-\s]*(.*)$")
@@ -46,10 +51,16 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     out = out_dir / f"task-{args.task_number}-brief-{stamp}.md"
-    out.write_text(
-        f"# Task {args.task_number} Brief\n\nSource plan: `{plan}`\n\n{task}",
-        encoding="utf-8",
-    )
+    try:
+        source = plan.relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        source = plan.name
+    brief = f"# Task {args.task_number} Brief\n\nSource plan: `{source}`\n\n{task}"
+    try:
+        out.write_text(redact_text(brief), encoding="utf-8")
+    except RuntimeError as exc:
+        print(f"error={exc}")
+        return 1
     print(out)
     return 0
 

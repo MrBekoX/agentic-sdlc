@@ -854,7 +854,10 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
             with self.subTest(file=rel):
                 head = _git_show(rel)
                 self.assertIsNotNone(head, f"{rel} not in HEAD")
-                self.assertEqual((REPO / rel).read_text(encoding="utf-8"), head)
+                # The public skill-ID migration is the only permitted delta. After the rename is
+                # committed, the replacement is a no-op and this returns to an exact HEAD lock.
+                expected = head.replace("implementasyon-control", "implementation-control")
+                self.assertEqual((REPO / rel).read_text(encoding="utf-8"), expected)
 
     def test_codex_pretooluse_sessionstart_unchanged(self):  # AC18 (additive-only since AP2c)
         # AP2c additively appends flow-order-guard-codex.mjs to the Bash|apply_patch PreToolUse

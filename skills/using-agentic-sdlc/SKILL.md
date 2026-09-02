@@ -46,6 +46,11 @@ Resolve conflicts by semantic intent before domain nouns. Do not rely on exact k
 
 - Any-language brainstorming, option exploration, or uncertain direction -> `mind-spark`, not generic `brainstorming` or an implementation skill.
 - If another plugin exposes a same-purpose process skill, prefer the AGENTIC-SDLC skill listed here for AGENTIC-SDLC prompts; do not replace `mind-spark` with `superpowers:brainstorming`.
+- When Superpowers is also installed, choose one process owner per phase: an explicit
+  `superpowers:<skill>` request stays with Superpowers, while an explicit AGENTIC-SDLC request or a
+  route entered through this router stays with the matching AGENTIC-SDLC skill. Never stack both
+  plugins' brainstorming/planning/TDD/debug/review/completion skills for the same phase merely
+  because both are discoverable. Runtime security hooks still apply independently of the process owner.
 - Any-language plan-only, HOW, task breakdown, or no direct code/fix yet -> `plan-authoring`, even when the prompt mentions a bug, failing behavior, or fix.
 - For any-language plan-only/HOW/no direct code or fix yet prompts, activate `plan-authoring` immediately; never ask for bug details first or say you will use `plan-authoring` after details arrive.
 - Any-language end-to-end/full-envelope prompts that ask for spec, plan, TDD, security/audit, and release-readiness -> `agentic-sdlc-pipeline`, not `mind-spark`, even if they mention design or requirements.
@@ -53,9 +58,9 @@ Resolve conflicts by semantic intent before domain nouns. Do not rely on exact k
 - Any-language behavior-preserving refactor prompts about preserving behavior while cleaning up, simplifying, or restructuring -> `safe-refactor` before Glob/Read/file-existence checks; the selected skill owns missing-target clarification.
 - Any-language received-review-feedback prompts about PR comments, reviewer comments, bot feedback, or CI review output -> `feedback-triage`, not a fresh `code-quality-review`.
 - Any-language orchestration decision prompts comparing main loop, subagents, workflows, or agent-teams -> `dispatch-strategy` before answering. Do not choose a mechanism directly without activating the skill.
-- Any-language final audit or process audit prompt asking whether spec/plan/TDD/security flow was followed before the final response -> `implementasyon-control`. Treat it as an active audit task now, not a passive session preference; the audit intent requires a Skill call even when no implementation evidence exists, then report missing evidence. Do not run `git diff`/`status`/`log` or read files first, and do not ask the user for branch/file/change details before activating — the skill's auditor inspects the diff; the Skill call is the first action.
+- Any-language final audit or process audit prompt asking whether spec/plan/TDD/security flow was followed before the final response -> `implementation-control`. Treat it as an active audit task now, not a passive session preference; the audit intent requires a Skill call even when no implementation evidence exists, then report missing evidence. Do not run `git diff`/`status`/`log` or read files first, and do not ask the user for branch/file/change details before activating — the skill's auditor inspects the diff; the Skill call is the first action.
 - Any-language clear implementation prompts that ask to add, build, develop, apply, or implement a feature/endpoint -> `feature-build` unless they explicitly ask only for brainstorming/spec/plan/tests/review or ask for the full pipeline.
-- For final audit/process audit prompts, activate `implementasyon-control` with the Skill tool; do not answer from memory or summarize without activation.
+- For final audit/process audit prompts, activate `implementation-control` with the Skill tool; do not answer from memory or summarize without activation.
 - Implementation skills apply when the user asks to change files, fix behavior, add a feature, refactor, or write tests now.
 - If the selected focused skill is underspecified, invoke it anyway before clarifying. Do not defer activation by saying you will use the skill after the user provides details.
 
@@ -70,7 +75,7 @@ Resolve conflicts by semantic intent before domain nouns. Do not rely on exact k
 - Code/diff quality review -> `code-quality-review`.
 - Received review feedback -> `feedback-triage`.
 - Parallelism/delegation decision -> `dispatch-strategy`.
-- Final implementation or process audit -> `implementasyon-control`.
+- Final implementation or process audit -> `implementation-control`.
 - Any done/fixed/passing/ready claim -> `completion-claim-gate` first.
 
 Escalate to `agentic-sdlc-pipeline` only when the user asks for end-to-end implementation or the work needs the full SDLC envelope: spec, plan, implementation, tests, security review, final audit, and release/PR readiness. High-risk areas such as auth, payment, database migration, API contract, permissions, user data, token/session, or RLS also qualify when implementation is requested.

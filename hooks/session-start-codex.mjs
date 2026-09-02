@@ -45,7 +45,7 @@ const bootstrap = [
   '  code/diff quality review                -> code-quality-review',
   '  received review / PR / bot feedback     -> feedback-triage',
   '  parallelism / delegation decision       -> dispatch-strategy (before choosing a mechanism)',
-  '  final process/SDLC audit                -> implementasyon-control (report missing evidence)',
+  '  final process/SDLC audit                -> implementation-control (report missing evidence)',
   '  any done/fixed/passing/ready claim      -> completion-claim-gate first',
   'Before any completion claim, require fresh evidence: command output, test result, diff, transcript, or explicit skip reason.',
   'Commit/push/merge/delete only on explicit user request. Secrets stay masked. Match the user language unless asked otherwise.',

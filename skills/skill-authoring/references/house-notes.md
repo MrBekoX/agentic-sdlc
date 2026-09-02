@@ -48,17 +48,18 @@ fail without it, and always pair the ask with the reason it exists.
 Resolve the skill-creator root before running any external script:
 
 ```bash
-python skills/skill-authoring/scripts/resolve_skill_creator.py
+python3 skills/skill-authoring/scripts/resolve_skill_creator.py
 ```
 
 If it prints `skill_creator_status=missing`, run:
 
 ```bash
-python skills/skill-authoring/scripts/resolve_skill_creator.py --install
+python3 skills/skill-authoring/scripts/resolve_skill_creator.py --install
 ```
 
-The helper checks `SKILL_CREATOR_ROOT`, `AGENTIC_SDLC_SKILL_CREATOR_ROOT`, Codex skill homes,
-Claude plugin caches, and the legacy Claude marketplace layout. With `--install`, it runs
+The helper checks explicit environment roots, the Codex system skill, and versioned
+`claude-plugins-official/skill-creator` cache entries. It does not recursively accept arbitrary
+user/cache matches. With `--install`, it runs
 `claude plugin install skill-creator@claude-plugins-official` and then resolves again.
 Use the printed `skill_creator_root` as `SC`.
 
@@ -69,7 +70,7 @@ source.
 
 | Script | Has `from scripts.*`? | How to call | Note |
 |---|---|---|---|
-| `run_eval.py` | yes (`scripts.utils`) | `python -m scripts.run_eval ...` **from `SC`** | broken on Windows — see §4 |
+| `run_eval.py` | yes (`scripts.utils`) | `python3 -m scripts.run_eval ...` **from `SC`** | broken on Windows — see §4 |
 | `run_loop.py` | yes (`scripts.*`) | `python -m scripts.run_loop ...` **from `SC`** | wraps run_eval → also blocked on Windows |
 | `improve_description.py` | yes (`scripts.utils`) | `python -m scripts.improve_description ...` **from `SC`** | |
 | `package_skill.py` | yes (`scripts.quick_validate`) | `python -m scripts.package_skill <skill-path>` **from `SC`** | validates first; excludes `evals/` |

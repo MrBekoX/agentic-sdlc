@@ -37,7 +37,7 @@ const bootstrap = [
   '  code/diff quality review                -> agentic-sdlc:code-quality-review (not generic code-review)',
   '  received review / PR / bot feedback     -> agentic-sdlc:feedback-triage',
   '  parallelism / delegation decision       -> agentic-sdlc:dispatch-strategy (before choosing a mechanism)',
-  '  final process/SDLC audit                -> agentic-sdlc:implementasyon-control (audit now; report missing evidence)',
+  '  final process/SDLC audit                -> agentic-sdlc:implementation-control (audit now; report missing evidence)',
   '  any done/fixed/passing/ready claim      -> agentic-sdlc:completion-claim-gate first',
   'When a focused skill applies, invoke it before reading memory, git diff, or files; the skill owns clarification.',
   'Before any completion claim, require fresh evidence: command output, test result, diff, transcript, or explicit skip reason.',

@@ -61,7 +61,7 @@ Use the portable capability matrix in `docs/runtime-adapter.md`.
 ## Per-slice fan-out — parallel specialists, you coordinate
 The common in-skill shape: the work splits into 2+ **independent read-only slices** (layers, lenses, file-groups, hypotheses). Dispatch **one specialist per slice in a single message** — parallel `Agent` calls, or a `Workflow` when the slices are a fixed ≈3+ and you want them deterministic/repeatable — so they run concurrently. You (main loop) stay the **coordinator**: the fresh-context specialists return unbiased findings; merging, dedup, conflict resolution, and the final call are yours.
 - **Reads fan out; writes stay serial.** Review/analysis/audit slices parallelize; file edits stay in one loop or worktree-isolated — never two agents on one file.
-- **Independent verdict, not self-attestation.** When accepting the merged findings would mean judging your own code, route them through `implementation-auditor` (via `implementasyon-control`). You coordinate; the auditor arbitrates.
+- **Independent verdict, not self-attestation.** When accepting the merged findings would mean judging your own code, route them through `implementation-auditor` (via `implementation-control`). You coordinate; the auditor arbitrates.
 - **No coordinator agent.** The main loop already receives every specialist's result — a separate coordinator sub-agent would see less than you and cannot apply fixes. Don't add one.
 - **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → run the slices serially and flag `Delegation Degraded: parallel specialists unavailable`, marked non-independent.
 

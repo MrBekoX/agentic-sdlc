@@ -47,7 +47,7 @@ This keeps the dependency graph one-directional and prevents the pipeline from b
 | `security-audit` | Security audit for code, diff, design, endpoint, or dependency changes. | General maintainability review or implementing fixes. |
 | `code-quality-review` | Quality review of code/diff/file with fresh context. | Applying received reviewer feedback. |
 | `feedback-triage` | Verifying, judging, and applying external review comments. | Producing a fresh review from scratch. |
-| `implementasyon-control` | Mandatory pre-final audit that the required flow was followed. | Planning or implementing the work. |
+| `implementation-control` | Mandatory pre-final audit that the required flow was followed. | Planning or implementing the work. |
 | `completion-claim-gate` | Evidence check before saying done/fixed/passing/complete. | Replacing tests, security review, or implementation audit. |
 | `mind-spark` | Ambiguous design/build intent before spec. | Clear bug fix, test-only, security review, or code review. |
 | `skill-authoring` | Creating, changing, evaluating, or packaging Claude Code / Codex skills. | Ordinary application feature work. |
@@ -73,7 +73,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Should trigger:** user asks for end-to-end implementation with spec, plan, TDD, tests, security review, PR-ready diff; production-impacting areas (auth, payment, DB migration, API contract, permissions, user data, token/session, RLS).
 - **Should NOT trigger:** narrow feature/fix/test/spec/plan/refactor/review/audit requests; as the default for every implementation question.
 - **Produces:** approved `docs/agentic-sdlc/specs/<work_id>.md` + `docs/agentic-sdlc/plans/<work_id>.md`, implementation, tests, security findings, final implementation report.
-- **Delegates to:** `dispatch-strategy`; `root-cause-fix`/`feature-build`/`safe-refactor`/`test-authoring` for the core; `security-audit`, `implementasyon-control`, `completion-claim-gate` for gates.
+- **Delegates to:** `dispatch-strategy`; `root-cause-fix`/`feature-build`/`safe-refactor`/`test-authoring` for the core; `security-audit`, `implementation-control`, `completion-claim-gate` for gates.
 - **Contracts:** all of `00`–`10`.
 
 ### `spec-authoring`
@@ -100,7 +100,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Should trigger:** "add/build a new feature, endpoint, screen, flow, or capability"; focused new functionality when the full pipeline envelope has **not** been requested.
 - **Should NOT trigger:** bug/root-cause fixes (→ `root-cause-fix`); test-only work (→ `test-authoring`); behavior-preserving refactors (→ `safe-refactor`); full SDLC envelope requests (→ `agentic-sdlc-pipeline`).
 - **Produces:** implemented feature, tests, security notes, final report.
-- **Delegates to:** `context-analyst` for per-layer scope mapping; `dispatch-strategy` for exploration/verification fan-out; `implementasyon-control` for pre-final audit; `completion-claim-gate` before success claims.
+- **Delegates to:** `context-analyst` for per-layer scope mapping; `dispatch-strategy` for exploration/verification fan-out; `implementation-control` for pre-final audit; `completion-claim-gate` before success claims.
 - **Contracts:** `01`, `02`, `03`, `04`, `05`, `06`, `07`, `08`, `09`, `10`.
 
 ### `root-cause-fix`
@@ -109,7 +109,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Should trigger:** "fix a bug / error / broken behavior / failing test / production issue / incident / regression"; "find and fix / root cause / null reference / webhook / expired-token failures".
 - **Should NOT trigger:** new features (→ `feature-build`); pure refactors (→ `safe-refactor`); received review feedback (→ `feedback-triage`).
 - **Produces:** a minimal fix, regression test, test output, security pass, final report.
-- **Delegates to:** `debugger`, `context-analyst`, `dispatch-strategy`, `security-audit`, `implementasyon-control`, `completion-claim-gate`.
+- **Delegates to:** `debugger`, `context-analyst`, `dispatch-strategy`, `security-audit`, `implementation-control`, `completion-claim-gate`.
 - **Contracts:** `01`, `02`, `03`, `05`, `06`, `07`, `08`, `10`.
 
 ### `safe-refactor`
@@ -118,7 +118,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Should trigger:** "refactor / restructure / clean up / simplify / improve readability / reduce duplication / change architecture without changing behavior"; requests requiring characterization tests and approval for broad scope.
 - **Should NOT trigger:** bug fixes (→ `root-cause-fix`); new features (→ `feature-build`); test-only work (→ `test-authoring`).
 - **Produces:** restructured code, proof behavior is unchanged (tests green before and after), remaining risks.
-- **Delegates to:** `software-architect`/`context-analyst` for per-module characterization; `dispatch-strategy` for multi-file fan-out; `implementasyon-control` for pre-final audit.
+- **Delegates to:** `software-architect`/`context-analyst` for per-module characterization; `dispatch-strategy` for multi-file fan-out; `implementation-control` for pre-final audit.
 - **Contracts:** `01`, `04`, `05`, `06`, `07`, `08`, `10`.
 
 ### `test-authoring`
@@ -167,7 +167,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Delegates to:** `code-quality-review` for cross-reference; `test-authoring` or `root-cause-fix` for behavior changes triggered by feedback.
 - **Contracts:** `00`, `02`, `03` (scope lock), `04`.
 
-### `implementasyon-control`
+### `implementation-control`
 
 - **Purpose:** mandatory pre-final audit that the required implementation flow was actually followed.
 - **Should trigger:** "pre-final audit", "verify the required flow was followed", "before the final answer check the flow"; any final implementation report in `feature-build`/`root-cause-fix`/`safe-refactor`/`agentic-sdlc-pipeline`.
@@ -266,7 +266,7 @@ Security audit of code / diff / endpoint / design?    -> security-audit
 Code / diff / PR quality review?                      -> code-quality-review
 Received review / bot / CI feedback to verify/apply?  -> feedback-triage
 Choose execution mechanism?                           -> dispatch-strategy
-Pre-final audit that required flow was followed?      -> implementasyon-control
+Pre-final audit that required flow was followed?      -> implementation-control
 About to claim done / fixed / passing / ready?        -> completion-claim-gate
 Create / edit / evaluate / package a skill?           -> skill-authoring
 ```

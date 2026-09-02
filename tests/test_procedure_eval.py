@@ -177,7 +177,7 @@ class TestProcedureEvalHarness(unittest.TestCase):
             trace, "Agent", {"subagent_type": "agentic-sdlc:implementation-auditor", "description": "audit flow"}
         )
         self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:security-audit"))
-        self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:implementasyon-control"))
+        self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:implementation-control"))
 
     def test_unmapped_gate_skill_not_satisfied_by_agent(self):
         # A skill with no agent equivalent still requires an actual Skill call.
@@ -226,7 +226,7 @@ class TestProcedureEvalHarness(unittest.TestCase):
             {"command": "python ${PLUGIN_ROOT}/scripts/validate_artifacts.py --mode plan --file docs/agentic-sdlc/plans/greeting-suffix.md --spec docs/agentic-sdlc/specs/greeting-suffix.md --strict"},
         )
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:security-audit"})
-        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:implementasyon-control"})
+        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:implementation-control"})
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:completion-claim-gate"})
 
         errors = procedure_eval.evaluate_case(case, trace, REPO)
