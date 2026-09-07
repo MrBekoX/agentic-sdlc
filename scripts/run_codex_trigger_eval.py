@@ -19,10 +19,18 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+try:
+    from scripts.eval_safety import require_slug, resolve_under
+    from scripts.sensitive_redaction import redact_text
+except ModuleNotFoundError:
+    from eval_safety import require_slug, resolve_under
+    from sensitive_redaction import redact_text
 
 
 def split_frontmatter(text: str) -> dict[str, str]:
@@ -43,7 +51,7 @@ def split_frontmatter(text: str) -> dict[str, str]:
 def read_skill(skill_path: Path) -> tuple[str, str]:
     text = (skill_path / "SKILL.md").read_text(encoding="utf-8")
     fm = split_frontmatter(text)
-    return fm.get("name", skill_path.name), fm.get("description", "")
+    return require_slug(fm.get("name", skill_path.name), "skill name"), fm.get("description", "")
 
 
 def load_skills(skills_dir: Path) -> list[tuple[str, str]]:
@@ -72,7 +80,7 @@ def build_prompt(query: str, skills: list[tuple[str, str]]) -> str:
         "An orchestration decision (main loop vs sub-agent vs workflow vs agent-team) routes to "
         "dispatch-strategy, not using-agentic-sdlc.\n"
         "Final implementation or process audit before a final report routes to "
-        "implementasyon-control. Choose completion-claim-gate only for validating a specific "
+        "implementation-control. Choose completion-claim-gate only for validating a specific "
         "done/fixed/passing/ready claim, not for auditing the whole SDLC flow.\n"
         "Choose agentic-sdlc-pipeline only for explicit or clearly end-to-end SDLC work that "
         "needs the full spec-plan-build-test-review-audit loop.\n"
@@ -202,7 +210,7 @@ def run_codex_once(prompt: str, project_root: Path, args: argparse.Namespace, tr
 
     if transcript_path:
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        transcript_path.write_text("".join(captured), encoding="utf-8")
+        transcript_path.write_text(redact_text("".join(captured)), encoding="utf-8")
     actual, usage = parse_codex_events(captured)
     return actual, usage, None
 
@@ -212,7 +220,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skill-path", required=True, type=Path)
     parser.add_argument("--eval-set", required=True, type=Path)
     parser.add_argument("--skills-dir", type=Path, default=Path(__file__).resolve().parents[1] / "skills")
-    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        help="explicit real checkout context (default: an ephemeral empty directory)",
+    )
+    parser.add_argument(
+        "--allow-writable-project",
+        action="store_true",
+        help="Explicitly authorize exposing --project-root to the live Codex classifier; Codex still runs read-only.",
+    )
     parser.add_argument("--model", default="gpt-5.4-mini")
     parser.add_argument("--reasoning-effort", default="low")
     parser.add_argument("--runs", type=int, default=3, help="Runs per query for majority voting (rate = matches/runs vs --threshold). Default 3 so run-to-run flakiness is measured, not masked; --smoke forces 1.")
@@ -222,6 +239,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--transcript-dir", type=Path)
     args = parser.parse_args(argv)
+
+    if args.project_root is not None and not args.allow_writable_project:
+        parser.error("--project-root requires --allow-writable-project")
 
     target_skill, _ = read_skill(args.skill_path)
     queries = json.loads(args.eval_set.read_text(encoding="utf-8"))["queries"]
@@ -246,32 +266,47 @@ def main(argv: list[str] | None = None) -> int:
     total_output_tokens = 0
     total_reasoning_tokens = 0
 
-    for i, query in enumerate(queries):
-        matches = 0
-        actuals = []
-        for run_index in range(args.runs):
-            prompt = build_prompt(query["query"], skills)
-            transcript_path = None
-            if args.transcript_dir:
-                transcript_path = args.transcript_dir / f"{target_skill}-q{i}-run{run_index}.jsonl"
-            actual, usage, error = run_codex_once(prompt, args.project_root, args, transcript_path)
-            if error:
-                errors.append(f"q{i}_{error}")
-                continue
-            actuals.append(actual or "")
-            if actual == target_skill:
-                matches += 1
-            total_input_tokens += int(usage.get("input_tokens") or 0)
-            total_output_tokens += int(usage.get("output_tokens") or 0)
-            total_reasoning_tokens += int(usage.get("reasoning_output_tokens") or 0)
-        rate = matches / args.runs
-        ok = (rate >= args.threshold) if query["should_trigger"] else (rate < args.threshold)
-        fields[f"q{i}_actual"] = ",".join(actuals)
-        fields[f"q{i}_should={str(query['should_trigger']).lower()}_rate"] = f"{rate:.2f}"
-        if ok:
-            passed += 1
-        else:
-            errors.append(f"q{i}_mismatch:should_trigger={query['should_trigger']},rate={rate:.2f}")
+    temporary_project = None
+    if args.project_root is not None:
+        args.project_root = args.project_root.resolve()
+    else:
+        temporary_project = tempfile.TemporaryDirectory(prefix="agentic-sdlc-codex-trigger-")
+        args.project_root = Path(temporary_project.name)
+
+    try:
+        for i, query in enumerate(queries):
+            matches = 0
+            actuals = []
+            for run_index in range(args.runs):
+                prompt = build_prompt(query["query"], skills)
+                transcript_path = None
+                if args.transcript_dir:
+                    transcript_path = resolve_under(
+                        args.transcript_dir,
+                        f"{target_skill}-q{i}-run{run_index}.jsonl",
+                        "transcript filename",
+                    )
+                actual, usage, error = run_codex_once(prompt, args.project_root, args, transcript_path)
+                if error:
+                    errors.append(f"q{i}_{error}")
+                    continue
+                actuals.append(actual or "")
+                if actual == target_skill:
+                    matches += 1
+                total_input_tokens += int(usage.get("input_tokens") or 0)
+                total_output_tokens += int(usage.get("output_tokens") or 0)
+                total_reasoning_tokens += int(usage.get("reasoning_output_tokens") or 0)
+            rate = matches / args.runs
+            ok = (rate >= args.threshold) if query["should_trigger"] else (rate < args.threshold)
+            fields[f"q{i}_actual"] = ",".join(actuals)
+            fields[f"q{i}_should={str(query['should_trigger']).lower()}_rate"] = f"{rate:.2f}"
+            if ok:
+                passed += 1
+            else:
+                errors.append(f"q{i}_mismatch:should_trigger={query['should_trigger']},rate={rate:.2f}")
+    finally:
+        if temporary_project is not None:
+            temporary_project.cleanup()
 
     fields["queries_passed"] = f"{passed}/{len(queries)}"
     fields["input_tokens"] = total_input_tokens

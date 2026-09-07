@@ -78,6 +78,18 @@ class TestCodexWriteParser(unittest.TestCase):
         self.assertNotIn("Begin Patch", r["addedContent"])  # envelope excluded
         self.assertNotIn("Add File", r["addedContent"])
 
+    def test_apply_patch_content_beginning_with_double_plus_is_scanned(self):
+        cmd = _apply_patch("a.txt", ["++" + SECRET])
+        r = self._parse("apply_patch", cmd)
+        self.assertTrue(r["parsed"])
+        self.assertIn(SECRET, r["addedContent"])
+
+    def test_bash_literal_begin_patch_text_stays_on_bash_parser(self):
+        cmd = "printf '*** Begin Patch " + SECRET + "' > f.txt"
+        r = self._parse("Bash", cmd)
+        self.assertTrue(r["parsed"])
+        self.assertIn(SECRET, r["addedContent"])
+
     def test_multifile_patch_all_sections(self):
         cmd = ("*** Begin Patch\n*** Add File: a.txt\n+clean line\n"
                "*** Add File: b.txt\n+TOKEN = " + SECRET + "\n*** End Patch")
@@ -161,6 +173,12 @@ class TestCodexWriteGuardBehavior(unittest.TestCase):
 
     def test_apply_patch_secret_denied(self):  # AC1
         self._assert_deny(self._run("apply_patch", _apply_patch("a.txt", ["TOKEN = " + SECRET])))
+
+    def test_apply_patch_triple_plus_secret_denied(self):
+        self._assert_deny(self._run("apply_patch", _apply_patch("a.txt", ["++" + SECRET])))
+
+    def test_bash_begin_patch_literal_secret_denied(self):
+        self._assert_deny(self._run("Bash", "printf '*** Begin Patch " + SECRET + "' > f.txt"))
 
     def test_deny_reason_sanitizes_injected_target_path(self):  # security: no path reflection (prompt-injection)
         # The V4A `*** Add File: (.+)` capture is attacker-influenceable; the deny reason must reduce it
@@ -255,16 +273,17 @@ class TestCodexWriteGuardWiring(unittest.TestCase):
 
     def test_claude_side_byte_identical(self):  # AC12
         digests = {
-            "hooks/scan-write.mjs": "c1fbd3b247beb203e7fd8ba1d1b5ce2850c0d852dd45bbe90f696a2001dfdcf7",
+            # LF-normalized (working-tree CRLF on Windows must not fail a Linux checkout).
+            "hooks/scan-write.mjs": "8e4fd3225c3cf096498adeedebb8a9e4a36b19bc09267d067fe4aa66a1c02e90",
             # Refreshed by the 2026-08-22 guard-bypass fix: the Bash-only matcher and the
             # `if: Bash(git commit*)` filters were removed (a Bash-only matcher is inert on a
             # Windows host with no Git Bash, and a subcommand-level `if` never starts the hook
-            # for a git alias). NOTE: this lock is byte-exact and therefore line-ending
-            # sensitive; recompute it on the same checkout style it was recorded on.
+            # for a git alias).
             "hooks/hooks-claude.json": "e50dbe053f4cc59a1b2ce23fc1cc6b96581a1f0f28048b1bc31aa544c0e3ed39",
         }
         for rel, want in digests.items():
-            got = hashlib.sha256((REPO / rel).read_bytes()).hexdigest()
+            payload = (REPO / rel).read_bytes().replace(b"\r\n", b"\n")
+            got = hashlib.sha256(payload).hexdigest()
             self.assertEqual(got, want, f"{rel} changed (must be byte-identical)")
 
 

@@ -60,7 +60,7 @@ Two read-only fan-out points: the **scope map** (one `context-analyst` per affec
 7. **Security analysis** (contract 06) — validation, authN/authZ (IDOR), secrets, injection, dependency risk, logging hygiene. Fix→re-check→retest on findings.
 8. **Refactor** (contract 07) — only if needed; behavior unchanged; retest after.
 9. **Documentation** (contract 09) — update stale docs, env vars, API signatures, setup.
-10. **Implementation control** — run **`implementasyon-control`** before finalizing; complete any gap and re-run. Don't give the final answer if a critical step is missing.
+10. **Implementation control** — run **`implementation-control`** before finalizing; complete any gap and re-run. Don't give the final answer if a critical step is missing.
 
 ## Final Response
 What was built · files changed · tests run (with result) · security notes · remaining risks · user actions needed.

@@ -1,4 +1,5 @@
 import unittest
+import subprocess
 from pathlib import Path
 
 
@@ -21,13 +22,14 @@ class TestReleaseReadinessDocs(unittest.TestCase):
             "run_procedure_eval.py",
             "secret",
             "Known Limitations",
-            "Codex command-blocking guardrails are advisory/manual",
-            "2026-06-20 Codex live low smoke",
+            "Codex wires native blocking `PreToolUse` guards",
+            "Historical evidence — 2026-06-20 Codex 0.3.0 live low smoke",
+            "not live evidence for the current `0.4.1` worktree",
             "docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md",
             "gpt-5.3-codex-spark",
             "model_reasoning_effort=\"low\"",
             "RED->GREEN",
-            "Implementation Control PASS",
+            "`Overall Status: PASS` for Implementation Control",
             "Release Verdict Template",
         ):
             self.assertIn(required, text)
@@ -40,6 +42,20 @@ class TestReleaseReadinessDocs(unittest.TestCase):
 
         plugin_readme = (REPO / "docs" / "plugin-readme.md").read_text(encoding="utf-8")
         self.assertIn(f"## 11. Deterministic scripts ({len(scripts)})", plugin_readme)
+
+    def test_linked_codex_live_evidence_is_release_visible(self):
+        target = REPO / "docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md"
+        self.assertTrue(target.is_file())
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", str(target)], cwd=REPO, capture_output=True
+        )
+        self.assertNotEqual(ignored.returncode, 0, "release evidence is still git-ignored")
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", str(target.relative_to(REPO))],
+            cwd=REPO,
+            capture_output=True,
+        )
+        self.assertEqual(tracked.returncode, 0, "release evidence is not present in the Git index")
 
 
 if __name__ == "__main__":

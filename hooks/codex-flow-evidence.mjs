@@ -37,9 +37,10 @@ function runIsGreen(r) {
 // byte-locked file must not change). Read-only subprocess: the artifact path is a SEPARATE argv (no
 // shell). Returns the exit code, or null when no interpreter can run -> caller fails open (BR2 exception).
 function runValidator(mode, file, specFile, cwd) {
-  const candidates = process.platform === 'win32'
-    ? [['py', '-3'], ['python'], ['python3']]
-    : [['python3'], ['python']];
+  const configured = String(process.env.AGENTIC_SDLC_PYTHON || '').trim();
+  const candidates = (configured ? [[configured]] : []).concat(process.platform === 'win32'
+    ? [['python3'], ['python'], ['py', '-3']]
+    : [['python3'], ['python']]);
   const script = join(HOOK_DIR, '..', 'scripts', 'validate_artifacts.py');
   const tail = ['--mode', mode, '--file', file, '--strict'];
   if (mode === 'plan' && specFile) tail.push('--spec', specFile);
@@ -47,6 +48,7 @@ function runValidator(mode, file, specFile, cwd) {
     const r = spawnSync(c[0], [...c.slice(1), script, ...tail], { encoding: 'utf8', cwd, timeout: 10000 });
     if (r.error) continue;           // interpreter not found -> try next
     if (r.status === null) continue; // spawn failed
+    if (/unable to create process using/i.test(String(r.stderr || ''))) continue;
     return r.status;                 // 0 = pass, non-zero = fail (e.g. a stub)
   }
   return null; // could not run any interpreter -> caller fails open
@@ -66,7 +68,7 @@ function isValidSlug(slug, pp) {
 // Classify a per-package artifact path docs/agentic-sdlc/<slug>/<subdir>/<basename>.md -> role
 // ('spec'|'plan') for a valid, non-reserved slug; the evidence subdir and any reserved/invalid slug
 // return null, so evidence is never a trigger (AC12) and a reserved slug never shadows a flat root.
-function perPackageRole(filePath, req) {
+export function perPackageRole(filePath, req) {
   const pp = req?.perPackageArtifact;
   if (!pp || typeof pp.base !== 'string' || !filePath) return null;
   const norm = String(filePath).replace(/\\/g, '/');
@@ -119,7 +121,7 @@ export function findArtifactFile(cwd, role, req, workId) {
 }
 
 // Reduce a rollout edit-target path to a bare work-id base-name; reject traversal/empty.
-function workIdOf(target) {
+export function workIdOf(target) {
   const id = String(target).replace(/\\/g, '/').split('/').pop()
     .replace(/\.md$/i, '')
     .replace(/[^A-Za-z0-9._-]/g, '');

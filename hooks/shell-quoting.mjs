@@ -72,6 +72,17 @@ export function expandAnsiCQuotes(command) {
       i = j;
       continue;
     }
+    if (s[i] === '"') {                                  // ANSI-C quotes are inert inside "..."
+      let j = i + 1;
+      while (j < s.length) {
+        if (s[j] === '\\' && j + 1 < s.length) { j += 2; continue; }
+        if (s[j] === '"') { j += 1; break; }
+        j += 1;
+      }
+      out += s.slice(i, j);
+      i = j;
+      continue;
+    }
     if (s[i] === "'") {                                  // ordinary single-quoted span: copy as-is
       const end = s.indexOf("'", i + 1);
       if (end === -1) { out += s.slice(i); break; }

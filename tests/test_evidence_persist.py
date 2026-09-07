@@ -25,7 +25,7 @@ PROSE_FILES = [
     REPO / "skills" / "agentic-sdlc-pipeline" / "playbook.md",
     REPO / "skills" / "agentic-sdlc-pipeline" / "SKILL.md",
     REPO / "skills" / "agentic-sdlc-pipeline" / "templates.md",
-    REPO / "skills" / "implementasyon-control" / "SKILL.md",
+    REPO / "skills" / "implementation-control" / "SKILL.md",
 ]
 
 # Markers each prose file must carry (lowercased substring match):

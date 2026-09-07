@@ -33,6 +33,13 @@ import time
 from pathlib import Path
 from typing import Any
 
+try:
+    from scripts.eval_safety import require_slug, resolve_under
+    from scripts.sensitive_redaction import redact_text
+except ModuleNotFoundError:
+    from eval_safety import require_slug, resolve_under
+    from sensitive_redaction import redact_text
+
 
 def split_frontmatter(text: str) -> dict[str, str]:
     if not text.startswith("---"):
@@ -52,7 +59,7 @@ def split_frontmatter(text: str) -> dict[str, str]:
 def read_skill(skill_path: Path) -> tuple[str, str]:
     text = (skill_path / "SKILL.md").read_text(encoding="utf-8")
     fm = split_frontmatter(text)
-    return fm.get("name", skill_path.name), fm.get("description", "")
+    return require_slug(fm.get("name", skill_path.name), "skill name"), fm.get("description", "")
 
 
 def load_skills(skills_dir: Path) -> list[tuple[str, str]]:
@@ -193,7 +200,7 @@ def run_opencode_once(
 
     if transcript_path:
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        transcript_path.write_text("".join(captured), encoding="utf-8")
+        transcript_path.write_text(redact_text("".join(captured)), encoding="utf-8")
     actual, usage = parse_opencode_events(captured)
     return actual, usage, None
 
@@ -254,7 +261,11 @@ def main(argv: list[str] | None = None) -> int:
             prompt = build_prompt(query["query"], skills)
             transcript_path = None
             if args.transcript_dir:
-                transcript_path = args.transcript_dir / f"{target_skill}-q{i}-run{run_index}.jsonl"
+                transcript_path = resolve_under(
+                    args.transcript_dir,
+                    f"{target_skill}-q{i}-run{run_index}.jsonl",
+                    "transcript filename",
+                )
             actual, usage, error = run_opencode_once(prompt, args.model, args.timeout, eval_cwd, transcript_path)
             if error:
                 errors.append(f"q{i}_{error}")

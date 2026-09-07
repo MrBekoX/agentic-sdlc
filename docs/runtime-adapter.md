@@ -38,6 +38,12 @@ For deferred adapter targets, the only acceptable documented fallback is the sam
 
 Work-package artifacts resolve in two layouts on both runtimes: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
+Current Codex switch semantics (0.4.1): `AGENTIC_FLOW_GATE_BLOCK` controls only the flow-step Stop
+backstop; `AGENTIC_FLOW_ORDER_BLOCK` controls only `flow-order-guard-codex.mjs`. They are independent.
+The flow-order guard resolves both flat and canonical per-package spec/plan layouts through the same
+artifact lookup used by the Codex Stop evidence engine. Any older “shared-env coupling” wording in
+historical design material is superseded by this runtime contract.
+
 Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution; the flow guards on neither runtime activate on an evidence write). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.

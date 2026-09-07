@@ -1,5 +1,5 @@
 {
-  "_comment": "Live trigger eval-set for implementasyon-control. Positives = natural-language pre-final audit that the required implementation flow was followed; negatives = starting implementation or review feedback.",
+  "_comment": "Live trigger eval-set for implementation-control. Positives = natural-language pre-final audit that the required implementation flow was followed; negatives = starting implementation or review feedback.",
   "queries": [
     {"query": "Bu branch'in implementation flow'u icin spec, plan, TDD, security ve test kaniti gercekten var mi kontrol et.", "should_trigger": true},
     {"query": "Verify the implementation actually followed the required spec/plan/TDD/security flow before the final answer.", "should_trigger": true},

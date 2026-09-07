@@ -39,11 +39,11 @@ Check:
 1. `hooks/hooks-codex.json` is valid Codex hook JSON and has only the top-level `hooks` object, and `.codex-plugin/plugin.json` declares `"hooks": "./hooks/hooks-codex.json"`.
 2. The plugin was reinstalled after hook config changes.
 3. Start a new Codex thread so the declared Codex hook config is reloaded.
-4. Open `/hooks` and review/trust the plugin-bundled `SessionStart` command hook if Codex marks it pending review.
+4. Open `/hooks` and review/trust the plugin-bundled commands if Codex marks them pending review.
 5. `node` is on `PATH`.
 6. `${PLUGIN_ROOT}` resolves in the Codex plugin runtime.
 
-Codex wires only the `SessionStart` bootstrap hook in this release. Runtime guardrails for Codex still rely on skills, contracts, explicit script runs, and final evidence checks rather than command-blocking hook events.
+Codex wires blocking `PreToolUse` guards, `SessionStart`, and advisory/env-gated `Stop` backstops. If startup context works but a command guard does not, compare the event/matcher in `hooks/hooks-codex.json`, confirm `node` is available, and run the hook script with a sanitized sample payload. Remember that unrecognized literal-write forms and internal parse errors deliberately fail open.
 
 ## Branch Guard Only Warns
 

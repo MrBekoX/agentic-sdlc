@@ -1,7 +1,7 @@
 ---
 name: debugger
 description: Finds the root cause of a bug — separates symptom from cause, clarifies reproduction steps, and prevents unnecessary patches. Use when a bug's cause isn't obvious or a fix risks treating only the symptom. Read-only diagnosis.
-tools: Glob, Grep, Read, NotebookRead, Bash, WebFetch, WebSearch
+tools: Glob, Grep, Read, Bash, WebFetch, WebSearch
 model: inherit
 ---
 

@@ -49,6 +49,25 @@ class TestProcedureEvalHarness(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("procedure_eval=dry-run-passed", proc.stdout)
 
+    def test_unknown_case_id_fails(self):
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_procedure_eval.py",
+                "--eval-set",
+                "tests/skills/procedure/agentic-sdlc-pipeline.json",
+                "--case-id",
+                "does-not-exist",
+                "--dry-run",
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True, encoding="utf-8",
+        )
+        self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("error=unknown_case_id:does-not-exist", proc.stdout)
+        self.assertIn("procedure_eval=failed", proc.stdout)
+
     def test_sample_transcript_passes_dev_flow_coverage(self):
         proc = subprocess.run(
             [
@@ -177,7 +196,7 @@ class TestProcedureEvalHarness(unittest.TestCase):
             trace, "Agent", {"subagent_type": "agentic-sdlc:implementation-auditor", "description": "audit flow"}
         )
         self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:security-audit"))
-        self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:implementasyon-control"))
+        self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:implementation-control"))
 
     def test_unmapped_gate_skill_not_satisfied_by_agent(self):
         # A skill with no agent equivalent still requires an actual Skill call.
@@ -226,7 +245,7 @@ class TestProcedureEvalHarness(unittest.TestCase):
             {"command": "python ${PLUGIN_ROOT}/scripts/validate_artifacts.py --mode plan --file docs/agentic-sdlc/plans/greeting-suffix.md --spec docs/agentic-sdlc/specs/greeting-suffix.md --strict"},
         )
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:security-audit"})
-        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:implementasyon-control"})
+        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:implementation-control"})
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:completion-claim-gate"})
 
         errors = procedure_eval.evaluate_case(case, trace, REPO)
@@ -302,6 +321,8 @@ class TestProcedureEvalHarness(unittest.TestCase):
                 "scripts/run_procedure_eval.py",
                 "--eval-set",
                 "tests/skills/procedure/agentic-sdlc-pipeline.json",
+                "--case-id",
+                PER_PACKAGE_CASE_ID,
                 "--transcript",
                 str(PER_PACKAGE_FIXTURE),
             ],

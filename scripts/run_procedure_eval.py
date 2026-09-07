@@ -29,6 +29,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+try:
+    from scripts.eval_safety import require_link_free_tree, require_relative_pattern, require_slug, resolve_under
+    from scripts.sensitive_redaction import redact_text
+except ModuleNotFoundError:
+    from eval_safety import require_link_free_tree, require_relative_pattern, require_slug, resolve_under
+    from sensitive_redaction import redact_text
+
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -38,7 +45,7 @@ REPO = Path(__file__).resolve().parents[1]
 # sub-agent is wrongly scored as "missing_skill". Map: skill short-name -> agent short-names.
 SKILL_AGENT_EQUIVALENTS: dict[str, list[str]] = {
     "security-audit": ["security-reviewer"],
-    "implementasyon-control": ["implementation-auditor"],
+    "implementation-control": ["implementation-auditor"],
     "code-quality-review": ["code-reviewer"],
     "test-authoring": ["test-engineer"],
 }
@@ -275,6 +282,7 @@ def load_eval(path: Path) -> list[dict[str, Any]]:
     for case in cases:
         if not isinstance(case.get("id"), str) or not case["id"].strip():
             raise ValueError("case missing id")
+        require_slug(case["id"], "case id")
         if not isinstance(case.get("prompt"), str) or not case["prompt"].strip():
             raise ValueError(f"case {case['id']} missing prompt")
         for key in (
@@ -292,6 +300,16 @@ def load_eval(path: Path) -> list[dict[str, Any]]:
             if key.endswith("patterns") or key.endswith("commands"):
                 for value in values:
                     re.compile(value)
+            if key == "required_artifacts":
+                for value in values:
+                    require_relative_pattern(value, f"case {case['id']} required artifact")
+        fixture = case.get("fixture_dir")
+        if fixture is not None:
+            if not isinstance(fixture, str) or not fixture.strip():
+                raise ValueError(f"case {case['id']} invalid fixture_dir")
+            src = resolve_under(REPO, fixture, f"case {case['id']} fixture_dir", must_exist=True)
+            if not src.is_dir():
+                raise ValueError(f"case {case['id']} fixture_dir is not a directory: {fixture}")
         adapters = case.get("required_runtime_adapters", [])
         if not isinstance(adapters, list):
             raise ValueError(f"case {case['id']} invalid required_runtime_adapters")
@@ -316,7 +334,8 @@ def regex_present(pattern: str, text: str) -> bool:
 def artifact_present(pattern: str, trace: Trace, cwd: Path) -> bool:
     if any(pattern.replace("\\", "/") in w.replace("\\", "/") for w in trace.writes):
         return True
-    candidates = list(cwd.glob(pattern)) if any(ch in pattern for ch in "*?[]") else [cwd / pattern]
+    require_relative_pattern(pattern, "required artifact")
+    candidates = list(cwd.glob(pattern)) if any(ch in pattern for ch in "*?[]") else [resolve_under(cwd, pattern, "required artifact")]
     return any(p.exists() for p in candidates)
 
 
@@ -409,7 +428,11 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
         ):
             latest[norm] = content
     for norm, content in sorted(latest.items()):
-        disk = cwd / norm
+        try:
+            disk = resolve_under(cwd, norm, "artifact write path")
+        except ValueError:
+            errors.append(f"unsafe_artifact_path:{norm}")
+            continue
         text = disk.read_text(encoding="utf-8") if disk.exists() else content
         # Per-package mode comes from the singular-segment classifier; flat falls back
         # to the existing plural-substring test verbatim (provably unchanged for flat).
@@ -437,7 +460,11 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
                     # flat plan pairing unchanged: pair with any flat spec written in the run
                     spec_path = next((p for p in latest if "/specs/" in p), None)
                 if spec_path:
-                    sp = cwd / spec_path
+                    try:
+                        sp = resolve_under(cwd, spec_path, "paired spec path")
+                    except ValueError:
+                        errors.append(f"unsafe_artifact_path:{spec_path}")
+                        continue
                     spec_text = sp.read_text(encoding="utf-8") if sp.exists() else latest[spec_path]
                     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as sf:
                         sf.write(spec_text)
@@ -490,11 +517,12 @@ def evaluate_case(case: dict[str, Any], trace: Trace, cwd: Path) -> list[str]:
 def copy_fixture(case: dict[str, Any], tmp_root: Path) -> Path:
     fixture = case.get("fixture_dir")
     if not fixture:
-        return REPO
-    src = (REPO / fixture).resolve()
-    if not src.exists():
-        raise ValueError(f"fixture_dir missing: {fixture}")
-    dst = tmp_root / case["id"]
+        raise ValueError(f"live case {case['id']} requires fixture_dir")
+    src = resolve_under(REPO, fixture, "fixture_dir", must_exist=True)
+    if not src.is_dir():
+        raise ValueError(f"fixture_dir must be a directory: {fixture}")
+    require_link_free_tree(src, "fixture_dir")
+    dst = resolve_under(tmp_root, require_slug(case["id"], "case id"), "fixture destination")
     shutil.copytree(src, dst)
     subprocess.run(["git", "init", "-b", "main"], cwd=dst, capture_output=True, text=True, encoding="utf-8")
     subprocess.run(["git", "config", "user.email", "eval@example.invalid"], cwd=dst, capture_output=True, text=True, encoding="utf-8")
@@ -508,9 +536,9 @@ def run_live_case(case: dict[str, Any], args: argparse.Namespace, tmp_root: Path
     if shutil.which("claude") is None:
         raise RuntimeError("claude CLI missing")
     cwd = copy_fixture(case, tmp_root)
-    transcript_dir = args.transcript_dir or (REPO / "tests" / "artifacts" / "procedure")
+    transcript_dir = args.transcript_dir.resolve() if args.transcript_dir else (tmp_root / "transcripts")
     transcript_dir.mkdir(parents=True, exist_ok=True)
-    transcript_path = transcript_dir / f"{case['id']}.jsonl"
+    transcript_path = resolve_under(transcript_dir, f"{case['id']}.jsonl", "transcript filename")
     cmd = [
         "claude",
         "-p",
@@ -540,13 +568,16 @@ def run_live_case(case: dict[str, Any], args: argparse.Namespace, tmp_root: Path
         errors="replace",
         timeout=args.timeout,
     )
-    transcript_path.write_text((proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else ""), encoding="utf-8")
+    raw_transcript = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+    transcript_path.write_text(redact_text(raw_transcript), encoding="utf-8")
     return trace_events(load_json_lines(transcript_path)), cwd, transcript_path
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval-set", required=True, type=Path)
+    parser.add_argument("--case-id", action="append", dest="case_ids",
+                        help="Restrict to these case ids (repeatable).")
     parser.add_argument("--transcript", type=Path)
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -570,6 +601,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error={type(exc).__name__}:{exc}")
         print("procedure_eval=failed")
         return 1
+
+    if args.case_ids:
+        wanted = set(args.case_ids)
+        known = {case["id"] for case in cases}
+        missing = sorted(wanted - known)
+        if missing:
+            print(f"error=unknown_case_id:{','.join(missing)}")
+            print("procedure_eval=failed")
+            return 1
+        cases = [case for case in cases if case["id"] in wanted]
 
     if args.dry_run:
         print(f"cases={len(cases)}")

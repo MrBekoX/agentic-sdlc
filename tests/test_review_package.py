@@ -75,6 +75,19 @@ class TestReviewPackageRefValidation(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             self.assertTrue(any(Path(td).glob("out/review-package-*.md")))
 
+    def test_persisted_diff_redacts_high_confidence_secret(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._make_repo(td)
+            secret = "ghp_" + "A1b2" * 9
+            (Path(td) / "secret.txt").write_text(secret + "\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=td, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "second"], cwd=td, check=True, capture_output=True)
+            proc = self._run(td, "HEAD~1", "HEAD")
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            text = next(Path(td).glob("out/review-package-*.md")).read_text(encoding="utf-8")
+            self.assertNotIn(secret, text)
+            self.assertIn("***MASKED:github-token***", text)
+
 
 if __name__ == "__main__":
     unittest.main()

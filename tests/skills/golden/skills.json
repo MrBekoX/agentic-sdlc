@@ -16,7 +16,7 @@
         {"ref": "feedback-triage", "kind": "skill"},
         {"ref": "mind-spark", "kind": "skill"},
         {"ref": "dispatch-strategy", "kind": "skill"},
-        {"ref": "implementasyon-control", "kind": "skill"},
+        {"ref": "implementation-control", "kind": "skill"},
         {"ref": "completion-claim-gate", "kind": "skill"}
       ]
     },
@@ -28,7 +28,7 @@
         {"ref": "safe-refactor", "kind": "skill"},
         {"ref": "test-authoring", "kind": "skill"},
         {"ref": "dispatch-strategy", "kind": "skill"},
-        {"ref": "implementasyon-control", "kind": "skill"},
+        {"ref": "implementation-control", "kind": "skill"},
         {"ref": "mind-spark", "kind": "skill"},
         {"ref": "completion-claim-gate", "kind": "skill"},
         {"ref": "feedback-triage", "kind": "skill"},
@@ -82,7 +82,7 @@
       "description_must_include": ["bug", "root-cause", "failing test"],
       "must_reference": [
         {"ref": "dispatch-strategy", "kind": "skill"},
-        {"ref": "implementasyon-control", "kind": "skill"},
+        {"ref": "implementation-control", "kind": "skill"},
         {"ref": "spec-plan-draft", "kind": "workflow"},
         {"ref": "spec-plan-author", "kind": "agent"},
         {"ref": "spec-plan-critic", "kind": "agent"},
@@ -94,7 +94,7 @@
       "description_must_include": ["new feature", "endpoint", "implementation-control"],
       "must_reference": [
         {"ref": "dispatch-strategy", "kind": "skill"},
-        {"ref": "implementasyon-control", "kind": "skill"},
+        {"ref": "implementation-control", "kind": "skill"},
         {"ref": "spec-plan-author", "kind": "agent"},
         {"ref": "spec-plan-critic", "kind": "agent"},
         {"ref": "context-analyst", "kind": "agent"}
@@ -104,7 +104,7 @@
       "description_must_include": ["refactor", "without changing behavior", "approval"],
       "must_reference": [
         {"ref": "dispatch-strategy", "kind": "skill"},
-        {"ref": "implementasyon-control", "kind": "skill"},
+        {"ref": "implementation-control", "kind": "skill"},
         {"ref": "software-architect", "kind": "agent"},
         {"ref": "context-analyst", "kind": "agent"}
       ]
@@ -145,7 +145,7 @@
         {"ref": "software-architect", "kind": "agent"}
       ]
     },
-    "implementasyon-control": {
+    "implementation-control": {
       "description_must_include": ["pre-final", "followed the required flow", "tdd"],
       "must_reference": [
         {"ref": "implementation-auditor", "kind": "agent"}
@@ -154,7 +154,7 @@
     "completion-claim-gate": {
       "description_must_include": ["done", "passing", "evidence gate"],
       "must_reference": [
-        {"ref": "implementasyon-control", "kind": "skill"}
+        {"ref": "implementation-control", "kind": "skill"}
       ]
     },
     "mind-spark": {

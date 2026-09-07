@@ -12,7 +12,7 @@
     {"prompt": "Bu branch'teki diff'i merge oncesi kod kalitesi acisindan gozden gecir.", "expected": "code-quality-review", "escalation": false},
     {"prompt": "CodeRabbit'in PR'da biraktigi yorumlari degerlendirip ele al.", "expected": "feedback-triage", "escalation": false},
     {"prompt": "Bu 16-skill eval isini main loop'ta mi, subagent'larla mi yoksa workflow ile mi kosalim, karar ver.", "expected": "dispatch-strategy", "escalation": false},
-    {"prompt": "Mevcut diff icin final cevaptan once spec/plan/TDD/guvenlik akisinin gercekten takip edildigini simdi denetle.", "expected": "implementasyon-control", "escalation": false},
+    {"prompt": "Mevcut diff icin final cevaptan once spec/plan/TDD/guvenlik akisinin gercekten takip edildigini simdi denetle.", "expected": "implementation-control", "escalation": false},
     {"prompt": "Uretimi etkileyen yeni odeme akisini uctan uca spec, plan, TDD, guvenlik review ve final audit ile gelistir.", "expected": "agentic-sdlc-pipeline", "escalation": true},
     {"prompt": "Su webhook cift-kayit bug'ini sadece bul ve duzelt.", "expected": "root-cause-fix", "escalation": false},
     {"prompt": "I'm not sure what direction to take for feature X; let's discuss options before writing code.", "expected": "mind-spark", "escalation": false}

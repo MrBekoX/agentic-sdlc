@@ -156,6 +156,36 @@ export function scanLines(text, patterns) {
   return out;
 }
 
+// Replace high-confidence matches before durable local persistence. Unlike the interactive guard,
+// durable redaction deliberately IGNORES per-line allow markers: an annotation may authorize a
+// fixture in source control, but it never authorizes copying a secret value into a transcript or
+// review artifact. Exact published samples and structural placeholders remain safe to preserve.
+export function redactSecrets(text, patterns = HIGH) {
+  // A line scanner can see only the BEGIN header. Redact the complete PEM block first so neither
+  // key material nor the END marker survives. An unterminated block is masked through EOF.
+  const pem = /-----BEGIN ([A-Z0-9 ]*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)/g;
+  const withoutPrivateKeys = String(text ?? '').replace(pem, '***MASKED:private-key***');
+  return withoutPrivateKeys.split(/(\r?\n)/).map((line) => {
+    if (/^\r?\n$/.test(line)) return line;
+    let redacted = line;
+    for (const p of patterns) {
+      const flags = p.re.flags.includes('g') ? p.re.flags : p.re.flags + 'g';
+      const re = new RegExp(p.re.source, flags);
+      redacted = redacted.replace(re, (...args) => {
+        const whole = args[0];
+        const captured = p.valueGroup ? args[p.valueGroup] : null;
+        if (p.valueGroup) {
+          if (looksPlaceholder(captured)) return whole;
+        } else if (DOC_SAMPLES.has(whole) || isDegenerateToken(whole)) {
+          return whole;
+        }
+        return `***MASKED:${p.label}***`;
+      });
+    }
+    return redacted;
+  }).join('');
+}
+
 // Read the full JSON from stdin (hook input).
 export async function readStdin() {
   if (process.stdin.isTTY) return '';

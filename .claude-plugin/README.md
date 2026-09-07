@@ -49,7 +49,7 @@ Do not hard-code machine-specific absolute paths into skills, hooks, evals, or g
 6. `validate_artifacts.py --mode plan --strict` after saving the plan.
 7. `Skill` invocation for the selected core workflow: `feature-build`, `root-cause-fix`, `safe-refactor`, or `test-authoring`.
 8. `Skill` invocation for `security-audit` at required security gates.
-9. `Skill` invocation for `implementasyon-control` before final reporting.
+9. `Skill` invocation for `implementation-control` before final reporting.
 10. `Skill` invocation for `completion-claim-gate` immediately before any done/fixed/passing/ready claim.
 
 Manual prose does not replace those tool calls when the runtime supports them.
@@ -63,7 +63,7 @@ Focused skills are independently invocable. The pipeline reuses them instead of 
 | Spec and plan phases | Named workflow `agentic-sdlc:spec-plan-draft`. |
 | Implementation core | Delegates to `feature-build`, `root-cause-fix`, `safe-refactor`, or `test-authoring`. |
 | Security gates | Delegates to `security-audit`. |
-| Pre-final audit | Delegates to `implementasyon-control`. |
+| Pre-final audit | Delegates to `implementation-control`. |
 | Final evidence claim | Delegates to `completion-claim-gate`. |
 
 `spec-authoring` and `plan-authoring` remain standalone prompt-level skills. They are not internal pipeline substeps.
@@ -77,9 +77,13 @@ Claude Code wires the full hook surface in `hooks/hooks-claude.json`:
 | `PreToolUse` | `scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs`, `flow-order-guard.mjs` |
 | `PostToolUse` | `scan-write.mjs` |
 | `SessionStart` | `session-start.mjs` |
-| `Stop` | `completion-claim-guard.mjs`, `flow-step-guard.mjs` |
+| `Stop` | `completion-claim-guard.mjs`, `flow-step-guard.mjs`, `worktree-scan.mjs` |
 
 `scan-commit.mjs` and `destructive-command-guard.mjs` can block. `scan-write.mjs` warns. `branch-guard.mjs` warns by default and blocks only when `AGENTIC_BRANCH_GUARD_BLOCK=true`. `completion-claim-guard.mjs` warns by default and blocks only when `AGENTIC_COMPLETION_GATE_BLOCK=true`.
+
+`worktree-scan.mjs` scans the actual tracked/untracked bytes at Stop, reports only masked finding
+labels/locations, and is advisory by default. `AGENTIC_WORKTREE_SCAN_BLOCK=true` asks Claude Code to
+continue the turn, but cannot undo a secret that already reached disk.
 
 The flow guards are the deterministic backstop for active implementation flows. `flow-order-guard.mjs` checks before source edits that required pre-edit evidence exists in the current turn; `flow-step-guard.mjs` checks at Stop that required flow steps have observable evidence. Both use `hooks/flow-requirements.json` and `flow-evidence.mjs`, warn by default, and block/deny only when `AGENTIC_FLOW_GATE_BLOCK=true`.
 

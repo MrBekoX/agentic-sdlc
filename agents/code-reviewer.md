@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Reviews code quality in a fresh context — readability, maintainability, simplicity, duplication, overengineering, naming, error handling, performance, architecture consistency, testability. Use to review a diff before merge without the author's bias. Read-only.
-tools: Glob, Grep, Read, NotebookRead, WebFetch, WebSearch
+tools: Glob, Grep, Read, WebFetch, WebSearch
 model: inherit
 ---
 

@@ -28,6 +28,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,7 +36,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 NODE = shutil.which("node")
 GIT = shutil.which("git")
-PY = shutil.which("python") or shutil.which("python3")
+# Reuse the interpreter that launched the suite. PATH aliases such as the Windows Store
+# `python.exe` stub can exist yet fail CreateProcess, which made the cross-platform gate flaky.
+PY = sys.executable
 
 _A = "a1B2"
 GH_CLEAN = "ghp_" + _A * 9

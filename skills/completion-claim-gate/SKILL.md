@@ -37,7 +37,7 @@ success, treat that impulse as the trigger to run the proof first.
 
 This complements the lab's evidence contracts rather than restating them. Contract 00 ("show real
 evidence before claiming success") and contract 05 (TDD: see RED, then GREEN, show the output) define
-*what counts as evidence* for code and tests. `implementasyon-control` audits the *whole flow*
+*what counts as evidence* for code and tests. `implementation-control` audits the *whole flow*
 once, at the very end. This skill is the per-claim, same-turn micro-gate in front of every
 individual "done/passing/works" — including mid-flow claims, claims about a subagent's report,
 and the line right before a commit.

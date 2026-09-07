@@ -10,7 +10,7 @@ Full Mode is not satisfied by inline summaries of other skills. Use `docs/runtim
 - `Bash`/`PowerShell` -> `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py"` after saving the spec and plan artifacts.
 - `Skill` -> the selected core work-flow with the approved `docs/agentic-sdlc/specs/<work_id>.md` and `docs/agentic-sdlc/plans/<work_id>.md` paths.
 - `Skill` -> `agentic-sdlc:security-audit` for required security passes.
-- `Skill` -> `agentic-sdlc:implementasyon-control` before finalizing.
+- `Skill` -> `agentic-sdlc:implementation-control` before finalizing.
 - `Skill` -> `agentic-sdlc:completion-claim-gate` before any success/completion/ready claim.
 
 In Codex, the other supported runtime, Claude Code `Workflow` calls are not available. Keep `spec-authoring` and `plan-authoring` as independent entry skills; agentic-sdlc-pipeline does not invoke them for steps 4-5. Instead, agentic-sdlc-pipeline runs the embedded adapter:
@@ -18,7 +18,7 @@ In Codex, the other supported runtime, Claude Code `Workflow` calls are not avai
 - Run a fresh-context critic pass with the runtime's subagent/specialist mechanism using `spec-plan-critic` instructions wherever the runtime exposes a subagent mechanism (mandatory there).
 - Revise up to two rounds, save the artifact, then run `validate_artifacts.py`.
 - If fresh-context specialists are unavailable, record `Delegation Degraded: fresh-context specialist unavailable` and perform the critic pass inline.
-- Emit `Runtime: Codex` once and `Codex Adapter Gate: <gate>` for dispatch-strategy, spec-plan-draft author/critic, the selected core skill, security-audit, implementasyon-control, and completion-claim-gate. If Codex lacks a native transcript event, record `Delegation Degraded: native Skill transcript events unavailable`; this means the transcript event is unavailable, not that the step itself may be skipped.
+- Emit `Runtime: Codex` once and `Codex Adapter Gate: <gate>` for dispatch-strategy, spec-plan-draft author/critic, the selected core skill, security-audit, implementation-control, and completion-claim-gate. If Codex lacks a native transcript event, record `Delegation Degraded: native Skill transcript events unavailable`; this means the transcript event is unavailable, not that the step itself may be skipped.
 - Do not run recursive cleanup deletes for generated caches such as `__pycache__` during Codex pipeline/eval runs. Leave or report them; cleanup is not a pipeline gate.
 
 Resolve `<runtime-root>` as `${CLAUDE_PLUGIN_ROOT}` in Claude Code, `${PLUGIN_ROOT}` in Codex for contract and script paths.
@@ -37,7 +37,7 @@ Call-order rule: `dispatch-strategy` is the first delegate call before Read/Bash
 | Behavior-preserving restructure | `safe-refactor` | characterization-test guard + envelope |
 | Test coverage only | `test-authoring` | envelope (usually no migration/git-PR) |
 
-agentic-sdlc-pipeline **owns the Spec and Plan phases directly** (steps 4–5). Claude Code uses the `spec-plan-draft` workflow with review gates; Codex uses the embedded author/critic adapter because the Claude Workflow runtime is not available there. agentic-sdlc-pipeline persists the artifacts to **`docs/agentic-sdlc/specs/`** and **`docs/agentic-sdlc/plans/`**, then hands the **approved spec + plan files** to the core work-flow, which executes the implementation core — RED → GREEN → security#1 → refactor → retest → `implementasyon-control` (steps 8–13) — **faithfully to those two files**. The work-flow consumes the provided spec/plan and does not re-draft them.
+agentic-sdlc-pipeline **owns the Spec and Plan phases directly** (steps 4–5). Claude Code uses the `spec-plan-draft` workflow with review gates; Codex uses the embedded author/critic adapter because the Claude Workflow runtime is not available there. agentic-sdlc-pipeline persists the artifacts to **`docs/agentic-sdlc/specs/`** and **`docs/agentic-sdlc/plans/`**, then hands the **approved spec + plan files** to the core work-flow, which executes the implementation core — RED → GREEN → security#1 → refactor → retest → `implementation-control` (steps 8–13) — **faithfully to those two files**. The work-flow consumes the provided spec/plan and does not re-draft them.
 
 ---
 
@@ -91,8 +91,8 @@ Run independent gates in parallel when the runtime supports it: Claude workflow 
 ### 16. Git diff review — agentic-sdlc-pipeline · `git-safety-check`
 `git status --short` → `git diff --stat` → `git diff`. Run the read-only **`/git-safety-check`** command. Confirm: change matches spec, no out-of-plan files, no formatting noise, no secrets, no debug logs / commented-out code, tests meaningful, no unintended breaking change, `.env.example` updated, docs touched if needed. Output: **Diff Review** report.
 
-### Implementation control (gate before commit) — `implementasyon-control`
-Run the **`implementasyon-control`** skill as the master pre-final audit (the core work-flow also runs it internally; here it is the gate before any git commit). The audit must include a passing `resolve_work_package.py` result and adherence to `docs/agentic-sdlc/specs/<work_id>.md` + `docs/agentic-sdlc/plans/<work_id>.md`: every acceptance criterion implemented, no undocumented scope, every plan task done or consciously deferred. Gap → complete the step → re-run. Critical gap → **do not commit, do not finalize.**
+### Implementation control (gate before commit) — `implementation-control`
+Run the **`implementation-control`** skill as the master pre-final audit (the core work-flow also runs it internally; here it is the gate before any git commit). The audit must include a passing `resolve_work_package.py` result and adherence to `docs/agentic-sdlc/specs/<work_id>.md` + `docs/agentic-sdlc/plans/<work_id>.md`: every acceptance criterion implemented, no undocumented scope, every plan task done or consciously deferred. Gap → complete the step → re-run. Critical gap → **do not commit, do not finalize.**
 
 ### Finalize: persist per-package evidence — main flow, not the auditor
 Work-package artifacts live in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`). Per-package plan change-detection is a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.

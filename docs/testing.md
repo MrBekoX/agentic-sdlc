@@ -153,6 +153,10 @@ The deterministic layer is driven by checked-in references and fixtures under `t
 
 `scripts/run_routing_eval.py` evaluates `using-agentic-sdlc` as a router, not as a child skill trigger. It checks whether the prompt routes to the smallest sufficient skill and whether only full-envelope/high-risk prompts escalate to `agentic-sdlc-pipeline`.
 
+Live processes use an ephemeral empty working directory by default; `--plugin-dir` selects the
+plugin source independently. Running against a real checkout requires both
+`--project-root <path>` and `--allow-writable-project`. Persisted transcripts are secret-redacted.
+
 Claude and Codex use different evidence sources, so read the runtime label on every result:
 
 ```bash
@@ -225,6 +229,10 @@ python3 scripts/run_trigger_eval.py \
 
 Use real plugin skills only (no command shim): `--no-command-shim`.
 
+The Claude trigger runner uses a fresh temporary project by default. Running against a real writable
+checkout requires both `--project-root <path>` and `--allow-writable-project`. Relative
+`--plugin-dir .` is resolved before switching to the temporary project.
+
 ### Codex: `run_codex_trigger_eval.py`
 
 Codex does not expose a Claude-style `Skill` tool event in `codex exec --json`, so `scripts/run_codex_trigger_eval.py` checks Codex's route decision as a **local classifier**. It builds a prompt listing every skill name + description, asks the model to return JSON `{"skill":"<name>","needs_dev_flow":true|false}`, and compares the selected skill to the target.
@@ -238,6 +246,11 @@ python3 scripts/run_codex_trigger_eval.py \
   --reasoning-effort low \
   --transcript-dir tests/artifacts/codex-trigger
 ```
+
+The Codex classifier uses a fresh temporary project by default so ignored/local checkout files are
+not exposed to the model. Selecting a real checkout requires both `--project-root <path>` and
+`--allow-writable-project`; the authorization is about project-context exposure, while Codex itself
+still runs with `-s read-only`.
 
 ### Batch: `run_all_trigger_evals.py`
 
@@ -380,7 +393,8 @@ For each case, the evaluator parses the transcript into a trace and checks:
 }
 ```
 
-`fixture_dir` is optional. When present, the eval copies the fixture into a fresh temporary git repo so live runs do not mutate the real tree.
+`fixture_dir` is optional for dry-run/transcript analysis and required for `--live`. Live mode copies
+every fixture into a fresh temporary git repo; it never falls back to the real plugin checkout.
 
 ---
 
@@ -463,11 +477,13 @@ Live evals spend real tokens and time. Apply these controls:
 - Set `--max-budget-usd` to a small value for smoke runs (e.g. `0.10` for trigger evals, `2.00` for procedure evals).
 - Use `--timeout` to cap wall-clock time; `run_trigger_eval.py` defaults to 180 s and `--smoke` caps it at 90.
 - Use `--smoke` for one-query, one-run probes before running a full eval.
-- Capture transcripts with `--transcript-dir` so failures can be replayed and reviewed.
+- Capture transcripts explicitly with `--transcript-dir` when failures must be replayed. Persisted
+  transcripts are passed through the canonical high-confidence secret redactor first.
 - The Claude trigger runner kills the process tree as soon as a trigger decision is detected or the timeout expires.
 - The Codex runner and behavior/procedure runners also terminate the subprocess on timeout.
 - Run live evals only when `claude` or `codex` CLI and auth are available; if the CLI is missing, treat the result as **skipped, not passed**.
-- Never leave eval artifacts containing secrets. The procedure eval copies fixtures into temporary directories and writes transcripts under `tests/artifacts/` (gitignored).
+- Never leave eval artifacts containing secrets. Procedure transcripts are ephemeral by default;
+  caller-selected transcript paths are redacted before persistence.
 
 ---
 
@@ -489,7 +505,7 @@ not masked by a lucky single draw.
 
 | Finding | Result | Action |
 |---|---|---|
-| `implementasyon-control` skipped its `Skill` call (~20%), diving into `git diff` or deferring to the user | first-tool **0.80 → 1.00** (N=10) | call-order guard added to skill + router (genuine bug, fixed) |
+| `implementation-control` skipped its `Skill` call (~20%), diving into `git diff` or deferring to the user | first-tool **0.80 → 1.00** (N=10) | call-order guard added to skill + router (genuine bug, fixed) |
 | Routing eval scored a correct route as a timeout when its skill ran a long auditor pass | fixed | `run_routing_eval.py` early-stops once the route is observed |
 | `runs=1` is unreliable on Haiku — two full sweeps gave 15/15 (q11 outlier) and 14/15 (q13 outlier) from variance alone | n/a | `run_routing_eval.py` default `--runs 1 → 3` (strict threshold kept) |
 | Router trigger eval-set asked the router to route to a child skill (structurally under-credits it) | **Sonnet 6/6** after rework | `tests/skills/evals/using-agentic-sdlc.json` reworked to test the router's own "which skill owns this?" surface |
@@ -507,7 +523,7 @@ Question: do the pipeline's feeder skills fire at the right step, and does it ru
 
 | Model / budget | Result | Notes |
 |---|---|---|
-| Haiku N=3 @ `$2` | **1/3** full PASS | core gates 3/3 (detect_context, validate_artifacts, feature-build, security-audit, implementasyon-control); each run drops a different gate — variance/floor. Haiku-only deviations SKILL.md already forbids: ad hoc `Workflow({script})` instead of named `spec-plan-draft`; shell/branch before the `dispatch-strategy` call-order guard. |
+| Haiku N=3 @ `$2` | **1/3** full PASS | core gates 3/3 (detect_context, validate_artifacts, feature-build, security-audit, implementation-control); each run drops a different gate — variance/floor. Haiku-only deviations SKILL.md already forbids: ad hoc `Workflow({script})` instead of named `spec-plan-draft`; shell/branch before the `dispatch-strategy` call-order guard. |
 | Sonnet N=3 @ `$2` | 0/3 (artifact) | all hit `Reached maximum budget ($2)` mid-run — $2 cut off a strong-model pipeline and masked late gates. |
 | Sonnet N=2 @ `$6` | **2/2** full PASS | all 8 gates each run, named workflow, call-order respected, no forbidden git, no budget hit. |
 

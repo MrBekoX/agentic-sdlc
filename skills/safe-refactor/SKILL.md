@@ -57,7 +57,7 @@ Characterizing current behavior across modules is a read-only fan-out: dispatch 
 4. **Small steps** — one structural change at a time (extract, rename, dedupe, simplify). After **each** step run the relevant tests and **show output**. Use the runtime loop tool when available; otherwise record each fail -> fix -> retest cycle with command evidence.
 5. **No behavior change** — if a "refactor" alters behavior, stop: that is a feature/fix, not a refactor.
 6. **Security re-check** (contract 06) if the refactor touches auth/config/data paths.
-7. **Implementation control** — run **`implementasyon-control`** before finalizing.
+7. **Implementation control** — run **`implementation-control`** before finalizing.
 
 ## Final Response
 What was restructured · files changed · proof behavior is unchanged (tests green before & after, with output) · remaining risks.

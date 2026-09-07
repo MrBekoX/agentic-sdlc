@@ -65,7 +65,7 @@
           "id": "control",
           "label": "Implementation control",
           "evidence": [
-            { "kind": "toolUse", "tool": "Skill", "contains": "implementasyon-control" },
+            { "kind": "toolUse", "tool": "Skill", "contains": "implementation-control" },
             { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" }
           ],
           "stop": "block",
@@ -80,14 +80,14 @@
         { "id": "plan", "label": "Plan (HOW)", "evidence": [ { "kind": "artifact", "role": "plan", "validate": { "mode": "plan", "strict": true } }, { "kind": "toolUse", "tool": "Workflow", "contains": "spec-plan-draft" } ], "stop": "block", "beforeSourceEdit": true },
         { "id": "tests", "label": "RED to GREEN tests run", "evidence": [ { "kind": "command", "matches": "testCommand" } ], "stop": "block", "beforeSourceEdit": false },
         { "id": "security", "label": "Security analysis", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "security-audit" }, { "kind": "toolUse", "tool": "Agent", "contains": "security-reviewer" } ], "stop": "warn", "beforeSourceEdit": false },
-        { "id": "control", "label": "Implementation control", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "implementasyon-control" }, { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" } ], "stop": "block", "beforeSourceEdit": false }
+        { "id": "control", "label": "Implementation control", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "implementation-control" }, { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" } ], "stop": "block", "beforeSourceEdit": false }
       ]
     },
     "safe-refactor": {
       "activeWhen": { "skill": "safe-refactor" },
       "steps": [
         { "id": "characterization", "label": "Characterization tests (safety net) run", "evidence": [ { "kind": "command", "matches": "testCommand" } ], "stop": "block", "beforeSourceEdit": true },
-        { "id": "control", "label": "Implementation control", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "implementasyon-control" }, { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" } ], "stop": "block", "beforeSourceEdit": false }
+        { "id": "control", "label": "Implementation control", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "implementation-control" }, { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" } ], "stop": "block", "beforeSourceEdit": false }
       ]
     },
     "agentic-sdlc-pipeline": {
@@ -100,7 +100,7 @@
         { "id": "core", "label": "Core work-flow delegation", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "feature-build" }, { "kind": "toolUse", "tool": "Skill", "contains": "root-cause-fix" }, { "kind": "toolUse", "tool": "Skill", "contains": "safe-refactor" }, { "kind": "toolUse", "tool": "Skill", "contains": "test-authoring" } ], "stop": "block", "beforeSourceEdit": true },
         { "id": "tests", "label": "RED to GREEN tests run", "evidence": [ { "kind": "command", "matches": "testCommand" } ], "stop": "block", "beforeSourceEdit": false },
         { "id": "security", "label": "Security analysis", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "security-audit" }, { "kind": "toolUse", "tool": "Agent", "contains": "security-reviewer" } ], "stop": "block", "beforeSourceEdit": false },
-        { "id": "control", "label": "Implementation control", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "implementasyon-control" }, { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" } ], "stop": "block", "beforeSourceEdit": false }
+        { "id": "control", "label": "Implementation control", "evidence": [ { "kind": "toolUse", "tool": "Skill", "contains": "implementation-control" }, { "kind": "toolUse", "tool": "Agent", "contains": "implementation-auditor" } ], "stop": "block", "beforeSourceEdit": false }
       ]
     }
   }

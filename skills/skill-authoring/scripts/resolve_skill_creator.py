@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -49,58 +50,34 @@ def candidate_paths() -> list[tuple[str, Path]]:
     out.extend(
         [
             ("codex-system", ch / "skills" / ".system" / "skill-creator"),
-            ("codex-user", ch / "skills" / "skill-creator"),
-            (
-                "claude-official-cache",
-                home()
-                / ".claude"
-                / "plugins"
-                / "cache"
-                / "claude-plugins-official"
-                / "skill-creator"
-                / "unknown"
-                / "skills"
-                / "skill-creator",
-            ),
-            (
-                "claude-legacy-marketplace",
-                home()
-                / ".claude"
-                / "plugins"
-                / "marketplaces"
-                / "anthropic-agent-skills"
-                / "skills"
-                / "skill-creator",
-            ),
         ]
     )
+    official = home() / ".claude/plugins/cache/claude-plugins-official/skill-creator"
+    if official.is_dir():
+        for version in sorted((p for p in official.iterdir() if p.is_dir()), reverse=True):
+            out.append((f"claude-official-cache:{version.name}", version / "skills/skill-creator"))
     return out
 
 
 def is_skill_creator_root(path: Path) -> bool:
-    return path.is_dir() and all((path / name).exists() for name in REQUIRED)
-
-
-def discover_by_scan() -> tuple[str, Path] | None:
-    scan_roots = [
-        home() / ".claude" / "plugins" / "cache",
-        home() / ".claude" / "plugins" / "marketplaces",
-        codex_home() / "skills",
-    ]
-    for root in scan_roots:
-        if not root.is_dir():
-            continue
-        for path in root.rglob("skill-creator"):
-            if is_skill_creator_root(path):
-                return ("scan", path)
-    return None
+    if not path.is_dir() or not all((path / name).exists() for name in REQUIRED):
+        return False
+    try:
+        text = (path / "SKILL.md").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return bool(re.search(r"(?m)^name:\s*skill-creator\s*$", text))
 
 
 def discover() -> tuple[str, Path] | None:
     for source, path in candidate_paths():
         if is_skill_creator_root(path):
             return source, path
-    return discover_by_scan()
+    return None
+
+
+def trust_for(source: str) -> str:
+    return "explicit-unverified" if source in {"skill_creator_root", "agentic_sdlc_skill_creator_root"} else "official"
 
 
 def install_with_claude() -> tuple[int, str]:
@@ -137,6 +114,7 @@ def main(argv: list[str]) -> int:
             {
                 "skill_creator_root": str(path),
                 "skill_creator_source": source,
+                "skill_creator_trust": trust_for(source),
                 "skill_creator_status": "found",
             }
         )
@@ -165,6 +143,7 @@ def main(argv: list[str]) -> int:
             {
                 "skill_creator_root": str(path),
                 "skill_creator_source": source,
+                "skill_creator_trust": trust_for(source),
                 "skill_creator_status": "installed",
             }
         )

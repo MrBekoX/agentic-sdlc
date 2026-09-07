@@ -81,30 +81,35 @@ The call style differs per script, and getting it wrong is the most common time-
 Resolve `SC` first; do not assume a fixed Claude or Codex home path:
 
 ```bash
-python skills/skill-authoring/scripts/resolve_skill_creator.py
+python3 skills/skill-authoring/scripts/resolve_skill_creator.py
 ```
 
-If the output is `skill_creator_status=found`, use `skill_creator_root` as `SC`. If it is
+If the output is `skill_creator_status=found`, inspect `skill_creator_source` and
+`skill_creator_trust` before using `skill_creator_root` as `SC`. `official` means the Codex system
+skill or the versioned `claude-plugins-official/skill-creator` cache. An
+`explicit-unverified` environment path is caller-supplied; show the resolved path and get explicit
+approval before executing any script from it. The resolver deliberately does not recursively scan
+user/plugin caches for the first shape-compatible directory. If the status is
 `missing`, run the same helper with `--install` so it fetches `skill-creator` from the official
 Claude marketplace and resolves again:
 
 ```bash
-python skills/skill-authoring/scripts/resolve_skill_creator.py --install
+python3 skills/skill-authoring/scripts/resolve_skill_creator.py --install
 ```
 
 Then use this matrix exactly.
 
 | Task | Script | How to call |
 |---|---|---|
-| Validate skill structure / frontmatter | `quick_validate.py` | direct: `python <SC>/scripts/quick_validate.py <skill-path>` |
-| Aggregate eval results into a benchmark | `aggregate_benchmark.py` | direct: `python <SC>/scripts/aggregate_benchmark.py <ws>/iteration-N --skill-name <name>` |
-| Build the review viewer (review before judging) | `generate_review.py` | direct: `python <SC>/eval-viewer/generate_review.py <ws>/iteration-N --static <out.html>` |
-| Run the triggering eval | `run_eval.py` | package: `python -m scripts.run_eval ...` **from `SC`** |
-| Optimize the description (loop) | `run_loop.py` | package: `python -m scripts.run_loop ...` **from `SC`** |
-| Package the final `.skill` | `package_skill.py` | package: `python -m scripts.package_skill <skill-path>` **from `SC`** |
+| Validate skill structure / frontmatter | `quick_validate.py` | direct: `python3 <SC>/scripts/quick_validate.py <skill-path>` |
+| Aggregate eval results into a benchmark | `aggregate_benchmark.py` | direct: `python3 <SC>/scripts/aggregate_benchmark.py <ws>/iteration-N --skill-name <name>` |
+| Build the review viewer (review before judging) | `generate_review.py` | direct: `python3 <SC>/eval-viewer/generate_review.py <ws>/iteration-N --static <out.html>` |
+| Run the triggering eval | `run_eval.py` | package: `python3 -m scripts.run_eval ...` **from `SC`** |
+| Optimize the description (loop) | `run_loop.py` | package: `python3 -m scripts.run_loop ...` **from `SC`** |
+| Package the final `.skill` | `package_skill.py` | package: `python3 -m scripts.package_skill <skill-path>` **from `SC`** |
 
 Why two styles: `run_eval`, `run_loop`, and `package_skill` do package-relative imports
-(`from scripts....`), so they need `python -m scripts.<name>` run from `SC` (the package root);
+(`from scripts....`), so they need `python3 -m scripts.<name>` run from `SC` (the package root);
 calling them by direct path fails with `ModuleNotFoundError: No module named 'scripts.utils'`.
 The other three import nothing from their own package, so a direct path is fine.
 
@@ -176,5 +181,5 @@ If you catch yourself doing any of these, pause:
 - [ ] `description` is when-to-use, CSO-seeded, no `<`/`>`; frontmatter within allowed keys.
 - [ ] Body lean and under ~500 lines; overflow pushed to `references/`.
 - [ ] Viewer generated (`--static` on Windows) and reviewed **before** any verdict.
-- [ ] `quick_validate.py` exits 0; `.skill` packaged via `python -m scripts.package_skill` from `SC`.
+- [ ] `quick_validate.py` exits 0; `.skill` packaged via `python3 -m scripts.package_skill` from `SC`.
 - [ ] Every success claim backed by real evidence (output / transcript / diff).

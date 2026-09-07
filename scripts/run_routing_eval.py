@@ -28,10 +28,16 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+try:
+    from scripts.sensitive_redaction import redact_text
+except ModuleNotFoundError:
+    from sensitive_redaction import redact_text
 
 
 ROUTER = "using-agentic-sdlc"
@@ -141,7 +147,7 @@ def build_codex_prompt(query: str, skills: list[tuple[str, str]]) -> str:
         "agentic-sdlc-pipeline, unless the user explicitly asks for the full gated SDLC envelope "
         "or release/PR-ready end-to-end evidence.\n"
         "Final implementation or process audit before a final report routes to "
-        "implementasyon-control. Choose completion-claim-gate only for validating a specific "
+        "implementation-control. Choose completion-claim-gate only for validating a specific "
         "done/fixed/passing/ready claim, not for auditing the whole SDLC flow.\n"
         "Choose agentic-sdlc-pipeline only for explicit or clearly end-to-end SDLC work that "
         "needs the full spec-plan-build-test-review-audit loop.\n"
@@ -242,7 +248,7 @@ def run_claude(
         "--permission-mode",
         "dontAsk",
         "--plugin-dir",
-        str(args.project_root),
+        str(args.plugin_dir),
     ]
     if args.model:
         cmd += ["--model", args.model]
@@ -311,7 +317,7 @@ def run_claude(
 
     if transcript_path:
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        transcript_path.write_text("".join(captured), encoding="utf-8")
+        transcript_path.write_text(redact_text("".join(captured)), encoding="utf-8")
     return captured, "timeout" if timed_out else None
 
 
@@ -475,7 +481,7 @@ def run_codex_once(
 
     if transcript_path:
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        transcript_path.write_text("".join(captured), encoding="utf-8")
+        transcript_path.write_text(redact_text("".join(captured)), encoding="utf-8")
 
     if timed_out:
         return None, {}, "timeout"
@@ -529,60 +535,12 @@ def runtime_default_model(runtime: str) -> str:
     return DEFAULT_CLAUDE_MODEL if runtime == "claude" else DEFAULT_CODEX_MODEL
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Live using-agentic-sdlc routing eval.")
-    parser.add_argument("--eval-set", required=True, type=Path)
-    parser.add_argument("--runtime", choices=("codex", "claude"), default="codex")
-    parser.add_argument("--model")
-    parser.add_argument("--reasoning-effort", default="high")
-    parser.add_argument(
-        "--runs",
-        type=int,
-        default=3,
-        help="Runs per scenario. Default 3 so per-run model variance is measured, not masked: "
-        "haiku routing swings ~0.6-1.0 between runs, so a single draw (runs=1) can read 15/15 "
-        "by luck. Strict threshold (1.0) then requires every run to route correctly. --smoke forces 1.",
-    )
-    parser.add_argument("--threshold", type=float, default=1.0)
-    parser.add_argument("--timeout", type=int, default=120)
-    parser.add_argument("--max-turns", type=int, default=3)
-    parser.add_argument("--max-budget-usd", default="0.15")
-    parser.add_argument(
-        "--scenario-index",
-        action="append",
-        type=int,
-        default=[],
-        help="Run only this zero-based scenario index; may be repeated.",
-    )
-    parser.add_argument("--scenario-limit", type=int, default=0)
-    parser.add_argument("--smoke", action="store_true")
-    parser.add_argument("--transcript-dir", type=Path)
-    parser.add_argument("--skills-dir", type=Path, default=Path(__file__).resolve().parents[1] / "skills")
-    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
-    args = parser.parse_args(argv)
-
-    if args.runs < 1:
-        print("error=ValueError:runs must be >= 1")
-        print("routing_eval=failed")
-        return 2
-    if not 0 < args.threshold <= 1:
-        print("error=ValueError:threshold must be > 0 and <= 1")
-        print("routing_eval=failed")
-        return 2
-    if args.smoke:
-        args.runs = 1
-        args.scenario_limit = args.scenario_limit or 1
-        args.timeout = min(args.timeout, 90)
-    args.model = args.model or runtime_default_model(args.runtime)
-
-    try:
-        scenarios = load_scenarios(args.eval_set, args.scenario_limit, args.scenario_index)
-        skills = load_skills(args.skills_dir)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        print(f"error={type(exc).__name__}:{exc}")
-        print("routing_eval=failed")
-        return 1
-
+def run_loaded_eval(
+    args: argparse.Namespace,
+    scenarios: list[tuple[int, dict[str, Any]]],
+    skills: list[tuple[str, str]],
+) -> int:
+    """Run already-validated scenarios in the caller-selected isolated working directory."""
     fields: dict[str, object] = {
         "runtime": args.runtime,
         "model": args.model,
@@ -651,6 +609,87 @@ def main(argv: list[str] | None = None) -> int:
     for line in sorted([f"{key}={value}" for key, value in fields.items()] + [f"error={err}" for err in errors]):
         print(line)
     return 1 if errors else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Live using-agentic-sdlc routing eval.")
+    parser.add_argument("--eval-set", required=True, type=Path)
+    parser.add_argument("--runtime", choices=("codex", "claude"), default="codex")
+    parser.add_argument("--model")
+    parser.add_argument("--reasoning-effort", default="high")
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=3,
+        help="Runs per scenario. Default 3 so per-run model variance is measured, not masked: "
+        "haiku routing swings ~0.6-1.0 between runs, so a single draw (runs=1) can read 15/15 "
+        "by luck. Strict threshold (1.0) then requires every run to route correctly. --smoke forces 1.",
+    )
+    parser.add_argument("--threshold", type=float, default=1.0)
+    parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--max-turns", type=int, default=3)
+    parser.add_argument("--max-budget-usd", default="0.15")
+    parser.add_argument(
+        "--scenario-index",
+        action="append",
+        type=int,
+        default=[],
+        help="Run only this zero-based scenario index; may be repeated.",
+    )
+    parser.add_argument("--scenario-limit", type=int, default=0)
+    parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--transcript-dir", type=Path)
+    parser.add_argument("--skills-dir", type=Path, default=Path(__file__).resolve().parents[1] / "skills")
+    parser.add_argument(
+        "--plugin-dir",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="plugin source to load; independent from the live process working directory",
+    )
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        help="explicit writable live cwd (default: an ephemeral empty directory)",
+    )
+    parser.add_argument("--allow-writable-project", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.project_root is not None and not args.allow_writable_project:
+        parser.error("--project-root requires --allow-writable-project")
+
+    if args.runs < 1:
+        print("error=ValueError:runs must be >= 1")
+        print("routing_eval=failed")
+        return 2
+    if not 0 < args.threshold <= 1:
+        print("error=ValueError:threshold must be > 0 and <= 1")
+        print("routing_eval=failed")
+        return 2
+    if args.smoke:
+        args.runs = 1
+        args.scenario_limit = args.scenario_limit or 1
+        args.timeout = min(args.timeout, 90)
+    args.model = args.model or runtime_default_model(args.runtime)
+    args.plugin_dir = args.plugin_dir.resolve()
+    args.skills_dir = args.skills_dir.resolve()
+    if args.transcript_dir:
+        args.transcript_dir = args.transcript_dir.resolve()
+
+    try:
+        scenarios = load_scenarios(args.eval_set, args.scenario_limit, args.scenario_index)
+        skills = load_skills(args.skills_dir)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"error={type(exc).__name__}:{exc}")
+        print("routing_eval=failed")
+        return 1
+
+    if args.project_root is not None:
+        args.project_root = args.project_root.resolve()
+        return run_loaded_eval(args, scenarios, skills)
+
+    with tempfile.TemporaryDirectory(prefix="agentic-sdlc-routing-") as td:
+        args.project_root = Path(td)
+        return run_loaded_eval(args, scenarios, skills)
 
 
 if __name__ == "__main__":

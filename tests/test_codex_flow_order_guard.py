@@ -168,6 +168,18 @@ def _artifact(cwd, role, work_id, valid=True, ac_id="AC1"):
     return f"docs/agentic-sdlc/{sub}/{work_id}.md"
 
 
+def _per_package_artifact(cwd, role, work_id, slug="work-package", valid=True, ac_id="AC1"):
+    sub = "spec" if role == "spec" else "plan"
+    d = Path(cwd) / "docs" / "agentic-sdlc" / slug / sub
+    d.mkdir(parents=True, exist_ok=True)
+    if role == "spec":
+        text = _VALID_SPEC.format(work_id=work_id, ac_id=ac_id) if valid else "# Spec\n(stub)\n"
+    else:
+        text = _VALID_PLAN.format(work_id=work_id, ac_id=ac_id) if valid else "## Task 1\n(todo)\n"
+    (d / f"{work_id}.md").write_text(text, encoding="utf-8")
+    return f"docs/agentic-sdlc/{slug}/{sub}/{work_id}.md"
+
+
 # ---- current-edit command builders (the pending edit, in tool_input.command) ----
 def _src_redirect_cmd(path="src/app.py"):
     return f"printf x > {path}"
@@ -311,6 +323,12 @@ class TestFlowOrderGuard(_Tmp):
         out = _run_hook(self._pre(cwd, _src_redirect_cmd()), ENV_ON)
         self.assertEqual(_missing_list(out), ["spec", "plan"])
 
+    def test_literal_patch_marker_in_bash_does_not_hide_source_redirect(self):
+        cwd = self._cwd()
+        command = "printf '*** Begin Patch' > note.txt; printf x > src/app.py"
+        out = _run_hook(self._pre(cwd, command), ENV_ON)
+        self.assertEqual(_missing_list(out), ["spec", "plan"])
+
     def test_bash_heredoc_source_edit_no_pair_denies(self):  # AC3 heredoc form
         cwd = self._cwd()
         out = _run_hook(self._pre(cwd, _src_heredoc_cmd()), ENV_ON)
@@ -333,6 +351,22 @@ class TestFlowOrderGuard(_Tmp):
         out = _run_hook(self._pre(cwd, _src_redirect_cmd(),
                                   rollout_lines=[_mark_write(s), _mark_write(p)]), ENV_ON)
         self.assertEqual(out.strip(), "")
+
+    def test_per_package_order_respected_allows(self):
+        cwd = self._cwd()
+        s = _per_package_artifact(cwd, "spec", "W")
+        p = _per_package_artifact(cwd, "plan", "W")
+        out = _run_hook(self._pre(cwd, _src_redirect_cmd(),
+                                  rollout_lines=[_mark_write(s), _mark_write(p)]), ENV_ON)
+        self.assertEqual(out.strip(), "")
+
+    def test_per_package_mismatched_work_id_denies(self):
+        cwd = self._cwd()
+        s = _per_package_artifact(cwd, "spec", "W1")
+        p = _per_package_artifact(cwd, "plan", "W2")
+        out = _run_hook(self._pre(cwd, _src_redirect_cmd(),
+                                  rollout_lines=[_mark_write(s), _mark_write(p)]), ENV_ON)
+        self.assertTrue(_is_deny(out))
 
     def test_mixed_origin_disk_only_plan_denies_plan(self):  # AC17 (DP-EVID load-bearing)
         cwd = self._cwd()
@@ -631,7 +665,9 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # Bash|apply_patch block scan-write-codex.mjs lives in, so its bytes must be locked).
         # hooks/scan-write-codex.mjs is NOT locked here — a security follow-up sanitized the target
         # path in its deny reason (prompt-injection fix); it is covered by the AP1 write-guard suite.
-        "hooks/destructive-command-guard.mjs",
+        # destructive-command-guard.mjs and codex-write-signal.mjs are security-fix targets with
+        # dedicated parser/behavior regressions; byte-locking them to the vulnerable HEAD would
+        # prevent release hardening.
     ]
 
     def test_locked_files_byte_identical_to_head(self):  # BR8
@@ -639,7 +675,10 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
             with self.subTest(file=rel):
                 head = _git_show(rel)
                 self.assertIsNotNone(head, f"{rel} not in HEAD")
-                self.assertEqual((REPO / rel).read_text(encoding="utf-8"), head)
+                # The public skill-ID migration is the only permitted delta. After the rename is
+                # committed, the replacement is a no-op and this returns to an exact HEAD lock.
+                expected = head.replace("implementasyon-control", "implementation-control")
+                self.assertEqual((REPO / rel).read_text(encoding="utf-8"), expected)
 
 
 # ==== B5 (#5 write-form symmetry): drivers + tests ==========================
@@ -825,8 +864,9 @@ class TestB5WriteformSymmetry(_Tmp):
         self.assertTrue(row, "flow-order-guard-codex.mjs row missing from hooks/README.md")
         for form in ("sed -i", "tee", "`>`/`>>`"):        # recognized current-edit forms (B5)
             self.assertIn(form, row, f"recognized form {form!r} not documented")
-        for residual in ("&>", ">|", "*** Begin Patch"):  # deferred residuals (#6)
+        for residual in ("&>", ">|"):  # deferred residuals (#6)
             self.assertIn(residual, row, f"deferred residual {residual!r} not documented")
+        self.assertIn("literal `*** Begin Patch` inside Bash no longer selects", row)
 
 
 if __name__ == "__main__":

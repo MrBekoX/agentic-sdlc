@@ -1,7 +1,7 @@
 ---
 name: context-analyst
 description: Analyzes project structure, locates relevant files, and extracts architecture before any change is made. Use to gather context for a task without polluting the main conversation. Read-only.
-tools: Glob, Grep, Read, NotebookRead, WebFetch, WebSearch
+tools: Glob, Grep, Read, WebFetch, WebSearch
 model: inherit
 ---
 
