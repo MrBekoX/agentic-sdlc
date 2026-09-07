@@ -576,6 +576,8 @@ def run_live_case(case: dict[str, Any], args: argparse.Namespace, tmp_root: Path
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval-set", required=True, type=Path)
+    parser.add_argument("--case-id", action="append", dest="case_ids",
+                        help="Restrict to these case ids (repeatable).")
     parser.add_argument("--transcript", type=Path)
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -599,6 +601,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error={type(exc).__name__}:{exc}")
         print("procedure_eval=failed")
         return 1
+
+    if args.case_ids:
+        wanted = set(args.case_ids)
+        known = {case["id"] for case in cases}
+        missing = sorted(wanted - known)
+        if missing:
+            print(f"error=unknown_case_id:{','.join(missing)}")
+            print("procedure_eval=failed")
+            return 1
+        cases = [case for case in cases if case["id"] in wanted]
 
     if args.dry_run:
         print(f"cases={len(cases)}")
