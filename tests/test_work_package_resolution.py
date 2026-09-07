@@ -715,10 +715,13 @@ class TestEvidence(unittest.TestCase):
 
 class TestRepoWorkPackageArtifacts(unittest.TestCase):
     def test_canonical_work_package_artifacts_are_well_formed(self):
+        # Dogfooding specs/plans live under gitignored docs/agentic-sdlc/; a public
+        # clone (and CI) has none. Skip there — do not fail the shipped gate.
         resolver = _load_module()
         plan_root = REPO / "docs" / "agentic-sdlc" / "plans"
         plans = sorted(plan_root.glob("*.md")) if plan_root.exists() else []
-        self.assertGreaterEqual(len(plans), 1, "expected at least one canonical dogfooding plan")
+        if not plans:
+            self.skipTest("no local dogfooding plans (gitignored; absent on a clean clone)")
         for plan in plans:
             result = resolver.resolve(REPO, plan_path=plan)
             self.assertTrue(result.ok, f"{plan.relative_to(REPO)}: {result.errors}")

@@ -92,6 +92,10 @@ def main():
     tests_ok = res.returncode == 0
     if not tests_ok:
         errors.append("validator_tests_failed")
+        # Surface the captured unittest output so CI/logs can name the failing test.
+        dumped = (res.stderr or "").strip() or (res.stdout or "").strip()
+        if dumped:
+            sys.stderr.write(dumped + "\n")
 
     fields = {
         "skills_checked": checked,
