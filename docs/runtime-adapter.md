@@ -20,6 +20,10 @@ AGENTIC-SDLC currently supports **Claude Code** and **Codex** as release targets
 
 > Other harnesses (OpenCode, Kimi, GLM-style) are future/unsupported work, not release targets.
 
+## Codex hook live-proof status
+
+Last live hook/rollout proof is Codex CLI **0.142.0** (`patch_apply_end` carrier, blocking PreToolUse, Stop continuation). Current documented Codex CLI is **0.153.4**; public hook docs still describe the same contract (`Bash` / `apply_patch` matchers, shell-string command form, `${PLUGIN_ROOT}`, Stop `decision:block` continues the turn). `transcript_path` remains an unstable convenience, not a stable hook interface. A 0.153.4 Stop/rollout re-probe is pending.
+
 ## Evidence Rule
 
 If a native runtime tool exists, use it. If it does not exist, record `Delegation Degraded: <capability> unavailable`, perform the smallest safe fallback, and preserve deterministic gates such as `detect_context.py`, `validate_artifacts.py`, real test output, diff review, and secret scan.
@@ -38,7 +42,7 @@ For deferred adapter targets, the only acceptable documented fallback is the sam
 
 Work-package artifacts resolve in two layouts on both runtimes: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
-Current Codex switch semantics (0.4.1): `AGENTIC_FLOW_GATE_BLOCK` controls only the flow-step Stop
+Current Codex switch semantics (0.4.2): `AGENTIC_FLOW_GATE_BLOCK` controls only the flow-step Stop
 backstop; `AGENTIC_FLOW_ORDER_BLOCK` controls only `flow-order-guard-codex.mjs`. They are independent.
 The flow-order guard resolves both flat and canonical per-package spec/plan layouts through the same
 artifact lookup used by the Codex Stop evidence engine. Any older “shared-env coupling” wording in

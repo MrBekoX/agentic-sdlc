@@ -1,6 +1,6 @@
 # AGENTIC-SDLC Plugin Reference
 
-> Version: `0.4.1`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md) or [Codex](../.codex-plugin/README.md).
+> Version: `0.4.2`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md) or [Codex](../.codex-plugin/README.md).
 
 AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It routes each prompt to the smallest sufficient skill and reserves the full SDLC envelope for work that actually needs it.
 
@@ -10,7 +10,7 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 |---|---|---|
 | Claude Code | Supported | Native `Skill`, `Workflow`, `Agent`/`Task`, commands, and full hook wiring. See [`../.claude-plugin/README.md`](../.claude-plugin/README.md). |
 | Codex | Supported | Shared skills, Codex manifest metadata, personal-marketplace install flow, and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
-| OpenCode / Kimi Code / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.1`. |
+| OpenCode / Kimi Code / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.2`. |
 
 ## Installation Model
 
@@ -21,6 +21,8 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 | `.codex-plugin/plugin.json` | Codex | Codex plugin metadata, `skills`, `hooks`, and `interface` block. |
 | `hooks/hooks-claude.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
 | `hooks/hooks-codex.json` | Codex | Blocking `PreToolUse`, bootstrap `SessionStart`, and advisory/env-gated `Stop` wiring, subject to Codex hook review/trust. |
+
+`.claude-plugin/marketplace.json` is Claude's marketplace schema. Codex 0.153.0+ can add a remote catalog with `codex plugin marketplace add`, but that command expects a Codex-shaped catalog. The supported Codex install remains `codex plugin add agentic-sdlc@personal`.
 
 Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Runtime root variables are:
 
@@ -169,12 +171,14 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 
 ## Known Limitations
 
-- `0.4.1` supports Claude Code and Codex only.
+- `0.4.2` supports Claude Code and Codex only.
 - Codex hook wiring is declared via `.codex-plugin/plugin.json` -> `hooks/hooks-codex.json`; non-managed plugin-bundled command hooks require Codex review/trust before they run. It is deliberately not named `hooks/hooks.json`, which Claude Code would auto-load with an undefined `${PLUGIN_ROOT}`.
 - Codex trigger evals are classifier evidence, not Claude-style `Skill` event evidence.
 - Hooks fail open where necessary so a hook fault does not break a session.
 - `validate_artifacts.py` is structural; it cannot prove that a spec is semantically about the requested task.
 - Live routing is model-dependent and must be evidenced per runtime, model, and run.
+- Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters. Local CLI install does not require a public directory listing.
+- Last live Codex hook/rollout proof is **0.142.0**. Current documented CLI is **0.153.4**; `transcript_path` is still not a stable hook interface, and a 0.153.4 Stop/rollout re-probe is pending.
 
 ## Artifact Layouts And Per-Package Evidence
 

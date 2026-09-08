@@ -22,6 +22,8 @@ Check:
 6. Skills are under root `skills/`, not `.codex/skills/`.
 7. The runtime guide in [`../.codex-plugin/README.md`](../.codex-plugin/README.md) matches the installed path.
 
+`codex plugin add agentic-sdlc@personal` is the supported local install. Codex 0.153.0+ also has `codex plugin marketplace add` for a Codex-shaped catalog. This repo's `.claude-plugin/marketplace.json` is Claude's marketplace schema; do not add that file as a Codex marketplace.
+
 ## Claude Hooks Do Not Run
 
 Check:

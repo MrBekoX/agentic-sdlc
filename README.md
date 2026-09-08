@@ -4,7 +4,7 @@
 
 > A local AGENTIC-SDLC plugin for **Claude Code** and **Codex**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
-> `Version 0.4.1` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
+> `Version 0.4.2` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
 
 ---
 
@@ -70,6 +70,8 @@ Example `~/.agents/plugins/marketplace.json`:
 ```bash
 codex plugin add agentic-sdlc@personal
 ```
+
+`@personal` is the supported local install. Codex 0.153.0+ also has `codex plugin marketplace add` for a Codex-shaped catalog, but this repo's `.claude-plugin/marketplace.json` is Claude's marketplace schema. Do not add that file as a Codex marketplace.
 
 The same skills run through the embedded author/critic adapter where Claude-only Workflow/Skill tooling is unavailable.
 
@@ -245,7 +247,7 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 
 ## Versioning
 
-Current version: `0.4.1`.
+Current version: `0.4.2`.
 
 ```bash
 python3 scripts/bump_version.py --check

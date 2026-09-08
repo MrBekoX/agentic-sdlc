@@ -1,6 +1,6 @@
 {
   "name": "agentic-sdlc",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Gated SDLC skills for spec, plan, TDD, security review, implementation control, and evidence-backed delivery.",
   "author": {
     "name": "Beko",
@@ -21,10 +21,10 @@
   "hooks": "./hooks/hooks-codex.json",
   "interface": {
     "displayName": "Agentic SDLC",
-    "shortDescription": "Spec, plan, TDD, security, and delivery workflows for coding agents",
+    "shortDescription": "Gated spec/plan/TDD delivery",
     "longDescription": "Use Agentic SDLC to guide implementation work through agentic-sdlc-pipeline, planning, test-driven development, security review, implementation control, and evidence-before-claim delivery gates.",
     "developerName": "Beko",
-    "category": "Coding",
+    "category": "Developer Tools",
     "capabilities": [
       "Interactive",
       "Read",

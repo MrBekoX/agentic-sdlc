@@ -1,6 +1,6 @@
 # Release Readiness
 
-This file is the publish gate for `agentic-sdlc` version `0.4.1`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex.
+This file is the publish gate for `agentic-sdlc` version `0.4.2`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex.
 
 ## Supported Release Scope
 
@@ -8,7 +8,7 @@ This file is the publish gate for `agentic-sdlc` version `0.4.1`. It keeps the r
 |---|---|---|
 | Claude Code | Supported | Local gate plus live routing/procedure transcript evidence before claiming live behavior. |
 | Codex | Supported | Local gate plus route-classifier/procedure transcript evidence before claiming live behavior. |
-| OpenCode, Kimi Code, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.1`. |
+| OpenCode, Kimi Code, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.2`. |
 
 ## Required Local Gate
 
@@ -58,7 +58,7 @@ them. Use routing/trigger `--runs ≥3`.
 | `using-agentic-sdlc` routing — Codex `high` | **15/15 passed** (`gpt-5.3-codex-spark`, `runs=3`) | satisfies the Codex routing evidence requirement |
 | 16-skill trigger matrix — Codex | **16/16 passed** (`low`, after classifier-prompt fix) | `low` is fix-verification; re-confirm at `high` for publish. Pre-fix 12/16 was an eval-tool gap (trigger classifier prompt lacked the over-escalation/feeder guards the routing classifier has), now aligned |
 | `agentic-sdlc-pipeline` procedure — Claude | Sonnet 2/2 at `--max-budget-usd 6`; Haiku 1/3 (floor) | `$2` default cut strong-model runs off mid-run → default raised to `5.00` |
-| `agentic-sdlc-pipeline` procedure — Codex adapter | **`procedure_eval=passed`** (deterministic transcript) + historical `0.3.0` live low-effort strict smoke pass | adapter patterns present: `spec-plan-author/critic`, "Workflow unavailable/embedded adapter", `docs/agentic-sdlc/specs/`, `docs/agentic-sdlc/plans/`, all gates. The 2026-06-20 `gpt-5.3-codex-spark` run proves the `0.3.0` adapter path only; it is not live proof for `0.4.1` |
+| `agentic-sdlc-pipeline` procedure — Codex adapter | **`procedure_eval=passed`** (deterministic transcript) + historical `0.3.0` live low-effort strict smoke pass | adapter patterns present: `spec-plan-author/critic`, "Workflow unavailable/embedded adapter", `docs/agentic-sdlc/specs/`, `docs/agentic-sdlc/plans/`, all gates. The 2026-06-20 `gpt-5.3-codex-spark` run proves the `0.3.0` adapter path only; it is not live proof for `0.4.2` |
 
 Eval-infra fixes made during the sweep (all on `main`): routing-eval early-stop + `runs=3` default;
 implementation-control/router call-order guards; `safe-refactor`/`skill-authoring`/`completion-claim-gate`
@@ -90,7 +90,7 @@ Passing signals observed in the transcript:
 - final report included `Overall Status: PASS` for Implementation Control and the final todo list was complete.
 
 Limit of this evidence: this is a historical Codex `0.3.0` low-effort smoke/procedure run, not a
-publish-grade high-effort stability run and not live evidence for the current `0.4.1` worktree. It is
+publish-grade high-effort stability run and not live evidence for the current `0.4.2` worktree. It is
 valid only as evidence that the earlier adapter completed the full pipeline in a small fixture,
 including RED->GREEN, artifact validation, work-package resolution, and recovery from metadata errors.
 
@@ -114,7 +114,9 @@ Scan staged and unstaged diffs for tokens, private keys, connection strings, and
 - Codex wires native blocking `PreToolUse` guards, `SessionStart`, and two `Stop` continuation backstops. Coverage is bounded: branch/flow hardening is env-gated, unrecognized write forms fail open, and Stop can request another turn but cannot undo prior effects.
 - `agentic-sdlc-pipeline` owns internal spec/plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for pipeline steps 4-5; Codex uses the embedded author/critic adapter.
 - Hooks are local runtime guardrails. Some warn or fail open by design, so they complement but do not replace diff review, test output, and secret scanning.
-- `0.4.1` is publishable for Claude Code and Codex only when the local gate and current live evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
+- `0.4.2` is publishable for Claude Code and Codex only when the local gate and current live evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
+- Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters.
+- Last live Codex hook/rollout proof is **0.142.0**. Current documented CLI is **0.153.4**; `transcript_path` is still not a stable hook interface, and a 0.153.4 Stop/rollout re-probe is pending. Do not treat documented-contract overlap as a fresh live probe.
 
 ## Artifact Layouts And Per-Package Evidence
 
@@ -129,7 +131,7 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 Use this shape in a release note or final publish report:
 
 ```text
-version=0.4.1
+version=0.4.2
 scope=Claude Code, Codex
 local_gate=<passed|failed> <date>
 claude_routing_eval=<passed|failed|not-run> <transcript-or-log>
