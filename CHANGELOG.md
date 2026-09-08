@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.2 - 2026-09-08
+
 - Codex public-listing metadata now uses the official `Developer Tools` category and a `shortDescription` within the final 30-character listing limit.
 - Claude plugin manifest now declares `displayName: "Agentic SDLC"`.
 - Documented that `codex plugin add agentic-sdlc@personal` remains the supported local install, and that this repo's `.claude-plugin/marketplace.json` is Claude's schema, not a Codex catalog for `codex plugin marketplace add`.

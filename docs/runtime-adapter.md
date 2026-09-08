@@ -42,7 +42,7 @@ For deferred adapter targets, the only acceptable documented fallback is the sam
 
 Work-package artifacts resolve in two layouts on both runtimes: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
-Current Codex switch semantics (0.4.1): `AGENTIC_FLOW_GATE_BLOCK` controls only the flow-step Stop
+Current Codex switch semantics (0.4.2): `AGENTIC_FLOW_GATE_BLOCK` controls only the flow-step Stop
 backstop; `AGENTIC_FLOW_ORDER_BLOCK` controls only `flow-order-guard-codex.mjs`. They are independent.
 The flow-order guard resolves both flat and canonical per-package spec/plan layouts through the same
 artifact lookup used by the Codex Stop evidence engine. Any older “shared-env coupling” wording in

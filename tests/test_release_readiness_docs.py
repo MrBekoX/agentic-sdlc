@@ -24,7 +24,7 @@ class TestReleaseReadinessDocs(unittest.TestCase):
             "Known Limitations",
             "Codex wires native blocking `PreToolUse` guards",
             "Historical evidence — 2026-06-20 Codex 0.3.0 live low smoke",
-            "not live evidence for the current `0.4.1` worktree",
+            "not live evidence for the current `0.4.2` worktree",
             "docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md",
             "gpt-5.3-codex-spark",
             "model_reasoning_effort=\"low\"",
