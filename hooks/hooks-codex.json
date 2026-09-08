@@ -1,5 +1,5 @@
 {
-  "description": "Codex hook wiring. Paths use ${PLUGIN_ROOT}, resolved to this plugin's install directory. Codex v0.142.0 natively supports blocking PreToolUse hooks; the command form is a single shell string (the args-array form does not run on Codex).",
+  "description": "Codex hook wiring. Paths use ${PLUGIN_ROOT}, resolved to this plugin's install directory. Codex v0.142.0 natively supports blocking PreToolUse hooks (last live proof); current CLI 0.153.4 still documents the same contract. The command form is a single shell string (the args-array form does not run on Codex).",
   "hooks": {
     "PreToolUse": [
       {

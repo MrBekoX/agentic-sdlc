@@ -115,6 +115,8 @@ Scan staged and unstaged diffs for tokens, private keys, connection strings, and
 - `agentic-sdlc-pipeline` owns internal spec/plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for pipeline steps 4-5; Codex uses the embedded author/critic adapter.
 - Hooks are local runtime guardrails. Some warn or fail open by design, so they complement but do not replace diff review, test output, and secret scanning.
 - `0.4.1` is publishable for Claude Code and Codex only when the local gate and current live evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
+- Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters.
+- Last live Codex hook/rollout proof is **0.142.0**. Current documented CLI is **0.153.4**; `transcript_path` is still not a stable hook interface, and a 0.153.4 Stop/rollout re-probe is pending. Do not treat documented-contract overlap as a fresh live probe.
 
 ## Artifact Layouts And Per-Package Evidence
 

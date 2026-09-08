@@ -22,6 +22,8 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 | `hooks/hooks-claude.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
 | `hooks/hooks-codex.json` | Codex | Blocking `PreToolUse`, bootstrap `SessionStart`, and advisory/env-gated `Stop` wiring, subject to Codex hook review/trust. |
 
+`.claude-plugin/marketplace.json` is Claude's marketplace schema. Codex 0.153.0+ can add a remote catalog with `codex plugin marketplace add`, but that command expects a Codex-shaped catalog. The supported Codex install remains `codex plugin add agentic-sdlc@personal`.
+
 Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Runtime root variables are:
 
 | Runtime | Plugin root variable |
@@ -175,6 +177,8 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 - Hooks fail open where necessary so a hook fault does not break a session.
 - `validate_artifacts.py` is structural; it cannot prove that a spec is semantically about the requested task.
 - Live routing is model-dependent and must be evidenced per runtime, model, and run.
+- Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters. Local CLI install does not require a public directory listing.
+- Last live Codex hook/rollout proof is **0.142.0**. Current documented CLI is **0.153.4**; `transcript_path` is still not a stable hook interface, and a 0.153.4 Stop/rollout re-probe is pending.
 
 ## Artifact Layouts And Per-Package Evidence
 

@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 import unittest
@@ -73,6 +74,66 @@ class TestPackagingMetadata(unittest.TestCase):
                 text,
                 f"{rel} still uses legacy Codex personal plugin path",
             )
+
+    def test_codex_docs_keep_personal_install_and_reject_claude_marketplace(self):
+        docs = [
+            REPO / "README.md",
+            REPO / ".codex-plugin" / "README.md",
+            REPO / "docs" / "troubleshooting.md",
+        ]
+        for path in docs:
+            text = path.read_text(encoding="utf-8")
+            rel = path.relative_to(REPO)
+            self.assertIn("codex plugin add agentic-sdlc@personal", text, f"{rel} missing personal install")
+            self.assertIn("codex plugin marketplace add", text, f"{rel} missing Codex catalog CLI")
+            self.assertIn(".claude-plugin/marketplace.json", text, f"{rel} missing Claude marketplace path")
+            self.assertRegex(
+                text,
+                r"Claude(?:'s)? marketplace schema",
+                f"{rel} must say the Claude marketplace is Claude schema",
+            )
+
+    def test_runtime_adapter_records_codex_hook_live_proof_drift(self):
+        text = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
+        self.assertIn("0.142.0", text)
+        self.assertIn("0.153.4", text)
+        self.assertIn("re-probe is pending", text)
+        self.assertIn("transcript_path", text)
+
+    def test_claude_plugin_declares_display_name(self):
+        plugin = json.loads((REPO / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(plugin.get("displayName"), "Agentic SDLC")
+
+    def test_codex_interface_meets_public_listing_limits(self):
+        # Official Codex directory listing limits (developers.openai.com/plugins/deploy/submission-errors):
+        # category must be one of the published set; final listing shortDescription <= 30;
+        # defaultPrompt entries <= 128 and unique.
+        allowed_categories = {
+            "Productivity",
+            "Creativity",
+            "Developer Tools",
+            "Business & Operations",
+            "Data & Analytics",
+            "Communication",
+            "Education & Research",
+            "Security",
+            "Finance",
+            "Healthcare",
+            "Travel",
+            "Entertainment",
+            "Other",
+        }
+        interface = json.loads((REPO / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))["interface"]
+        self.assertIn(interface["category"], allowed_categories)
+        self.assertLessEqual(len(interface["shortDescription"]), 30)
+        self.assertLessEqual(len(interface["displayName"]), 30)
+        prompts = interface["defaultPrompt"]
+        self.assertLessEqual(len(prompts), 3)
+        normalized = [re.sub(r"\s+", " ", p.strip()) for p in prompts]
+        self.assertEqual(len(normalized), len(set(normalized)))
+        for prompt in prompts:
+            self.assertLessEqual(len(prompt), 128)
+            self.assertNotIn("@", prompt)
 
     def test_codex_manifest_uses_publishable_schema_keys(self):
         codex_plugin = json.loads((REPO / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))

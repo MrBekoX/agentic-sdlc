@@ -55,6 +55,8 @@ Example `~/.agents/plugins/marketplace.json`:
 codex plugin add agentic-sdlc@personal
 ```
 
+`@personal` is the supported local install. Codex 0.153.0+ also has `codex plugin marketplace add` for a Codex-shaped catalog, but this repo's `.claude-plugin/marketplace.json` is Claude's marketplace schema. Do not add that file as a Codex marketplace.
+
 Start a new Codex thread after install or reinstall so the runtime reloads plugin skills and hooks. If Codex reports bundled hooks pending review, open `/hooks` and review the plugin commands before relying on them.
 
 ## Runtime Root

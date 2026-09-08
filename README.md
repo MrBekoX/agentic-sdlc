@@ -71,6 +71,8 @@ Example `~/.agents/plugins/marketplace.json`:
 codex plugin add agentic-sdlc@personal
 ```
 
+`@personal` is the supported local install. Codex 0.153.0+ also has `codex plugin marketplace add` for a Codex-shaped catalog, but this repo's `.claude-plugin/marketplace.json` is Claude's marketplace schema. Do not add that file as a Codex marketplace.
+
 The same skills run through the embedded author/critic adapter where Claude-only Workflow/Skill tooling is unavailable.
 
 ## What It Is

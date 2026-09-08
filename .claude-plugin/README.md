@@ -8,7 +8,7 @@ Claude Code reads:
 
 | File | Purpose |
 |---|---|
-| `.claude-plugin/plugin.json` | Plugin metadata: name, version, description, author, license, homepage. |
+| `.claude-plugin/plugin.json` | Plugin metadata: name, displayName, version, description, author, license, homepage. |
 | `.claude-plugin/marketplace.json` | Local marketplace source; `source` points at the repository root. |
 | `skills/*/SKILL.md` | Shared skill source. |
 | `workflows/*.js` | Claude Code dynamic workflow scripts. |

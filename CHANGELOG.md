@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Codex public-listing metadata now uses the official `Developer Tools` category and a `shortDescription` within the final 30-character listing limit.
+- Claude plugin manifest now declares `displayName: "Agentic SDLC"`.
+- Documented that `codex plugin add agentic-sdlc@personal` remains the supported local install, and that this repo's `.claude-plugin/marketplace.json` is Claude's schema, not a Codex catalog for `codex plugin marketplace add`.
+- Recorded Codex hook live-proof drift: last live proof 0.142.0, current documented CLI 0.153.4, Stop/rollout re-probe pending.
+
 ## 0.4.1 - 2026-09-01
 
 - Renamed the mixed-language public skill ID `implementasyon-control` to `implementation-control` across discovery metadata, routing, hooks, docs, eval fixtures, and golden references.
