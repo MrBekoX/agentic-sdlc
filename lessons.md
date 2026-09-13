@@ -20,6 +20,51 @@ Each entry includes:
 
 ---
 
+## 2026-09-12 — Toolkit identity does not establish capability compatibility
+
+- **Task / context:** Repair the shared Claude Code/Codex authoring workflow after the dual-runtime audit.
+- **Symptom:** Discovery selected the official Codex skill-creator even though its required benchmark, viewer, schema, and packaging resources were absent; a complete official Claude toolkit was installed alongside it.
+- **Root cause:** The resolver checked the skill name and directory shape, then stopped at the first candidate. Same-named runtime toolkits do not necessarily expose the same operations.
+- **Correct fix:** Resolve requested capability files and companion assets before selecting a candidate; report missing resources and retain explicit trust boundaries. Document native runtime eval commands separately from external toolkit operations.
+- **Preventive rule / automated check:** Test an incomplete high-priority candidate with a complete official fallback, narrow validation-only selection, missing companion resources, and post-install capability revalidation.
+- **Related files & tests:** `skills/skill-authoring/scripts/resolve_skill_creator.py`, `tests/test_skill_creator_resolver.py`, `skills/skill-authoring/SKILL.md`.
+
+## 2026-09-12 — Verify component delivery before adopting a newer manifest format
+
+- **Task / context:** Evaluate the portable manifest recommended by current OpenAI packaging documentation.
+- **Symptom:** Codex 0.154.0 accepted the package and discovered all 16 skills, but returned zero hooks; identical files in the supported compatibility format returned eight hooks.
+- **Root cause:** The released native loader explicitly suppresses hook loading for the portable AgentPlugin format. Successful metadata parsing and current documentation did not establish runtime component delivery.
+- **Correct fix:** Retain the hook-capable compatibility manifest; record the pinned loader source and native side-by-side comparison. Keep the portable candidate only as diagnostic evidence.
+- **Preventive rule / automated check:** Require native component inventory and execution proof before changing manifest precedence. A schema-valid manifest cannot stand in for hook delivery.
+- **Related files & tests:** `.codex-plugin/README.md`, `docs/runtime-adapter.md`, `tests/test_packaging_metadata.py::TestPackagingMetadata.test_shipping_format_keeps_codex_hooks_loadable`.
+
+## 2026-09-12 — Redact structured evidence before serialization without losing field context
+
+- **Task / context:** Persist native plugin/hook probe responses and their console summaries.
+- **Symptom:** Raw JSON text replacement produced invalid JSON; detached-value redaction missed an opaque credential identified by its field name. An early vendor-match return also left a second opaque credential in the same field.
+- **Root cause:** Redaction ran at the wrong representation boundary and treated one detector's match as completion of all detection. File output and console/error output were not handled consistently.
+- **Correct fix:** Apply the canonical credential-member detector to the original field/value, redact remaining text and property names, then serialize. Route every output sink through the same helper; keep native trust operations on fresh unredacted in-memory metadata.
+- **Preventive rule / automated check:** Regression tests cover parseable JSON, nested credentials, mixed opaque/vendor values, secret-shaped property names, and unchanged plain-text behavior; independent review also checks console and exception sinks.
+- **Related files & tests:** `scripts/sensitive_redaction.py`, `hooks/redact-sensitive.mjs`, `tests/test_sensitive_redaction.py`.
+
+## 2026-09-12 — Reload procedures at restoration boundaries and separate competing process bodies
+
+- **Task / context:** Evaluate direct entry and restored phase ownership with both plugins installed on native Claude Code and Codex.
+- **Symptom:** A focused design entry announced the foreign owner but continued with inline house design content. A later Codex summary-continuation case produced design output without loading the retained owner's procedure.
+- **Root cause:** The focused entry exposed the complete competing process before ownership was selected; the restored-context shortcut then treated a summary of prior work as evidence that the actual instruction body remained available.
+- **Correct fix:** Keep owner selection and loading in the entrypoint, move the complete house process behind a conditional reference, and reload the selected procedure after resume/compaction/supplied summaries while preserving saved progress and completed approvals.
+- **Preventive rule / automated check:** Test the loading boundary structurally and grade actual native Skill/read output before substantive phase content. Retain failed candidates and repeat the exact failed case; an owner announcement alone is not a handoff.
+- **Related files & tests:** `skills/mind-spark/SKILL.md`, `skills/mind-spark/references/design-process.md`, both SessionStart hooks, `tests/test_process_owner_policy.py`; native direct-entry and restored-owner regression captures under `tests/artifacts/dual-runtime-remediation/`.
+
+## 2026-09-12 — Separate native status metadata from echoed tool content
+
+- **Task / context:** Update the rollout reader using actual Codex 0.154.0 successful patch and shell output records.
+- **Symptom:** Historical carriers missed real successful edits and exit statuses. The first compatibility fix then accepted success headers echoed inside a denied patch as evidence of a write.
+- **Root cause:** Correlating a response with its call proves identity, not success. Searching the whole response body for native-looking headers lets rejected input manufacture execution evidence.
+- **Correct fix:** Parse only leading native metadata, stop at the output boundary or unknown text, and require the correlated custom-tool output's actual success body. Reject conflicting and mismatched carrier records.
+- **Preventive rule / automated check:** Preserve real carrier provenance, mutate the captured denial envelope, and check the downstream ordering decision as well as the parser. Keep replay verification distinct from native execution of the final source.
+- **Related files & tests:** `hooks/codex-rollout.mjs`, `tests/test_codex_current_rollout.py`, `tests/fixtures/transcripts/codex-0.154.0-native-tool-carriers.jsonl`, `tests/artifacts/dual-runtime-remediation/native-parser-review.md`.
+
 ## 2026-08-23 — When a layer is provably incomplete, add a layer; do not keep patching it
 
 - **Task / context:** After ten adversarial rounds hardened the PreToolUse command guards, the loop was still producing real findings. The remaining gaps were not bugs — they were the layer's definition.

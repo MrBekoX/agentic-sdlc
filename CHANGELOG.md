@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.4.3 - 2026-09-13
+
+- Select the authoring toolkit by required validation, evaluation, viewer and packaging capabilities, with explicit diagnostics for incomplete installations.
+- Preserve explicit plugin choice and phase ownership across bootstrap, direct skill entry and restored context; load the selected procedure before phase content and keep the full house design process behind a conditional reference.
+- Support Codex 0.154.0 native custom patch and command-exit records while rejecting success headers echoed inside denied output.
+- Preserve JSON structure and credential-field context when redacting evaluation evidence.
+- Enforce the six shared skill frontmatter fields, third-person description framing, portable runtime roots and RED-before-implementation guidance.
+- Add Codex presentation assets while retaining the hook-capable compatibility manifest; document native lifecycle coverage and its snapshot, trust and effort limits.
+- Refresh release documentation, public evidence visibility and clean distribution checks; use the repository's python3 entry point in CI.
+- Clarify pipeline branch-before-write evidence, completed security reviewer results and dependency-install boundaries; require failing test commands to propagate failure to the implementation auditor.
+
 ## 0.4.2 - 2026-09-08
 
 - Codex public-listing metadata now uses the official `Developer Tools` category and a `shortDescription` within the final 30-character listing limit.

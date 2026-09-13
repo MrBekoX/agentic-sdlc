@@ -1,0 +1,90 @@
+{
+  "schema": "process-owner-coexistence-v1",
+  "_comment": "Bounded live coexistence scenarios, not a trigger-rate or regex-only behavior eval set. Run in isolated scratch sessions with both plugin skill catalogs available. Compare the prior snapshot with the candidate using identical prompts, then review held-out cases. Inject actual runtime bootstrap context for bootstrap cases; direct-mind-spark cases load that skill body before the prompt to exercise an incidental focused entry. prior_context is an evaluator-supplied conversation summary, not a claim about a real prior user session. No writes, installation, configuration changes, or git mutations are part of these scenarios.",
+  "runtime_models": {
+    "codex": {"model": "GPT-5.3-Codex-Spark", "reasoning": "low"},
+    "claude": {"model": "Claude-Sonnet-5", "reasoning": "low"}
+  },
+  "review_requirements": [
+    "Record the actual model and reasoning selection, runtime version, bootstrap delivery mechanism, both plugin revisions, command exit status, and full transcript.",
+    "Prove phase skill activation with a qualified native Skill event in Claude Code or the selected catalog entry's exact SKILL.md read in Codex. A prose promise or a skill name echoed from the prompt is not activation.",
+    "The expected phase skill must own the substantive action. An incidental router or mind-spark load must exit before executing a competing phase checklist.",
+    "Reject a second plugin's procedure for the same phase, including a house completion checklist appended to a Superpowers-owned phase. Owner choice must not disable hooks, permissions, or evidence requirements.",
+    "Generate a review artifact before assigning a verdict. Separate model behavior under supplied bootstrap context from native installed-plugin bootstrap delivery; do not claim native delivery from supplied context.",
+    "Resume scenarios validate owner preservation against the supplied conversation summary. Native resume or compact support additionally requires an actual resumed runtime transcript."
+  ],
+  "scenarios": [
+    {
+      "id": "explicit-superpowers-design",
+      "split": "comparison",
+      "entrypoint": "bootstrap",
+      "prior_context": "",
+      "prompt": "Use superpowers:brainstorming to explore a local reading-list app. I have not decided whether books should be grouped by shelf or by reading goal. Take the first design step; do not write code or files.",
+      "expected_phase_skill": "superpowers:brainstorming",
+      "competing_phase_skills": ["agentic-sdlc:mind-spark", "agentic-sdlc:completion-claim-gate"]
+    },
+    {
+      "id": "explicit-house-design",
+      "split": "comparison",
+      "entrypoint": "bootstrap",
+      "prior_context": "",
+      "prompt": "Use AGENTIC-SDLC mind-spark to explore a local reading-list app. I have not decided whether books should be grouped by shelf or by reading goal. Take the first design step; do not write code or files.",
+      "expected_phase_skill": "agentic-sdlc:mind-spark",
+      "competing_phase_skills": ["superpowers:brainstorming"]
+    },
+    {
+      "id": "unowned-house-bootstrap",
+      "split": "comparison",
+      "entrypoint": "bootstrap",
+      "prior_context": "No process owner or phase skill has been selected in this session.",
+      "prompt": "Let's explore a local reading-list app. I am unsure whether a shelf view or a reading-goal view is more useful. Begin the design discussion; do not write code or files.",
+      "expected_phase_skill": "agentic-sdlc:mind-spark",
+      "competing_phase_skills": ["superpowers:brainstorming"]
+    },
+    {
+      "id": "explicit-superpowers-planning",
+      "split": "comparison",
+      "entrypoint": "bootstrap",
+      "prior_context": "The user approved a design for an in-memory reading-list with title, author, and optional shelf. The current request is planning only.",
+      "prompt": "Use superpowers:writing-plans to turn the approved reading-list design into implementation steps. Start the planning procedure and keep any plan in the response; do not write files or implement anything.",
+      "expected_phase_skill": "superpowers:writing-plans",
+      "competing_phase_skills": ["agentic-sdlc:plan-authoring", "agentic-sdlc:mind-spark", "agentic-sdlc:completion-claim-gate"]
+    },
+    {
+      "id": "preserve-superpowers-owner",
+      "split": "comparison",
+      "entrypoint": "bootstrap",
+      "prior_context": "The user selected Superpowers for this design phase and superpowers:brainstorming began it. After resume, the phase is still design and no design is approved. The app stores books locally; shelf versus reading-goal organization is unresolved.",
+      "prompt": "Continue the design discussion from where we stopped. A book can belong to several reading goals. Take the next step; do not write code or files.",
+      "expected_phase_skill": "superpowers:brainstorming",
+      "competing_phase_skills": ["agentic-sdlc:mind-spark", "agentic-sdlc:completion-claim-gate"]
+    },
+    {
+      "id": "explicit-owner-switch",
+      "split": "comparison",
+      "entrypoint": "bootstrap",
+      "prior_context": "AGENTIC-SDLC mind-spark owns the ongoing reading-list design phase. No design is approved yet.",
+      "prompt": "Switch this design phase to superpowers:brainstorming and continue exploring shelf versus reading-goal organization. Take its next step; do not write code or files.",
+      "expected_phase_skill": "superpowers:brainstorming",
+      "competing_phase_skills": ["agentic-sdlc:mind-spark", "agentic-sdlc:completion-claim-gate"]
+    },
+    {
+      "id": "direct-design-entry-retains-owner",
+      "split": "held-out",
+      "entrypoint": "direct-mind-spark",
+      "prior_context": "Superpowers owns the ongoing design phase. superpowers:brainstorming already began exploring an offline recipe notebook; no design is approved. mind-spark was subsequently loaded incidentally during skill discovery, with no user request to switch owners.",
+      "prompt": "Keep going with the notebook design. Multiple people may share recipes on one computer, but I have not settled how they should organize collections. Take the next design step without writing code or files.",
+      "expected_phase_skill": "superpowers:brainstorming",
+      "competing_phase_skills": ["agentic-sdlc:mind-spark", "agentic-sdlc:completion-claim-gate"]
+    },
+    {
+      "id": "house-owner-held-out-delegation",
+      "split": "held-out",
+      "entrypoint": "bootstrap",
+      "prior_context": "",
+      "prompt": "Use AGENTIC-SDLC to decide how to organize independent documentation, schema, and fixture reviews for a small plugin package. Choose the appropriate review execution mechanism, but do not dispatch agents or modify files yet.",
+      "expected_phase_skill": "agentic-sdlc:dispatch-strategy",
+      "competing_phase_skills": ["superpowers:dispatching-parallel-agents"]
+    }
+  ]
+}

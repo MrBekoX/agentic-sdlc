@@ -23,10 +23,10 @@ jobs:
         with:
           node-version: "22"
       - name: Version consistency
-        run: python scripts/bump_version.py --release-check
+        run: python3 scripts/bump_version.py --release-check
       - name: Static checks
-        run: python scripts/check_all.py
+        run: python3 scripts/check_all.py
       - name: Skill harness
-        run: python tests/skills/harness.py
+        run: python3 tests/skills/harness.py
       - name: Unit tests
-        run: python -m unittest discover -s tests -v
+        run: python3 -m unittest discover -s tests -v

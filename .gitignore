@@ -28,11 +28,14 @@ docs/codex-plugin-runtime-debug-report/
 !docs/skill-boundaries.md
 !docs/runtime-adapter.md
 !docs/release-readiness.md
+!docs/release-evidence-0.4.3.md
 !docs/agentic-sdlc/
 docs/agentic-sdlc/*
 !docs/agentic-sdlc/evidence/
 docs/agentic-sdlc/evidence/*
 !docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md
+# Model-generated audit write-ups stay local; never distributed.
+audit-docs/
 
 # Debug / local runtime artifacts
 debug.txt

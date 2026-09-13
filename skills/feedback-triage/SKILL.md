@@ -1,6 +1,6 @@
 ---
 name: feedback-triage
-description: Use first in any language when review feedback has been received on the user's own change and must be verified, judged, or applied, including CodeRabbit/reviewer/PR comments, bot/linter/CI review output, or questionable suggestions. Not for a fresh code-quality-review of someone else's change.
+description: This skill should be used first in any language when review feedback has been received on the user's own change and must be verified, judged, or applied, including CodeRabbit/reviewer/PR comments, bot/linter/CI review output, or questionable suggestions. Not for a fresh code-quality-review of someone else's change.
 ---
 
 # Skill: feedback-triage

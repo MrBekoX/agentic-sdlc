@@ -10,6 +10,38 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class TestPackagingMetadata(unittest.TestCase):
+    def test_shipping_format_keeps_codex_hooks_loadable(self):
+        # Codex 0.154.0 loader.rs suppresses all AgentPlugin hooks. The native
+        # comparison observes 0 portable hooks versus 8 legacy hooks. Revisit
+        # this release contract only after a newer native probe proves parity.
+        self.assertFalse((REPO / "plugin.json").exists())
+        plugin = json.loads((REPO / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(plugin["hooks"], "./hooks/hooks-codex.json")
+        docs = (REPO / ".codex-plugin/README.md").read_text(encoding="utf-8")
+        self.assertIn("0.154.0", docs)
+        self.assertIn("portable", docs)
+
+    def test_presentation_assets_exist_inside_package(self):
+        interface = json.loads((REPO / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))["interface"]
+        self.assertRegex(interface["brandColor"], r"^#[0-9A-Fa-f]{6}$")
+        # This skills-only plugin has no custom MCP UI to screenshot. The
+        # submission contract requests screenshots only for custom UI.
+        self.assertEqual(interface["screenshots"], [])
+        for asset in [interface["composerIcon"], interface["logo"], *interface["screenshots"]]:
+            self.assertTrue(asset.startswith("./assets/"), asset)
+            path = (REPO / asset).resolve()
+            self.assertTrue(path.is_relative_to(REPO / "assets"))
+            self.assertTrue(path.is_file(), asset)
+            self.assertGreater(path.stat().st_size, 100)
+            # PNG IHDR dimensions; no imaging dependency in the repository gate.
+            import struct
+            data = path.read_bytes()
+            self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+            width, height = struct.unpack(">II", data[16:24])
+            self.assertEqual(width, height)
+            self.assertTrue(48 <= width <= 4096)
+            self.assertLessEqual(len(data), 5 * 1024 * 1024)
+
     def test_plugin_manifests_exist_and_match_version(self):
         version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
         plugin = json.loads((REPO / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
@@ -96,8 +128,9 @@ class TestPackagingMetadata(unittest.TestCase):
     def test_runtime_adapter_records_codex_hook_live_proof_drift(self):
         text = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
         self.assertIn("0.142.0", text)
-        self.assertIn("0.153.4", text)
-        self.assertIn("re-probe is pending", text)
+        self.assertIn("0.154.0", text)
+        self.assertIn("historical", text.lower())
+        self.assertIn("current binary", text.lower())
         self.assertIn("transcript_path", text)
 
     def test_claude_plugin_declares_display_name(self):

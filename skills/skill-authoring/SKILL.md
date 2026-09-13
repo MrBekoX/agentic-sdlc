@@ -1,6 +1,6 @@
 ---
 name: skill-authoring
-description: Use first in any language to create, edit, test, evaluate, optimize, or package a Claude Agent Skill or Codex skill. Activate this skill as the first action even when the target skill is unstated, before reading files or asking which skill to improve. Covers SKILL.md, frontmatter/description tuning, trigger optimization, eval fixtures/harnesses, and .skill packaging.
+description: This skill should be used first in any language to create, edit, test, evaluate, optimize, or package a Claude Agent Skill or Codex skill. It applies as the first action even when the target skill is unstated, before reading files or asking which skill to improve. Covers SKILL.md, frontmatter/description tuning, trigger optimization, eval fixtures/harnesses, and .skill packaging.
 ---
 
 # Skill: skill-authoring
@@ -76,63 +76,53 @@ metaphor or structure usually beats a third narrow patch.
 
 ## Delegation to skill-creator
 
-This skill does not re-implement evals, the viewer, or packaging — it calls `skill-creator`.
-The call style differs per script, and getting it wrong is the most common time-sink.
-Resolve `SC` first; do not assume a fixed Claude or Codex home path:
+Reuse the installed toolkit for validation, benchmark aggregation, the viewer, and packaging.
+Resolve it by required capabilities: the Codex system `skill-creator` may provide validation
+without any eval or packaging tools. A matching name or an `official` source is not enough.
+Resolve `<runtime-root>` to `${CLAUDE_PLUGIN_ROOT}` on Claude Code or `${PLUGIN_ROOT}` on Codex;
+when developing this checkout, use its absolute root.
+For a standalone `.skill`, invoke the resolver by its extracted skill-local path instead;
+the runtime eval runners below require companion plugin resources.
 
 ```bash
-python3 skills/skill-authoring/scripts/resolve_skill_creator.py
+python3 "<runtime-root>/skills/skill-authoring/scripts/resolve_skill_creator.py"
 ```
 
-If the output is `skill_creator_status=found`, inspect `skill_creator_source` and
-`skill_creator_trust` before using `skill_creator_root` as `SC`. `official` means the Codex system
-skill or the versioned `claude-plugins-official/skill-creator` cache. An
-`explicit-unverified` environment path is caller-supplied; show the resolved path and get explicit
-approval before executing any script from it. The resolver deliberately does not recursively scan
-user/plugin caches for the first shape-compatible directory. If the status is
-`missing`, run the same helper with `--install` so it fetches `skill-creator` from the official
-Claude marketplace and resolves again:
+The default requires validation, benchmark, viewer (including its template), packaging, and
+eval schemas from one root. Narrow with `--require validate` for a validation-only change, or
+`--require benchmark viewer schemas` for reviewing existing runs. Use `skill_creator_root` as
+`SC` only after exit 0 and `skill_creator_status=found` (or `installed`). Read the source and
+trust fields; `explicit-unverified` roots need source review and execution authorization already
+present in the task, or explicit approval. Discovery never executes candidate scripts.
 
 ```bash
-python3 skills/skill-authoring/scripts/resolve_skill_creator.py --install
+python3 "<runtime-root>/skills/skill-authoring/scripts/resolve_skill_creator.py" --require package
 ```
 
-Then use this matrix exactly.
+On `missing` / `missing_capabilities`, use the reported missing files to identify the absent
+dependency. Continue independent authoring work; do not invoke absent scripts or label missing
+evidence as passing. `--install` changes the Claude installation and is only for an already
+authorized dependency install; otherwise present the exact install command for approval.
 
-| Task | Script | How to call |
-|---|---|---|
-| Validate skill structure / frontmatter | `quick_validate.py` | direct: `python3 <SC>/scripts/quick_validate.py <skill-path>` |
-| Aggregate eval results into a benchmark | `aggregate_benchmark.py` | direct: `python3 <SC>/scripts/aggregate_benchmark.py <ws>/iteration-N --skill-name <name>` |
-| Build the review viewer (review before judging) | `generate_review.py` | direct: `python3 <SC>/eval-viewer/generate_review.py <ws>/iteration-N --static <out.html>` |
-| Run the triggering eval | `run_eval.py` | package: `python3 -m scripts.run_eval ...` **from `SC`** |
-| Optimize the description (loop) | `run_loop.py` | package: `python3 -m scripts.run_loop ...` **from `SC`** |
-| Package the final `.skill` | `package_skill.py` | package: `python3 -m scripts.package_skill <skill-path>` **from `SC`** |
+Before running tools, read `references/house-notes.md` for the capability-to-command matrix,
+absolute path and UTF-8 setup, and runtime-specific eval semantics. Claude trigger checks use
+the repo's Windows-safe `run_trigger_eval.py`; Codex uses `run_codex_trigger_eval.py`, a route
+classifier that does not prove installed skill activation. The external `run_eval.py` and
+`run_loop.py` are Claude tools and cannot substitute for Codex evaluation.
 
-Why two styles: `run_eval`, `run_loop`, and `package_skill` do package-relative imports
-(`from scripts....`), so they need `python3 -m scripts.<name>` run from `SC` (the package root);
-calling them by direct path fails with `ModuleNotFoundError: No module named 'scripts.utils'`.
-The other three import nothing from their own package, so a direct path is fine.
-
-**On Windows (this host):**
-- Always generate the viewer with `--static <out.html>` — the server path leans on `lsof` /
-  `webbrowser`, which are unreliable here; `--static` writes a standalone file you just open.
-- `run_eval.py` (and `run_loop.py`, which wraps it) is **broken on Windows**: it calls
-  `select.select` on a pipe at `run_eval.py:108`, and Windows `select` accepts only sockets, so it
-  dies with `WinError 10038`. The triggering eval is therefore not run on Windows. For behavioral
-  evals use the sequential-subagent path instead (with-skill + baseline subagents → grader writes
-  `grading.json` → `aggregate_benchmark.py` → `generate_review.py --static`), and review the
-  viewer **before** forming any verdict.
-
-For the deeper canon (degrees of freedom, progressive-disclosure levels, CSO of the description,
-token budgets, the register matrix) read `references/house-notes.md`; it points to skill-creator's
-own reference rather than duplicating it.
+For behavioral comparison on either runtime, run old/no-skill and new-skill tasks in isolated
+contexts, preserve transcripts and outputs, grade against the selected toolkit's schemas,
+aggregate, and generate the static viewer before reviewing or judging. Record unavailable
+runtime capabilities as explicit limits; file discovery itself is not a successful eval.
 
 ## Frontmatter that survives validation
 
-`quick_validate.py` allows only these keys: `name`, `description`, `license`, `allowed-tools`,
-`metadata`, `compatibility`. It rejects anything else (e.g. `user-invocable`, `argument-hint`) and
-rejects `<` or `>` anywhere in the description. Keep frontmatter to `name` + `description` unless
-you have a real need for the others, because an invalid key fails AC1 and blocks packaging.
+The shared format permits `name`, `description`, `license`, `allowed-tools`, `metadata`, and
+`compatibility`; keep just `name` + `description` unless another field is needed. External
+validators differ by installation: the inspected Codex system validator rejects `compatibility`,
+while the full Claude toolkit accepts it. Read and run the selected validator before packaging;
+report tool-specific rejection separately from format validity. The local house rule also
+rejects `<` or `>` in descriptions; `user-invocable` and `argument-hint` are outside the shared set.
 
 The `description` is the trigger — it is the only body text Claude sees when deciding to invoke
 the skill. Write it third-person and as *when to use*, not *what it does*, and seed it with the
@@ -142,7 +132,7 @@ failure the description-optimization step measures).
 
 **Example — description framing**
 Weak (what-it-does): `Creates and edits Claude skills.`
-Strong (when-to-use): `Use when creating, editing, or testing a Claude skill — authoring a SKILL.md, writing evals, fixing why a skill never triggers, or packaging a .skill.`
+Strong (when-to-use): `Applies when creating, editing, evaluating, or packaging a Claude Code or Codex skill, including SKILL.md and trigger-description changes.`
 
 ## Rationalization table
 
@@ -181,5 +171,6 @@ If you catch yourself doing any of these, pause:
 - [ ] `description` is when-to-use, CSO-seeded, no `<`/`>`; frontmatter within allowed keys.
 - [ ] Body lean and under ~500 lines; overflow pushed to `references/`.
 - [ ] Viewer generated (`--static` on Windows) and reviewed **before** any verdict.
-- [ ] `quick_validate.py` exits 0; `.skill` packaged via `python3 -m scripts.package_skill` from `SC`.
+- [ ] Required toolkit capabilities resolved; selected validator exits 0; `.skill` packaged
+      from `SC` with an absolute output directory outside the skill; archive contents reviewed.
 - [ ] Every success claim backed by real evidence (output / transcript / diff).

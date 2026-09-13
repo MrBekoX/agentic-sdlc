@@ -83,12 +83,11 @@ export function readRollout(path) {
 // no spawn. GATE_MARKER / payloadOf are shared with readRollout above; readRollout's marker check
 // is scoped to the final message only (A1 injection-hardening).
 //
-// Carriers (DP-E union; carrier SHAPES stay labelled VERIFY, reused from AP1/AP2a probes):
+// Carriers (historical AP1/AP2 shapes plus native 0.154.0 WSL capture):
 //   commands  - function_call exec_command {cmd}, AND event_msg exec_command_begin {command, parsed_cmd}.
-//   edits     - function_call apply_patch/patch {input: <V4A patch>}, AND event_msg patch_apply_begin {changes}.
-// Edit targets are read ONLY from patch carriers via extractWrittenContent('apply_patch', ...), which
-// always routes to the V4A patch parser - a command string is NEVER inspected for an edit target, so a
-// Bash redirect/heredoc/`sed -i` surfaces no edit (AC27 fail-open).
+//   edits     - historical patch carriers, successful custom_tool_call apply_patch/patch {input},
+//               plus the bounded shell-write recognizer below. A custom patch attempt counts only
+//               after its correlated output confirms success; a denied/failed attempt is not a write.
 function parseArgs(args) {
   if (args && typeof args === 'object') return args;
   if (typeof args === 'string') { try { return JSON.parse(args); } catch { return null; } }
@@ -109,16 +108,32 @@ function outputTextOf(o) {
   return null;
 }
 
-// A2 substrate: codex prepends an `Exit code: N` line to an exec `function_call_output` (OFFICIAL-
-// SOURCE openai/codex rust-v0.142.x). Parse the FIRST line-anchored occurrence as the run's real exit
-// status. LINEAR ([ \t]* avoids any \s*-over-newline ambiguity). RESIDUAL: the combined stdout/stderr
-// is agent/tool-authored, so the exact placement of codex's own line vs. a tool-printed one needs a
-// LIVE rollout capture to pin down; matching the first line-anchored occurrence is the best-effort
-// heuristic within the bounded-backstop posture (flagged in the A2 report).
+// Parse only the native leading metadata, never headers echoed inside tool output or a denial's
+// raw-command suffix. Both historical Exit-code and 0.154.0 Process-exited headers are supported.
+// Scan disjoint lines until Output: or unknown text; no body-wide status search or greedy regex.
+function nativeOutputParts(text) {
+  let exitCode = null;
+  if (typeof text !== 'string') return { exitCode, body: null };
+  let offset = 0;
+  while (offset <= text.length) {
+    const end = text.indexOf('\n', offset);
+    const line = text.slice(offset, end < 0 ? text.length : end).trim();
+    if (line === 'Output:') return { exitCode, body: end < 0 ? '' : text.slice(end + 1) };
+    const match = /^(?:Exit code:[ \t]*|Process exited with code[ \t]+)(-?\d+)$/.exec(line);
+    if (match) {
+      if (exitCode !== null) return { exitCode, body: null }; // conflicting/repeated metadata
+      exitCode = Number(match[1]);
+    } else if (line && !/^(?:Chunk ID|Wall time|Original token count):/.test(line)) {
+      return { exitCode, body: null };
+    }
+    if (end < 0) break;
+    offset = end + 1;
+  }
+  return { exitCode, body: null };
+}
+
 export function parseCodexExitCode(text) {
-  if (typeof text !== 'string') return null;
-  const m = /(?:^|\n)[ \t]*Exit code:\s*(-?\d+)/.exec(text);
-  return m ? Number(m[1]) : null;
+  return nativeOutputParts(text).exitCode;
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +372,8 @@ export function readRolloutSignals(path) {
   // stays exitCode:null -> the flow-STEP consumer FAILS OPEN on it (substrate absent, no regression).
   const commandRuns = [];
   const outputByCallId = new Map(); // call_id -> function_call_output text (primary exit/output carrier)
+  const customPatches = new Map(); // call_id -> input; conflicting definitions become null
+  const customOutputs = new Map(); // preserve the native custom-tool output type boundary
   const endByCallId = new Map();    // call_id -> { exitCode, output } from exec_command_end (defensive)
   const pushCmd = (s, callId) => { commands.push(s); commandRuns.push({ command: s, callId: callId ?? null, exitCode: null, output: null }); };
   // A1/BR4a closure: a Codex shell-redirect WRITE is recorded as a raw command string (verified live:
@@ -393,6 +410,17 @@ export function readRolloutSignals(path) {
           for (const t of extractWrittenContent('apply_patch', patchText).targets) editTargets.push(t);
         }
       }
+    } else if (p.type === 'custom_tool_call') {
+      if ((p.name === 'apply_patch' || p.name === 'patch') && p.call_id != null && typeof p.input === 'string') {
+        if (!customPatches.has(p.call_id)) customPatches.set(p.call_id, p.input);
+        else if (customPatches.get(p.call_id) !== p.input) customPatches.set(p.call_id, null);
+      }
+    } else if (p.type === 'custom_tool_call_output') {
+      if (p.call_id != null) {
+        const output = outputTextOf(p.output);
+        if (!customOutputs.has(p.call_id)) customOutputs.set(p.call_id, output);
+        else if (customOutputs.get(p.call_id) !== output) customOutputs.set(p.call_id, null);
+      }
     } else if (p.type === 'function_call_output') {
       // A2 primary exit/output carrier: correlate to its `function_call` by call_id (either order).
       if (p.call_id != null) {
@@ -421,6 +449,18 @@ export function readRolloutSignals(path) {
       // (No `patch_apply_begin` / `function_call apply_patch` is emitted in the rollout.) Count only a
       // SUCCESSFUL apply as a real in-session write; a failed patch wrote nothing.
       if (p.success !== false) for (const t of Object.keys(p.changes || {})) editTargets.push(t);
+    }
+  }
+  const seenEditTargets = new Set(editTargets);
+  for (const [callId, input] of customPatches) {
+    if (input === null) continue;
+    const output = nativeOutputParts(customOutputs.get(callId));
+    if (output.exitCode !== 0 || !/^Success\. Updated the following files:\r?\n/.test(output.body)) continue;
+    for (const target of extractWrittenContent('apply_patch', input).targets) {
+      if (!seenEditTargets.has(target)) {
+        seenEditTargets.add(target);
+        editTargets.push(target);
+      }
     }
   }
   // A2 correlation pass: fill each run's exitCode/output from its call_id. The function_call_output's

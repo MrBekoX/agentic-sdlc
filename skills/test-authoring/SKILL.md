@@ -1,6 +1,6 @@
 ---
 name: test-authoring
-description: Use first in any language to write, add, repair, or design tests before inspecting code for test-only prompts covering unit, integration, regression, e2e, flaky/failing tests, meaningful assertions, coverage, test doubles, or test strategy. Test-only work that must not change production behavior; not for features, fixes, or refactors.
+description: This skill should be used first in any language to write, add, repair, or design tests before inspecting code for test-only prompts covering unit, integration, regression, e2e, flaky/failing tests, meaningful assertions, coverage, test doubles, or test strategy. Test-only work that must not change production behavior; not for features, fixes, or refactors.
 ---
 
 # Skill: test-authoring

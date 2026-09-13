@@ -1,6 +1,6 @@
 # Release Readiness
 
-This file is the publish gate for `agentic-sdlc` version `0.4.2`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex.
+This file is the publish gate for `agentic-sdlc` version `0.4.3`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex. The current release decision and sanitized observations are in [release evidence](release-evidence-0.4.3.md); preparation or a metadata-only pass cannot replace its required results.
 
 ## Supported Release Scope
 
@@ -8,7 +8,7 @@ This file is the publish gate for `agentic-sdlc` version `0.4.2`. It keeps the r
 |---|---|---|
 | Claude Code | Supported | Local gate plus live routing/procedure transcript evidence before claiming live behavior. |
 | Codex | Supported | Local gate plus route-classifier/procedure transcript evidence before claiming live behavior. |
-| OpenCode, Kimi Code, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.2`. |
+| OpenCode, Kimi Code, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.3`. |
 
 ## Required Local Gate
 
@@ -22,7 +22,7 @@ python3 tests/skills/harness.py
 python3 -m unittest discover -s tests -v
 ```
 
-On Windows, `py -3` is an acceptable local substitute for `python3` when `python3` is not on `PATH`.
+Use the repository's `python3` entry point on both platforms and verify it resolves to the intended Python installation. CI uses `actions/setup-python`; its [Windows installer](https://github.com/actions/python-versions/blob/main/installers/win-setup-template.ps1) supplies the python3 executable link.
 
 The local gate proves metadata consistency, Codex manifest shape, static skill wiring, fixture health, hook/workflow syntax, flow-evidence config wiring, and unit behavior. It does not prove live model routing or live tool-use obedience.
 
@@ -30,27 +30,29 @@ The local gate proves metadata consistency, Codex manifest shape, static skill w
 
 Do not claim that a skill "works", "triggers", or is "production-ready" in a runtime unless at least one current transcript or eval summary exists for that claim.
 
-Minimum publish evidence for this release:
+Minimum publish evidence for this release uses the requested `gpt-5.3-codex-spark` / Low and `claude-sonnet-5` / Low settings. Cover all fifteen standalone scenarios with `--runs 3 --threshold 1.0`: every case needs three correct observations, no hard error and no prohibited pipeline escalation. Preserve both procedure cases; the first explicitly requests smoke depth, while the second requests the normal per-package layout.
 
 | Claim | Command shape | Passing signal |
 |---|---|---|
-| `using-agentic-sdlc` routes standalone prompts in Claude Code | `python3 scripts/run_routing_eval.py --eval-set tests/skills/routing/using-agentic-sdlc.json --runtime claude --model haiku ...` | `routing_eval=passed`, all scenarios passed. |
-| `using-agentic-sdlc` routes standalone prompts in Codex | `python3 scripts/run_routing_eval.py --eval-set tests/skills/routing/using-agentic-sdlc.json --runtime codex --reasoning-effort high ...` | `routing_eval=passed`, all scenarios passed. |
-| `agentic-sdlc-pipeline` invokes the required phase skills/tools in Claude Code | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live --model haiku ...` | `procedure_eval=passed`. |
+| `using-agentic-sdlc` routes standalone prompts in Claude Code | `python3 scripts/run_routing_eval.py --eval-set tests/skills/routing/using-agentic-sdlc.json --runtime claude --model claude-sonnet-5 --runs 3 --threshold 1.0 --max-budget-usd 1.50 ...` | `routing_eval=passed`, 15/15 scenarios and 45/45 observations; inspect actual selected Skill/Read delivery. |
+| `using-agentic-sdlc` routes standalone prompts in Codex | `python3 scripts/run_routing_eval.py --eval-set tests/skills/routing/using-agentic-sdlc.json --runtime codex --model gpt-5.3-codex-spark --reasoning-effort low --runs 3 --threshold 1.0 ...` | `routing_eval=passed`, 15/15 scenarios and 45/45 observations; this is a description classifier, not native skill activation. |
+| `agentic-sdlc-pipeline` invokes the required phase skills/tools in Claude Code | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live --model claude-sonnet-5 --max-budget-usd 6 ...` | `procedure_eval=passed` for both procedure cases, with persisted fixture and transcript evidence. |
 | `agentic-sdlc-pipeline` Codex adapter transcript satisfies procedure gates | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-codex-adapter-pass.jsonl` | `procedure_eval=passed`. |
 
-If a live Claude Code run uses a restrictive permission mode and the model is denied a required branch/tool action, record it as a permission-mode failure, not as pipeline behavior evidence. Re-run in an isolated fixture with an explicit permissive mode if branch/tool creation is part of the procedure being evaluated.
+These are runner command shapes, not automatic authorization to run a large batch. Review exact commands, snapshots and limits before execution. For Claude, set `CLAUDE_CODE_EFFORT_LEVEL=low` and pin `CLAUDE_CODE_SUBAGENT_MODEL` plus `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL` to `claude-sonnet-5` in the isolated child environment. The routing runner's `--reasoning-effort` argument configures Codex; it does not itself configure Claude. Inspect every returned assistant model and modelUsage entry rather than assuming the requested main model constrains helpers. Claude response-side effective effort may be absent; record Low configuration without inventing telemetry.
 
-For publish evidence, prefer Codex `--reasoning-effort high`. Low-effort runs are acceptable as smoke/procedure checks only; if a release decision cites a low-effort run, label it with the exact model, effort, date, and transcript instead of presenting it as a high-effort stability guarantee.
+Keep native auth in its existing store, use isolated fixtures and reviewed source, and preserve terminal process state. The standard procedure runner creates a scratch fixture baseline commit and cleans temporary outputs; a release capture must explicitly authorize that harness setup and preserve its artifacts before cleanup. No model or project commit/push/merge is permitted by these fixture cases. Generate the review viewer before grading, retain failures and do not retry a still-running process after an observation timeout.
+
+If a live Claude Code run is denied a required branch/tool action, record the actual permission failure and missing procedure step. Correct an isolated fixture's permissions only within the reviewed scope; a trust bypass or swallowed denial cannot prove the normal installed behavior.
+
+This release follows the maintainer's Low-effort constraint. Label every result with exact model, effort, date, runtime and payload identity; three observations improve the measured sample but do not establish high-effort or universal stability. The current CLI versions observed during remediation were Codex **0.154.0** and Claude Code **2.1.269**; record fresh versions for each release batch.
 
 ## Captured evidence — 2026-06-18/19 live sweep
 
-Detailed transcripts under `tests/artifacts/` (gitignored); full writeup in
-[`docs/testing.md`](testing.md#live-eval-findings-2026-06-18--haiku--sonnet-sweep). Model-capacity note:
-**Haiku is a floor** for abstract/meta/gate skills and the pipeline — the same descriptions score
-0.80–1.00 on Sonnet and Codex routes them at high effort. Take publish evidence on Sonnet/Opus (Claude)
-and `gpt-5.3-codex-spark` at `high` (Codex); do not block release on Haiku floor numbers, but do record
-them. Use routing/trigger `--runs ≥3`.
+These are historical observations, with detailed transcripts under `tests/artifacts/` (gitignored)
+and a writeup in [`docs/testing.md`](testing.md#live-eval-findings-2026-06-18--haiku--sonnet-sweep).
+The earlier Haiku/Sonnet/high-effort comparison is not a current release verdict. Follow the exact
+models and three-observation requirement above for 0.4.3; do not relabel these old outcomes as new runs.
 
 | Evidence | Result | Notes |
 |---|---|---|
@@ -58,7 +60,7 @@ them. Use routing/trigger `--runs ≥3`.
 | `using-agentic-sdlc` routing — Codex `high` | **15/15 passed** (`gpt-5.3-codex-spark`, `runs=3`) | satisfies the Codex routing evidence requirement |
 | 16-skill trigger matrix — Codex | **16/16 passed** (`low`, after classifier-prompt fix) | `low` is fix-verification; re-confirm at `high` for publish. Pre-fix 12/16 was an eval-tool gap (trigger classifier prompt lacked the over-escalation/feeder guards the routing classifier has), now aligned |
 | `agentic-sdlc-pipeline` procedure — Claude | Sonnet 2/2 at `--max-budget-usd 6`; Haiku 1/3 (floor) | `$2` default cut strong-model runs off mid-run → default raised to `5.00` |
-| `agentic-sdlc-pipeline` procedure — Codex adapter | **`procedure_eval=passed`** (deterministic transcript) + historical `0.3.0` live low-effort strict smoke pass | adapter patterns present: `spec-plan-author/critic`, "Workflow unavailable/embedded adapter", `docs/agentic-sdlc/specs/`, `docs/agentic-sdlc/plans/`, all gates. The 2026-06-20 `gpt-5.3-codex-spark` run proves the `0.3.0` adapter path only; it is not live proof for `0.4.2` |
+| `agentic-sdlc-pipeline` procedure — Codex adapter | **`procedure_eval=passed`** (deterministic transcript) + historical `0.3.0` live low-effort strict smoke pass | adapter patterns present: `spec-plan-author/critic`, "Workflow unavailable/embedded adapter", `docs/agentic-sdlc/specs/`, `docs/agentic-sdlc/plans/`, all gates. The 2026-06-20 `gpt-5.3-codex-spark` run proves the `0.3.0` adapter path only; it is not live proof for `0.4.3` |
 
 Eval-infra fixes made during the sweep (all on `main`): routing-eval early-stop + `runs=3` default;
 implementation-control/router call-order guards; `safe-refactor`/`skill-authoring`/`completion-claim-gate`
@@ -90,7 +92,7 @@ Passing signals observed in the transcript:
 - final report included `Overall Status: PASS` for Implementation Control and the final todo list was complete.
 
 Limit of this evidence: this is a historical Codex `0.3.0` low-effort smoke/procedure run, not a
-publish-grade high-effort stability run and not live evidence for the current `0.4.2` worktree. It is
+publish-grade high-effort stability run and not live evidence for the current `0.4.3` worktree. It is
 valid only as evidence that the earlier adapter completed the full pipeline in a small fixture,
 including RED->GREEN, artifact validation, work-package resolution, and recovery from metadata errors.
 
@@ -114,9 +116,9 @@ Scan staged and unstaged diffs for tokens, private keys, connection strings, and
 - Codex wires native blocking `PreToolUse` guards, `SessionStart`, and two `Stop` continuation backstops. Coverage is bounded: branch/flow hardening is env-gated, unrecognized write forms fail open, and Stop can request another turn but cannot undo prior effects.
 - `agentic-sdlc-pipeline` owns internal spec/plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for pipeline steps 4-5; Codex uses the embedded author/critic adapter.
 - Hooks are local runtime guardrails. Some warn or fail open by design, so they complement but do not replace diff review, test output, and secret scanning.
-- `0.4.2` is publishable for Claude Code and Codex only when the local gate and current live evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
+- `0.4.3` is publishable for Claude Code and Codex only when the local gate and current release evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
 - Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters.
-- Last live Codex hook/rollout proof is **0.142.0**. Current documented CLI is **0.153.4**; `transcript_path` is still not a stable hook interface, and a 0.153.4 Stop/rollout re-probe is pending. Do not treat documented-contract overlap as a fresh live probe.
+- Current bounded hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. They retain their own immutable source identities; current parser replay and later skill evaluations are separate evidence. `transcript_path` remains unstable. See [runtime boundaries](runtime-adapter.md#current-binary-and-historical-hook-evidence) and the [public release ledger](release-evidence-0.4.3.md).
 
 ## Artifact Layouts And Per-Package Evidence
 
@@ -124,14 +126,14 @@ Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdl
 
 Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
-Per-package plan change-detection runs as a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
+Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 
 ## Release Verdict Template
 
 Use this shape in a release note or final publish report:
 
 ```text
-version=0.4.2
+version=0.4.3
 scope=Claude Code, Codex
 local_gate=<passed|failed> <date>
 claude_routing_eval=<passed|failed|not-run> <transcript-or-log>

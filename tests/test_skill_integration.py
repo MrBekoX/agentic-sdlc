@@ -179,7 +179,8 @@ class TestSkillCrossReferences(unittest.TestCase):
             "in any language",
             "explore options",
             "discuss direction",
-            "supersedes generic brainstorming",
+            "AGENTIC-SDLC-owned design phases",
+            "respects explicit selection of another plugin",
         ):
             self.assertIn(phrase, desc)
 
@@ -189,7 +190,7 @@ class TestSkillCrossReferences(unittest.TestCase):
         desc = h.frontmatter_value(art["frontmatter"], "description")
         self.assertIn("underspecified plan-only prompts", desc)
         self.assertIn("no-direct-fix prompts", desc)
-        self.assertIn("Activate before asking for missing bug details", desc)
+        self.assertIn("It applies before asking for missing bug details", desc)
         self.assertIn("stay in `plan-authoring`", text)
         self.assertIn("do not defer activation", text)
 
@@ -200,7 +201,7 @@ class TestSkillCrossReferences(unittest.TestCase):
         self.assertIn("in any language", desc)
         self.assertIn("spec-plan-TDD-security flow", desc)
         self.assertIn("not passive session preferences", desc)
-        self.assertIn("report missing evidence", desc)
+        self.assertIn("missing evidence is an audit outcome", desc)
 
     def test_test_authoring_description_requires_activation_before_file_reads(self):
         art = h.load_markdown_artifact(h.SKILLS_DIR / "test-authoring" / "SKILL.md")
