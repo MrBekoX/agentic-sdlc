@@ -20,6 +20,15 @@ Each entry includes:
 
 ---
 
+## 2026-09-13 — Compare canonical paths when the API resolves candidates
+
+- **Task / context:** Merge the dual-runtime changes through Windows and Ubuntu CI.
+- **Symptom:** Three resolver tests passed locally and on Ubuntu but failed on Windows because a temporary-directory path used a short-name alias while the resolver returned the expanded path.
+- **Root cause:** The tests compared raw fixture paths against `discover()`'s documented `Path.resolve()` result; they were asserting an incidental spelling rather than the canonical return contract.
+- **Correct fix:** Resolve expected paths while the fixture still exists. Retain noncanonical input coverage instead of changing the production resolver to return unresolved paths.
+- **Preventive rule / automated check:** A platform-independent candidate containing `..` must resolve to the canonical root; keep the Windows CI matrix to exercise filesystem aliases too.
+- **Related files & tests:** `tests/test_skill_creator_resolver.py::TestSkillCreatorResolver.test_discovery_returns_canonical_candidate_path` and the three corrected discovery expectations.
+
 ## 2026-09-12 — Toolkit identity does not establish capability compatibility
 
 - **Task / context:** Repair the shared Claude Code/Codex authoring workflow after the dual-runtime audit.

@@ -55,6 +55,8 @@ The original evaluated runtime input SHA-256 is `9978383c0bd22fe6ca0c71bfc0c8138
 
 The corrective runtime input is `144ca634c0803a9af7f8ddd5c1c4ccbc9895547dd819c5944edec04d7ce93437`. All sixteen skill names/descriptions remain byte-equivalent in their routing fields; pipeline, feature-build and implementation-control bodies, the pipeline playbook, auditor role and changelog changed. All28 shipped hook files remain byte-identical to9978383c. Codex's earlier classifier measures the unchanged routing fields; Claude's earlier full-body receipts remain evidence of the original bodies. New procedure captures must identify the corrected input and preserve this boundary.
 
+A subsequent merge-CI correction normalizes expected resolver paths while temporary fixtures exist, adds a canonical-path regression and records that lesson. It changes tests/documentation, not the evaluated runtime instructions. The archive hashes and test counts above identify their original snapshots; they are not relabeled as a new live evaluation of this CI-only correction.
+
 The release source excludes private audit writeups, maintainer prompts, credentials, local agent configuration, runtime caches and raw transcripts. A verified worktree package includes explicitly reviewed new source files; archiving the old HEAD would omit those fixes. After the reviewed release commit exists, its source ZIP can be reproduced with Git:
 
 ```bash

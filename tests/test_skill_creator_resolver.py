@@ -54,7 +54,7 @@ class TestSkillCreatorResolver(unittest.TestCase):
             with mock.patch.object(resolver, "candidate_paths", return_value=[
                 ("codex-system", codex), ("claude-official-cache:test", claude),
             ]):
-                self.assertEqual(resolver.discover(), ("claude-official-cache:test", claude))
+                self.assertEqual(resolver.discover(), ("claude-official-cache:test", claude.resolve()))
 
     def test_validate_only_accepts_minimal_toolkit(self):
         resolver = load_resolver()
@@ -62,7 +62,7 @@ class TestSkillCreatorResolver(unittest.TestCase):
             root = Path(tmp) / "minimal"
             make_skill_creator_root(root, ["scripts/quick_validate.py"])
             with mock.patch.object(resolver, "candidate_paths", return_value=[("codex-system", root)]):
-                self.assertEqual(resolver.discover(("validate",)), ("codex-system", root))
+                self.assertEqual(resolver.discover(("validate",)), ("codex-system", root.resolve()))
 
     def test_missing_capabilities_report_resources_and_do_not_install(self):
         resolver = load_resolver()
@@ -139,12 +139,23 @@ class TestSkillCreatorResolver(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "skill-creator"
             make_skill_creator_root(root)
+            expected = root.resolve()
             with mock.patch.dict("os.environ", {"SKILL_CREATOR_ROOT": str(root)}, clear=True):
                 found = resolver.discover()
         self.assertIsNotNone(found)
         source, path = found
         self.assertEqual(source, "skill_creator_root")
-        self.assertEqual(path, root)
+        self.assertEqual(path, expected)
+
+    def test_discovery_returns_canonical_candidate_path(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "skill-creator"
+            make_skill_creator_root(root)
+            # Keep the input noncanonical, independently of Windows 8.3 aliases.
+            candidate = root / ".." / root.name
+            with mock.patch.object(resolver, "candidate_paths", return_value=[("codex-system", candidate)]):
+                self.assertEqual(resolver.discover(), ("codex-system", root.resolve()))
 
     def test_rejects_shape_compatible_wrong_skill(self):
         resolver = load_resolver()
