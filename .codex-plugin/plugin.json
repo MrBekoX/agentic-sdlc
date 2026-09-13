@@ -1,6 +1,6 @@
 {
   "name": "agentic-sdlc",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Gated SDLC skills for spec, plan, TDD, security review, implementation control, and evidence-backed delivery.",
   "author": {
     "name": "Beko",
@@ -36,6 +36,10 @@
     ],
     "websiteURL": "https://github.com/MrBekoX/agentic-sdlc",
     "privacyPolicyURL": "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement",
-    "termsOfServiceURL": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service"
+    "termsOfServiceURL": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service",
+    "brandColor": "#58DBC0",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "screenshots": []
   }
 }

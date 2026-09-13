@@ -1,6 +1,6 @@
 ---
 name: feature-build
-description: Use first in any language to add a new feature, endpoint, screen, or capability without the full agentic-sdlc-pipeline envelope, via implementation-control. Not for bug/root-cause fixes, test-only work, or behavior-preserving refactors.
+description: This skill should be used first in any language to add a new feature, endpoint, screen, or capability without the full agentic-sdlc-pipeline envelope, via implementation-control. Not for bug/root-cause fixes, test-only work, or behavior-preserving refactors.
 ---
 
 # Skill: feature-build
@@ -55,8 +55,8 @@ Two read-only fan-out points: the **scope map** (one `context-analyst` per affec
 2. **Scope map** — affected layers/files, existing signatures/conventions to follow, integration points. For multi-file features, fan this out with the runtime's workflow/subagent/parallel equivalent (don't scan serially in the main loop). Output feeds the spec.
 3. **Spec** (contract 02) — business rules · acceptance criteria (testable) · edge cases · definition of done · must-not-change behaviors. Use `spec-plan-author` → `spec-plan-critic` for depth.
 4. **Plan + approval** (contract 03) — small single-purpose tasks, each mapped to acceptance criteria, files + TDD points named. **Get user approval before big changes.** Use the runtime goal tool when available; otherwise write the Goal Lock template inline and treat it as the scope lock.
-5. **Implementation** — follow the existing architecture and conventions; only files in scope; justify new abstractions. Write interdependent code in the main loop, delegate independent fixed-pattern pieces.
-6. **Test** (contract 05) — TDD: failing test first (show RED), then code (GREEN); run suite, show output. Use the runtime loop tool when available; otherwise record each fail -> fix -> retest cycle with command evidence.
+5. **Failing test** (contract 05) — identify the project's available test command, write the smallest test for the requested behavior and run it; show RED caused by the missing behavior before implementation. A missing runner does not authorize installing packages: use an already available equivalent that executes the intended tests, or report the prerequisite for approval. Preserve failure exit status; a fallback runner must exit nonzero when an assertion fails, not catch failures and return success.
+6. **Implementation + verification** — follow the existing architecture and conventions; only files in scope; justify new abstractions. Write interdependent code in the main loop, delegate independent fixed-pattern pieces. Make the RED test GREEN, then run the suite and show output. Use the runtime loop tool when available; otherwise record each fail -> fix -> retest cycle with command evidence.
 7. **Security analysis** (contract 06) — validation, authN/authZ (IDOR), secrets, injection, dependency risk, logging hygiene. Fix→re-check→retest on findings.
 8. **Refactor** (contract 07) — only if needed; behavior unchanged; retest after.
 9. **Documentation** (contract 09) — update stale docs, env vars, API signatures, setup.

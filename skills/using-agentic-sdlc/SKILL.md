@@ -1,6 +1,6 @@
 ---
 name: using-agentic-sdlc
-description: Use first in any language for meta-routing of explicit AGENTIC-SDLC routing questions, quoted prompts asking which project skill owns the work, or session-local scope shifts. Routes to the smallest sufficient skill and escalates to agentic-sdlc-pipeline only for full SDLC; evidence-before-claim done/fixed/passing gates belong to completion-claim-gate.
+description: This skill should be used first in any language for meta-routing of explicit AGENTIC-SDLC routing questions, quoted prompts asking which project skill owns the work, or session-local scope shifts. Routes to the smallest sufficient skill and escalates to agentic-sdlc-pipeline only for full SDLC; evidence-before-claim done/fixed/passing gates belong to completion-claim-gate.
 ---
 
 <SUBAGENT-STOP>
@@ -10,7 +10,7 @@ If you were dispatched as a subagent for a bounded task, skip this bootstrap unl
 # Skill: using-agentic-sdlc
 
 ## Invariant
-Every prompt is routed to the smallest sufficient skill before acting — agentic-sdlc-pipeline only for the full envelope.
+Every AGENTIC-SDLC-owned prompt is routed to the smallest sufficient skill before acting — agentic-sdlc-pipeline only for the full envelope.
 
 This is the bootstrap router for the AGENTIC-SDLC skill system.
 
@@ -36,21 +36,44 @@ No route chosen on a keyword alone — every route carries its intent verb. No e
 
 If a user instruction conflicts with a skill, follow the user instruction and state the trade-off when it affects safety, verification, or scope.
 
+## Process owner
+
+When another plugin exposes a same-purpose process skill, choose one process owner per phase **before** applying the routes below:
+
+1. Follow the user's explicit plugin or skill choice, including `superpowers:brainstorming` or any other `superpowers:<skill>`. An explicit AGENTIC-SDLC choice selects the matching house skill. A newer explicit choice overrides the established owner.
+2. Otherwise keep the established owner for the current phase, including across resume/compact. Loading this router or a focused skill does not transfer ownership.
+3. With no established owner, work entering this router defaults to AGENTIC-SDLC. State the owner briefly when overlap matters, and track it in conversation context rather than a persistent file.
+
+For a Superpowers-owned phase, use that owner's skill and handoff and stop house routing here. Never stack both plugins' processes for the same phase, including a second completion checklist. Re-evaluate at a new phase or explicit user change. Runtime security hooks still apply independently of the process owner; permission and evidence requirements remain in force.
+
+Load the selected owner's actual instructions before substantive phase content. After resume, compaction, or a supplied summary, reload the selected procedure now even if the summary says it already began: preserve its owner and saved progress, not an assumption that its instruction body survived. Invoke its `Skill` in Claude Code or read its catalog-resolved `SKILL.md` in Codex, then continue from saved progress without repeating completed approvals. Reuse an actual body already present only in uninterrupted context; otherwise load it. If unavailable, report the gap instead of reconstructing the procedure from memory.
+
+Qualify every target by plugin, for example `agentic-sdlc:mind-spark` or `superpowers:brainstorming`. Claude Code passes that identifier to `Skill`. Codex CLI selects the matching plugin's entry through `/skills` or `$`; a qualified identity here is not invented CLI command syntax. If activation is unavailable, read the selected owner's catalog-resolved `SKILL.md` and record the degraded mechanism; for house skills absent from the catalog use `${PLUGIN_ROOT}/skills/<skill>/SKILL.md` in Codex or `${CLAUDE_PLUGIN_ROOT}/skills/<skill>/SKILL.md` in Claude Code. Bare house names below identify skills from this plugin only. If the chosen skill cannot be found, report the limitation instead of substituting the other owner.
+
+Overlap map (intent overlap does not make these procedures interchangeable):
+
+| Phase | AGENTIC-SDLC identifier | Superpowers identifier |
+|---|---|---|
+| Intent / design | `mind-spark` | `brainstorming` |
+| WHAT / HOW | `spec-authoring` / `plan-authoring` | `brainstorming` (WHAT overlap) / `writing-plans` |
+| Test-first implementation | `test-authoring` / `feature-build` | `test-driven-development` |
+| Debugging | `root-cause-fix` | `systematic-debugging` |
+| Change review | `code-quality-review` | `requesting-code-review` |
+| Received feedback | `feedback-triage` | `receiving-code-review` |
+| Completion evidence | `completion-claim-gate` | `verification-before-completion` |
+| Routing | `using-agentic-sdlc` | `using-superpowers` |
+| Delegation | `dispatch-strategy` | `dispatching-parallel-agents` |
+| Skill authoring | `skill-authoring` | `writing-skills` |
+
 ## Routing Rule
 
-Before acting, ask which AGENTIC-SDLC skill owns the request.
+After the process-owner check selects AGENTIC-SDLC, ask which house skill owns the request.
 
 Use the smallest skill that satisfies the user's current prompt.
 
 Resolve conflicts by semantic intent before domain nouns. Do not rely on exact keywords or the prompt language.
 
 - Any-language brainstorming, option exploration, or uncertain direction -> `mind-spark`, not generic `brainstorming` or an implementation skill.
-- If another plugin exposes a same-purpose process skill, prefer the AGENTIC-SDLC skill listed here for AGENTIC-SDLC prompts; do not replace `mind-spark` with `superpowers:brainstorming`.
-- When Superpowers is also installed, choose one process owner per phase: an explicit
-  `superpowers:<skill>` request stays with Superpowers, while an explicit AGENTIC-SDLC request or a
-  route entered through this router stays with the matching AGENTIC-SDLC skill. Never stack both
-  plugins' brainstorming/planning/TDD/debug/review/completion skills for the same phase merely
-  because both are discoverable. Runtime security hooks still apply independently of the process owner.
 - Any-language plan-only, HOW, task breakdown, or no direct code/fix yet -> `plan-authoring`, even when the prompt mentions a bug, failing behavior, or fix.
 - For any-language plan-only/HOW/no direct code or fix yet prompts, activate `plan-authoring` immediately; never ask for bug details first or say you will use `plan-authoring` after details arrive.
 - Any-language end-to-end/full-envelope prompts that ask for spec, plan, TDD, security/audit, and release-readiness -> `agentic-sdlc-pipeline`, not `mind-spark`, even if they mention design or requirements.
@@ -58,9 +81,9 @@ Resolve conflicts by semantic intent before domain nouns. Do not rely on exact k
 - Any-language behavior-preserving refactor prompts about preserving behavior while cleaning up, simplifying, or restructuring -> `safe-refactor` before Glob/Read/file-existence checks; the selected skill owns missing-target clarification.
 - Any-language received-review-feedback prompts about PR comments, reviewer comments, bot feedback, or CI review output -> `feedback-triage`, not a fresh `code-quality-review`.
 - Any-language orchestration decision prompts comparing main loop, subagents, workflows, or agent-teams -> `dispatch-strategy` before answering. Do not choose a mechanism directly without activating the skill.
-- Any-language final audit or process audit prompt asking whether spec/plan/TDD/security flow was followed before the final response -> `implementation-control`. Treat it as an active audit task now, not a passive session preference; the audit intent requires a Skill call even when no implementation evidence exists, then report missing evidence. Do not run `git diff`/`status`/`log` or read files first, and do not ask the user for branch/file/change details before activating — the skill's auditor inspects the diff; the Skill call is the first action.
+- Any-language final audit or process audit prompt asking whether spec/plan/TDD/security flow was followed before the final response -> `implementation-control`. Treat it as an active audit task now, not a passive session preference; in Claude Code the audit intent requires a Skill call even when no implementation evidence exists, then report missing evidence. Codex activates the qualified skill or reads its instructions through the runtime adapter. Do not run `git diff`/`status`/`log` or read unrelated files first, and do not ask the user for branch/file/change details before activating — the skill's auditor inspects the diff.
 - Any-language clear implementation prompts that ask to add, build, develop, apply, or implement a feature/endpoint -> `feature-build` unless they explicitly ask only for brainstorming/spec/plan/tests/review or ask for the full pipeline.
-- For final audit/process audit prompts, activate `implementation-control` with the Skill tool; do not answer from memory or summarize without activation.
+- For final audit/process audit prompts, activate `implementation-control` with the runtime mechanism above; do not answer from memory or summarize without activation.
 - Implementation skills apply when the user asks to change files, fix behavior, add a feature, refactor, or write tests now.
 - If the selected focused skill is underspecified, invoke it anyway before clarifying. Do not defer activation by saying you will use the skill after the user provides details.
 

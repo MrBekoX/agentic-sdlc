@@ -16,12 +16,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SKILLS_DIR = REPO / "skills"
 TESTS_DIR = REPO / "tests"
-# Valid Claude Code skill frontmatter for a REPO gate. Broader than skill-creator's
-# quick_validate (a packaging validator): `user-invocable` / `argument-hint` are legitimate
-# here and used by our flow skills. `.skill` packaging still enforces the stricter set.
+# Shared Agent Skills fields only. Runtime-specific agent metadata has its own gate;
+# an external toolkit validator may implement a narrower, version-specific subset.
 ALLOWED_KEYS = {
     "name", "description", "license", "allowed-tools", "metadata", "compatibility",
-    "user-invocable", "argument-hint", "model", "disable-model-invocation",
 }
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -60,6 +58,8 @@ def check_skill(skill_dir, errors, warnings):
         errors.append(f"name_dir_mismatch:{name_hint}:{name}")
     elif not NAME_RE.match(name):
         errors.append(f"name_not_kebab:{name_hint}")
+    if len(name) > 64:
+        errors.append(f"name_too_long:{name_hint}")
     # description: present, no angle brackets (the quick_validate rejection class).
     m = re.search(r"(?m)^description:\s*(.+)$", fm)
     desc = m.group(1).strip() if m else ""
@@ -67,6 +67,10 @@ def check_skill(skill_dir, errors, warnings):
         errors.append(f"no_description:{name_hint}")
     elif "<" in desc or ">" in desc:
         errors.append(f"angle_bracket_in_description:{name_hint}")
+    if len(desc) > 1024:
+        errors.append(f"description_too_long:{name_hint}")
+    if re.match(r"^[\"']?Use\b", desc):
+        errors.append(f"imperative_description:{name_hint}")
     # body length budget (lines after the closing frontmatter ---).
     blines = (body or "").count("\n")
     if blines > 500:

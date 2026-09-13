@@ -1,6 +1,6 @@
 ---
 name: agentic-sdlc-pipeline
-description: Use first in any language for end-to-end implementation with the full gated SDLC envelope (spec, plan, TDD, tests, security review, final audit, PR readiness). Production-impacting, API contract, auth, payment, or database work overrides focused feature-build/root-cause-fix/safe-refactor/test-authoring routing.
+description: This skill should be used first in any language for end-to-end implementation with the full gated SDLC envelope (spec, plan, TDD, tests, security review, final audit, PR readiness). Production-impacting, API contract, auth, payment, or database work overrides focused feature-build/root-cause-fix/safe-refactor/test-authoring routing.
 ---
 
 # Skill: agentic-sdlc-pipeline (the full-envelope SDLC orchestrator)
@@ -15,7 +15,7 @@ Every gate is satisfied by the **actual tool call or artifact** named in the run
 ## Excuse -> check
 | Excuse | Check |
 |---|---|
-| "Security was reviewed." | Point to the `security-audit` Skill call (or the recorded deterministic skip rule) — a final-report sentence is not the gate. |
+| "Security was reviewed." | Show activation plus the completed dispatch/reviewer results required by `security-audit`, or its applicable documented fallback/skip. Loading the skill alone does not perform the review. |
 | "The spec is fine, I drafted it inline." | The `spec-plan-draft` workflow (or the Codex author/critic adapter) ran with a fresh-context critic; an inline draft is the flagged degraded path, not the gate. |
 | "Validation passed, I read the artifact." | Manual Read does not replace `validate_artifacts.py`; show the validator's zero exit, or the gate stays red. |
 | "Context is clear, I explored manually." | Manual Read/Glob/ls does not replace `detect_context.py`; the transcript needs the detector run or its skip note. |
@@ -39,19 +39,21 @@ Codex, the other supported runtime, satisfies the same behavior through the embe
 
 **Call-order guard:** after loading `agentic-sdlc-pipeline`, do not read files, run shell commands, create branches, or write artifacts until you have called `Skill` -> `agentic-sdlc:dispatch-strategy` for the mechanism decision. This call is required even when the likely answer is "small single-file work; main loop is enough".
 
+**Branch checkpoint (both runtimes):** after dispatch, before the first artifact/test/source write in a Git repository, record `git branch --show-current` and `git rev-parse HEAD`. Reuse a suitable work branch or create one when on main/master or detached HEAD, then verify the active branch before writing. Routine local branch creation is within an implementation request unless the user restricts it; no-commit does not mean no-branch. A non-Git workspace gets an explicit skip note. See playbook steps 1–2 for remote/update boundaries.
+
 **No manual substitutes:** these gates are transcript gates, not prose gates. Manual Read/Glob/ls exploration does not replace detect_context.py. Manual review text does not replace validate_artifacts.py. Manual TDD/edit/test work does not replace the selected core work-flow Skill call. Missing one is a failed gate even if the final code and tests are otherwise correct.
 
 **Named workflow only in Claude Code:** Spec and Plan drafts must call the named `Workflow` `agentic-sdlc:spec-plan-draft` when the Workflow tool exists. Do not create ad hoc Workflow scripts for spec or plan drafting; that bypasses the author/critic workflow contract and fails the gate. In Codex, the equivalent gate is the embedded author -> critic -> revise adapter described below, not a `Workflow` call and not a call to `spec-authoring` / `plan-authoring`.
 
 Minimum Full-mode transcript in Claude Code:
 1. `Skill` -> `agentic-sdlc:dispatch-strategy` before choosing mechanisms for heavy, independent, or parallel steps.
-2. `Bash`/`PowerShell` -> `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/detect_context.py" --path <scope>` before replacing exploration decisions with file reads.
+2. `Bash`/`PowerShell` -> `python3 "<runtime-root>/scripts/detect_context.py" --path <scope>` before replacing exploration decisions with file reads.
 3. `Workflow` -> `agentic-sdlc:spec-plan-draft` with `args:{mode:"spec", context:<analysis + scope>}` for step 4.
-4. `Bash`/`PowerShell` -> `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode spec --file docs/agentic-sdlc/specs/<work_id>.md` after saving the spec and before the Spec Review gate.
+4. `Bash`/`PowerShell` -> `python3 "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/agentic-sdlc/specs/<work_id>.md` after saving the spec and before the Spec Review gate.
 5. `Workflow` -> `agentic-sdlc:spec-plan-draft` with `args:{mode:"plan", context:<approved spec>}` for step 5.
-6. `Bash`/`PowerShell` -> `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode plan --file docs/agentic-sdlc/plans/<work_id>.md --spec docs/agentic-sdlc/specs/<work_id>.md --strict` after saving the plan and before the Plan Review gate.
+6. `Bash`/`PowerShell` -> `python3 "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/agentic-sdlc/plans/<work_id>.md --spec docs/agentic-sdlc/specs/<work_id>.md --strict` after saving the plan and before the Plan Review gate.
 7. `Skill` -> the selected core work-flow (`agentic-sdlc:root-cause-fix`, `agentic-sdlc:feature-build`, `agentic-sdlc:safe-refactor`, or `agentic-sdlc:test-authoring`) with the approved spec and plan paths before writing implementation tests or code.
-8. `Skill` -> `agentic-sdlc:security-audit` for each required security pass, unless a deterministic skip rule applies and is recorded.
+8. `Skill` -> `agentic-sdlc:security-audit` for each required security pass, followed by its dispatch decision and completed fresh reviewer result(s); retain input scope and findings. Use only the skill's applicable documented fallback or deterministic skip, with its evidence.
 9. `Skill` -> `agentic-sdlc:implementation-control` before any final implementation report.
 10. `Skill` -> `agentic-sdlc:completion-claim-gate` immediately before the final implementation report or any claim containing done, fixed, passing, verified, ready, complete, works, or commit/push/PR readiness.
 
@@ -65,11 +67,11 @@ Before the list, emit `Runtime: Codex`. For each gate below, emit a one-line `Co
 6. Draft the plan inside agentic-sdlc-pipeline using `contracts/skills/03-plan-mode.md` and the approved spec; record `Codex Adapter Gate: spec-plan-draft plan author`.
 7. Run the same critic/revise adapter for the plan, save `docs/agentic-sdlc/plans/<work_id>.md`, then validate with `--mode plan --spec docs/agentic-sdlc/specs/<work_id>.md --strict`; record `Codex Adapter Gate: spec-plan-draft plan critic`.
 8. Activate the selected core work-flow skill instructions (`root-cause-fix`, `feature-build`, `safe-refactor`, or `test-authoring`) before implementation tests or code edits; record `Codex Adapter Gate: <selected-core-skill> activated`.
-9. Activate `security-audit`, `implementation-control`, and `completion-claim-gate` at their gates, using runtime subagents where the skill calls for fresh context and the runtime supports them; record `Codex Adapter Gate: security-audit`, `Codex Adapter Gate: implementation-control`, and `Codex Adapter Gate: completion-claim-gate`.
+9. Activate `security-audit`, `implementation-control`, and `completion-claim-gate` at their gates, using runtime subagents where the skill calls for fresh context and the runtime supports them; retain completed reviewer results, not just activation. Record `Codex Adapter Gate: security-audit`, `Codex Adapter Gate: implementation-control`, and `Codex Adapter Gate: completion-claim-gate`.
 
 Do not satisfy these by restating another skill's checklist inline. If a runtime tool is genuinely unavailable, write a `Delegation Degraded` note naming the missing tool and perform the smallest safe fallback; otherwise, missing the tool call is a failed gate.
 
-For an explicit automated smoke eval only, pass `depth:"smoke"` and `maxRevisionRounds:0` to `spec-plan-draft`; normal product work stays full-depth. Smoke mode shortens only the `spec-plan-draft` internals. It does not skip `detect_context.py`, artifact validation, the selected core work-flow Skill call, security review, implementation control, or completion-claim-gate.
+For an explicit automated smoke eval only, pass `depth:"smoke"` and `maxRevisionRounds:0` to `spec-plan-draft`; normal product work stays full-depth. Smoke mode shortens only the `spec-plan-draft` internals. It does not skip the branch checkpoint, `detect_context.py`, artifact validation, the selected core work-flow Skill call, completed security review, implementation control, or completion-claim-gate. Dependency-install approval boundaries still apply.
 
 ## At kickoff (always)
 1. **Mode select.** Full vs **Lite Mode** (see playbook). Lite is **forbidden** for auth / payment / security / DB migration / production bug / API contract / permission-role / user-data / token-session / RLS — those are always Full.
@@ -146,7 +148,7 @@ Detail per step → `playbook.md`. The Spec/Plan author⇄critic phases (4–5) 
 Only when: code done · relevant + full tests run with output shown · both security passes done · lint/typecheck/build + secret-scan reported · diff reviewed · `implementation-control` clean. Then invoke `completion-claim-gate` with the exact evidence you will claim, and only after that produce the **Final Implementation Report** (`templates.md`). No evidence → no "done"; report the honest current state instead.
 
 ## Artifact layout & per-package evidence
-Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`). Per-package plan change-detection runs as a filesystem scan, not a `git status` query; the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
+Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`). Per-package plan change-detection runs as a filesystem scan, not a `git status` query; new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 
 On **Finalize**, persist the Final Implementation Report to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — **per-package only** (flat packages get no evidence), using the slug emitted by `resolve_work_package.py` (never re-derived). A re-run **overwrites** this single canonical file in place (last run wins; no per-run/timestamp suffix). Evidence is git-ignored and has **no validator** — it never gates resolution. This write is performed by the **main pipeline finalize step**, not the read-only `implementation-auditor` sub-agent.
 

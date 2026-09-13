@@ -1,8 +1,8 @@
 """Update local plugin version metadata.
 
 Usage:
-  python scripts/bump_version.py 0.2.0
-  python scripts/bump_version.py --check
+  python3 scripts/bump_version.py 0.2.0
+  python3 scripts/bump_version.py --check
 
 This updates the shared VERSION plus Claude Code and Codex plugin manifests.
 """

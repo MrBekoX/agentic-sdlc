@@ -40,12 +40,10 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 EVALS_DIR = Path(__file__).resolve().parent / "evals"
 
-# Same allow-list as scripts/check_all.py — the repo gate is intentionally broader than
-# skill-creator's packaging validator (`user-invocable` / `argument-hint` are legitimate
-# here and used by the flow skills). Kept in sync deliberately; the structure test asserts it.
+# Shared Agent Skills fields, matching scripts/check_all.py. Runtime-specific agent
+# metadata uses ALLOWED_AGENT_KEYS; external toolkit validators can be narrower.
 ALLOWED_SKILL_KEYS = {
     "name", "description", "license", "allowed-tools", "metadata", "compatibility",
-    "user-invocable", "argument-hint", "model", "disable-model-invocation",
 }
 ALLOWED_AGENT_KEYS = {"name", "description", "tools", "model"}
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -208,6 +206,8 @@ def validate_skill_structure(skill_dir):
         errors.append(f"name_dir_mismatch:{name_hint}:{name}")
     elif not NAME_RE.match(name):
         errors.append(f"name_not_kebab:{name_hint}")
+    if len(name) > 64:
+        errors.append(f"name_too_long:{name_hint}")
 
     desc = frontmatter_value(fm, "description")
     if not desc:
@@ -217,6 +217,10 @@ def validate_skill_structure(skill_dir):
             errors.append(f"angle_bracket_in_description:{name_hint}")
         if len(desc) < 40:
             warnings.append(f"thin_description:{name_hint}:{len(desc)}")
+        if len(desc) > 1024:
+            errors.append(f"description_too_long:{name_hint}")
+        if re.match(r"^[\"']?Use\b", desc):
+            errors.append(f"imperative_description:{name_hint}")
 
     # A skill body should carry at least one H1 title (a section anchor for the reader).
     if not re.search(r"(?m)^#\s+\S", body):

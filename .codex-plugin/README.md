@@ -8,11 +8,11 @@ Codex reads:
 
 | File | Purpose |
 |---|---|
-| `.codex-plugin/plugin.json` | Codex plugin metadata and interface block. |
+| `.codex-plugin/plugin.json` | Supported compatibility manifest carrying Codex hooks and presentation. |
 | `skills/*/SKILL.md` | Shared skill source. |
 | `hooks/hooks-codex.json` | Codex hook config: blocking `PreToolUse`, bootstrap `SessionStart`, and advisory/env-gated `Stop` backstops after hook review/trust. |
 
-The manifest points to:
+The manifest explicitly points to:
 
 ```json
 {
@@ -20,7 +20,11 @@ The manifest points to:
 }
 ```
 
-The `interface` block supplies Codex display metadata, capabilities, default prompts, website, privacy policy, and terms links.
+The `interface` block supplies display metadata, capabilities, default prompts, external links, and bundled square icon/logo assets. `screenshots` is empty because this skills-only package has no custom MCP UI; the [submission contract](https://developers.openai.com/plugins/deploy/submission-errors) requests screenshots only for custom UI. The documentation overview below illustrates the process and is not runtime evidence.
+
+![Agentic SDLC workflow overview](../assets/workflow-overview.png)
+
+The [official packaging guide](https://developers.openai.com/plugins/build/plugins) recommends a portable root `plugin.json` for new packages and still supports this compatibility manifest. This package deliberately retains the compatibility format: Codex **0.154.0** suppresses portable-package hooks in its [released loader](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/core-plugins/src/loader.rs#L954). A native comparison with identical files discovered 16 skills in both formats, but **0 portable hooks versus 8 compatibility-format hooks**. Do not add a portable root manifest until a new native probe proves hook parity; otherwise it silently disables the backstops. See [runtime evidence and limits](../docs/runtime-adapter.md).
 
 ## Install
 
@@ -140,7 +144,7 @@ Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdl
 
 Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
-Per-package plan change-detection runs as a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
+Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 
 ## Troubleshooting
 

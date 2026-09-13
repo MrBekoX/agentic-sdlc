@@ -1,6 +1,6 @@
 ---
 name: implementation-control
-description: Use first for a pre-final audit in any language that the implementation followed the required flow across spec, plan, TDD, tests run, security pass, scoped diff, and final evidence. Treat requests to audit the spec-plan-TDD-security flow before the final response as active audit tasks, not passive session preferences. Invoke this skill as the first action, before running git diff/status/log or reading files and even when evidence is missing, because its auditor inspects the diff itself; then report missing evidence and do not gather the diff or ask what to do first. Not for starting new implementation.
+description: This skill should be used first for a pre-final audit in any language that the implementation followed the required flow across spec, plan, TDD, tests run, security pass, scoped diff, and final evidence. Requests to audit the spec-plan-TDD-security flow before the final response are active audit tasks, not passive session preferences. It applies as the first action, before running git diff/status/log or reading files and even when evidence is missing, because its auditor inspects the diff itself; missing evidence is an audit outcome, not a reason to defer activation. Not for starting new implementation.
 ---
 
 # Skill: implementation-control
@@ -60,7 +60,7 @@ A report that marks every step PASS with the same justification ("flow was follo
 ## Procedure
 1. Resolve the work package before reading the spec/plan. If the user supplied `plan:` or `spec:` paths, pass them explicitly: `python3 "<runtime-root>/scripts/resolve_work_package.py" --plan <path>` or `--spec <path>`. Otherwise run `python3 "<runtime-root>/scripts/resolve_work_package.py"` and let it match current branch, then changed canonical plans.
 2. If resolution fails or returns multiple candidates, do **not** guess. Emit PARTIAL/FAIL with `spec/plan artifact ambiguous or missing`, list the candidates/error lines, and block the final answer until the intended plan path is supplied or the artifacts are fixed.
-3. Gather evidence from the resolved spec, resolved plan, the `git diff`, the test output, and the security-analysis notes.
+3. Gather evidence from the resolved spec, resolved plan, the `git diff`, test output with exit status, and security-analysis notes. Supply the auditor with branch/HEAD receipts before the first write (when the enclosing flow requires a work branch), dependency-install attempts and their authorization, and the required security dispatch/reviewer completion results or the applicable documented fallback. A Skill load or self-authored PASS note is not completed independent review.
 4. **Delegate to the `implementation-auditor` agent** or runtime fresh-context equivalent for an independent pass (mandatory — self-attestation by the implementer is not an audit; F6). If the runtime supports a fresh-context specialist, use it. If it does not, record `Delegation Degraded: fresh-context specialist unavailable`, perform the pass in the main loop, and mark the result non-independent.
 5. Map evidence to the checklist below; mark each step PASS / PARTIAL / FAIL with the evidence (or its absence).
 6. Emit the **Implementation Control Report**.

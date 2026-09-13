@@ -18,24 +18,144 @@ def load_resolver():
     return mod
 
 
-def make_skill_creator_root(path):
+FULL_TOOLKIT_FILES = (
+    "scripts/quick_validate.py",
+    "scripts/aggregate_benchmark.py",
+    "eval-viewer/generate_review.py",
+    "eval-viewer/viewer.html",
+    "scripts/run_eval.py",
+    "scripts/run_loop.py",
+    "scripts/improve_description.py",
+    "scripts/generate_report.py",
+    "scripts/utils.py",
+    "scripts/package_skill.py",
+    "references/schemas.md",
+)
+
+
+def make_skill_creator_root(path, files=FULL_TOOLKIT_FILES):
     path.mkdir(parents=True)
     (path / "SKILL.md").write_text("---\nname: skill-creator\n---\n", encoding="utf-8")
     (path / "scripts").mkdir()
+    for relative in files:
+        target = path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# fixture\n", encoding="utf-8")
 
 
 class TestSkillCreatorResolver(unittest.TestCase):
+    def test_default_skips_minimal_codex_for_complete_claude_toolkit(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            codex = Path(tmp) / "codex-system"
+            claude = Path(tmp) / "claude-official"
+            make_skill_creator_root(codex, ["scripts/quick_validate.py"])
+            make_skill_creator_root(claude)
+            with mock.patch.object(resolver, "candidate_paths", return_value=[
+                ("codex-system", codex), ("claude-official-cache:test", claude),
+            ]):
+                self.assertEqual(resolver.discover(), ("claude-official-cache:test", claude.resolve()))
+
+    def test_validate_only_accepts_minimal_toolkit(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "minimal"
+            make_skill_creator_root(root, ["scripts/quick_validate.py"])
+            with mock.patch.object(resolver, "candidate_paths", return_value=[("codex-system", root)]):
+                self.assertEqual(resolver.discover(("validate",)), ("codex-system", root.resolve()))
+
+    def test_missing_capabilities_report_resources_and_do_not_install(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "minimal"
+            make_skill_creator_root(root, ["scripts/quick_validate.py"])
+            buf = io.StringIO()
+            with (
+                mock.patch.object(resolver, "candidate_paths", return_value=[("codex-system", root)]),
+                mock.patch.object(resolver, "install_with_claude") as install,
+                contextlib.redirect_stdout(buf),
+            ):
+                rc = resolver.main([])
+            install.assert_not_called()
+        self.assertEqual(rc, 2)
+        self.assertIn("skill_creator_status=missing_capabilities", buf.getvalue())
+        for resource in ("scripts/package_skill.py", "eval-viewer/viewer.html", "references/schemas.md"):
+            self.assertIn(resource, buf.getvalue())
+
+    def test_viewer_requires_its_template_and_packager_requires_validator(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "partial"
+            make_skill_creator_root(root, ["eval-viewer/generate_review.py", "scripts/package_skill.py"])
+            with mock.patch.object(resolver, "candidate_paths", return_value=[("codex-system", root)]):
+                self.assertIsNone(resolver.discover(("viewer",)))
+                self.assertIsNone(resolver.discover(("package",)))
+
+    def test_required_resources_must_be_files(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "partial"
+            make_skill_creator_root(root, [])
+            (root / "scripts/quick_validate.py").mkdir()
+            with mock.patch.object(resolver, "candidate_paths", return_value=[("codex-system", root)]):
+                self.assertIsNone(resolver.discover(("validate",)))
+
+    def test_cli_can_request_multiple_capabilities(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "review"
+            make_skill_creator_root(root, [
+                "scripts/aggregate_benchmark.py", "eval-viewer/generate_review.py", "eval-viewer/viewer.html",
+            ])
+            buf = io.StringIO()
+            with (
+                mock.patch.object(resolver, "candidate_paths", return_value=[("skill_creator_root", root)]),
+                contextlib.redirect_stdout(buf),
+            ):
+                rc = resolver.main(["--require", "benchmark", "viewer"])
+        self.assertEqual(rc, 0)
+        self.assertIn("skill_creator_required=benchmark,viewer", buf.getvalue())
+        self.assertIn("skill_creator_trust=explicit-unverified", buf.getvalue())
+
+    def test_install_rechecks_capabilities_not_just_identity(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "minimal"
+            make_skill_creator_root(root, ["scripts/quick_validate.py"])
+            buf = io.StringIO()
+            with (
+                mock.patch.object(resolver, "candidate_paths", return_value=[("codex-system", root)]),
+                mock.patch.object(resolver, "install_with_claude", return_value=(0, "installed")) as install,
+                contextlib.redirect_stdout(buf),
+            ):
+                rc = resolver.main(["--install"])
+            install.assert_called_once_with()
+        self.assertEqual(rc, 3)
+        self.assertIn("skill_creator_status=missing_after_install", buf.getvalue())
+        self.assertIn("scripts/package_skill.py", buf.getvalue())
+
     def test_discovers_explicit_env_root(self):
         resolver = load_resolver()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "skill-creator"
             make_skill_creator_root(root)
+            expected = root.resolve()
             with mock.patch.dict("os.environ", {"SKILL_CREATOR_ROOT": str(root)}, clear=True):
                 found = resolver.discover()
         self.assertIsNotNone(found)
         source, path = found
         self.assertEqual(source, "skill_creator_root")
-        self.assertEqual(path, root)
+        self.assertEqual(path, expected)
+
+    def test_discovery_returns_canonical_candidate_path(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "skill-creator"
+            make_skill_creator_root(root)
+            # Keep the input noncanonical, independently of Windows 8.3 aliases.
+            candidate = root / ".." / root.name
+            with mock.patch.object(resolver, "candidate_paths", return_value=[("codex-system", candidate)]):
+                self.assertEqual(resolver.discover(), ("codex-system", root.resolve()))
 
     def test_rejects_shape_compatible_wrong_skill(self):
         resolver = load_resolver()

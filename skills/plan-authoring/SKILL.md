@@ -1,6 +1,6 @@
 ---
 name: plan-authoring
-description: Use first in any language when the user asks only for an implementation plan, task breakdown, HOW document, sequencing, ordered steps, or verification/TDD points without writing code, including no-direct-fix prompts and underspecified plan-only prompts. Activate before asking for missing bug details or clarification; not for spec-only, test-only, code implementation, or ambiguous design exploration.
+description: This skill should be used first in any language when the user asks only for an implementation plan, task breakdown, HOW document, sequencing, ordered steps, or verification/TDD points without writing code, including no-direct-fix prompts and underspecified plan-only prompts. It applies before asking for missing bug details or clarification; not for spec-only, test-only, code implementation, or ambiguous design exploration.
 ---
 
 # Skill: plan-authoring

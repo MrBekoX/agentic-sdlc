@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Resolve the external skill-creator root for skill-authoring workflows.
 
-Default mode is read-only discovery. Pass --install to try the Claude Code
-official marketplace install command when discovery fails, then resolve again.
+Default mode checks the files needed for validation, behavioral review, and
+packaging without executing external code. Narrow with --require. Pass --install
+only when an official marketplace dependency installation is authorized.
 """
 
 from __future__ import annotations
@@ -15,7 +16,21 @@ import sys
 from pathlib import Path
 
 
-REQUIRED = ("SKILL.md", "scripts")
+CAPABILITIES = {
+    "validate": ("scripts/quick_validate.py",),
+    "benchmark": ("scripts/aggregate_benchmark.py",),
+    "viewer": ("eval-viewer/generate_review.py", "eval-viewer/viewer.html"),
+    "package": ("scripts/package_skill.py", "scripts/quick_validate.py"),
+    "schemas": ("references/schemas.md",),
+    # These are the external Claude harnesses, not Codex runners. File presence
+    # alone does not establish CLI/auth, platform, or Python dependency support.
+    "trigger": ("scripts/run_eval.py", "scripts/utils.py"),
+    "optimize": (
+        "scripts/run_loop.py", "scripts/run_eval.py",
+        "scripts/improve_description.py", "scripts/generate_report.py", "scripts/utils.py",
+    ),
+}
+DEFAULT_CAPABILITIES = ("validate", "benchmark", "viewer", "package", "schemas")
 
 
 def emit(fields: dict[str, str]) -> None:
@@ -60,19 +75,44 @@ def candidate_paths() -> list[tuple[str, Path]]:
 
 
 def is_skill_creator_root(path: Path) -> bool:
-    if not path.is_dir() or not all((path / name).exists() for name in REQUIRED):
+    if not (path / "SKILL.md").is_file() or not (path / "scripts").is_dir():
         return False
     try:
         text = (path / "SKILL.md").read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeError):
         return False
     return bool(re.search(r"(?m)^name:\s*skill-creator\s*$", text))
 
 
-def discover() -> tuple[str, Path] | None:
+def missing_files(path: Path, required: tuple[str, ...]) -> list[str]:
+    return sorted({
+        relative for capability in required for relative in CAPABILITIES[capability]
+        if not (path / relative).is_file()
+    })
+
+
+def available_capabilities(path: Path) -> list[str]:
+    return [name for name in CAPABILITIES if not missing_files(path, (name,))]
+
+
+def discover(
+    required: tuple[str, ...] = DEFAULT_CAPABILITIES,
+    diagnostics: dict[str, str] | None = None,
+) -> tuple[str, Path] | None:
+    skipped = 0
     for source, path in candidate_paths():
         if is_skill_creator_root(path):
-            return source, path
+            missing = missing_files(path, required)
+            if not missing:
+                return source, path.resolve()
+            skipped += 1
+            if diagnostics is not None:
+                prefix = f"candidate_{skipped}"
+                diagnostics.update({
+                    f"{prefix}_root": str(path.resolve()),
+                    f"{prefix}_source": source,
+                    f"{prefix}_missing_files": ",".join(missing),
+                })
     return None
 
 
@@ -101,21 +141,30 @@ def install_with_claude() -> tuple[int, str]:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--require", nargs="+", choices=tuple(CAPABILITIES),
+        default=DEFAULT_CAPABILITIES,
+        help="Required resource capabilities (default: validate benchmark viewer package schemas).",
+    )
+    parser.add_argument(
         "--install",
         action="store_true",
-        help="If discovery fails, install skill-creator from the Claude official marketplace.",
+        help="If capabilities are missing, explicitly install from the Claude official marketplace.",
     )
     args = parser.parse_args(argv)
 
-    found = discover()
+    required = tuple(dict.fromkeys(args.require))
+    fields = {"skill_creator_required": ",".join(required)}
+    found = discover(required, fields)
     if found:
         source, path = found
         emit(
             {
+                **fields,
                 "skill_creator_root": str(path),
                 "skill_creator_source": source,
                 "skill_creator_trust": trust_for(source),
                 "skill_creator_status": "found",
+                "skill_creator_capabilities": ",".join(available_capabilities(path)),
             }
         )
         return 0
@@ -123,18 +172,20 @@ def main(argv: list[str]) -> int:
     if not args.install:
         emit(
             {
+                **fields,
                 "install_command": "claude plugin install skill-creator@claude-plugins-official",
-                "skill_creator_status": "missing",
+                "skill_creator_status": "missing_capabilities" if "candidate_1_root" in fields else "missing",
             }
         )
         return 2
 
     rc, message = install_with_claude()
-    found = discover()
     fields = {
+        "skill_creator_required": ",".join(required),
         "install_command": "claude plugin install skill-creator@claude-plugins-official",
         "install_exit": str(rc),
     }
+    found = discover(required, fields)
     if message:
         fields["install_message"] = message
     if found:
@@ -145,6 +196,7 @@ def main(argv: list[str]) -> int:
                 "skill_creator_source": source,
                 "skill_creator_trust": trust_for(source),
                 "skill_creator_status": "installed",
+                "skill_creator_capabilities": ",".join(available_capabilities(path)),
             }
         )
         emit(fields)

@@ -30,14 +30,14 @@ python3 tests/skills/harness.py
 python3 -m unittest discover -s tests -v
 ```
 
-On Windows, use `py -3` for the same commands when `python3` is not on `PATH`.
+Use the repository-mandated `python3` entry point on both platforms; verify it is on `PATH` before running the gate. Hook-internal interpreter fallbacks are separate from these contributor commands.
 
 ### What each command proves
 
 | Command | Proves |
 |---|---|
-| `python3 scripts/bump_version.py --check` | `VERSION`, Claude plugin metadata, Claude marketplace metadata, and Codex plugin metadata agree. |
-| `python3 scripts/check_all.py` | Every `skills/<name>/SKILL.md` has valid frontmatter; name matches the directory; only allowed keys; description present and free of angle brackets; the discovered `tests/test_*.py` suites pass. |
+| `python3 scripts/bump_version.py --check` | `VERSION`, all shipped plugin manifests, and Claude marketplace metadata agree. |
+| `python3 scripts/check_all.py` | Every `skills/<name>/SKILL.md` has valid frontmatter; name matches the directory; only the six shared keys (`name`, `description`, `license`, `allowed-tools`, `metadata`, `compatibility`); description length and angle-bracket checks, plus rejection of the known leading-Use imperative regression (third-person meaning and trigger intent still need review); the discovered `tests/test_*.py` suites pass. |
 | `python3 tests/skills/harness.py` | Skill/agent/workflow/hook/skill-contract references resolve; golden cross-references have not drifted; safety-fixture evidence is wired to real files; `${CLAUDE_PLUGIN_ROOT}` and `${PLUGIN_ROOT}` paths plus Claude/Codex hook configs resolve. |
 | `python3 -m unittest discover -s tests -v` | `detect_context.py` classifies workspaces correctly; `validate_artifacts.py` enforces spec/plan structure and scans for placeholders/secrets; hook and workflow JavaScript parses under `node --check` (skipped if `node` is missing). |
 
@@ -100,7 +100,8 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_packaging_metadata.py` | metadata unit | Plugin manifests, publishable Codex schema keys, marketplace version consistency, and `bump_version.py` behavior. |
 | `tests/test_release_readiness_docs.py` | doc consistency unit | Release-readiness docs and documented helper counts match the repository. |
 | `tests/test_house_voice.py` | product-surface unit | Runtime scope, house-voice markers, depth-forcing blocks, and maintenance files remain present. |
-| `tests/test_skill_creator_resolver.py` | helper unit | `skill-authoring/scripts/resolve_skill_creator.py` discovers or reports the external skill-creator location without hidden installs. |
+| `tests/test_skill_creator_resolver.py` | helper unit | Official toolkit identity, requested capabilities, candidate fallback, and explicit-path trust diagnostics without hidden installs. |
+| `tests/test_runtime_documentation.py` | doc consistency unit | Current runtime evidence limits, test-result versus ordering semantics, coexistence restoration, and installed-trust proof requirements. |
 | `tests/test_handoff_scripts.py` | script unit | `task_brief.py` extracts a single plan task into a handoff file. |
 
 ---
@@ -470,6 +471,27 @@ In tests, `detect_context.py` is exercised through `tests/test_detect_context.py
 
 ---
 
+## Installed-runtime and coexistence evidence
+
+Keep these evidence classes separate:
+
+| Claim | Required observation |
+|---|---|
+| Metadata or handler correctness | Native manifest validation or direct deterministic handler tests, with exact files and versions |
+| Model access | Successful response on the requested model/effort; no substitution |
+| Installed hook delivery | Discovered plugin and hook definitions, reviewed trust state, real event output and observed effect |
+| Process ownership | Selected owner plus actual skill invocation/read, with no stacked counterpart for that phase |
+| Session restoration | Real persisted-session resume/compact and delivered bootstrap/owner context |
+| Procedure completion | Commands, outputs, resulting artifacts, and an independent final review scoped to that procedure |
+
+Record the binary version, plugin/reference hashes, requested and effective model/effort, fixture, trust state, transcript, and terminal result. For paired coexistence comparisons, freeze old/new snapshots and use the same prompts and model settings. Cover explicit house selection, explicit reference selection, inherited owner after resume, and an unqualified house entry; keep held-out phrasing out of the editing loop. An old baseline may pass. Generate the review viewer before judging the comparison. A classifier's JSON answer is route-classification evidence, not native activation evidence.
+
+For the 2026-09-12 remediation, the requested settings are `gpt-5.3-codex-spark` with `model_reasoning_effort="low"` and `claude-sonnet-5 --effort low`. Inspect Claude `modelUsage` as well as the assistant model: the CLI can invoke background or subagent models independently. Its documented child-environment controls include `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, and `CLAUDE_CODE_EFFORT_LEVEL`; pin them to the requested model/effort when every evaluation call must use it, and verify the observed usage. Never silently substitute a model when access fails. [Claude model configuration](https://code.claude.com/docs/en/model-config)
+
+A trust bypass may demonstrate execution of reviewed hook code but cannot establish ordinary persisted trust. Capture pending/untrusted discovery, native review of the exact current definition, and trusted delivery without bypass for that claim. Do not use Codex `--ephemeral` or Claude `--no-session-persistence` for resume/compact proof; existing trigger runners use those flags intentionally for disposable classifier/activation tests. Do not use Claude bare/safe mode for hook-delivery claims. Keep real credentials in the runtime's auth store rather than copying them into fixtures or evidence.
+
+A live hook test must inspect pre-tool denial and absence of the intended effect, or a Stop block followed by continuation and `stop_hook_active` loop protection. Calling the handler directly proves only its response to the supplied payload. Current rollout/cwd compatibility requires an installed-runtime sample because the transcript schema is unstable. See [runtime proof scope](runtime-adapter.md#current-binary-and-historical-hook-evidence).
+
 ## Live eval safety
 
 Live evals spend real tokens and time. Apply these controls:
@@ -489,8 +511,7 @@ Live evals spend real tokens and time. Apply these controls:
 
 ## Live eval findings (2026-06-18 — Haiku + Sonnet sweep)
 
-A full live sweep on Claude Code (`claude -p`, OAuth/subscription auth) over every skill and the
-pipeline run-time. Detailed transcripts live under `tests/artifacts/` (gitignored); this section is
+This historical sweep used Claude Code (`claude -p`, OAuth/subscription auth) over the then-current skill catalog and pipeline runtime. It does not establish current binary or revised-skill behavior. Detailed transcripts live under `tests/artifacts/` (gitignored); this section is
 the **durable summary** plus the eval-infrastructure fixes it motivated.
 
 ### Headline lesson: separate model-capacity floor from description/skill debt
@@ -552,7 +573,7 @@ Question: do the pipeline's feeder skills fire at the right step, and does it ru
 | `permission_denied` in procedure eval | A safe-looking command was denied by the runtime. | The eval treats denials as failures for executed procedure steps. Check whether `--permission-mode auto` is appropriate or whether the command needs broader permissions. |
 | `node not available` | `node` is not on PATH. | Install Node.js to enable `test_static_node.py`; the test skips rather than passes. |
 | `claude=missing` | The `claude` CLI is not installed or not on PATH. | Install/authenticate Claude Code to run live evals; deterministic checks still pass. |
-| Codex transcripts contain `WARN codex_core_plugins`/`codex_core_skills` lines (`defaultPrompt[0] must be at most 128 characters`, `icon path with '..'`) | `codex exec` loads **all** plugins installed in your user environment; these warnings come from **other** plugins (e.g. `ngs-analysis`, `chatgpt-apps`), not this repo — its `.codex-plugin/plugin.json` uses short `defaultPrompt` strings and declares no icon paths. | Harmless noise; ignore for trigger-eval results. The Codex route classifier passes skill names+descriptions inline in the prompt, so it does not depend on this repo's plugin actually loading. |
+| Codex transcripts contain plugin/skill warnings | Any loaded plugin can produce a warning; its source must be identified from the actual path/plugin metadata. | Record the warning and determine whether it affects the tested plugin. The inline route classifier can run without plugin discovery, so its result cannot excuse an installed-plugin warning or prove hook delivery. |
 
 ---
 
@@ -562,9 +583,11 @@ Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdl
 
 Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
-Per-package plan change-detection runs as a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
+Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 
 ## Cross-references
+
+The native Codex 0.154.0 fixture `tests/fixtures/transcripts/codex-0.154.0-native-tool-carriers.jsonl` retains six redacted WSL success/denial records. Its tests cover actual current carriers, output correlation, and forged headers inside denied/tool-output text. The live source capture proves runtime effects; replaying the reader against that capture proves parser compatibility, not a second model execution.
 
 - [README.md](../README.md) — project overview, install model, and quality gate.
 - [Claude Code runtime README](../.claude-plugin/README.md) — Claude plugin loading, hooks, and native transcript gates.

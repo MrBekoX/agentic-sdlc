@@ -1,6 +1,6 @@
 ---
 name: security-audit
-description: Use first in any language to audit code, a diff, endpoint, or login flow for security covering input validation, auth, authorization, IDOR, secrets, injection, dependencies, data exposure, rate limiting, or vulnerability risk. Not for general code-quality review or bug fixing.
+description: This skill should be used first in any language to audit code, a diff, endpoint, or login flow for security covering input validation, auth, authorization, IDOR, secrets, injection, dependencies, data exposure, rate limiting, or vulnerability risk. Not for general code-quality review or bug fixing.
 ---
 
 # Skill: security-audit

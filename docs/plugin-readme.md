@@ -1,6 +1,6 @@
 # AGENTIC-SDLC Plugin Reference
 
-> Version: `0.4.2`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md) or [Codex](../.codex-plugin/README.md).
+> Version: `0.4.3`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md) or [Codex](../.codex-plugin/README.md).
 
 AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It routes each prompt to the smallest sufficient skill and reserves the full SDLC envelope for work that actually needs it.
 
@@ -10,7 +10,7 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 |---|---|---|
 | Claude Code | Supported | Native `Skill`, `Workflow`, `Agent`/`Task`, commands, and full hook wiring. See [`../.claude-plugin/README.md`](../.claude-plugin/README.md). |
 | Codex | Supported | Shared skills, Codex manifest metadata, personal-marketplace install flow, and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
-| OpenCode / Kimi Code / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.2`. |
+| OpenCode / Kimi Code / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.3`. |
 
 ## Installation Model
 
@@ -171,14 +171,14 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 
 ## Known Limitations
 
-- `0.4.2` supports Claude Code and Codex only.
+- `0.4.3` supports Claude Code and Codex only.
 - Codex hook wiring is declared via `.codex-plugin/plugin.json` -> `hooks/hooks-codex.json`; non-managed plugin-bundled command hooks require Codex review/trust before they run. It is deliberately not named `hooks/hooks.json`, which Claude Code would auto-load with an undefined `${PLUGIN_ROOT}`.
 - Codex trigger evals are classifier evidence, not Claude-style `Skill` event evidence.
 - Hooks fail open where necessary so a hook fault does not break a session.
 - `validate_artifacts.py` is structural; it cannot prove that a spec is semantically about the requested task.
 - Live routing is model-dependent and must be evidenced per runtime, model, and run.
 - Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters. Local CLI install does not require a public directory listing.
-- Last live Codex hook/rollout proof is **0.142.0**. Current documented CLI is **0.153.4**; `transcript_path` is still not a stable hook interface, and a 0.153.4 Stop/rollout re-probe is pending.
+- Bounded native hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. Their source identities and the separate parser replay are recorded in [runtime evidence](runtime-adapter.md#current-binary-and-historical-hook-evidence); `transcript_path` remains unstable. The [release ledger](release-evidence-0.4.3.md) distinguishes this proof from the standalone routing and pipeline publication gates.
 
 ## Artifact Layouts And Per-Package Evidence
 
@@ -186,7 +186,7 @@ Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdl
 
 Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
-Per-package plan change-detection runs as a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
+Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 
 ## Cross-References
 
