@@ -1,0 +1,1232 @@
+{
+  "schema": 1,
+  "testCommandSource": "hooks/flow-requirements.json#testCommand",
+  "rows": [
+    {
+      "id": "ac28-semicolon-echo-exit",
+      "command": "pytest; echo EXIT=$?",
+      "specRefs": [
+        "AC28",
+        "AC123",
+        "AC130"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "echo EXIT=$?"
+      ],
+      "lastIsRealRunner": false,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac30-semicolon-echo-exit-nonzero",
+      "command": "pytest; echo EXIT=$?",
+      "specRefs": [
+        "AC30"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 1,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "echo EXIT=$?"
+      ],
+      "lastIsRealRunner": false,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "missing"
+      }
+    },
+    {
+      "id": "edge-semicolon-echo-no-exit-record",
+      "command": "pytest; echo EXIT=$?",
+      "specRefs": [
+        "AC42",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 0,
+        "exitCode": null,
+        "outputSummary": null
+      },
+      "statements": [
+        "pytest",
+        "echo EXIT=$?"
+      ],
+      "lastIsRealRunner": false,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac118-trailing-version",
+      "command": "pytest; pytest --version",
+      "specRefs": [
+        "AC118",
+        "AC130",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest --version"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac118-trailing-help",
+      "command": "pytest; pytest --help",
+      "specRefs": [
+        "AC118",
+        "AC130"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest --help"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac118-trailing-short-version",
+      "command": "pytest; pytest -V",
+      "specRefs": [
+        "AC118",
+        "AC130",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -V"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac118-trailing-python-m-version",
+      "command": "pytest; python -m pytest --version",
+      "specRefs": [
+        "AC118",
+        "AC130",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "python -m pytest --version"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac118-trailing-npm-test-help",
+      "command": "pytest; npm test -- --help",
+      "specRefs": [
+        "AC118",
+        "AC130",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "npm test -- --help"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac118-newline-echo-done",
+      "command": "pytest\necho done",
+      "specRefs": [
+        "AC118",
+        "AC130",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "echo done"
+      ],
+      "lastIsRealRunner": false,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac118-oror-true",
+      "command": "pytest || true",
+      "specRefs": [
+        "AC118",
+        "AC130",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "true"
+      ],
+      "lastIsRealRunner": false,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac118-andand-echo-ok",
+      "command": "pytest && echo ok",
+      "specRefs": [
+        "AC118",
+        "AC130"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest && echo ok"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac118-andand-trailing-version",
+      "command": "pytest && pytest --version",
+      "specRefs": [
+        "AC118",
+        "AC130",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest && pytest --version"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac29-cd-andand",
+      "command": "cd repo && pytest",
+      "specRefs": [
+        "AC29"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "cd repo && pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac29-cd-semicolon",
+      "command": "cd repo; pytest",
+      "specRefs": [
+        "AC29"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "cd repo",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac29-export-semicolon",
+      "command": "export X=1; pytest",
+      "specRefs": [
+        "AC29"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "export X=1",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac29-quoted-double",
+      "command": "pytest -k \"a;b\"",
+      "specRefs": [
+        "AC29"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest -k \"a;b\""
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac29-pytest-twice",
+      "command": "pytest; pytest",
+      "specRefs": [
+        "AC29"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac29-trailing-empty",
+      "command": "pytest;",
+      "specRefs": [
+        "AC29"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac29-trailing-empty-spaced",
+      "command": "pytest ; ",
+      "specRefs": [
+        "AC29"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac29-backslash-continuation",
+      "command": "pytest \\\n-q",
+      "specRefs": [
+        "AC29"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest -q"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac29-comment-line",
+      "command": "pytest\n# done",
+      "specRefs": [
+        "AC29"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-quoted-single",
+      "command": "pytest -k 'a;b'",
+      "specRefs": [
+        "AC29",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest -k 'a;b'"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac31-pipe-tee",
+      "command": "pytest | tee log.txt",
+      "specRefs": [
+        "AC31",
+        "AC42"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest | tee log.txt"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": true,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "ac31-pipe-tail",
+      "command": "pytest 2>&1 | tail -n 50",
+      "specRefs": [
+        "AC31",
+        "AC42",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest 2>&1 | tail -n 50"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": true,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-standalone-version",
+      "command": "pytest --version",
+      "specRefs": [
+        "AC41",
+        "AC42",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest --version"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-cd-andand-version",
+      "command": "cd repo && pytest --version",
+      "specRefs": [
+        "AC42",
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "cd repo && pytest --version"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-semicolon-cd-up",
+      "command": "pytest; cd ..",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "cd .."
+      ],
+      "lastIsRealRunner": false,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-cd-pytest-echo",
+      "command": "cd repo; pytest; echo x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "cd repo",
+        "pytest",
+        "echo x"
+      ],
+      "lastIsRealRunner": false,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-trailing-short-help",
+      "command": "pytest; pytest -h",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -h"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-trailing-version-extra-arg",
+      "command": "pytest; pytest --version -q",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest --version -q"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-trailing-k-help",
+      "command": "pytest; pytest -k help",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -k help"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-version-andand-pytest",
+      "command": "pytest --version && pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest --version && pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-echo-pytest",
+      "command": "echo pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "echo pytest"
+      ],
+      "lastIsRealRunner": false,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": false,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "missing",
+        "codexOrderGuard": "not-satisfied",
+        "codexStopTests": "missing"
+      }
+    },
+    {
+      "id": "edge-bash-c-wrapper",
+      "command": "bash -c \"pytest; true\"",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "bash -c \"pytest; true\""
+      ],
+      "lastIsRealRunner": false,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": false,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "missing",
+        "codexOrderGuard": "not-satisfied",
+        "codexStopTests": "missing"
+      }
+    },
+    {
+      "id": "plan-python-m-pytest",
+      "command": "python -m pytest -q",
+      "specRefs": [
+        "AC69"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "python -m pytest -q"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "plan-python-m-echo-exit-red-hidden",
+      "command": "python -m pytest -q; echo EXIT=$?",
+      "specRefs": [
+        "AC69"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "python -m pytest -q",
+        "echo EXIT=$?"
+      ],
+      "lastIsRealRunner": false,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "carrier-plain-green",
+      "command": "pytest",
+      "specRefs": [
+        "AC35",
+        "AC69",
+        "AC123"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "carrier-plain-red",
+      "command": "pytest",
+      "specRefs": [
+        "AC69"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 1,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": true,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "missing"
+      }
+    },
+    {
+      "id": "carrier-substrate-absent",
+      "command": "pytest",
+      "specRefs": [
+        "AC41",
+        "AC42",
+        "AC123"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 0,
+        "exitCode": null,
+        "outputSummary": null
+      },
+      "statements": [
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "carrier-missing-exit-code",
+      "command": "pytest",
+      "specRefs": [
+        "AC41"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": null,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "carrier-duplicate-call-event",
+      "command": "pytest",
+      "specRefs": [
+        "AC44"
+      ],
+      "carrier": {
+        "callEvents": 2,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "carrier-duplicate-output-record",
+      "command": "pytest",
+      "specRefs": [
+        "AC44"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 2,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    }
+  ]
+}
