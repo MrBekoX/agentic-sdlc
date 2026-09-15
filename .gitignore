@@ -29,6 +29,11 @@ docs/codex-plugin-runtime-debug-report/
 !docs/runtime-adapter.md
 !docs/release-readiness.md
 !docs/release-evidence-0.4.3.md
+!docs/data-handling.md
+!docs/publication/
+docs/publication/*
+!docs/publication/*.md
+!docs/publication/link-checks.json
 !docs/agentic-sdlc/
 docs/agentic-sdlc/*
 !docs/agentic-sdlc/evidence/
