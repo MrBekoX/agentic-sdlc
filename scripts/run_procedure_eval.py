@@ -1061,6 +1061,10 @@ BR6_BASH_BUILTINS = frozenset({
     "printf", "pushd", "pwd", "read", "readarray", "readonly", "return", "set", "shift", "shopt", "source", "suspend",
     "test", "times", "trap", "true", "type", "typeset", "ulimit", "umask", "unalias", "unset", "wait",
 })
+# bash 5.2.37's integer-attributed variables (`bash -c 'declare -p' | grep '^declare -[a-zA-Z]*i'`; SECONDS is not marked).
+# Assigning one evaluates the value as arithmetic, which can write BASH_CMDS, so an assignment to one (standalone, prefix
+# or as an export argument) lies outside the grammar.
+BR6_INTEGER_VARIABLES = frozenset({"BASHPID", "EUID", "HISTCMD", "OPTIND", "PPID", "RANDOM", "SRANDOM", "UID"})
 # printf, test, `[`, wait and unset stay out: each takes a variable name or evaluates an arithmetic subscript from an
 # argument, so any expansion there (parameter, glob, tilde) can supply a BASH_CMDS subscript.
 BR6_SAFE_BUILTINS = frozenset({":", "cd", "echo", "export", "false", "pwd", "set", "true"})
@@ -1068,7 +1072,8 @@ _ASCII_ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 _GRAMMAR_WORD_CHARS = frozenset(_ASCII_ALNUM + "_-./:=+,@%^~!?*]")
 _GRAMMAR_PARAMETER_CHARS = frozenset(_ASCII_ALNUM + "_?#$!@*-")
 _GRAMMAR_COMMAND_WORD_CHARS = frozenset(_ASCII_ALNUM + "_-./:=+,@%^~!#")
-_GRAMMAR_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
+_GRAMMAR_ASSIGNMENT_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\+?=")
+_GRAMMAR_PLAIN_ARGUMENT_RE = re.compile(r"[A-Za-z0-9_-]+")
 _GRAMMAR_SET_OPTION_RE = re.compile(r"[-+][euo]+")
 _GRAMMAR_SET_WORDS = frozenset({"errexit", "nounset", "pipefail"})
 
@@ -1079,8 +1084,10 @@ def in_safe_br6_grammar(command: str) -> bool:
     One linear left-to-right pass: unquoted words, single quotes, double quotes without substitution, `$NAME`-style
     parameters, backslash pairs and continuations, word-start comments, the separators `;`, newline, `||`, `&&`, `|`,
     `|&` and a background `&`, and simple redirections followed by a word. Each simple command's command word must be an
-    external program or one of BR6_SAFE_BUILTINS; after such a builtin no later `[` may appear; and `set` only takes the
-    errexit/nounset/pipefail forms. A word of only digits directly before `<` or `>` is that
+    external program or one of BR6_SAFE_BUILTINS; after such a builtin no later `[` may appear; `set` only takes the
+    errexit/nounset/pipefail forms; no assignment word names one of BR6_INTEGER_VARIABLES; and each `export` argument is a
+    literal `NAME=`/`NAME+=` assignment or a plain word of letters, digits, `_` and `-`, so no expansion, quote or glob
+    can build the assigned name. A word of only digits directly before `<` or `>` is that
     redirection's file descriptor in any position. Anything else is outside.
     """
     text = str(command or "")
@@ -1091,11 +1098,12 @@ def in_safe_br6_grammar(command: str) -> bool:
     command_seen = False
     safe_builtin = False
     set_command = False
+    export_command = False
     redirect_pending = False  # an operator was read and its target word has not started
     target_word = False       # the current word is a redirection target
 
     def finish_word(next_char: str) -> bool:
-        nonlocal in_word, command_seen, safe_builtin, set_command, target_word
+        nonlocal in_word, command_seen, safe_builtin, set_command, export_command, target_word
         if not in_word:
             return True
         in_word = False
@@ -1105,9 +1113,10 @@ def in_safe_br6_grammar(command: str) -> bool:
             return True
         if next_char in ("<", ">") and raw and all(c in "0123456789" for c in raw):
             return True  # the file descriptor of the redirection that follows
+        assignment = _GRAMMAR_ASSIGNMENT_RE.match(raw)
         if not command_seen:
-            if _GRAMMAR_ASSIGNMENT_RE.match(raw):
-                return True
+            if assignment:
+                return assignment.group(1) not in BR6_INTEGER_VARIABLES
             command_seen = True
             if not all(c in _GRAMMAR_COMMAND_WORD_CHARS or ord(c) >= 0x80 for c in raw):
                 return False
@@ -1115,12 +1124,17 @@ def in_safe_br6_grammar(command: str) -> bool:
                 return False
             safe_builtin = raw in BR6_SAFE_BUILTINS
             set_command = raw == "set"
+            export_command = raw == "export"
             return True
+        if export_command:
+            if assignment:
+                return assignment.group(1) not in BR6_INTEGER_VARIABLES
+            return bool(_GRAMMAR_PLAIN_ARGUMENT_RE.fullmatch(raw))
         return not set_command or bool(_GRAMMAR_SET_OPTION_RE.fullmatch(raw)) or raw in _GRAMMAR_SET_WORDS
 
     def end_simple_command() -> None:
-        nonlocal command_seen, safe_builtin, set_command
-        command_seen = safe_builtin = set_command = False
+        nonlocal command_seen, safe_builtin, set_command, export_command
+        command_seen = safe_builtin = set_command = export_command = False
 
     index = 0
     while index < length:

@@ -563,9 +563,11 @@ export function trailingOrRun(command) {
 // D23 safe shell grammar (spec DP35). An exit code is attributable only while the command lies entirely
 // inside it; anything outside is not attributable. The word sets are bash 5.2.37's own `compgen -k`
 // reserved words and `compgen -b` builtins. Within one bash process a later literal command name runs
-// other code, or the exit status is rewritten, only through a reserved word, a builtin or a shell-variable
-// assignment that needs `[` or `set -x`; a builtin a later bash adds is read as an external program (a
-// disclosed limit), and how a name resolves outside the command text (PATH, profile functions) is not seen.
+// other code, or the exit status is rewritten, only through a reserved word, a builtin, a shell-variable
+// assignment that needs `[` or `set -x`, or an assignment to an integer-attributed variable (its value is
+// evaluated as arithmetic, which can write BASH_CMDS); a builtin a later bash adds is read as an external
+// program (a disclosed limit), and how a name resolves outside the command text (PATH, profile functions)
+// is not seen.
 const BR6_RESERVED_WORDS = new Set([
   '!', '[[', ']]', '{', '}', 'case', 'coproc', 'do', 'done', 'elif', 'else', 'esac', 'fi', 'for', 'function', 'if',
   'in', 'select', 'then', 'time', 'until', 'while',
@@ -577,6 +579,9 @@ const BR6_BASH_BUILTINS = new Set([
   'printf', 'pushd', 'pwd', 'read', 'readarray', 'readonly', 'return', 'set', 'shift', 'shopt', 'source', 'suspend',
   'test', 'times', 'trap', 'true', 'type', 'typeset', 'ulimit', 'umask', 'unalias', 'unset', 'wait',
 ]);
+// bash 5.2.37's integer-attributed variables (`bash -c 'declare -p' | grep '^declare -[a-zA-Z]*i'`; SECONDS is not
+// marked). An assignment to one, standalone, prefix or as an export argument, lies outside the grammar.
+const BR6_INTEGER_VARIABLES = new Set(['BASHPID', 'EUID', 'HISTCMD', 'OPTIND', 'PPID', 'RANDOM', 'SRANDOM', 'UID']);
 // printf, test, `[`, wait and unset stay out: each takes a variable name or evaluates an arithmetic subscript from
 // an argument, so any expansion there (parameter, glob, tilde) can supply a BASH_CMDS subscript.
 const BR6_SAFE_BUILTINS = new Set([':', 'cd', 'echo', 'export', 'false', 'pwd', 'set', 'true']);
@@ -584,7 +589,8 @@ const GRAMMAR_ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234
 const GRAMMAR_WORD_CHARS = new Set(GRAMMAR_ALNUM + '_-./:=+,@%^~!?*]');
 const GRAMMAR_PARAMETER_CHARS = new Set(GRAMMAR_ALNUM + '_?#$!@*-');
 const GRAMMAR_COMMAND_WORD = /^[A-Za-z0-9_\-./:=+,@%^~!#\u0080-\uFFFF]+$/;
-const GRAMMAR_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
+const GRAMMAR_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/;
+const GRAMMAR_PLAIN_ARGUMENT = /^[A-Za-z0-9_-]+$/;
 const GRAMMAR_DIGITS = /^[0-9]+$/;
 const GRAMMAR_SET_OPTION = /^[-+][euo]+$/;
 const GRAMMAR_SET_WORDS = new Set(['errexit', 'nounset', 'pipefail']);
@@ -593,8 +599,10 @@ const GRAMMAR_SET_WORDS = new Set(['errexit', 'nounset', 'pipefail']);
 // substitution, `$NAME`-style parameters, backslash pairs and continuations, word-start comments, the
 // separators `;`, newline, `||`, `&&`, `|`, `|&` and a background `&`, and simple redirections followed by a
 // word. Each simple command's command word is an external program or a BR6_SAFE_BUILTINS name; after such a
-// builtin no later `[` may appear (an array subscript reaches BASH_CMDS); and `set` only takes the
-// errexit/nounset/pipefail forms. A word of only
+// builtin no later `[` may appear (an array subscript reaches BASH_CMDS); `set` only takes the
+// errexit/nounset/pipefail forms; no assignment word names an integer-attributed variable; and each `export`
+// argument is a literal `NAME=`/`NAME+=` assignment or a plain word of letters, digits, `_` and `-`, so
+// no expansion, quote or glob can build the assigned name. A word of only
 // digits directly before `<` or `>` is that redirection's file descriptor in any position. Always outside: `(`,
 // `)`, `{`, `}`, a backtick, `[[`, `<<`, `<(` and `>(`.
 // scripts/run_procedure_eval.py in_safe_br6_grammar mirrors this pass branch for branch.
@@ -607,6 +615,7 @@ export function inSafeBr6Grammar(command) {
   let commandSeen = false;
   let safeBuiltin = false;
   let setCommand = false;
+  let exportCommand = false;
   let redirectPending = false; // an operator was read and its target word has not started
   let targetWord = false;      // the current word is a redirection target
   const finishWord = (next) => {
@@ -615,15 +624,18 @@ export function inSafeBr6Grammar(command) {
     const raw = word.join('');
     if (targetWord) { targetWord = false; return true; }
     if ((next === '<' || next === '>') && GRAMMAR_DIGITS.test(raw)) return true; // the redirection's fd
+    const assignment = GRAMMAR_ASSIGNMENT.exec(raw);
     if (!commandSeen) {
-      if (GRAMMAR_ASSIGNMENT.test(raw)) return true;
+      if (assignment) return !BR6_INTEGER_VARIABLES.has(assignment[1]);
       commandSeen = true;
       if (!GRAMMAR_COMMAND_WORD.test(raw)) return false;
       if (BR6_RESERVED_WORDS.has(raw) || (BR6_BASH_BUILTINS.has(raw) && !BR6_SAFE_BUILTINS.has(raw))) return false;
       safeBuiltin = BR6_SAFE_BUILTINS.has(raw);
       setCommand = raw === 'set';
+      exportCommand = raw === 'export';
       return true;
     }
+    if (exportCommand) return assignment ? !BR6_INTEGER_VARIABLES.has(assignment[1]) : GRAMMAR_PLAIN_ARGUMENT.test(raw);
     return !setCommand || GRAMMAR_SET_OPTION.test(raw) || GRAMMAR_SET_WORDS.has(raw);
   };
   let i = 0;
@@ -643,6 +655,7 @@ export function inSafeBr6Grammar(command) {
       commandSeen = false;
       safeBuiltin = false;
       setCommand = false;
+      exportCommand = false;
       wordStart = true;
       continue;
     }

@@ -985,6 +985,10 @@ GRAMMAR_INSIDE = (
     "X='BASH_CMDS[pytest]'; cd \"$X\" 2>/dev/null; pytest",
     "CDPATH='BASH_CMDS[pytest]'; cd -P . ; pytest",
     "set -euo pipefail; cd .; echo ok; pytest",
+    # Assignments to variables without bash 5.2.37's integer attribute, and literal export arguments (runner runs).
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; SECONDS=V; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; LINENO=V; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; export -n X=V -- Y; pytest",
 )
 GRAMMAR_OUTSIDE = (
     "pytest $(x)", "pytest $((1))", "pytest ${x}", "pytest $'x'", "pytest $\"x\"", "pytest $[1]", "pytest $",
@@ -1013,7 +1017,26 @@ GRAMMAR_OUTSIDE = (
     "cp /usr/bin/true 0; V='a[BASH_CMDS[pytest]=0]'; test -v $V; pytest",
     "cp /usr/bin/true 0; V='a[BASH_CMDS[pytest]=0]'; [ -v \"$V\" ]; pytest",
     "V='BASH_CMDS[pytest]'; wait -n -p $V; pytest",
+    # Assigning an integer-attributed variable (bash 5.2.37 `declare -p`) evaluates the value as arithmetic, which can
+    # write BASH_CMDS (bash exit 0, runner not run); an export argument must name its variable literally.
+    "echo exit 0 > 1; chmod +x 1; RANDOM=BASH_CMDS[pytest]=1; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; RANDOM=V; pytest",
+    "echo exit 0 > 1; chmod +x 1; ls BASH_CMDS[pytest]=1; RANDOM=_; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; RANDOM+=V; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; export RANDOM=V; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; SRANDOM=$V; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; OPTIND=V; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; HISTCMD=V; pytest",
+    "echo exit 0 > 1; chmod +x 1; W='RANDOM=BASH_CMDS[pytest]=1'; export $W; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; export \"RANDOM=V\"; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; touch RANDOM=V; export RAND?M=V; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; OLDPWD=RANDOM=V; export ~-; pytest",
+    "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[pytest]=1; export -n RANDOM=V; pytest",
+    # Disclosed false 'missing': any integer-attributed assignment, prefix or standalone, and a non-literal export word.
+    "RANDOM=5; pytest", "RANDOM=5 true; pytest", "RANDOM=V pytest", "export \"X=1\"; pytest",
 ) + ('pytest "a' + chr(1) + 'b"',)
+# bash 5.2.37 `bash -c 'declare -p' | grep '^declare -[a-zA-Z]*i'` (SECONDS is not marked).
+INTEGER_VARIABLES = frozenset({"BASHPID", "EUID", "HISTCMD", "OPTIND", "PPID", "RANDOM", "SRANDOM", "UID"})
 
 
 class TestStrictRedGreen(unittest.TestCase):
@@ -1038,10 +1061,23 @@ class TestStrictRedGreen(unittest.TestCase):
 
     def test_safe_grammar_production_lists(self):
         # Mutation: dropping any character or command-word production (each listed construct would be admitted).
-        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (30, 79))
+        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (33, 96))
         for command, expected in [(c, True) for c in GRAMMAR_INSIDE] + [(c, False) for c in GRAMMAR_OUTSIDE]:
             with self.subTest(command=command):
                 self.assertIs(procedure_eval.in_safe_br6_grammar(command), expected)
+
+    def test_integer_attributed_assignments_outside(self):
+        # Mutation: dropping any name from the pinned set, or checking only standalone assignments (not prefix or
+        # export arguments), admits that name's arithmetic BASH_CMDS write.
+        self.assertEqual(procedure_eval.BR6_INTEGER_VARIABLES, INTEGER_VARIABLES)
+        for name in sorted(INTEGER_VARIABLES):
+            for command in (f"{name}=V; pytest", f"{name}+=V; pytest", f"{name}=V true; pytest",
+                            f"export X=1 {name}=V; pytest"):
+                with self.subTest(command=command):
+                    self.assertIs(procedure_eval.in_safe_br6_grammar(command), False)
+        for command in ("SECONDS=V; pytest", "export SECONDS=V PATH=$PATH:bin; pytest", "RANDOMX=V; pytest"):
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.in_safe_br6_grammar(command), True)
 
     def test_statement_joins_carry_oror(self):
         # The values slice B's test_trailing_oror_run_records_the_joining_separator pins for Node (D23 mirror).

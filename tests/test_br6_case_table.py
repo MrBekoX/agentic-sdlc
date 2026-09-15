@@ -169,6 +169,9 @@ R10_EXCLUDED_WORDS = frozenset({
     "typeset", "ulimit", "umask", "unalias", "unset", "wait",
     "set",
 })
+# R10 (D23): an assignment word, prefix or export argument, naming one of bash 5.2.37's integer-attributed variables
+# (`declare -p`) evaluates its value as arithmetic, so a command holding one lies outside the grammar.
+R10_INTEGER_ASSIGNMENT = re.compile(r"(?:BASHPID|EUID|HISTCMD|OPTIND|PPID|RANDOM|SRANDOM|UID)\+?=")
 
 # (command, callEvents, outputRecords, exitCode)
 CARRIER_VARIANTS = (
@@ -364,7 +367,8 @@ class TestBR6CaseTable(unittest.TestCase):
                 plain_chars = not any(ch in "$(){}[]<>\\*?'\"#`" for ch in command)
                 no_controls = not any((ord(ch) < 32 and ch not in "\t\n") or ord(ch) == 127 for ch in command)
                 words = set(re.split(r"[ \t\n;|&]+", command))
-                if plain_chars and no_controls and not (words & R10_EXCLUDED_WORDS):
+                integer_assignment = any(R10_INTEGER_ASSIGNMENT.match(word) for word in words)
+                if plain_chars and no_controls and not (words & R10_EXCLUDED_WORDS) and not integer_assignment:
                     self.assertTrue(row["inSafeGrammar"], "R10 plain words and characters lie inside the grammar")
 
     # Guards: a construct row (outside the D23 grammar) marked attributable, a trailing `||` forgery marked default
@@ -399,10 +403,26 @@ class TestBR6CaseTable(unittest.TestCase):
                 self.assertIs(rows[row_id]["inSafeGrammar"], False)
                 self.assertEqual(rows[row_id]["defaultTests"], "missing")
                 self.assertIs(rows[row_id]["strictAttributable"], False)
+        # Integer-attributed assignments (standalone, append, or an export argument whose name is not literal) evaluate
+        # their value as arithmetic that writes BASH_CMDS; bash 5.2.37 exits 0 without running the runner.
+        integer_forged = [i for i in rows if i.startswith("edge-forged-integer-")]
+        self.assertEqual(len(integer_forged), 13)
+        for row_id in integer_forged:
+            with self.subTest(id=row_id):
+                self.assertIs(rows[row_id]["inSafeGrammar"], False)
+                self.assertEqual(rows[row_id]["defaultTests"], "missing")
+                self.assertIs(rows[row_id]["strictAttributable"], False)
+        for row_id in ("edge-outside-integer-random-number", "edge-outside-integer-random-prefix",
+                       "edge-outside-export-quoted-argument"):
+            with self.subTest(id=row_id):
+                self.assertIs(rows[row_id]["inSafeGrammar"], False)
+                self.assertEqual(rows[row_id]["defaultTests"], "missing")
+                self.assertIs(rows[row_id]["strictAttributable"], False)
         for row_id in ("edge-inside-cd-tilde-oldpwd", "edge-inside-echo-tilde-oldpwd",
                        "edge-inside-echo-parameter-subscript-text", "edge-inside-colon-parameter-subscript-text",
                        "edge-inside-cd-quoted-parameter", "edge-inside-cdpath-subscript-text",
-                       "edge-inside-set-cd-echo-before-runner"):
+                       "edge-inside-set-cd-echo-before-runner", "edge-inside-seconds-assignment",
+                       "edge-inside-lineno-assignment", "edge-inside-export-plain-arguments"):
             with self.subTest(id=row_id):
                 self.assertIs(rows[row_id]["inSafeGrammar"], True)
                 self.assertIs(rows[row_id]["strictAttributable"], True)

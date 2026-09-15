@@ -332,7 +332,7 @@ class BR6SafeGrammarTests(unittest.TestCase):
         self.assertEqual(mismatches, [], "rows where the Node grammar columns disagree with the table")
 
     def test_grammar_production_lists(self):
-        # The same 109 commands test_procedure_eval.TestStrictRedGreen.test_safe_grammar_production_lists checks in Python.
+        # The same 129 commands test_procedure_eval.TestStrictRedGreen.test_safe_grammar_production_lists checks in Python.
         from test_procedure_eval import GRAMMAR_INSIDE, GRAMMAR_OUTSIDE
         script = ("import {inSafeBr6Grammar} from " + json.dumps(ROLLOUT_URI) + ";"
                   "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () =>"
@@ -340,8 +340,22 @@ class BR6SafeGrammarTests(unittest.TestCase):
         commands = list(GRAMMAR_INSIDE) + list(GRAMMAR_OUTSIDE)
         got = self.node(script, commands)
         wrong = [c for c, value in zip(commands, got) if value is not (c in GRAMMAR_INSIDE)]
-        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (30, 79))
+        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (33, 96))
         self.assertEqual(wrong, [], "commands whose Node grammar verdict is wrong")
+
+    def test_integer_attributed_assignments_outside(self):
+        # Mutation: dropping a name from BR6_INTEGER_VARIABLES, or checking only standalone assignments, admits that
+        # name's arithmetic BASH_CMDS write (the Python mirror pins the same set).
+        from test_procedure_eval import INTEGER_VARIABLES
+        outside = [c for name in sorted(INTEGER_VARIABLES)
+                   for c in (f"{name}=V; pytest", f"{name}+=V; pytest", f"{name}=V true; pytest",
+                             f"export X=1 {name}=V; pytest")]
+        inside = ["SECONDS=V; pytest", "export SECONDS=V PATH=$PATH:bin; pytest", "RANDOMX=V; pytest"]
+        script = ("import {inSafeBr6Grammar} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () =>"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => inSafeBr6Grammar(c)))));")
+        got = dict(zip(outside + inside, self.node(script, outside + inside)))
+        self.assertEqual(got, {c: c in inside for c in outside + inside})
 
     def test_unmodeled_syntax_is_separator_outside_grammar(self):
         # Mutation: keeping the construct-opener list (the six forgeries below hold none of its openers).
