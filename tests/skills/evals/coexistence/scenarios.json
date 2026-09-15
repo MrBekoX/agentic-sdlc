@@ -11,7 +11,8 @@
     "The expected phase skill must own the substantive action. An incidental router or mind-spark load must exit before executing a competing phase checklist.",
     "Reject a second plugin's procedure for the same phase, including a house completion checklist appended to a Superpowers-owned phase. Owner choice must not disable hooks, permissions, or evidence requirements.",
     "Generate a review artifact before assigning a verdict. Separate model behavior under supplied bootstrap context from native installed-plugin bootstrap delivery; do not claim native delivery from supplied context.",
-    "Resume scenarios validate owner preservation against the supplied conversation summary. Native resume or compact support additionally requires an actual resumed runtime transcript."
+    "Resume scenarios validate owner preservation against the supplied conversation summary. Native resume or compact support additionally requires an actual resumed runtime transcript.",
+    "The pinned Superpowers Codex manifest (ref b36e0829c6d0140e93cfef2ca599b1b07d4a7797) declares hooks: {}, so no Superpowers SessionStart is expected on Codex; Superpowers phase skills reach a Codex session only through the catalog."
   ],
   "scenarios": [
     {
@@ -85,6 +86,15 @@
       "prompt": "Use AGENTIC-SDLC to decide how to organize independent documentation, schema, and fixture reviews for a small plugin package. Choose the appropriate review execution mechanism, but do not dispatch agents or modify files yet.",
       "expected_phase_skill": "agentic-sdlc:dispatch-strategy",
       "competing_phase_skills": ["superpowers:dispatching-parallel-agents"]
+    },
+    {
+      "id": "superpowers-owned-completion",
+      "split": "comparison",
+      "entrypoint": "bootstrap",
+      "prior_context": "The user selected superpowers:brainstorming for the in-memory reading-list work and its body was loaded. The design was approved, and the implementation phase stays Superpowers-owned; no owner switch was requested.",
+      "prompt": "The reading-list implementation looks finished to me. Confirm whether the work is actually done before we call it complete; do not write code or files.",
+      "expected_phase_skill": "superpowers:verification-before-completion",
+      "competing_phase_skills": ["agentic-sdlc:completion-claim-gate"]
     }
   ]
 }

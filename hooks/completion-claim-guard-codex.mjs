@@ -9,8 +9,14 @@
 // completion-claim-guard.mjs (that file stays byte-identical; a parity test enforces the copy). The
 // Claude guard keeps its own Skill tool_use detection — this marker path is the Codex signal only.
 // Fail-open on any error; never reflects claim/transcript bytes into the output.
+//
+// Owner scoping (publication-readiness 0.4.3, BR17/BR18/BR21): when readOwnerSignals reports a
+// Superpowers-owned or Ambiguous phase, the message is a fixed owner-neutral string that names no
+// house or Superpowers procedure, and a successful superpowers:verification-before-completion
+// delivery recorded after the phase start silences it. The no-owner, house-owned and unreadable
+// owner-scan paths keep the 5801cb9 output bytes.
 import { readStdin } from './secret-patterns.mjs';
-import { GATE_MARKER, readRollout } from './codex-rollout.mjs';
+import { GATE_MARKER, readRollout, readOwnerSignals } from './codex-rollout.mjs';
 
 const BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_COMPLETION_GATE_BLOCK || ''));
 
@@ -23,6 +29,13 @@ const NEGATED = /\b(not\s+(yet\s+)?(done|complete|ready|passing)|still\s+(failin
 
 const CLAIM_CAP = 64 * 1024; // R11/DP10: over-cap claim text is unscannable -> SILENT (never a block).
 const FFFD = '�'; // R5/DP4: U+FFFD in last_assistant_message = the Windows corruption signature.
+
+// BR21: the owner-neutral message for a Superpowers-owned or Ambiguous phase. It contains "fresh
+// verification evidence" and no procedure id (no completion-claim-gate, agentic-sdlc: or superpowers:).
+const NEUTRAL =
+  'Final message claims completion without fresh verification evidence recorded for this phase. ' +
+  'Run the verification step that owns this phase and cite its fresh verification evidence (test, ' +
+  'security and control output) before claiming done, fixed, passing or ready.';
 
 const raw = await readStdin();
 let input = {};
@@ -44,10 +57,17 @@ try {
   if (!roll.readable) process.exit(0);          // gate unconfirmable (unreadable rollout, DP5) -> silent
   if (roll.gateMarkerPresent) process.exit(0);  // the gate emitted its marker -> nothing to do
 
-  const msg =
+  // Owner scoping: an unreadable owner scan keeps the house path.
+  const cwd = (typeof input?.cwd === 'string' && input.cwd) ? input.cwd : process.cwd();
+  const owner = readOwnerSignals(tpath, cwd);
+  const foreignPhase = owner.readable && owner.phase !== 'house';
+  if (foreignPhase && owner.verificationDelivered) process.exit(0); // the owning verification ran
+
+  const houseMsg =
     'Final message claims completion but the completion-claim-gate marker is absent this session ' +
     '(contract 00 — evidence before claim). Run agentic-sdlc:completion-claim-gate with the exact ' +
     'evidence (test/security/control output) before claiming done/fixed/passing/ready.';
+  const msg = foreignPhase ? NEUTRAL : houseMsg;
 
   const out = BLOCK
     ? { decision: 'block', reason: msg, systemMessage: '🚧 completion-claim-guard (codex): blocked an unverified completion claim.' }

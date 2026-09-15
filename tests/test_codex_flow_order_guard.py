@@ -655,7 +655,10 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # NOTE: hooks/codex-rollout.mjs is intentionally NOT locked here — a DP-LIVE follow-up fix
         # corrected readRolloutSignals to read the real `patch_apply_end` carrier; that file is the
         # fix target, covered by its own regression test (test_patch_targets_from_patch_apply_end).
-        "hooks/completion-claim-guard-codex.mjs",
+        # hooks/completion-claim-guard-codex.mjs RELEASED by publication-readiness 0.4.3 (BR17) for the
+        # owner-aware completion message (same convention as codex-rollout.mjs and the 2026-08-22
+        # releases above); coverage in tests/test_codex_completion_claim_guard.py
+        # (TestHouseMessageBytes, TestOwnerAwareCompletion).
         "hooks/flow-step-guard-codex.mjs",
         # hooks/codex-write-signal.mjs IS locked here (B5/DP-C): the #5 fix keeps the shared secret-write
         # extractor byte-untouched (the precise recognizer re-implements its pattern rather than editing it),
@@ -679,6 +682,13 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
                 # committed, the replacement is a no-op and this returns to an exact HEAD lock.
                 expected = head.replace("implementasyon-control", "implementation-control")
                 self.assertEqual((REPO / rel).read_text(encoding="utf-8"), expected)
+
+    def test_released_completion_guard_not_locked_and_rationale_present(self):  # AC48
+        self.assertNotIn("hooks/completion-claim-guard-codex.mjs", self.BYTE_LOCKED)
+        comments = [line for line in Path(__file__).read_text(encoding="utf-8").splitlines()
+                    if line.strip().startswith("#")]
+        self.assertTrue(any("publication-readiness 0.4.3 (BR17)" in line for line in comments),
+                        "the lock release needs its rationale comment beside the list")
 
 
 # ==== B5 (#5 write-form symmetry): drivers + tests ==========================
@@ -713,6 +723,36 @@ def _raw_targets(command):
 def _cmd_fc(script_str):
     """A rollout exec_command carrier for a Bash `-lc` script (the realistic codex argv shape)."""
     return _exec_fc(["bash", "-lc", script_str])
+
+
+BR6_TABLE = REPO / "tests" / "fixtures" / "transcripts" / "br6-attribution-cases.json"
+
+
+def _br6_carrier_lines(row):
+    """A shared-table row's runner carrier with no spec/plan write: callEvents exec_command calls on
+    one call_id and outputRecords outputs ('Exit code: N' first only when exitCode is non-null)."""
+    carrier = row["carrier"]
+    call_id = "call-" + row["id"]
+    text = carrier["outputSummary"] or ""
+    if carrier["exitCode"] is not None:
+        text = f"Exit code: {carrier['exitCode']}\n{text}"
+    output = _line("response_item", {"type": "function_call_output", "call_id": call_id, "output": text})
+    return [_exec_fc_id(row["command"], call_id)] * carrier["callEvents"] + [output] * carrier["outputRecords"]
+
+
+# ---- AC130: the Stop-evidence closure never reaches the Codex ordering decision (Task 16) ----
+class TestClosureScopeCodexOrderGuard(_Tmp):
+    def test_table_order_decision_unchanged(self):  # AC130
+        rows = json.loads(BR6_TABLE.read_text(encoding="utf-8"))["rows"]
+        req = json.loads((REPO / "hooks" / "flow-requirements.json").read_text(encoding="utf-8"))
+        cwd = self._cwd()
+        bad = []
+        for row in rows:
+            decision = _order_decision(_br6_carrier_lines(row), req, cwd)
+            expected = row["baseline5801cb9"]["codexOrderGuard"] == "satisfied"
+            if (decision.get("satisfied") is True) != expected:
+                bad.append(row["id"])
+        self.assertEqual(bad, [], f"order decisions that differ from the 5801cb9 column: {bad}")
 
 
 class TestB5WriteformSymmetry(_Tmp):

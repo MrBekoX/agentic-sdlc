@@ -14,6 +14,12 @@ import { extractWrittenContent } from './codex-write-signal.mjs';
 // exact literal when it runs; AC17's drift test asserts the two copies stay byte-identical.
 export const GATE_MARKER = '<!-- agentic-sdlc:gate:completion-claim:verified -->';
 
+// Byte copies of completion-claim-guard-codex.mjs CLAIM and NEGATED for the offline strict evaluator's
+// completion line (a parity test keeps the copies identical).
+export const COMPLETION_CLAIM =
+  /\b(all\s+tests?\s+(pass|passing|green)|all\s+green|ready\s+to\s+(merge|ship)|ready\s+for\s+review|implementation\s+(is\s+)?complete|feature\s+complete|task\s+(is\s+)?complete|done\s+and\s+verified|fixed\s+and\s+verified|verified\s+and\s+(complete|done)|everything\s+(works|passes))\b/i;
+export const COMPLETION_NEGATED = /\b(not\s+(yet\s+)?(done|complete|ready|passing)|still\s+(failing|broken|todo)|incomplete|do\s+not\s+claim)\b/i;
+
 const MAX = 8 * 1024 * 1024; // 8 MiB whole-rollout ceiling (R11/DP10); over-ceiling -> unconfirmable.
 
 function payloadOf(o) {
@@ -476,4 +482,320 @@ export function readRolloutSignals(path) {
     }
   }
   return { commands, editTargets, commandRuns, readable: true };
+}
+
+// ---------------------------------------------------------------------------
+// BR6 exit attribution (publication-readiness 0.4.3). A correlated exit code belongs to the LAST
+// statement of a command, so `pytest; echo EXIT=$?` must not lend echo's exit 0 to pytest.
+// Statements split on unquoted `;`, newline and `||` only: `&&` keeps attribution (a failing left
+// side stops the chain), and `|` / `&` stay inside one statement. Pure single-pass helpers over the
+// command treated as DATA (no eval, no spawn, no backtracking regex), so each is linear (BR10).
+const VERSION_HELP_ARGS = new Set(['--version', '-V', '--help', '-h']);
+
+export function splitBr6Statements(command) {
+  const str = String(command || '');
+  const statements = [];
+  let cur = '';
+  let q = null;
+  const flush = () => {
+    const s = cur.trim();
+    if (s && !s.startsWith('#')) statements.push(s); // empty and comment-only statements are ignored
+    cur = '';
+  };
+  for (let i = 0; i < str.length; i += 1) {
+    const c = str[i];
+    const n = str[i + 1];
+    if (q === "'") { cur += c; if (c === q) q = null; continue; } // single quotes: all bytes literal
+    if (c === '\\') {
+      if (n === '\n') { i += 1; continue; }                        // line continuation joins the lines
+      cur += c;
+      if (n !== undefined) { cur += n; i += 1; }                    // an escaped character is data
+      continue;
+    }
+    if (q) { cur += c; if (c === q) q = null; continue; }
+    if (c === "'" || c === '"') { q = c; cur += c; continue; }
+    if (c === ';' || c === '\n') { flush(); continue; }
+    if (c === '|' && n === '|') { flush(); i += 1; continue; }
+    cur += c;
+  }
+  flush();
+  return statements;
+}
+
+export function lastStatement(command) {
+  const statements = splitBr6Statements(command);
+  return statements.length ? statements[statements.length - 1] : '';
+}
+
+// Visit every character outside single/double quotes that is not backslash-escaped. A visit that
+// returns false stops the scan.
+function forEachUnquoted(str, visit) {
+  let q = null;
+  for (let i = 0; i < str.length; i += 1) {
+    const c = str[i];
+    if (q) {
+      if (c === q) q = null;
+      else if (q === '"' && c === '\\') i += 1;
+      continue;
+    }
+    if (c === '\\') { i += 1; continue; }
+    if (c === "'" || c === '"') { q = c; continue; }
+    if (visit(i, c, str[i + 1]) === false) return;
+  }
+}
+
+export function hasUnquotedPipe(statement) {
+  let pipe = false;
+  let skip = -1;
+  forEachUnquoted(String(statement || ''), (i, c, n) => {
+    if (i === skip || c !== '|') return true;
+    if (n === '|') { skip = i + 1; return true; } // `||` separates statements; it is not a pipe
+    pipe = true;                                   // `|` or `|&`
+    return false;
+  });
+  return pipe;
+}
+
+// Quote-aware argument words after the runner match, up to the first unquoted pipe.
+function runnerArgs(segment, match) {
+  let rest = segment.slice(match.index + match[0].length);
+  forEachUnquoted(rest, (i, c) => {
+    if (c !== '|') return true;
+    rest = rest.slice(0, i);
+    return false;
+  });
+  return shellTokens(rest);
+}
+
+// True only when every `&&` segment that contains a test-runner match passes a standalone
+// --version, -V, --help or -h argument (arguments after `--` count). A statement with no runner
+// segment is not version/help-only.
+export function isVersionOrHelpOnly(statement, testRe) {
+  if (!testRe) return false;
+  const str = String(statement || '');
+  const cuts = [];
+  let skip = -1;
+  forEachUnquoted(str, (i, c, n) => {
+    if (i !== skip && c === '&' && n === '&') { cuts.push(i); skip = i + 1; }
+    return true;
+  });
+  let runnerSegments = 0;
+  let start = 0;
+  for (const end of [...cuts, str.length]) {
+    const segment = str.slice(start, end);
+    start = end + 2;
+    const match = testRe.exec(segment);
+    if (!match) continue;
+    runnerSegments += 1;
+    if (!runnerArgs(segment, match).some((t) => VERSION_HELP_ARGS.has(t))) return false;
+  }
+  return runnerSegments > 0;
+}
+
+// Ordered per-call run records for strict evaluation (AC44). An independent scan with the same
+// ceiling and fail-open discipline as readRolloutSignals, which stays untouched. One entry per
+// distinct call_id, ordered by its first call event; seq is that record's ordinal. callEvents
+// counts function_call exec_command plus exec_command_begin records, outputRecords counts
+// function_call_output plus exec_command_end records, so a replayed or lost record stays visible.
+// exitCode comes only from the native output header or a numeric exec_command_end exit_code;
+// conflicting values give null. Calls without a call_id are omitted.
+export function readRolloutRuns(path) {
+  const EMPTY = { readable: false, runs: [] };
+  if (!path || typeof path !== 'string') return EMPTY;
+  let raw;
+  try {
+    const st = statSync(path);
+    if (!st.isFile() || st.size > MAX) return EMPTY; // missing/non-file/over-ceiling -> unconfirmable
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return EMPTY; // unreadable -> unconfirmable
+  }
+
+  const runs = [];
+  const runById = new Map();
+  const outputCount = new Map(); // call_id -> output record count (either order relative to the call)
+  const exitCodes = new Map();   // call_id -> Set of parsed exit codes
+  let seq = -1;
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line) continue;
+    seq += 1;
+    let o;
+    try { o = JSON.parse(line); } catch { continue; } // tolerate a malformed line
+    const p = payloadOf(o);
+    if (!p || typeof p !== 'object' || p.call_id == null) continue;
+
+    let command = null;
+    if (p.type === 'function_call' && p.name === 'exec_command') {
+      const cmd = parseArgs(p.arguments)?.cmd;
+      command = Array.isArray(cmd) ? cmd.map((x) => String(x)).join(' ') : (typeof cmd === 'string' ? cmd : '');
+    } else if (p.type === 'exec_command_begin') {
+      const parsed = Array.isArray(p.parsed_cmd) ? p.parsed_cmd.filter((x) => typeof x === 'string').join(' ') : '';
+      command = typeof p.command === 'string' && p.command ? p.command : parsed;
+    }
+    if (command !== null) {
+      let run = runById.get(p.call_id);
+      if (!run) {
+        run = { callId: p.call_id, command, seq, callEvents: 0, outputRecords: 0, exitCode: null };
+        runById.set(p.call_id, run);
+        runs.push(run);
+      }
+      run.callEvents += 1;
+      continue;
+    }
+
+    let exit;
+    if (p.type === 'function_call_output') exit = parseCodexExitCode(outputTextOf(p.output));
+    else if (p.type === 'exec_command_end') exit = typeof p.exit_code === 'number' ? p.exit_code : null;
+    else continue;
+    outputCount.set(p.call_id, (outputCount.get(p.call_id) || 0) + 1);
+    if (exit !== null) {
+      if (!exitCodes.has(p.call_id)) exitCodes.set(p.call_id, new Set());
+      exitCodes.get(p.call_id).add(exit);
+    }
+  }
+  for (const run of runs) {
+    run.outputRecords = outputCount.get(run.callId) || 0;
+    const codes = exitCodes.get(run.callId);
+    run.exitCode = codes && codes.size === 1 ? [...codes][0] : null;
+  }
+  return { readable: true, runs };
+}
+
+// ---------------------------------------------------------------------------
+// Process-owner signals for the Codex completion hook (publication-readiness 0.4.3, BR18/BR19).
+// A phase is Superpowers-owned only when the LAST user-authored choice names superpowers:<skill> AND
+// that skill's installed body was read successfully after the choice and after any later compaction
+// boundary. Choices come only from user-role input_text items; injected blocks (instruction files,
+// environment context, bootstrap, hook feedback), assistant text, tool output and compaction summaries
+// never carry one. Anything short of that proof is Ambiguous, never a silent exemption. Pure and
+// linear: fixed-class patterns with bounded lookarounds, no spawn.
+const QUALIFIED_CHOICE = /(?<![A-Za-z0-9_./:-])(superpowers|agentic-sdlc):([a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])/g;
+const HOUSE_CHOICE = /(?<![A-Za-z0-9_./:-])AGENTIC-SDLC(?![A-Za-z0-9_-])/g;
+const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const INSTALLED_SUPERPOWERS_SKILL = /\/plugins\/cache\/[^/]+\/superpowers\/[^/]+\/skills\/([^/]+)\/SKILL\.md$/;
+const INJECTED_TAG = /^<([A-Za-z_][A-Za-z0-9_.:-]*)[\s>]/;
+// The heading Codex prepends to an injected instruction-file block: `# <file>.md instructions for <dir>`.
+const INJECTED_INSTRUCTIONS = /^# [A-Za-z0-9_.-]+\.md instructions\b/;
+const VERIFICATION_SKILL = 'verification-before-completion';
+
+export function ownerChoicesIn(text) {
+  const str = String(text || '');
+  const found = [];
+  for (const m of str.matchAll(QUALIFIED_CHOICE)) {
+    found.push({ index: m.index, owner: m[1] === 'superpowers' ? 'superpowers' : 'house', skill: m[2] });
+  }
+  for (const m of str.matchAll(HOUSE_CHOICE)) found.push({ index: m.index, owner: 'house', skill: null });
+  found.sort((a, b) => a.index - b.index);
+  return found.map(({ owner, skill }) => ({ owner, skill }));
+}
+
+function withoutTrailingSlashes(p) {
+  let end = p.length;
+  while (end > 1 && p[end - 1] === '/') end -= 1; // a loop, not a `/+$` regex (quadratic on a long run)
+  return p.slice(0, end);
+}
+
+// BR19 delivery read (D9): only `cat <absolute installed SKILL.md path>` as the last statement counts.
+// Any other form (pipe, background, `&&`, subshell, substitution, a `cd` anywhere, a relative path, a
+// `..` segment, a path under the session cwd) returns null, which leaves the phase Ambiguous.
+export function deliveryReadSkill(command, cwd) {
+  const statements = splitBr6Statements(command);
+  if (!statements.length || statements.some((s) => s.startsWith('cd'))) return null;
+  const last = statements[statements.length - 1];
+  if (/[|&()`]/.test(last)) return null;
+  const tokens = shellTokens(last);
+  if (tokens.length !== 2 || tokens[0] !== 'cat') return null;
+  const path = tokens[1].replace(/\\/g, '/');
+  const drive = /^[A-Za-z]:\//.test(path);
+  if (!(path.startsWith('/') || drive) || path.split('/').includes('..')) return null;
+  const fold = (s) => (drive ? s.toLowerCase() : s);
+  const base = withoutTrailingSlashes(String(cwd || '').replace(/\\/g, '/'));
+  if (base === '/' || (base && (fold(path) === fold(base) || fold(path).startsWith(fold(base) + '/')))) return null;
+  const m = INSTALLED_SUPERPOWERS_SKILL.exec(path);
+  return m && SKILL_NAME.test(m[1]) ? m[1] : null;
+}
+
+function hookAuthored(message) {
+  const kinds = message.internal_chat_message_metadata_passthrough?.content_item_kinds;
+  return Array.isArray(kinds) && kinds.some((k) => typeof k === 'string' && k.startsWith('hooks.'));
+}
+
+function isInjectedItem(text) {
+  const t = text.trim();
+  if (INJECTED_INSTRUCTIONS.test(t)) return true;
+  const m = INJECTED_TAG.exec(t);
+  return Boolean(m) && t.endsWith(`</${m[1]}>`);
+}
+
+export function readOwnerSignals(path, cwd) {
+  const EMPTY = { readable: false, phase: 'house', skill: null, verificationDelivered: false };
+  if (!path || typeof path !== 'string') return EMPTY;
+  let raw;
+  try {
+    const st = statSync(path);
+    if (!st.isFile() || st.size > MAX) return EMPTY; // missing/non-file/over-ceiling -> unconfirmable
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return EMPTY; // unreadable -> unconfirmable
+  }
+
+  const choices = [];      // { seq, owner, skill } in rollout order
+  const boundaries = [];   // seq of each compaction boundary, ascending
+  const calls = new Map(); // call_id -> { seq, command } of the first exec_command call event
+  const exits = new Map(); // call_id -> Set of correlated exit codes
+  let seq = -1;
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line) continue;
+    seq += 1;
+    let o;
+    try { o = JSON.parse(line); } catch { continue; } // tolerate a malformed line
+    if (o && o.type === 'compacted') { boundaries.push(seq); continue; } // replacement_history is never scanned
+    const p = payloadOf(o);
+    if (!p || typeof p !== 'object') continue;
+    if (p.type === 'context_compacted') { boundaries.push(seq); continue; } // event_msg carrier (assumption)
+    if (p.type === 'message') {
+      if (p.role === 'user' && Array.isArray(p.content) && !hookAuthored(p)) {
+        for (const item of p.content) {
+          if (!item || item.type !== 'input_text' || typeof item.text !== 'string' || isInjectedItem(item.text)) continue;
+          for (const choice of ownerChoicesIn(item.text)) choices.push({ seq, ...choice });
+        }
+      }
+      continue;
+    }
+    if (p.call_id == null) continue;
+    if (p.type === 'function_call' && p.name === 'exec_command') {
+      const cmd = parseArgs(p.arguments)?.cmd;
+      const command = Array.isArray(cmd) ? cmd.map((x) => String(x)).join(' ') : (typeof cmd === 'string' ? cmd : '');
+      if (!calls.has(p.call_id)) calls.set(p.call_id, { seq, command });
+    } else if (p.type === 'exec_command_begin') {
+      if (!calls.has(p.call_id) && typeof p.command === 'string') calls.set(p.call_id, { seq, command: p.command });
+    } else {
+      let exit = null;
+      if (p.type === 'function_call_output') exit = parseCodexExitCode(outputTextOf(p.output));
+      else if (p.type === 'exec_command_end' && typeof p.exit_code === 'number') exit = p.exit_code;
+      if (exit === null) continue;
+      if (!exits.has(p.call_id)) exits.set(p.call_id, new Set());
+      exits.get(p.call_id).add(exit);
+    }
+  }
+
+  const deliveries = []; // { seq, skill } of successful installed-body reads
+  for (const [callId, call] of calls) {
+    const codes = exits.get(callId);
+    if (!codes || codes.size !== 1 || !codes.has(0)) continue;
+    const skill = deliveryReadSkill(call.command, cwd);
+    if (skill) deliveries.push({ seq: call.seq, skill });
+  }
+
+  // The last choice wins; repeating the current Superpowers skill does not start a new phase.
+  let phase = { owner: 'house', skill: null, start: -1 };
+  for (const choice of choices) {
+    const repeat = choice.owner === 'superpowers' && phase.owner === 'superpowers' && choice.skill === phase.skill;
+    if (!repeat) phase = { owner: choice.owner, skill: choice.skill, start: choice.seq };
+  }
+  const verificationDelivered = deliveries.some((d) => d.skill === VERIFICATION_SKILL && d.seq > phase.start);
+  if (phase.owner === 'house') return { readable: true, phase: 'house', skill: null, verificationDelivered };
+  const boundary = boundaries.reduce((last, b) => (b > phase.start ? b : last), phase.start);
+  const delivered = deliveries.some((d) => d.skill === phase.skill && d.seq > boundary);
+  return { readable: true, phase: delivered ? 'superpowers' : 'ambiguous', skill: phase.skill, verificationDelivered };
 }

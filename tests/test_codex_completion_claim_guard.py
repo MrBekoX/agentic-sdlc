@@ -7,6 +7,7 @@ All text-mode subprocess calls pin encoding='utf-8' (locale-independent, house r
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -52,6 +53,83 @@ def _write_rollout(lines):
     os.close(fd)
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
+
+
+# ---- owner-signal carriers (publication-readiness Tasks 22, 24) ----
+# The installed-plugin location shape is an assumption pending a native Codex 0.154.0 capture of a
+# Superpowers cache read (AC58); the agentic-sdlc cache read in the native fixture has this shape.
+INSTALLED = "/home/u/.codex/plugins/cache/m/superpowers/1.0.0/skills/{skill}/SKILL.md"
+WORK_CWD = "/work/repo"
+CHOICE = "Use superpowers:brainstorming"
+
+
+def _user_kinds(text, kinds):
+    """A user-role message whose passthrough metadata carries content_item_kinds."""
+    return _line("response_item", {"type": "message", "role": "user",
+                                   "content": [{"type": "input_text", "text": text}],
+                                   "internal_chat_message_metadata_passthrough": {"content_item_kinds": kinds}})
+
+
+def _developer(text):
+    return _line("response_item", {"type": "message", "role": "developer",
+                                   "content": [{"type": "input_text", "text": text}]})
+
+
+def _exec_read(cmd, call_id):
+    return _line("response_item", {"type": "function_call", "name": "exec_command",
+                                   "arguments": json.dumps({"cmd": cmd}), "call_id": call_id})
+
+
+def _read_output(call_id, code, body="---\nname: skill\n---\n"):
+    """Native 0.154.0 function_call_output; code None omits the exit header."""
+    header = "" if code is None else f"Chunk ID: 0a1b2c\nWall time: 0.01 seconds\nProcess exited with code {code}\n"
+    return _line("response_item", {"type": "function_call_output", "call_id": call_id,
+                                   "output": f"{header}Output:\n{body}"})
+
+
+def _delivery(skill, call_id, code=0):
+    """A successful (code 0) installed-cache read of a Superpowers skill body (BR19)."""
+    return [_exec_read("cat " + INSTALLED.format(skill=skill), call_id), _read_output(call_id, code)]
+
+
+def _compacted(history=()):
+    return json.dumps({"type": "compacted", "payload": {"message": "", "replacement_history": list(history)}})
+
+
+def _node_json(body, payload):
+    """Run an ESM snippet with `input` = the JSON payload from stdin (large inputs never hit argv)."""
+    script = ("let b = ''; process.stdin.setEncoding('utf8');"
+              "process.stdin.on('data', (d) => { b += d; }).on('end', async () => { const input = JSON.parse(b);"
+              + body + "});")
+    r = subprocess.run(["node", "--input-type=module", "-e", script], input=json.dumps(payload).encode("utf-8"),
+                       capture_output=True)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    return json.loads(r.stdout.decode("utf-8"))
+
+
+def _owner_choices(texts):
+    body = ("const m = await import(%s);"
+            "process.stdout.write(JSON.stringify(input.map((t) => m.ownerChoicesIn(t).map((c) => [c.owner, c.skill]))));"
+            % json.dumps(ROLLOUT.as_uri()))
+    return _node_json(body, list(texts))
+
+
+def _delivery_skills(commands, cwd=WORK_CWD):
+    body = ("const m = await import(%s);"
+            "process.stdout.write(JSON.stringify(input.commands.map((c) => m.deliveryReadSkill(c, input.cwd))));"
+            % json.dumps(ROLLOUT.as_uri()))
+    return _node_json(body, {"commands": list(commands), "cwd": cwd})
+
+
+def _owner_signals(lines, cwd=WORK_CWD):
+    path = _write_rollout(lines)
+    try:
+        body = ("const m = await import(%s);"
+                "process.stdout.write(JSON.stringify(m.readOwnerSignals(input.path, input.cwd)));"
+                % json.dumps(ROLLOUT.as_uri()))
+        return _node_json(body, {"path": path, "cwd": cwd})
+    finally:
+        os.unlink(path)
 
 
 def _read_rollout(path):
@@ -228,6 +306,353 @@ class TestGuardBehavior(unittest.TestCase):
         self.assertNotIn("SENTINEL_CLAIM_XYZ", out)  # the distinctive claim substring never leaks
 
 
+# ---- AC53-AC58 (BR18/BR19): owner-signal scanner (Task 22) -----------------
+class TestOwnerSignalScanner(unittest.TestCase):
+    """Pure owner helpers in hooks/codex-rollout.mjs. Each test names the mutation that turns it red."""
+
+    def _phase(self, lines, cwd=WORK_CWD):
+        return _owner_signals(lines, cwd)["phase"]
+
+    def test_token_grammar_boundaries(self):
+        # Mutation: dropping a lookbehind/lookahead class member, or matching case-insensitively.
+        sp = [["superpowers", "brainstorming"]]
+        house = [["house", None]]
+        cases = {
+            "superpowers:brainstorming.": sp, "(superpowers:brainstorming)": sp, '"superpowers:brainstorming"': sp,
+            "superpowers:brainstorming-extra": [["superpowers", "brainstorming-extra"]],
+            "use-superpowers:brainstorming": [], "path/superpowers:brainstorming": [],
+            "superpowers:brainstorming_extra": [], "superpowers:Brainstorming": [],
+            "/agentic-sdlc:git-safety-check": [], "agentic-sdlc@mrbekox": [], "D:/agentic-sdlc": [],
+            "AGENTIC-SDLCX": [], "D:/AGENTIC-SDLC": [],
+            "AGENTIC-SDLC's": house, "AGENTIC-SDLC:": house, "(AGENTIC-SDLC)": house,
+            "agentic-sdlc:nonexistent-skill": [["house", "nonexistent-skill"]],
+            "Use superpowers:brainstorming, then AGENTIC-SDLC": [["superpowers", "brainstorming"], ["house", None]],
+        }
+        for (text, expected), got in zip(cases.items(), _owner_choices(list(cases))):
+            with self.subTest(text=text):
+                self.assertEqual(got, expected)
+        later = [_user("Use AGENTIC-SDLC, no, use superpowers:brainstorming"), *_delivery("brainstorming", "c1")]
+        self.assertEqual(self._phase(later), "superpowers")  # the later of two choices in one message wins
+
+    def test_owner_scan_linear_on_adversarial_input(self):
+        # Mutation: a backtracking token pattern (nested quantifier over the skill grammar).
+        import time
+        started = time.time()
+        _owner_choices(["superpowers:" + "a-" * 100000])  # ~200 KB, shipped on stdin
+        self.assertLess(time.time() - started, 5.0)
+
+    def test_choice_only_in_assistant_or_tool_output_is_no_owner(self):  # AC54
+        # Mutation: scanning assistant messages, agent_message events or tool output for choices.
+        lines = [_assistant(CHOICE), _agent_msg(CHOICE), _exec_read("ls skills", "c0"),
+                 _read_output("c0", 0, body="superpowers:brainstorming\n"), *_delivery("brainstorming", "c1")]
+        self.assertEqual(self._phase(lines), "house")
+
+    def test_injected_and_hook_authored_user_records_are_no_owner(self):  # AC55
+        # Mutation: dropping one exclusion (AGENTS.md block, tag-wrapped item, hooks.* kind, developer role).
+        carriers = {
+            "agents-md": _user("# AGENTS.md instructions for /work/repo\n\n<INSTRUCTIONS>\n" + CHOICE + "\n</INSTRUCTIONS>"),
+            "environment-context": _user("<environment_context>\n  <note>" + CHOICE + "</note>\n</environment_context>"),
+            "bootstrap-user": _user_kinds("Session bootstrap: " + CHOICE, ["hooks.additional_context"]),
+            "bootstrap-developer": _developer("Session bootstrap: " + CHOICE),
+            "hook-prompt": _user('<hook_prompt hook_run_id="stop:1">' + CHOICE + "</hook_prompt>"),
+            "system-message": _user("<system_message>" + CHOICE + "</system_message>"),
+        }
+        for name, carrier in carriers.items():
+            with self.subTest(carrier=name):
+                self.assertEqual(self._phase([carrier, *_delivery("brainstorming", "c1")]), "house")
+
+    def test_stale_superpowers_then_agentic_sdlc_phrasings_is_house(self):  # AC53
+        # Mutation: a Superpowers choice outliving a later house choice.
+        base = [_user(CHOICE), *_delivery("brainstorming", "c1")]
+        self.assertEqual(self._phase(base), "superpowers")  # control: the earlier phase alone is owned
+        for later in ("Use AGENTIC-SDLC feature-build",
+                      "Use AGENTIC-SDLC to decide how to organize independent reviews"):
+            with self.subTest(later=later):
+                self.assertEqual(self._phase(base + [_user(later)]), "house")
+
+    def test_repeat_same_skill_keeps_phase_new_skill_starts_ambiguous(self):  # DP29
+        # Mutation: restarting the phase on a repeated choice of the same skill.
+        base = [_user(CHOICE), *_delivery("brainstorming", "c1")]
+        self.assertEqual(self._phase(base + [_user("keep going with superpowers:brainstorming")]), "superpowers")
+        switched = base + [_user("now use superpowers:writing-plans")]
+        got = _owner_signals(switched)
+        self.assertEqual((got["phase"], got["skill"]), ("ambiguous", "writing-plans"))
+        self.assertEqual(self._phase(switched + _delivery("writing-plans", "c2")), "superpowers")
+
+    def test_delivery_before_choice_or_other_skill_does_not_count(self):
+        # Mutation: accepting a delivery recorded before the phase start, or of another skill.
+        self.assertEqual(self._phase([*_delivery("brainstorming", "c1"), _user(CHOICE)]), "ambiguous")
+        self.assertEqual(self._phase([_user(CHOICE), *_delivery("writing-plans", "c1")]), "ambiguous")
+
+    def test_compaction_boundary_requires_redelivery(self):  # AC56
+        # Mutation: ignoring compaction boundaries, or scanning replacement_history for choices.
+        base = [_user(CHOICE), *_delivery("brainstorming", "c1")]
+        self.assertEqual(self._phase(base + [_compacted()]), "ambiguous")
+        self.assertEqual(self._phase(base + [_line("event_msg", {"type": "context_compacted"})]), "ambiguous")
+        self.assertEqual(self._phase(base + [_compacted(), *_delivery("brainstorming", "c2")]), "superpowers")
+        summary_only = [_compacted([{"type": "message", "role": "user",
+                                     "content": [{"type": "input_text", "text": CHOICE}]}]),
+                        *_delivery("brainstorming", "c1")]
+        self.assertEqual(self._phase(summary_only), "house")
+
+    def test_resumed_rollout_without_choice_is_house(self):  # AC57
+        lines = [_line("session_meta", {"id": "resumed"}), _assistant("Continuing the brainstorming phase."),
+                 *_delivery("brainstorming", "c1")]
+        self.assertEqual(self._phase(lines), "house")
+
+    def test_verification_delivery_after_phase_start_only(self):
+        # Mutation: counting a verification delivery recorded before the phase start.
+        after = [_user(CHOICE), *_delivery("brainstorming", "c1"), *_delivery("verification-before-completion", "c2")]
+        self.assertTrue(_owner_signals(after)["verificationDelivered"])
+        before = [*_delivery("verification-before-completion", "c0"), _user(CHOICE), *_delivery("brainstorming", "c1")]
+        self.assertFalse(_owner_signals(before)["verificationDelivered"])
+
+    def test_delivery_read_rule_matrix(self):  # AC58, D9
+        # Mutation: relaxing any BR19 read-form clause (last statement, pipe/&, cd, absolute, '..', cwd).
+        path = INSTALLED.format(skill="brainstorming")
+        cases = {
+            "cat " + path: "brainstorming",
+            "cat C:\\Users\\u\\.codex\\plugins\\cache\\m\\superpowers\\1.0.0\\skills\\brainstorming\\SKILL.md": "brainstorming",
+            "cat ./superpowers/skills/brainstorming/SKILL.md": None,
+            "cat /work/repo/plugins/cache/m/superpowers/1.0.0/skills/brainstorming/SKILL.md": None,
+            "cat " + path + "; true": None,
+            "cat " + path + " || true": None,
+            "cat " + path + " | true": None,
+            "cat " + path + " | head -n 400": None,
+            "cat " + path + " & true": None,
+            "cd /home/u/.codex/plugins/cache/m/superpowers/1.0.0/skills/brainstorming && cat SKILL.md": None,
+            "cd /tmp; cat " + path: None,
+            "cat /home/u/.codex/plugins/cache/m/superpowers/1.0.0/skills/x/../brainstorming/SKILL.md": None,
+            "cat $(echo " + path + ")": None,
+            "cat " + path + " " + path: None,
+            "cat /home/u/.codex/plugins/cache/m/agentic-sdlc/1.0.0/skills/brainstorming/SKILL.md": None,
+            "cat /home/u/.codex/plugins/cache/m/superpowers/1.0.0/skills/Brainstorming/SKILL.md": None,
+        }
+        for (command, expected), got in zip(cases.items(), _delivery_skills(list(cases))):
+            with self.subTest(command=command):
+                self.assertEqual(got, expected)
+        read = _exec_read("cat " + path, "c1")
+        self.assertEqual(self._phase([_user(CHOICE), read, _read_output("c1", 0)]), "superpowers")
+        self.assertEqual(self._phase([_user(CHOICE), read]), "ambiguous")  # no correlated exit code
+        self.assertEqual(self._phase([_user(CHOICE), read, _read_output("c1", 1)]), "ambiguous")
+        masked = _exec_read("cat " + path + "; true", "c2")
+        self.assertEqual(self._phase([_user(CHOICE), masked, _read_output("c2", 0)]), "ambiguous")
+
+    def test_delivery_read_followed_by_comment_line_counts(self):
+        command = "cat " + INSTALLED.format(skill="brainstorming") + "\n# done"
+        self.assertEqual(_delivery_skills([command]), ["brainstorming"])
+        self.assertEqual(self._phase([_user(CHOICE), _exec_read(command, "c1"), _read_output("c1", 0)]),
+                         "superpowers")
+
+    def test_unreadable_or_over_ceiling_rollout_not_readable(self):
+        body = ("const m = await import(%s);"
+                "process.stdout.write(JSON.stringify(m.readOwnerSignals(input, '/work/repo').readable));"
+                % json.dumps(ROLLOUT.as_uri()))
+        self.assertFalse(_node_json(body, "/no/such/rollout.jsonl"))
+        fd, big = tempfile.mkstemp(suffix=".jsonl", prefix="codex-owner-big-")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(_user(CHOICE) + "\n" + "x" * (8 * 1024 * 1024 + 16))
+        self.addCleanup(os.unlink, big)
+        self.assertFalse(_node_json(body, big))
+
+
+# ---- AC48, AC52: exact 5801cb9 house output bytes ---------------------------
+# Captured from the unmodified hook for a house claim without the marker (no owner choice). They
+# replace the released byte lock: a one-byte change to the house message fails these tests.
+HOUSE_CLAIM = "All tests passing, done and verified."
+HOUSE_REMINDER = (
+    "{\"systemMessage\":\"⚠️ completion-claim-guard (codex): Final message claims completion "
+    "but the completion-claim-gate marker is absent this session (contract 00 — evidence before "
+    "claim). Run agentic-sdlc:completion-claim-gate with the exact evidence (test/security/control "
+    "output) before claiming done/fixed/passing/ready.\"}"
+)
+HOUSE_BLOCK = (
+    "{\"decision\":\"block\",\"reason\":\"Final message claims completion but the completion-claim-gate "
+    "marker is absent this session (contract 00 — evidence before claim). Run "
+    "agentic-sdlc:completion-claim-gate with the exact evidence (test/security/control output) before "
+    "claiming done/fixed/passing/ready.\",\"systemMessage\":\"\U0001f6a7 completion-claim-guard (codex): "
+    "blocked an unverified completion claim.\"}"
+)
+
+
+class TestHouseMessageBytes(unittest.TestCase):
+    def _house_input(self):
+        return {"last_assistant_message": HOUSE_CLAIM,
+                "transcript_path": _write_rollout([_task_complete(HOUSE_CLAIM)])}
+
+    def test_house_reminder_bytes_exact(self):
+        self.assertEqual(_run_hook(self._house_input()).encode("utf-8"), HOUSE_REMINDER.encode("utf-8"))
+
+    def test_house_block_bytes_exact(self):
+        out = _run_hook(self._house_input(), {"AGENTIC_COMPLETION_GATE_BLOCK": "true"})
+        self.assertEqual(out.encode("utf-8"), HOUSE_BLOCK.encode("utf-8"))
+
+
+# ---- AC49-AC57: owner-aware Codex completion message (Task 24) -------------
+NEUTRAL = ("Final message claims completion without fresh verification evidence recorded for this phase. "
+           "Run the verification step that owns this phase and cite its fresh verification evidence (test, "
+           "security and control output) before claiming done, fixed, passing or ready.")
+REMINDER_PREFIX = "⚠️ completion-claim-guard (codex): "  # the 5801cb9 reminder prefix
+BLOCK_SYSTEM = "\U0001f6a7 completion-claim-guard (codex): blocked an unverified completion claim."
+BLOCK_ON = {"AGENTIC_COMPLETION_GATE_BLOCK": "true"}
+HOUSE_PROCEDURE_NAMES = ("completion-claim-gate", "agentic-sdlc:", "superpowers:")
+
+
+class TestOwnerAwareCompletion(unittest.TestCase):
+    def _run(self, lines, env_extra=None, claim=CLAIM_TEXT):
+        path = _write_rollout(list(lines) + [_task_complete(claim)])
+        self.addCleanup(os.unlink, path)
+        return _run_hook({"last_assistant_message": claim, "transcript_path": path, "cwd": WORK_CWD}, env_extra)
+
+    def _assert_house_bytes(self, lines):
+        self.assertEqual(self._run(lines, claim=HOUSE_CLAIM).encode("utf-8"), HOUSE_REMINDER.encode("utf-8"))
+        self.assertEqual(self._run(lines, BLOCK_ON, claim=HOUSE_CLAIM).encode("utf-8"), HOUSE_BLOCK.encode("utf-8"))
+
+    def _assert_neutral(self, lines):
+        reminder = json.loads(self._run(lines))
+        self.assertEqual(reminder, {"systemMessage": REMINDER_PREFIX + NEUTRAL})
+        block = json.loads(self._run(lines, BLOCK_ON))
+        self.assertEqual(block, {"decision": "block", "reason": NEUTRAL, "systemMessage": BLOCK_SYSTEM})
+        for out in (reminder, block):
+            for value in out.values():
+                for name in HOUSE_PROCEDURE_NAMES:
+                    self.assertNotIn(name, value)
+                self.assertNotIn("SENTINEL_CLAIM_XYZ", value)
+
+    # ---- RED ----
+    def test_superpowers_owned_reminder_is_neutral_field_contract(self):  # AC49
+        self.assertIn("fresh verification evidence", NEUTRAL)
+        self._assert_neutral([_user(CHOICE), *_delivery("brainstorming", "c1")])
+
+    def test_marker_or_verification_delivery_silences_superpowers_phase_under_block(self):  # AC50
+        owned = [_user(CHOICE), *_delivery("brainstorming", "c1")]
+        self.assertEqual(self._run(owned, BLOCK_ON, claim=CLAIM_TEXT + " " + MARKER).strip(), "")
+        verified = owned + _delivery("verification-before-completion", "c2")
+        self.assertEqual(self._run(verified, BLOCK_ON).strip(), "")
+
+    def test_ambiguous_foo_neutral_and_silenced_by_marker_or_verification(self):  # AC51
+        foo = [_user("Use superpowers:foo")]
+        self._assert_neutral(foo)
+        self.assertEqual(self._run(foo, BLOCK_ON, claim=CLAIM_TEXT + " " + MARKER).strip(), "")
+        self.assertEqual(self._run(foo + _delivery("verification-before-completion", "c2"), BLOCK_ON).strip(), "")
+
+    def test_compaction_without_redelivery_is_neutral(self):  # AC56 second half
+        self._assert_neutral([_user(CHOICE), *_delivery("brainstorming", "c1"), _compacted()])
+
+    # ---- guards: stdout bytes equal the 5801cb9 house literals ----
+    def test_no_owner_and_house_choice_bytes_equal_5801cb9(self):  # AC52
+        for lines in ([], [_user("Use agentic-sdlc:feature-build")], [_user("Use AGENTIC-SDLC mind-spark")]):
+            with self.subTest(lines=lines):
+                self._assert_house_bytes(lines)
+
+    def test_later_agentic_sdlc_phrasings_restore_house_bytes(self):  # AC53
+        for later in ("Use AGENTIC-SDLC feature-build", "Use AGENTIC-SDLC to decide how to organize independent reviews"):
+            with self.subTest(later=later):
+                self._assert_house_bytes([_user(CHOICE), *_delivery("brainstorming", "c1"), _user(later)])
+
+    def test_echoed_choice_in_assistant_or_tool_output_is_house(self):  # AC54
+        self._assert_house_bytes([_assistant(CHOICE), _exec_read("ls skills", "c0"),
+                                  _read_output("c0", 0, body="superpowers:brainstorming\n"),
+                                  *_delivery("brainstorming", "c1")])
+
+    def test_injected_or_hook_authored_choice_is_house(self):  # AC55
+        carriers = (
+            _user("# AGENTS.md instructions for /work/repo\n\n<INSTRUCTIONS>\n" + CHOICE + "\n</INSTRUCTIONS>"),
+            _user("<environment_context>\n  <note>" + CHOICE + "</note>\n</environment_context>"),
+            _user_kinds("Session bootstrap: " + CHOICE, ["hooks.additional_context"]),
+            _user('<hook_prompt hook_run_id="stop:1">' + CHOICE + "</hook_prompt>"),
+        )
+        for carrier in carriers:
+            with self.subTest(carrier=carrier[:60]):
+                self._assert_house_bytes([carrier, *_delivery("brainstorming", "c1")])
+
+    def test_choice_only_in_compaction_summary_is_house(self):  # AC56 first half
+        summary = _compacted([{"type": "message", "role": "user", "content": [{"type": "input_text", "text": CHOICE}]}])
+        self._assert_house_bytes([summary, *_delivery("brainstorming", "c1")])
+
+    def test_resumed_rollout_without_choice_is_house(self):  # AC57
+        self._assert_house_bytes([_line("session_meta", {"id": "resumed"}),
+                                  _assistant("Continuing the brainstorming phase."), *_delivery("brainstorming", "c1")])
+
+    def test_unreadable_or_over_ceiling_rollout_silent_as_today(self):
+        missing = {"last_assistant_message": CLAIM_TEXT, "transcript_path": "/no/such.jsonl", "cwd": WORK_CWD}
+        self.assertEqual(_run_hook(missing, BLOCK_ON).strip(), "")
+        fd, big = tempfile.mkstemp(suffix=".jsonl", prefix="codex-owner-big-")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(_user(CHOICE) + "\n" + "x" * (8 * 1024 * 1024 + 16))
+        self.addCleanup(os.unlink, big)
+        over = {"last_assistant_message": CLAIM_TEXT, "transcript_path": big, "cwd": WORK_CWD}
+        self.assertEqual(_run_hook(over, BLOCK_ON).strip(), "")
+
+
+# ---- AC59: safety guards take no owner input (Task 27) ---------------------
+GIT = shutil.which("git")
+
+
+@unittest.skipIf(shutil.which("node") is None or GIT is None, "node or git not available")
+class TestSafetyGuardsOwnerIndependent(unittest.TestCase):
+    """Characterization (S9), expected green at 5801cb9: scan-commit, destructive-command-guard and
+    branch-guard read no owner signal, so no-owner, Superpowers-owned and Ambiguous rollouts leave each
+    guard's decision byte-identical. Each decision is also asserted non-empty, so an inert guard fails."""
+
+    def _repo_on_main_with_staged_credential(self):
+        root = Path(tempfile.mkdtemp(prefix="owner-guards-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        repo = root / "repo"
+        repo.mkdir()
+        for args in (("init", "-b", "main"),
+                     ("-c", "user.email=slice-b@invalid", "-c", "user.name=slice-b", "commit", "--allow-empty", "-m", "init")):
+            subprocess.run([GIT, *args], cwd=repo, check=True, capture_output=True)
+        # A synthetic HIGH-confidence credential assembled at runtime, so no literal lands in this file.
+        (repo / "settings.txt").write_text("token = " + "ghp_" + "a1B2" * 9 + "\n", encoding="utf-8")
+        subprocess.run([GIT, "add", "settings.txt"], cwd=repo, check=True, capture_output=True)
+        return repo
+
+    def _owner_rollouts(self):
+        states = {
+            "no-owner": [_user("Please finish the change.")],
+            "superpowers-owned": [_user(CHOICE), *_delivery("brainstorming", "c1")],
+            "ambiguous": [_user("Use superpowers:foo")],
+        }
+        paths = {}
+        for name, lines in states.items():
+            paths[name] = _write_rollout(lines + [_task_complete(CLAIM_TEXT)])
+            self.addCleanup(os.unlink, paths[name])
+        return paths
+
+    def _guard(self, script, command, cwd, rollout, env_extra):
+        env = dict(os.environ)
+        env.pop("AGENTIC_BRANCH_GUARD_BLOCK", None)
+        if env_extra:
+            env.update(env_extra)
+        payload = {"session_id": "owner-check", "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                   "tool_input": {"command": command}, "cwd": str(cwd), "transcript_path": rollout}
+        r = subprocess.run(["node", str(REPO / "hooks" / script)], input=json.dumps(payload), capture_output=True,
+                           text=True, encoding="utf-8", env=env, cwd=str(cwd))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def test_same_decision_for_every_owner_state(self):  # AC59
+        repo = self._repo_on_main_with_staged_credential()
+        rollouts = self._owner_rollouts()
+        cases = {
+            "scan-commit": ("scan-commit.mjs", "git commit -m x", None, "deny"),
+            "destructive-command-guard": ("destructive-command-guard.mjs", "git reset --hard", None, "deny"),
+            "branch-guard default": ("branch-guard.mjs", "git commit -m x", None, "warn"),
+            "branch-guard block": ("branch-guard.mjs", "git commit -m x", {"AGENTIC_BRANCH_GUARD_BLOCK": "true"}, "deny"),
+        }
+        for name, (script, command, env_extra, decision) in cases.items():
+            with self.subTest(guard=name):
+                outputs = [self._guard(script, command, repo, path, env_extra) for path in rollouts.values()]
+                self.assertEqual(len(set(outputs)), 1, "a guard decision changed with the process owner")
+                out = json.loads(outputs[0])
+                if decision == "deny":
+                    self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+                else:
+                    self.assertNotIn("hookSpecificOutput", out)
+                    self.assertIn("branch-guard", out["systemMessage"])
+
+
 # ---- AC11: Claude source + regex parity -------------------------------------
 class TestClaudeParity(unittest.TestCase):
     @staticmethod
@@ -242,6 +667,14 @@ class TestClaudeParity(unittest.TestCase):
         for name in ("CLAIM", "NEGATED"):
             self.assertEqual(self._extract(name, claude), self._extract(name, codex),
                              f"{name} regex drifted between Claude and Codex guards")
+
+    def test_strict_copy_claim_negation_parity(self):  # Task 26: the offline strict completion line
+        rollout = ROLLOUT.read_text(encoding="utf-8")
+        codex = HOOK.read_text(encoding="utf-8")
+        for strict_name, hook_name in (("COMPLETION_CLAIM", "CLAIM"), ("COMPLETION_NEGATED", "NEGATED")):
+            with self.subTest(pattern=strict_name):
+                self.assertEqual(self._extract(strict_name, rollout), self._extract(hook_name, codex),
+                                 f"{strict_name} drifted from the Codex completion hook's {hook_name}")
 
     def test_claude_guard_matches_head_except_approved_skill_rename(self):  # AC11 / §10
         head = _git_show("hooks/completion-claim-guard.mjs")

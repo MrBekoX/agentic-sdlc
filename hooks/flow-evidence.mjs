@@ -5,9 +5,11 @@
 //                merely exists (PreToolUse, cheap). If the validator cannot run, fail-open.
 //   - toolUse  : a real tool_use event of the named tool whose input contains the marker.
 //   - command  : a real Bash command in the transcript matching the named regex.
+//   - branch   : the Stop-time working-directory branch is not main/master (warn-level step).
+//   - reviewResult : a dispatched reviewer returned a correlated non-error tool_result (warn-level).
 // Every reader fails OPEN (treats as allowed / satisfied) on its own error, matching the other guards.
 import { readFileSync, readdirSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -106,18 +108,27 @@ export function outputHasTestSignature(text) {
 
 // Parse a transcript JSONL into a trace of observable facts. Fail-open to an empty trace.
 export function parseTranscript(transcriptPath) {
-  const empty = { tools: [], commands: [], edits: [], lastText: '', raw: '' };
+  const empty = { tools: [], commands: [], edits: [], lastText: '', raw: '', results: new Map() };
   if (!transcriptPath) return empty;
   let raw = '';
   try { raw = readFileSync(transcriptPath, 'utf8'); } catch { return empty; }
   const tools = [];
   const commands = [];
   const edits = [];
+  const results = new Map(); // tool_use id -> { nonError } from native user tool_result records
   let lastText = '';
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let e;
     try { e = JSON.parse(line); } catch { continue; }
+    if (e?.type === 'user' && Array.isArray(e?.message?.content)) {
+      for (const r of e.message.content) {
+        if (r?.type !== 'tool_result' || typeof r.tool_use_id !== 'string') continue;
+        // is_error absent counts as non-error; any non-error result for an id marks it non-error.
+        const nonError = r.is_error !== true || Boolean(results.get(r.tool_use_id)?.nonError);
+        results.set(r.tool_use_id, { nonError });
+      }
+    }
     if (e?.type !== 'assistant') continue;
     const content = e?.message?.content;
     if (typeof content === 'string') { if (content) lastText = content; continue; }
@@ -126,7 +137,7 @@ export function parseTranscript(transcriptPath) {
       if (c?.type === 'text' && c.text) lastText = c.text;
       else if (c?.type === 'tool_use') {
         const inputStr = JSON.stringify(c.input || {});
-        tools.push({ name: c.name || '', inputStr });
+        tools.push({ name: c.name || '', inputStr, id: typeof c.id === 'string' ? c.id : null });
         if (c.name === 'Bash' && c.input?.command) commands.push(String(c.input.command));
         if (['Edit', 'Write', 'MultiEdit'].includes(c.name) && c.input?.file_path) {
           edits.push(String(c.input.file_path));
@@ -134,7 +145,7 @@ export function parseTranscript(transcriptPath) {
       }
     }
   }
-  return { tools, commands, edits, lastText, raw };
+  return { tools, commands, edits, lastText, raw, results };
 }
 
 function toolUsePresent(trace, tool, contains) {
@@ -290,8 +301,46 @@ function evidenceSatisfied(item, trace, ctx) {
       // additionally checks exit0 from its rollout `Exit code:` carrier (deliberate asymmetry).
       return trace.commands.some((c) => isRealRunnerInvocation(c, re));
     }
+    case 'reviewResult':
+      // Warn-level only: a reviewer group (control, security) fails when a member was dispatched and no
+      // dispatched member has a correlated non-error result. Dispatch matching is toolUsePresent's test.
+      return Object.values(item.reviewers || {}).every((members) => {
+        const dispatched = trace.tools.filter((t) => (members || []).some((m) => t.name === m.tool && t.inputStr.includes(m.contains)));
+        return !dispatched.length || dispatched.some((t) => t.id && trace.results?.get(t.id)?.nonError);
+      });
+    case 'branch':
+      // Warn-level only (flow-requirements.json): satisfied unless the Stop-time cwd is on main/master.
+      return resolveBranchState(ctx.cwd) !== 'protected';
     default:
       return false;
+  }
+}
+
+// Branch state for the warn-level `branch` step (S10). Fixed argv run without a shell; repository-
+// configured programs (fsmonitor, hooks, pager) are disabled, optional locks and prompts are off. It
+// does not reuse branch-guard.mjs currentBranch, which lacks this hardening (D5). The branch name is
+// never returned or logged: only 'protected' | 'ok' | 'unknown'.
+export const BRANCH_GIT_ARGV = Object.freeze({
+  symbolicRef: Object.freeze(['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', '--no-pager',
+    'symbolic-ref', '--quiet', '--short', 'HEAD']),
+  verifyHead: Object.freeze(['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', '--no-pager',
+    'rev-parse', '--verify', '--quiet', 'HEAD']),
+});
+
+export function resolveBranchState(cwd) {
+  try {
+    const options = {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5000,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' },
+    };
+    const name = execFileSync('git', BRANCH_GIT_ARGV.symbolicRef, options).trim();
+    execFileSync('git', BRANCH_GIT_ARGV.verifyHead, options); // throws when there is no commit yet
+    return name === 'main' || name === 'master' ? 'protected' : 'ok';
+  } catch {
+    return 'unknown'; // git missing, not a repository, detached HEAD, no commits, or a timeout
   }
 }
 

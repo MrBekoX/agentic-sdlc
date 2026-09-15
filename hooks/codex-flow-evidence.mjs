@@ -14,11 +14,29 @@ import { readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation } from './flow-evidence.mjs';
-import { readRolloutSignals } from './codex-rollout.mjs';
+import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation, resolveBranchState } from './flow-evidence.mjs';
+import {
+  readRolloutSignals, readRolloutRuns, splitBr6Statements, lastStatement, isVersionOrHelpOnly, hasUnquotedPipe,
+  readRollout, readOwnerSignals, COMPLETION_CLAIM, COMPLETION_NEGATED,
+} from './codex-rollout.mjs';
 
 export const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
 export { blockFlag };
+
+// Opt-in strict evidence (AGENTIC_FLOW_STRICT_EVIDENCE), read at call time. Default off: with the flag
+// unset the tests step keeps the default shape + exit0 + BR6-attribution path below.
+export function strictFlag() {
+  return /^(true|1|yes)$/i.test(String(process.env.AGENTIC_FLOW_STRICT_EVIDENCE || ''));
+}
+
+// The shared BR6 table's strictAttributable rule (D3), a cross-slice contract: exactly one call event
+// and one output record, a numeric exit code, and a last statement that is a real runner, not
+// version/help-only and not piped. Accepts a readRolloutRuns record directly.
+export function isStrictlyAttributable({ command, callEvents, outputRecords, exitCode }, re) {
+  if (callEvents !== 1 || outputRecords !== 1 || typeof exitCode !== 'number') return false;
+  const last = lastStatement(command);
+  return isRealRunnerInvocation(last, re) && !isVersionOrHelpOnly(last, re) && !hasUnquotedPipe(last);
+}
 
 const ORDER = ['spec', 'plan', 'tests']; // canonical fixed emission order (DP-ORDER, AC25/AC30)
 
@@ -151,7 +169,7 @@ function mergedBlockSteps(req) {
   return [...byId.values()];
 }
 
-function stepMissing(step, workId, signals, req, cwd) {
+function stepMissing(step, workId, signals, req, cwd, runs) {
   if (step.role === 'spec') {
     const f = findArtifactFile(cwd, 'spec', req, workId);
     if (!f) return true;
@@ -171,6 +189,11 @@ function stepMissing(step, workId, signals, req, cwd) {
   if (typeof req.testCommand !== 'string') return true;
   let re;
   try { re = new RegExp(req.testCommand, 'i'); } catch { return true; }
+  // STRICT (opt-in): only an attributable, single-counted run that exited 0 satisfies tests. Absent or
+  // unreadable run records fail CLOSED under the flag, and only under the flag.
+  if (strictFlag()) {
+    return !(runs && runs.readable && runs.runs.some((r) => r.exitCode === 0 && isStrictlyAttributable(r, re)));
+  }
   // SHAPE floor: a run that actually STARTS with a runner (closes `echo pytest` and a forged
   // `echo "...5 passed..."` before any output is read).
   const shaped = (signals.commandRuns || []).filter((r) => isRealRunnerInvocation(r.command, re));
@@ -178,25 +201,43 @@ function stepMissing(step, workId, signals, req, cwd) {
   // ADDITIVE exit0: a shaped run GREENs iff it exited 0 (correlated by call_id from the codex
   // `Exit code:` line, or the exec_command_end fallback). When NO shaped run has a correlated exit
   // (older codex / a runtime that omits the carrier), runIsGreen fails open -> shape-only-satisfied.
-  return !shaped.some((r) => runIsGreen(r));
+  // BR6 closure (default-on): the exit code must also be ATTRIBUTABLE to the runner.
+  return !shaped.some((r) => runIsGreen(r) && attributable(r, re));
 }
 
-export function deriveFlowEvidenceWith(signals, req, cwd) {
+// BR6: a correlated exit code belongs to the command's LAST statement (split on unquoted `;`, newline
+// and `||`), so `pytest; echo EXIT=$?` no longer lends echo's exit 0 to pytest. Attributable when the
+// command is a single statement (the 5801cb9 outcome), when no exit code was correlated (fail-open,
+// as at 5801cb9), or when the last statement is a real runner that is not version/help-only.
+function attributable(r, re) {
+  if (splitBr6Statements(r.command).length <= 1) return true;
+  if (typeof r.exitCode !== 'number') return true;
+  const last = lastStatement(r.command);
+  return isRealRunnerInvocation(last, re) && !isVersionOrHelpOnly(last, re);
+}
+
+// Active-flow detection (BR4): only an in-session WRITE under the spec/plan artifactRoots, or a
+// per-package <slug>/{spec,plan}/ write (AC15), activates a flow; each write contributes its work id.
+function activeWorkIds(signals, req) {
+  const specRoot = req.artifactRoots?.spec;
+  const planRoot = req.artifactRoots?.plan;
+  const workIds = [];
+  for (const t of signals.editTargets) {
+    const norm = String(t).replace(/\\/g, '/');
+    const isArtifactWrite = (specRoot && norm.includes(specRoot)) || (planRoot && norm.includes(planRoot))
+      || perPackageRole(t, req) !== null;
+    if (!isArtifactWrite) continue;
+    const id = workIdOf(t);
+    if (id && !workIds.includes(id)) workIds.push(id);
+  }
+  return workIds;
+}
+
+export function deriveFlowEvidenceWith(signals, req, cwd, runs) {
   try {
     if (!signals || !signals.readable) return { flow: false, workIds: [], missingBlockSteps: [] };
 
-    // Active-flow detection (BR4): only an in-session WRITE under spec/plan artifactRoots activates.
-    const specRoot = req.artifactRoots?.spec;
-    const planRoot = req.artifactRoots?.plan;
-    const workIds = [];
-    for (const t of signals.editTargets) {
-      const norm = String(t).replace(/\\/g, '/');
-      const isArtifactWrite = (specRoot && norm.includes(specRoot)) || (planRoot && norm.includes(planRoot))
-        || perPackageRole(t, req) !== null; // per-package <slug>/{spec,plan}/ write (AC15)
-      if (!isArtifactWrite) continue;
-      const id = workIdOf(t);
-      if (id && !workIds.includes(id)) workIds.push(id);
-    }
+    const workIds = activeWorkIds(signals, req);
     if (!workIds.length) return { flow: false, workIds: [], missingBlockSteps: [] };
 
     // Obligation gate (BR5): no in-session NON-test source edit -> active flow, no step obligation.
@@ -207,7 +248,7 @@ export function deriveFlowEvidenceWith(signals, req, cwd) {
     const missing = new Set();
     for (const workId of workIds) {
       for (const step of steps) {
-        if (stepMissing(step, workId, signals, req, cwd)) missing.add(step.id);
+        if (stepMissing(step, workId, signals, req, cwd, runs)) missing.add(step.id);
       }
     }
     // Union across work-ids, deduped by id, emitted in canonical fixed order (BR4a/BR4b/AC25/AC30).
@@ -222,5 +263,64 @@ export function deriveFlowEvidenceWith(signals, req, cwd) {
 }
 
 export function deriveFlowEvidence(transcriptPath, cwd) {
-  return deriveFlowEvidenceWith(readRolloutSignals(transcriptPath), loadRequirements(), cwd);
+  const runs = strictFlag() ? readRolloutRuns(transcriptPath) : undefined; // second read only under strict
+  return deriveFlowEvidenceWith(readRolloutSignals(transcriptPath), loadRequirements(), cwd, runs);
+}
+
+// ---------------------------------------------------------------------------
+// Offline strict evaluation for scripts/strict_flow_evidence.py (publication-readiness 0.4.3; AC43,
+// AC44, AC119, AC120). The live hooks never call it. Returns {error:true} when a rollout scan is
+// unreadable, otherwise {evidence, completion, branch}:
+//   evidence   'missing' without an active flow, or with a source edit but no real runner invocation;
+//              'green' when every work id's spec and same-work-id plan validate strictly (an unavailable
+//              validator does not count) and, when a source edit exists, a strictly attributable RED run
+//              precedes a strictly attributable GREEN run; otherwise 'partial'.
+//   completion 'n/a' without an active flow or an un-negated completion claim in the final message;
+//              House needs the gate marker, Superpowers the marker or a verification delivery, and an
+//              Ambiguous phase is always 'unsatisfied'.
+//   branch     'ok' without a source edit, else resolveBranchState(cwd); report-only, never the verdict.
+function validatesStrictly(role, workId, req, cwd) {
+  const specFile = findArtifactFile(cwd, 'spec', req, workId);
+  if (!specFile) return false;
+  if (role === 'spec') return runValidator('spec', specFile, null, cwd) === 0;
+  const planFile = findArtifactFile(cwd, 'plan', req, workId);
+  return Boolean(planFile) && runValidator('plan', planFile, specFile, cwd) === 0;
+}
+
+export function deriveStrictEvidence(rolloutPath, cwd) {
+  const signals = readRolloutSignals(rolloutPath);
+  const runs = readRolloutRuns(rolloutPath);
+  const roll = readRollout(rolloutPath);
+  const owner = readOwnerSignals(rolloutPath, cwd);
+  if (!signals.readable || !runs.readable || !roll.readable || !owner.readable) return { error: true };
+  const req = loadRequirements();
+  let re = null;
+  try { if (typeof req.testCommand === 'string') re = new RegExp(req.testCommand, 'i'); } catch { re = null; }
+
+  const workIds = activeWorkIds(signals, req);
+  const sourceEdited = signals.editTargets.some((t) => isSourceFile(t, req));
+
+  let evidence;
+  if (!workIds.length || (sourceEdited && !(re && signals.commands.some((c) => isRealRunnerInvocation(c, re))))) {
+    evidence = 'missing';
+  } else {
+    const validated = workIds.every((id) => validatesStrictly('spec', id, req, cwd) && validatesStrictly('plan', id, req, cwd));
+    let redBeforeGreen = true;
+    if (sourceEdited) {
+      const attributable = runs.runs.filter((r) => isStrictlyAttributable(r, re)); // ordered by first call event
+      const reds = attributable.filter((r) => r.exitCode !== 0);
+      redBeforeGreen = reds.length > 0 && attributable.some((r) => r.exitCode === 0 && r.seq > reds[0].seq);
+    }
+    evidence = validated && redBeforeGreen ? 'green' : 'partial';
+  }
+
+  let completion = 'n/a';
+  if (workIds.length && COMPLETION_CLAIM.test(roll.finalMessage) && !COMPLETION_NEGATED.test(roll.finalMessage)) {
+    if (owner.phase === 'house') completion = roll.gateMarkerPresent ? 'satisfied' : 'unsatisfied';
+    else if (owner.phase === 'superpowers') completion = roll.gateMarkerPresent || owner.verificationDelivered ? 'satisfied' : 'unsatisfied';
+    else completion = 'unsatisfied';
+  }
+
+  const branch = sourceEdited ? resolveBranchState(cwd) : 'ok';
+  return { evidence, completion, branch };
 }
