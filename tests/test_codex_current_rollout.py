@@ -340,7 +340,7 @@ class BR6SafeGrammarTests(unittest.TestCase):
         commands = list(GRAMMAR_INSIDE) + list(GRAMMAR_OUTSIDE)
         got = self.node(script, commands)
         wrong = [c for c, value in zip(commands, got) if value is not (c in GRAMMAR_INSIDE)]
-        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (22, 62))
+        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (24, 70))
         self.assertEqual(wrong, [], "commands whose Node grammar verdict is wrong")
 
     def test_unmodeled_syntax_is_separator_outside_grammar(self):

@@ -579,6 +579,9 @@ const BR6_BASH_BUILTINS = new Set([
 ]);
 const BR6_SAFE_BUILTINS = new Set([':', '[', 'cd', 'echo', 'export', 'false', 'printf', 'pwd', 'set', 'test', 'true',
   'unset', 'wait']);
+// Safe builtins that assign to or arithmetically evaluate a variable name taken from an argument (`printf -v`,
+// `test -v`, `wait -p`): a parameter or glob in that argument can supply a BASH_CMDS subscript.
+const BR6_NAME_BUILTINS = new Set(['printf', 'test', '[', 'wait']);
 const GRAMMAR_ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const GRAMMAR_WORD_CHARS = new Set(GRAMMAR_ALNUM + '_-./:=+,@%^~!?*]');
 const GRAMMAR_PARAMETER_CHARS = new Set(GRAMMAR_ALNUM + '_?#$!@*-');
@@ -592,8 +595,11 @@ const GRAMMAR_SET_WORDS = new Set(['errexit', 'nounset', 'pipefail']);
 // substitution, `$NAME`-style parameters, backslash pairs and continuations, word-start comments, the
 // separators `;`, newline, `||`, `&&`, `|`, `|&` and a background `&`, and simple redirections followed by a
 // word. Each simple command's command word is an external program or a BR6_SAFE_BUILTINS name; after such a
-// builtin no later `[` may appear (an array subscript reaches BASH_CMDS), and `set` only takes the
-// errexit/nounset/pipefail forms. Always outside: `(`, `)`, `{`, `}`, a backtick, `[[`, `<<`, `<(` and `>(`.
+// builtin no later `[` may appear (an array subscript reaches BASH_CMDS); after a BR6_NAME_BUILTINS name no
+// later parameter (`$`, unquoted or in double quotes) and no unquoted `?` or `*` glob may appear either, since
+// either can expand to such a subscript; and `set` only takes the errexit/nounset/pipefail forms. A word of only
+// digits directly before `<` or `>` is that redirection's file descriptor in any position. Always outside: `(`,
+// `)`, `{`, `}`, a backtick, `[[`, `<<`, `<(` and `>(`.
 // scripts/run_procedure_eval.py in_safe_br6_grammar mirrors this pass branch for branch.
 export function inSafeBr6Grammar(command) {
   const str = String(command || '');
@@ -603,6 +609,7 @@ export function inSafeBr6Grammar(command) {
   let wordStart = true;
   let commandSeen = false;
   let safeBuiltin = false;
+  let nameBuiltin = false;
   let setCommand = false;
   let redirectPending = false; // an operator was read and its target word has not started
   let targetWord = false;      // the current word is a redirection target
@@ -611,13 +618,14 @@ export function inSafeBr6Grammar(command) {
     inWord = false;
     const raw = word.join('');
     if (targetWord) { targetWord = false; return true; }
+    if ((next === '<' || next === '>') && GRAMMAR_DIGITS.test(raw)) return true; // the redirection's fd
     if (!commandSeen) {
       if (GRAMMAR_ASSIGNMENT.test(raw)) return true;
-      if ((next === '<' || next === '>') && GRAMMAR_DIGITS.test(raw)) return true; // the redirection's fd
       commandSeen = true;
       if (raw !== '[' && !GRAMMAR_COMMAND_WORD.test(raw)) return false;
       if (BR6_RESERVED_WORDS.has(raw) || (BR6_BASH_BUILTINS.has(raw) && !BR6_SAFE_BUILTINS.has(raw))) return false;
       safeBuiltin = BR6_SAFE_BUILTINS.has(raw);
+      nameBuiltin = BR6_NAME_BUILTINS.has(raw);
       setCommand = raw === 'set';
       return true;
     }
@@ -628,6 +636,7 @@ export function inSafeBr6Grammar(command) {
     const c = str[i];
     const n = i + 1 < length ? str[i + 1] : '';
     if (c === '[' && safeBuiltin) return false;
+    if ((c === '$' || c === '?' || c === '*') && nameBuiltin) return false;
     if (c === ' ' || c === '\t') {
       if (!finishWord(c)) return false;
       wordStart = true;
@@ -639,6 +648,7 @@ export function inSafeBr6Grammar(command) {
       i += (c === '|' && (n === '|' || n === '&')) || (c === '&' && n === '&') ? 2 : 1;
       commandSeen = false;
       safeBuiltin = false;
+      nameBuiltin = false;
       setCommand = false;
       wordStart = true;
       continue;
@@ -699,7 +709,7 @@ export function inSafeBr6Grammar(command) {
         }
         if (inner === '$') {
           const following = scan + 1 < length ? str[scan + 1] : '';
-          if (!following || !GRAMMAR_PARAMETER_CHARS.has(following)) return false;
+          if (nameBuiltin || !following || !GRAMMAR_PARAMETER_CHARS.has(following)) return false;
           scan += 2;
           continue;
         }

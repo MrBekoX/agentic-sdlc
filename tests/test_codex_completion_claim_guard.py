@@ -484,7 +484,8 @@ class TestOwnerSignalScanner(unittest.TestCase):
                   "shopt -s extglob\ncat /nonexistent; echo @(x; cat " + path + " #)",
                   "eval 'cat() { true; }'; cat " + path,
                   "function cat if true; then true; fi; cat " + path,
-                  "set -n; cat " + path]
+                  "set -n; cat " + path,
+                  "V='BASH_CMDS[cat]'; printf -v $V %s /usr/bin/true; cat " + path]
         self.assertEqual(_delivery_skills(forged), [None] * len(forged))
         self.assertEqual(_delivery_skills(["cat " + path + "\n# done"]), ["verification-before-completion"])
 

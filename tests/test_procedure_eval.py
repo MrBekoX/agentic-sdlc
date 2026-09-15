@@ -976,6 +976,8 @@ GRAMMAR_INSIDE = (
     "X='eval' Y=\"$Z\" pytest",
     "ev\\\nal=1 pytest",
     "pytest eval source trap 'exit 0'",
+    "set -euo pipefail 2>/dev/null; pytest",
+    "echo $? *.txt; cd \"$D\"; export PATH=$PATH:bin; unset $X; pytest",
 )
 GRAMMAR_OUTSIDE = (
     "pytest $(x)", "pytest $((1))", "pytest ${x}", "pytest $'x'", "pytest $\"x\"", "pytest $[1]", "pytest $",
@@ -988,6 +990,15 @@ GRAMMAR_OUTSIDE = (
     "e\\val x", "ev\\\nal x", "function f if true; then true; fi", "! pytest", "time pytest",
     "BASH_CMDS[pytest]=x; pytest", "printf -v 'a[b]' x", "echo '[x]'; pytest", "test -v \"a[b]\"",
     "2>/dev/null eval x", "X=1 eval x", "type pytest", "p?test", "pyt*st", "[x] && pytest",
+    # A parameter or glob after printf, test, `[` or wait carries a subscript past the `[` check (bash 5.2.37 exit 0).
+    "V='BASH_CMDS[pytest]'; printf -v $V %s /usr/bin/true; pytest",
+    "V='BASH_CMDS[pytest]'; printf -v \"$V\" %s /usr/bin/true; pytest",
+    "ls 'BASH_CMDS[pytest]'; printf -v $_ %s /usr/bin/true; pytest",
+    "touch 'BASH_CMDS[pytest]'; printf -v BASH_CMDS?pytest? %s /usr/bin/true; pytest",
+    "touch 'BASH_CMDS[pytest]'; printf -v BASH_CMDS*pytest* %s /usr/bin/true; pytest",
+    "cp /usr/bin/true 0; V='a[BASH_CMDS[pytest]=0]'; test -v $V; pytest",
+    "cp /usr/bin/true 0; V='a[BASH_CMDS[pytest]=0]'; [ -v \"$V\" ]; pytest",
+    "V='BASH_CMDS[pytest]'; wait -n -p $V; pytest",
 ) + ('pytest "a' + chr(1) + 'b"',)
 
 
@@ -1013,7 +1024,7 @@ class TestStrictRedGreen(unittest.TestCase):
 
     def test_safe_grammar_production_lists(self):
         # Mutation: dropping any character or command-word production (each listed construct would be admitted).
-        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (22, 62))
+        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (24, 70))
         for command, expected in [(c, True) for c in GRAMMAR_INSIDE] + [(c, False) for c in GRAMMAR_OUTSIDE]:
             with self.subTest(command=command):
                 self.assertIs(procedure_eval.in_safe_br6_grammar(command), expected)
@@ -1478,7 +1489,7 @@ class TestStrictReviewerMembership(unittest.TestCase):
 
 
 PACKET_CASE = "agentic-sdlc-pipeline-feature-no-commit"
-BASIC_FIXTURE =REPO / "tests" / "fixtures" / "agentic-sdlc-pipeline-basic"
+BASIC_FIXTURE = REPO / "tests" / "fixtures" / "agentic-sdlc-pipeline-basic"
 BUILD_RELEASE = REPO / "scripts" / "build_release.py"
 UNAVAILABLE_IDENTITIES = {
     "unavailable:no-git-checkout",
