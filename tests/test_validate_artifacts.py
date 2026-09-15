@@ -222,7 +222,7 @@ class TestScanner(unittest.TestCase):
             "sk_live_" + "a1B2" * 5,
             "AIza" + "a1B2" * 8 + "abc",
             "sk-" + "a1B2" * 6,
-            "eyJa1B2a1B2.eyJc3D4c3D4.e5F6e5F6",
+            ".".join(["eyJa1B2a1B2", "eyJc3D4c3D4", "e5F6e5F6"]),
         ]
         for token in tokens:
             with self.subTest(token=token[:8]):

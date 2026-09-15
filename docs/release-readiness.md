@@ -10,6 +10,58 @@ This file is the publish gate for `agentic-sdlc` version `0.4.3`. It keeps the r
 | Codex | Supported | Local gate plus route-classifier/procedure transcript evidence before claiming live behavior. |
 | OpenCode, Kimi Code, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.3`. |
 
+## Distribution paths and go/no-go
+
+The four distribution paths below each get their own go/no-go decision; the same labels are used in [`README.md`](../README.md) and both runtime READMEs. Each verdict stays no-go, pending maintainer review, until a recorded maintainer review of that path is linked in the ledger's [path verdicts](release-evidence-0.4.3.md#path-verdicts). The old 45/45 routing results, synthetic replay and marketplace-only validation never close a path.
+
+### Claude own marketplace
+
+**Prerequisites.** Claude Code with plugin marketplace support, `node` on `PATH`, and read access to `MrBekoX/agentic-sdlc`.
+
+**Steps.** `/plugin marketplace add MrBekoX/agentic-sdlc`, then `/plugin install agentic-sdlc@mrbekox`.
+
+**Go condition.** Anonymous users need a public repository: a private repository installs only through a git credential helper or SSH, and a token supplied only in an environment variable does not authenticate the install ([private repositories](https://code.claude.com/docs/en/plugin-marketplaces.md#private-repositories), observed 2026-09-14). `claude plugin validate .claude-plugin/marketplace.json --strict` and `claude plugin validate .claude-plugin/plugin.json --strict` pass as two separate checks. Marketplace validation checks no plugin contents, and hook-config validity comes from the repository tests. A worktree strict `plugin.json` exit 1 caused by the untracked `CLAUDE.md` is not the clean-package result. The clean install starts from an empty profile: `/plugin marketplace add MrBekoX/agentic-sdlc`, `/plugin install agentic-sdlc@mrbekox`, a new session or `/reload-plugins`, then skill, command and hook discovery plus one real invocation, with the clone transport (SSH or HTTPS) recorded.
+
+State: BLOCKED. The repository is private, its unauthenticated URL returns 404 in `docs/publication/link-checks.json`, and visibility stays blocked by an unresolved Git history finding (ledger row `history_private_path_finding`).
+
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.4.3.md#path-verdicts)).
+
+### Claude community marketplace submission
+
+**Prerequisites.** A public repository, a recorded clean-package `claude plugin validate` result, and maintainer access to a submission form (the claude.ai form needs a Team or Enterprise plan with directory management; the Console form needs a Developer, Admin or Owner role).
+
+**Steps.** Submit the plugin root through [claude.com/docs/plugins/submit](https://claude.com/docs/plugins/submit), using the packet [`publication/claude-community.md`](publication/claude-community.md).
+
+**Go condition.** The repository must be public and `claude plugin validate` must pass on the submitted plugin root. Acceptance is not guaranteed. Observed 2026-09-14: [code.claude.com/docs/en/plugins](https://code.claude.com/docs/en/plugins.md) says approved plugins "are pinned to a specific commit SHA" and that CI bumps the pin automatically as new commits are pushed, and [claude.com/docs/plugins/submit](https://claude.com/docs/plugins/submit) says "updates pushed to your GitHub repo are picked up automatically", so every default-branch push after approval counts as publication. The pages name different target marketplaces, `claude-community` and `claude-plugins-official`; neither placement is promised.
+
+State: BLOCKED. The path needs a public repository, the clean-package validation result and maintainer form access.
+
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.4.3.md#path-verdicts)).
+
+### Codex personal marketplace
+
+**Prerequisites.** Codex CLI 0.154.0, `node` on `PATH`, and the plugin at `~/plugins/agentic-sdlc`.
+
+**Steps.** Create the personal catalog, run `codex plugin add agentic-sdlc@personal`, open `/hooks` in Codex and trust each agentic-sdlc hook, then run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal`, which prints `codex_hook_trust=trusted` for a fully trusted install ([Codex hook trust](troubleshooting.md#codex-hook-trust)).
+
+**Go condition.** A catalog at `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`; install through `codex plugin add agentic-sdlc@personal`; native `plugin/read` showing 16 skills and `hooks/list` showing 8 hooks; and hook trust granted through the native `/hooks` trust protocol as a required step.
+
+State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded in the ledger.
+
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.4.3.md#path-verdicts)).
+
+### OpenAI public directory
+
+**Prerequisites.** Maintainer-verified identity and Apps Management Write (`api.apps.write`).
+
+**Steps.** Build the BR24 skills-only archive with `python3 scripts/build_release.py --output <zip> --skills-only`, verify it with `python3 scripts/build_release.py --verify <zip>`, then upload it through the OpenAI portal, using the packet [`publication/openai-skills-only.md`](publication/openai-skills-only.md).
+
+**Go condition.** The skills-only archive verifies as `archive_kind=skills-only`, the maintainer identity and `api.apps.write` are verified, and submission, acceptance and publication are treated as three separate stages. After publication, the listing changes only through a newly reviewed version ([app review](https://developers.openai.com/plugins/deploy/app-review)).
+
+State: BLOCKED. The path needs the verified identity, `api.apps.write` and a verified skills-only archive.
+
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.4.3.md#path-verdicts)).
+
 ## Required Local Gate
 
 Run these commands from the repository root before publishing or tagging:
@@ -30,14 +82,18 @@ The local gate proves metadata consistency, Codex manifest shape, static skill w
 
 Do not claim that a skill "works", "triggers", or is "production-ready" in a runtime unless at least one current transcript or eval summary exists for that claim.
 
-Minimum publish evidence for this release uses the requested `gpt-5.3-codex-spark` / Low and `claude-sonnet-5` / Low settings. Cover all fifteen standalone scenarios with `--runs 3 --threshold 1.0`: every case needs three correct observations, no hard error and no prohibited pipeline escalation. Preserve both procedure cases; the first explicitly requests smoke depth, while the second requests the normal per-package layout.
+The model baseline for this release batch is `gpt-5.5` / Low for Codex (a new baseline) and `claude-sonnet-5` / Low for Claude. Earlier `gpt-5.3-codex-spark` / Low results are historical and separate; they are not comparable to the new Codex baseline.
+
+The live batch follows the BR11 settings: fifteen standalone routing scenarios with `--runs 3 --threshold 1.0` per runtime, where every case needs three correct observations, no hard error and no prohibited pipeline escalation; Claude `--max-budget-usd 1.50` per routing run; both procedure cases per runtime, at most $6 per Claude case; and no automatic retry. The first procedure case explicitly requests smoke depth, while the second requests the normal per-package layout.
 
 | Claim | Command shape | Passing signal |
 |---|---|---|
-| `using-agentic-sdlc` routes standalone prompts in Claude Code | `python3 scripts/run_routing_eval.py --eval-set tests/skills/routing/using-agentic-sdlc.json --runtime claude --model claude-sonnet-5 --runs 3 --threshold 1.0 --max-budget-usd 1.50 ...` | `routing_eval=passed`, 15/15 scenarios and 45/45 observations; inspect actual selected Skill/Read delivery. |
-| `using-agentic-sdlc` routes standalone prompts in Codex | `python3 scripts/run_routing_eval.py --eval-set tests/skills/routing/using-agentic-sdlc.json --runtime codex --model gpt-5.3-codex-spark --reasoning-effort low --runs 3 --threshold 1.0 ...` | `routing_eval=passed`, 15/15 scenarios and 45/45 observations; this is a description classifier, not native skill activation. |
-| `agentic-sdlc-pipeline` invokes the required phase skills/tools in Claude Code | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live --model claude-sonnet-5 --max-budget-usd 6 ...` | `procedure_eval=passed` for both procedure cases, with persisted fixture and transcript evidence. |
-| `agentic-sdlc-pipeline` Codex adapter transcript satisfies procedure gates | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-codex-adapter-pass.jsonl` | `procedure_eval=passed`. |
+| `using-agentic-sdlc` routes standalone prompts in Claude Code | `python3 scripts/run_routing_eval.py --eval-set tests/skills/routing/using-agentic-sdlc.json --runtime claude --model claude-sonnet-5 --runs 3 --threshold 1.0 --max-budget-usd 1.50 ...` (non-persistent live Skill routing with `--plugin-dir`) | `routing_eval=passed`, 15/15 scenarios and 45/45 observations; inspect actual selected Skill/Read delivery. |
+| `using-agentic-sdlc` routes standalone prompts in Codex | `python3 scripts/run_routing_eval.py --eval-set tests/skills/routing/using-agentic-sdlc.json --runtime codex --model gpt-5.5 --reasoning-effort low --runs 3 --threshold 1.0 ...` | `routing_eval=passed`, 15/15 scenarios and 45/45 observations; this is a description classifier, not native skill activation. |
+| `agentic-sdlc-pipeline` procedure in Claude Code and Codex | A native installed-package `claude -p` or `codex exec` run whose command equals its approved entry, graded by `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --case-id <id> --transcript <capture> --fixture-root <fixture> --strict-evidence --evidence-dir <dir>` | Strict `procedure_eval=passed` for both procedure cases (2/2) on that runtime. Output of the eval's `--live` harness mode (which requires `--allow-fixture-commit`) is not scored as a procedure row. |
+| `agentic-sdlc-pipeline` Codex adapter transcript replay | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-codex-adapter-pass.jsonl` | `procedure_eval=passed`; labeled deterministic replay, and it never sets `codex_pipeline_procedure`. |
+
+Procedure runs never use these BR12 forbidden flags. Codex: `--ephemeral`, `--dangerously-bypass-hook-trust`, `--dangerously-bypass-approvals-and-sandbox`, `--ignore-user-config` and `--ignore-rules`. Claude: `--no-session-persistence` and `--dangerously-skip-permissions`. Routing runs keep the runners' documented shapes, and neither routing type counts as trust, persistence or hook evidence.
 
 These are runner command shapes, not automatic authorization to run a large batch. Review exact commands, snapshots and limits before execution. For Claude, set `CLAUDE_CODE_EFFORT_LEVEL=low` and pin `CLAUDE_CODE_SUBAGENT_MODEL` plus `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL` to `claude-sonnet-5` in the isolated child environment. The routing runner's `--reasoning-effort` argument configures Codex; it does not itself configure Claude. Inspect every returned assistant model and modelUsage entry rather than assuming the requested main model constrains helpers. Claude response-side effective effort may be absent; record Low configuration without inventing telemetry.
 
@@ -120,6 +176,24 @@ Scan staged and unstaged diffs for tokens, private keys, connection strings, and
 - Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters.
 - Current bounded hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. They retain their own immutable source identities; current parser replay and later skill evaluations are separate evidence. `transcript_path` remains unstable. See [runtime boundaries](runtime-adapter.md#current-binary-and-historical-hook-evidence) and the [public release ledger](release-evidence-0.4.3.md).
 
+## Auxiliary .skill Archives
+
+`.skill` archives are an auxiliary artifact. They are not a fifth distribution path and not a go/no-go gate (BR5); the release decision uses only the four paths in [Distribution paths and go/no-go](#distribution-paths-and-gono-go).
+
+These skills depend on companion plugin resources, so they are not offered as universal standalone `.skill` packages. A skill counts when any `.md`, `.py` or `.json` file under `skills/<skill>/` references `<runtime-root>/scripts`, `/contracts` or `/hooks`, or the same paths under `${PLUGIN_ROOT}` or `${CLAUDE_PLUGIN_ROOT}`:
+
+- `agentic-sdlc-pipeline`: `SKILL.md` and `playbook.md` run plugin scripts and read plugin contracts.
+- `implementation-control`: `SKILL.md` runs a plugin script.
+- `plan-authoring`: `SKILL.md` reads plugin contracts and runs the plan validator script.
+- `skill-authoring`: `references/house-notes.md` points at `<runtime-root>/scripts`, and `SKILL.md` states that the runtime eval runners require companion plugin resources.
+- `spec-authoring`: `SKILL.md` reads plugin contracts and runs the spec validator script.
+
+`mind-spark` and `using-agentic-sdlc` are not in this list: their `${PLUGIN_ROOT}/skills/<skill>/SKILL.md` references are catalog-fallback paths, not companion resources.
+
+The skill-creator toolkit is BLOCKED until reviewed. `skills/skill-authoring/scripts/resolve_skill_creator.py` reports `skill_creator_status=missing_capabilities` for the WSL toolkit and `explicit-unverified` for the Windows cache. No archive is produced from an unreviewed toolkit, and a reviewed toolkit commit is recorded only as a full 40-hex commit together with its ledger row.
+
+The per-archive identity record is the `skill_archives` row in [release evidence](release-evidence-0.4.3.md) (AC127).
+
 ## Artifact Layouts And Per-Package Evidence
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`). This is distinct from the legacy `docs/agentic-sdlc/evidence/` directory (no slug segment) referenced above, which is outside the per-package evidence gate.
@@ -130,7 +204,7 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 
 ## Release Verdict Template
 
-Use this shape in a release note or final publish report:
+Use this shape in a release note or final publish report. Its keys, allowed values and row bindings are governed by the decision block in the [release ledger](release-evidence-0.4.3.md#publication-decision) (AC116):
 
 ```text
 version=0.4.3

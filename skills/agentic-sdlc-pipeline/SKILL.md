@@ -107,7 +107,7 @@ These fire on their own triggers across the flow — invoke them with the `Skill
 | 13 | Re-run all tests | core work-flow | full suite green | — |
 | 14 | Security analysis #2 (final diff) | agentic-sdlc-pipeline · `security-audit` | final diff clean | ⇉ lenses |
 | 15 | Lint / typecheck / build / secret-scan | agentic-sdlc-pipeline | all gates pass | ⇉ |
-| 16 | Git diff review | agentic-sdlc-pipeline · `/git-safety-check` | only intended files, no secrets | — |
+| 16 | Git diff review | agentic-sdlc-pipeline · read-only git-safety-check command | only intended files, no secrets | — |
 | — | **Implementation control** | `implementation-control` | no critical gap | — |
 | 17 | Commit | agentic-sdlc-pipeline · git | user approved | — |
 | 18 | Push branch | agentic-sdlc-pipeline · git | user approved, not main | — |

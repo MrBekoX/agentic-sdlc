@@ -15,14 +15,14 @@ Check:
 Check:
 
 1. The personal marketplace exists at `~/.agents/plugins/marketplace.json`.
-2. Its `agentic-sdlc` entry points at `~/.codex/plugins/agentic-sdlc`.
-3. `~/.codex/plugins/agentic-sdlc` is a real copy or symlink/junction to this plugin root.
+2. Its `agentic-sdlc` entry uses the source path `./plugins/agentic-sdlc`, which resolves under the home directory to `~/plugins/agentic-sdlc`.
+3. `~/plugins/agentic-sdlc` is a real copy or symlink/junction to this plugin root.
 4. The plugin was installed with `codex plugin add agentic-sdlc@personal`.
 5. The manifest contains `"skills": "./skills/"` and `"hooks": "./hooks/hooks-codex.json"`.
 6. Skills are under root `skills/`, not `.codex/skills/`.
 7. The runtime guide in [`../.codex-plugin/README.md`](../.codex-plugin/README.md) matches the installed path.
 
-`codex plugin add agentic-sdlc@personal` is the supported local install. Codex 0.153.0+ also has `codex plugin marketplace add` for a Codex-shaped catalog. This repo's `.claude-plugin/marketplace.json` is Claude's marketplace schema; do not add that file as a Codex marketplace.
+`codex plugin add agentic-sdlc@personal` is the supported local install. Codex 0.153.0+ also has `codex plugin marketplace add`. This repo's `.claude-plugin/marketplace.json` is Claude's marketplace schema and not the supported Codex install path. Codex 0.154.0 can read it as a legacy-compatible layout, and `codex plugin marketplace add MrBekoX/agentic-sdlc` surfacing the `mrbekox` marketplace has been observed, but that route is unsupported. Installing both routes can list the plugin twice, once from `mrbekox` and once from `personal`.
 
 ## Claude Hooks Do Not Run
 
@@ -41,11 +41,32 @@ Check:
 1. `hooks/hooks-codex.json` is valid Codex hook JSON and has only the top-level `hooks` object, and `.codex-plugin/plugin.json` declares `"hooks": "./hooks/hooks-codex.json"`.
 2. The plugin was reinstalled after hook config changes.
 3. Start a new Codex thread so the declared Codex hook config is reloaded.
-4. Open `/hooks` and review/trust the plugin-bundled commands if Codex marks them pending review.
+4. Open `/hooks` and review/trust the plugin-bundled commands if Codex marks them pending review; see [Codex hook trust](#codex-hook-trust) for each environment.
 5. `node` is on `PATH`.
 6. `${PLUGIN_ROOT}` resolves in the Codex plugin runtime.
 
 Codex wires blocking `PreToolUse` guards, `SessionStart`, and advisory/env-gated `Stop` backstops. If startup context works but a command guard does not, compare the event/matcher in `hooks/hooks-codex.json`, confirm `node` is available, and run the hook script with a sanitized sample payload. Remember that unrecognized literal-write forms and internal parse errors deliberately fail open.
+
+## Codex hook trust
+
+Codex runs a non-managed plugin-bundled hook only after that hook is trusted. Trust each agentic-sdlc hook in the Codex `/hooks` view, then run the read-only post-install check from the plugin root (or pass `--cwd <dir>`). A fully trusted install prints `codex_hook_trust=trusted`.
+
+| Environment | Codex config location | Trust step | `node` requirement | Check command | Verification state |
+|---|---|---|---|---|---|
+| Windows | `%USERPROFILE%\.codex\config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node` on the `PATH` Codex runs hooks with | `py -3 scripts\check_codex_hook_trust.py --plugin agentic-sdlc@personal` (or `python3`); needs Python 3.12 or newer | see ledger row `hook_trust_list_records` |
+| macOS | `~/.codex/config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node` on the `PATH` Codex runs hooks with | `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal` | not live-tested |
+| Linux | `~/.codex/config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node` on the `PATH` Codex runs hooks with | `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal` | verified through WSL Ubuntu 24.04 (ledger row `hook_trust_list_records`) |
+| WSL | `~/.codex/config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node` on `PATH`; an nvm install must be added to `PATH` explicitly | `python3 scripts/check_codex_hook_trust.py --codex ~/.local/bin/codex --plugin agentic-sdlc@personal` (use `~/.local/bin/codex` rather than an older nvm copy) | see ledger row `hook_trust_list_records` |
+
+The check starts `codex app-server --stdio`, sends only `initialize`, `initialized` and `hooks/list`, writes no file, and prints five lines: `codex_hook_trust_plugin=`, `codex_hook_trust_counts=`, `codex_hook_trust_untrusted_events=`, `codex_hook_trust=` and `codex_hook_trust_next_step=`. It prints no hook key, hash or path.
+
+- Exit 0: at least one hook of `--plugin` is listed and every one is `trusted` or `managed` (`codex_hook_trust=trusted`).
+- Exit 1: at least one hook of `--plugin` is `untrusted` or `modified` (`codex_hook_trust=untrusted`); the events line names them.
+- Exit 2: the plugin lists no hook (`codex_hook_trust=no-hooks`), a named error (`codex_hook_trust=error:<name>`, such as `codex_not_found`, `cwd_not_found`, `timeout`, `server_exited`, `rpc_error` or `malformed_response`), or a usage error, which prints usage on stderr and no five-line block. A `--plugin` value with a non-ASCII character is a usage error.
+
+A bare `--codex` name (the default `codex`) is resolved only on absolute `PATH` entries and never from the current directory; relative or `~` entries are skipped, so a `codex` reachable only through one reports `error:codex_not_found`. Pass an explicit path with `--codex` in that case. On a timeout the check kills the server's whole process tree; on Windows it starts `taskkill` by its absolute `System32` path. On Windows the check needs Python 3.12 or newer, whose `shutil.which` handles `PATHEXT` for a path that has a directory part.
+
+The check reports trust state only: it does not prove that a hook runs, that `node` is on `PATH`, or that a trusted hook has an effect. Trust is granted only through the `/hooks` review; no hand edit of `config.toml` and no trust-bypass flag is a trust step.
 
 ## Branch Guard Only Warns
 
@@ -76,6 +97,8 @@ AGENTIC_FLOW_GATE_BLOCK=true
 ```
 
 The flow guards re-derive evidence from the current transcript, validated `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/` artifacts, real tool calls, and real commands. Prose such as "I ran the gate" does not satisfy a required step.
+
+The `branch` and `review-result` steps are warn-only by design: they never block, even with `AGENTIC_FLOW_GATE_BLOCK=true`. For strict Codex evaluation, run the offline `python3 scripts/strict_flow_evidence.py --rollout <path> --cwd <dir>`, or set `AGENTIC_FLOW_STRICT_EVIDENCE=true` to make the live Codex `tests` evidence strict.
 
 ## Secret Scanner False Positive
 
