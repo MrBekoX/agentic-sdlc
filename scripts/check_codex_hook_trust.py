@@ -71,9 +71,10 @@ def _positive_seconds(value: str) -> float:
 
 
 def _plugin_id(value: str) -> str:
-    # The plugin id is echoed on line one; a control or space character would break the block.
-    if not value or any(ch.isspace() or not ch.isprintable() for ch in value):
-        raise argparse.ArgumentTypeError("must be a non-empty id without spaces or control characters")
+    # The plugin id is echoed on line one; a control or space character would break the block, and a
+    # non-ASCII one cannot be encoded by a redirected stdout that uses the locale code page.
+    if not value or not value.isascii() or any(ch.isspace() or not ch.isprintable() for ch in value):
+        raise argparse.ArgumentTypeError("must be a non-empty ASCII id without spaces or control characters")
     return value
 
 
@@ -121,7 +122,8 @@ def _await_response(sink: queue.Queue, request_id: int, deadline: float) -> dict
             continue
         try:
             message = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # A very deeply nested line exhausts the decoder's recursion limit.
             raise TrustCheckError("malformed_response") from None
         if not isinstance(message, dict):
             raise TrustCheckError("malformed_response")
@@ -140,9 +142,11 @@ def _await_response(sink: queue.Queue, request_id: int, deadline: float) -> dict
 def _terminate_tree(proc: subprocess.Popen) -> None:
     if sys.platform == "win32":
         if proc.poll() is None:
+            # By absolute path: a bare name is searched in the current directory first on Windows.
+            taskkill = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe")
             try:
                 subprocess.run(
-                    ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                    [taskkill, "/T", "/F", "/PID", str(proc.pid)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=KILL_WAIT_SECONDS,
@@ -257,11 +261,27 @@ def _block(plugin: str, total: int, counts: dict, events: list, state: str, step
     )
 
 
+def resolve_codex(name: str) -> str | None:
+    """Resolve `name` like the maintainer's shell: a bare name only on absolute PATH entries.
+
+    shutil.which on Windows also searches the current directory first (even with an explicit
+    `path=`), which would run a `codex.cmd` planted in the checked project.
+    """
+    if os.path.dirname(name):
+        return shutil.which(name)
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if entry and os.path.isabs(entry):
+            found = shutil.which(os.path.join(entry, name))
+            if found is not None:
+                return found
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     total, counts, events = 0, dict.fromkeys(STATUSES, 0), []
     try:
-        command = shutil.which(args.codex)
+        command = resolve_codex(args.codex)
         if command is None:
             raise TrustCheckError("codex_not_found")
         if not os.path.isdir(args.cwd):

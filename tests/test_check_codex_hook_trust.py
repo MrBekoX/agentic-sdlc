@@ -11,6 +11,7 @@ received method to a file and writes its own PID to a file.
 
 AGENTIC_TRUST_CHECK_UNDER_TEST overrides the script path (mutation control only).
 """
+import importlib.util
 import json
 import os
 import re
@@ -133,6 +134,11 @@ for raw in sys.stdin:
         sys.exit(0)
     if MODE == "hang":
         continue
+    if MODE == "deep-nest":
+        # A syntactically unfinished but very deeply nested line: json.loads raises RecursionError.
+        sys.stdout.write("[" * 200000 + "\n")
+        sys.stdout.flush()
+        continue
     if method == "initialize":
         params = msg.get("params") or {}
         if params.get("clientInfo") != {"name": "agentic_sdlc_trust_check", "version": "1"} or params.get("capabilities") != {"experimentalApi": False}:
@@ -216,13 +222,23 @@ class TrustCheckCase(unittest.TestCase):
                     os.kill(pid, 9)
         self._tmp.cleanup()
 
-    def run_cli(self, mode, *extra, codex=None, cwd=None, timeout="30"):
-        codex_path = Path(codex) if codex is not None else self.launcher
-        # Fail closed: a CLI run may only ever target a launcher path inside this test's temp dir.
-        if self.tmp not in codex_path.parents:
-            raise AssertionError(f"refusing a --codex outside the fake temp dir: {codex_path}")
-        argv = [sys.executable, str(UNDER_TEST), "--codex", str(codex_path), "--cwd", str(cwd or self.work), "--timeout", timeout, *extra]
+    def run_cli(self, mode, *extra, codex=None, cwd=None, timeout="30", empty_path_dir=None, drop_env=()):
         env = dict(os.environ)
+        if empty_path_dir is None:
+            codex_path = Path(codex) if codex is not None else self.launcher
+            # Fail closed: a CLI run may only ever target a launcher path inside this test's temp dir.
+            if self.tmp not in codex_path.parents:
+                raise AssertionError(f"refusing a --codex outside the fake temp dir: {codex_path}")
+            codex_args = ["--codex", str(codex_path)]
+        else:
+            # The one run without --codex: PATH is stripped to a single empty dir inside this test's
+            # temp dir, so the default `codex` lookup can never reach a real Codex binary.
+            path_dir = Path(empty_path_dir)
+            if codex is not None or self.tmp not in path_dir.parents or not path_dir.is_dir() or any(path_dir.iterdir()):
+                raise AssertionError(f"refusing a run without --codex unless PATH is one empty temp dir: {path_dir}")
+            env["PATH"] = str(path_dir)
+            codex_args = []
+        argv = [sys.executable, str(UNDER_TEST), *codex_args, "--cwd", str(cwd or self.work), "--timeout", timeout, *extra]
         env.update(
             FAKE_TRUST_MODE=mode,
             FAKE_TRUST_STATE_DIR=str(self.state),
@@ -230,6 +246,9 @@ class TrustCheckCase(unittest.TestCase):
             FAKE_TRUST_MARK=self.mark,
         )
         env.pop("AGENTIC_TRUST_CHECK_UNDER_TEST", None)
+        # os.environ upper-cases names on Windows, so drop them case-insensitively.
+        dropped = {name.upper() for name in drop_env}
+        env = {key: value for key, value in env.items() if key.upper() not in dropped}
         started = time.monotonic()
         proc = subprocess.run(
             argv,
@@ -372,6 +391,71 @@ class TestTrustErrors(TrustCheckCase):
         self.assertEqual(proc.stdout, "")
         self.assertIn("usage:", proc.stderr)
         self.assertFalse((self.state / PID_NAME).exists())
+
+    def test_non_ascii_plugin_is_a_usage_error_not_an_encoding_crash(self):
+        # Redirected stdout uses the locale code page (cp1252 on Windows) without UTF-8 mode.
+        plugin = "\u65e5\u672c@x"
+        proc = self.run_cli("trusted", "--plugin", plugin, drop_env=("PYTHONUTF8", "PYTHONIOENCODING"))
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertEqual(proc.stdout, "")
+        self.assertIn("usage:", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertFalse((self.state / PID_NAME).exists())
+
+    def test_deeply_nested_server_line_is_malformed_response_exit_2(self):
+        proc = self.run_cli("deep-nest")
+        self.assert_error(proc, "malformed_response")
+        self.assertNotIn("Traceback", proc.stderr)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows searches the current directory before PATH")
+    def test_default_codex_is_never_taken_from_the_current_directory(self):
+        marker = self.work / "cwd-codex-ran.txt"
+        planted = self.work / "codex.cmd"
+        planted.write_text(f'@echo off\r\ntype nul > "{marker}"\r\n', encoding="utf-8", newline="")
+        empty = self.tmp / "empty-path"
+        empty.mkdir()
+        # The Claude Code shell sets this variable to 1, which would hide the current-directory lookup.
+        proc = self.run_cli("trusted", empty_path_dir=empty, drop_env=("NoDefaultCurrentDirectoryInExePath",))
+        self.assert_error(proc, "codex_not_found")
+        self.assertFalse(marker.exists(), "a codex.cmd from the current directory was executed")
+        self.assertFalse((self.state / PID_NAME).exists())
+
+
+class TestTerminateTree(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "taskkill is the Windows tree-kill path")
+    def test_taskkill_is_started_by_absolute_system32_path(self):
+        spec = importlib.util.spec_from_file_location("check_codex_hook_trust_under_test", UNDER_TEST)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        expected = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe")
+        calls = []
+
+        class FakeProc:
+            pid = 424242
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                raise AssertionError("kill fallback used instead of taskkill")
+
+            def wait(self, timeout=None):
+                return 0
+
+        def fake_run(argv, **kwargs):
+            # Fail closed: only the exact taskkill argv is accepted; nothing reaches a real process.
+            if argv != [expected, "/T", "/F", "/PID", "424242"]:
+                raise AssertionError(f"unexpected subprocess argv: {argv!r}")
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0)
+
+        original = module.subprocess.run
+        module.subprocess.run = fake_run
+        try:
+            module._terminate_tree(FakeProc())
+        finally:
+            module.subprocess.run = original
+        self.assertEqual(len(calls), 1)
 
 
 class TestReadOnlyProtocol(TrustCheckCase):
