@@ -1278,7 +1278,9 @@ def stub_build_release(**attributes):
     module = types.ModuleType("build_release")
     for name, value in attributes.items():
         setattr(module, name, value)
-    return mock.patch.dict(sys.modules, {"scripts.build_release": module, "build_release": module})
+    # Patch the exact loader `_payload_identity` calls. A sys.modules patch alone is defeated once any real import
+    # has bound `build_release` as an attribute of the `scripts` package (e.g. test_release_distribution at load).
+    return mock.patch.object(procedure_eval, "_import_build_release", lambda: module)
 
 
 class TestEvidencePacket(unittest.TestCase):
@@ -1372,6 +1374,20 @@ class TestEvidencePacket(unittest.TestCase):
                     mock.patch.object(procedure_eval, "BUILD_RELEASE_SCRIPT", REPO / "scripts" / "run_procedure_eval.py"), \
                     stub_build_release(**attributes):
                 self.assertEqual(procedure_eval.runtime_payload_identity_for_commit("0" * 40, cache={}), expected)
+
+    def test_stub_wins_after_real_build_release_import_in_same_process(self):
+        # Order-independent regression: a real `scripts.build_release` import earlier in the process binds the
+        # submodule as a `scripts` package attribute, which `from scripts import build_release` returns ahead of
+        # sys.modules. The stub must still control exactly the loader `_payload_identity` uses.
+        if not BUILD_RELEASE.exists():
+            self.skipTest("scripts/build_release.py absent (slice D pre-integration)")
+        import importlib
+        importlib.import_module("scripts.build_release")
+        self.assertIn("build_release", vars(sys.modules["scripts"]))
+        with mock.patch.object(procedure_eval, "BUILD_RELEASE_SCRIPT", REPO / "scripts" / "run_procedure_eval.py"), \
+                stub_build_release(release_members=lambda repo_root, commit: {}, payload_identity=lambda m, e: "cd" * 32,
+                                   RUNTIME_PAYLOAD_EXCLUDE=frozenset()):
+            self.assertEqual(procedure_eval.runtime_payload_identity_for_commit("0" * 40, cache={}), "cd" * 32)
 
     def test_traversal_non_slug_and_reserved_case_ids_write_nothing(self):
         with tempfile.TemporaryDirectory() as td:
