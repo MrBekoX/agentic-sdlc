@@ -30,3 +30,45 @@ jobs:
         run: python3 tests/skills/harness.py
       - name: Unit tests
         run: python3 -m unittest discover -s tests -v
+      - name: Archive build
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/archive" "$RUNNER_TEMP/archive-logs"
+          python3 scripts/build_release.py --output "$RUNNER_TEMP/archive/agentic-sdlc.zip" | tee "$RUNNER_TEMP/archive-logs/archive-build.log"
+      - name: Archive verify
+        shell: bash
+        run: python3 scripts/build_release.py --verify "$RUNNER_TEMP/archive/agentic-sdlc.zip" | tee "$RUNNER_TEMP/archive-logs/archive-verify.log"
+      - name: Archive extract to clean directory
+        shell: bash
+        run: |
+          X="$RUNNER_TEMP/archive-extract/agentic-sdlc"
+          python3 -m zipfile -e "$RUNNER_TEMP/archive/agentic-sdlc.zip" "$X"
+          S=$(git rev-parse HEAD)
+          git init -q "$X"
+          git -C "$X" fetch -q --no-tags --depth=1 --no-write-fetch-head "$GITHUB_WORKSPACE" "$S"
+          git -C "$X" update-ref HEAD "$S"
+          git -C "$X" read-tree HEAD
+          git -C "$X" update-index -q --refresh
+      - name: "Archive gate: version check"
+        shell: bash
+        working-directory: ${{ runner.temp }}/archive-extract/agentic-sdlc
+        run: python3 scripts/bump_version.py --check 2>&1 | tee "$RUNNER_TEMP/archive-logs/archive-gate-version-check.log"
+      - name: "Archive gate: release check"
+        shell: bash
+        working-directory: ${{ runner.temp }}/archive-extract/agentic-sdlc
+        run: python3 scripts/bump_version.py --release-check 2>&1 | tee "$RUNNER_TEMP/archive-logs/archive-gate-release-check.log"
+      - name: "Archive gate: static checks"
+        shell: bash
+        working-directory: ${{ runner.temp }}/archive-extract/agentic-sdlc
+        run: python3 scripts/check_all.py 2>&1 | tee "$RUNNER_TEMP/archive-logs/archive-gate-static-checks.log"
+      - name: "Archive gate: skill harness"
+        shell: bash
+        working-directory: ${{ runner.temp }}/archive-extract/agentic-sdlc
+        run: python3 tests/skills/harness.py 2>&1 | tee "$RUNNER_TEMP/archive-logs/archive-gate-skill-harness.log"
+      - name: "Archive gate: unit tests"
+        shell: bash
+        working-directory: ${{ runner.temp }}/archive-extract/agentic-sdlc
+        run: python3 -m unittest discover -s tests -v 2>&1 | tee "$RUNNER_TEMP/archive-logs/archive-gate-unit-tests.log"
+      - name: "Archive gate: coverage comparison"
+        shell: bash
+        run: python3 -c "import sys; sys.path.insert(0, 'scripts'); import build_release; sys.exit(build_release.check_archive_gate_log(sys.argv[1], '.'))" "$RUNNER_TEMP/archive-logs/archive-gate-unit-tests.log"
