@@ -16,6 +16,12 @@ import unittest
 REPO = Path(__file__).resolve().parents[1]
 NODE = shutil.which("node")
 POLICY_TAG = "PROCESS_OWNER_POLICY"
+COEXISTENCE_SCENARIOS = REPO / "tests" / "skills" / "evals" / "coexistence" / "scenarios.json"
+# The Superpowers ref the coexistence matrix is pinned to (v6.3.0) and the skill ids verified to exist
+# at that ref. Its Codex manifest declares `hooks: {}`, so no Superpowers SessionStart runs on Codex.
+PINNED_SUPERPOWERS_REF = "b36e0829c6d0140e93cfef2ca599b1b07d4a7797"
+PINNED_SUPERPOWERS_SKILLS = {"brainstorming", "writing-plans", "dispatching-parallel-agents",
+                             "verification-before-completion"}
 
 
 @unittest.skipIf(NODE is None, "node not available")
@@ -159,6 +165,37 @@ class TestCoexistenceScenarioCoverage(unittest.TestCase):
             if owner == "agentic-sdlc":
                 self.assertTrue((REPO / "skills" / skill / "SKILL.md").is_file())
         self.assertEqual(owners, {"agentic-sdlc", "superpowers"})
+
+    @staticmethod
+    def _matrix():
+        return json.loads(COEXISTENCE_SCENARIOS.read_text(encoding="utf-8"))
+
+    def test_superpowers_owned_completion_scenario_present(self):  # AC60
+        matching = [case["id"] for case in self._matrix()["scenarios"]
+                    if case["expected_phase_skill"] == "superpowers:verification-before-completion"
+                    and "agentic-sdlc:completion-claim-gate" in case["competing_phase_skills"]]
+        self.assertTrue(matching, "no Superpowers-owned completion scenario competes with the house gate")
+
+    def test_review_requirements_record_pinned_codex_manifest_hooks_empty(self):  # AC60
+        entries = [entry for entry in self._matrix()["review_requirements"]
+                   if PINNED_SUPERPOWERS_REF in entry and "hooks: {}" in entry and "SessionStart" in entry]
+        self.assertTrue(entries, "no review requirement records the pinned Codex manifest's empty hooks")
+
+    def test_all_superpowers_ids_in_pinned_set(self):  # AC60 guard: no fabricated skill id
+        ids = set()
+        for case in self._matrix()["scenarios"]:
+            for skill_id in [case["expected_phase_skill"], *case["competing_phase_skills"]]:
+                if skill_id.startswith("superpowers:"):
+                    ids.add(skill_id.split(":", 1)[1])
+        self.assertTrue(ids)
+        self.assertEqual(ids - PINNED_SUPERPOWERS_SKILLS, set())
+
+    def test_no_scenario_expects_superpowers_sessionstart(self):  # AC60 guard: no double SessionStart
+        for case in self._matrix()["scenarios"]:
+            with self.subTest(id=case["id"]):
+                self.assertNotIn("superpowers", case["entrypoint"].lower())
+                self.assertNotIn("SessionStart", case["prompt"])
+                self.assertNotIn("SessionStart", case["prior_context"])
 
 
 class TestConditionalDesignProcedure(unittest.TestCase):
