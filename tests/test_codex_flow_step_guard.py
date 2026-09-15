@@ -1325,38 +1325,53 @@ def _synthetic_row(row_id, command, exit_code=0):
 
 class TestCommentAndHeredocForgery(_Tmp):
     """bash ends `pytest; echo EXIT=$? # ; pytest` on echo and `pytest; cat <<EOF\\npytest` on cat, so
-    their exit 0 never belongs to pytest. Mutation: dropping the comment skip in splitBr6Statements, or
-    the heredoc check in attributable() / isStrictlyAttributable()."""
+    their exit 0 never belongs to pytest. D23: an exit code is attributed only while the command lies inside
+    the safe shell grammar (inSafeBr6Grammar); a command holding `;`, newline or `||` outside it is never
+    attributable by default, and strict evaluation applies the grammar to every command. Mutation: dropping
+    the comment skip in splitBr6Statements, the grammar check in attributable() / isStrictlyAttributable(),
+    or the head-operand pipe/background check."""
 
     FORGED = {"comment": "pytest; echo EXIT=$? # ; pytest", "heredoc": "pytest; cat <<EOF\npytest",
               "heredoc-dash": "pytest; cat <<-EOF\npytest",
               "paren-comment": "pytest; (echo x)# ; pytest",  # bash ends on the subshell's exit 0
-              # Constructs the one-level quote mask does not model hide a separator inside a word, so
-              # bash ends on echo/cat (bash 5.2.37: rc=0 from the trailing echo/cat for every row).
+              # Constructs outside the safe grammar hide a separator inside a word, so bash ends on
+              # echo/cat (bash 5.2.37: rc=0 from the trailing echo/cat for every row).
               "command-substitution": "pytest; echo $(echo x; pytest)",
               "process-substitution": "pytest; cat <(echo x; pytest)",
               "backtick": "pytest; echo `true; pytest`",
               "substitution-in-double-quotes": 'pytest; echo "$(echo "; pytest")"',
               "ansi-c-quote": "pytest; echo $'\\'; pytest'",
-              # A left `||` operand that succeeds means bash never runs the right side.
+              "param-comment-closer": "pytest; echo ${x:-; pytest #}",
+              "double-bracket": "[[ x &&\npytest ||\npytest ]]",
+              # Command words outside the grammar shadow the runner or rewrite the exit status.
+              "function-shadow": "pytest() { true; }; pytest",
+              "eval-function-shadow": "cd repo; eval 'pytest() { true; }'; pytest",
+              "set-noexec": "set -n; pytest",
+              "trap-exit-rewrite": "trap 'exit 0' EXIT; pytest",
+              # A left `||` operand that succeeds means bash never runs the right side, and a piped or
+              # backgrounded head operand's own exit decides whether the runner after `||` runs.
               "oror-leading-success": "true || pytest",
               "oror-leading-version": "pytest --version || pytest",
-              "oror-newline-leading-echo": "echo ok ||\npytest"}
-    # Strict also rejects a piped operand anywhere in the trailing `||` run (tee owns its exit code).
-    STRICT_ONLY = {"oror-piped-operand": "pytest | tee log.txt || pytest"}
-    # Every operand of the trailing `||` run is a real runner, or a substitution holds no separator.
-    OROR_RUNNERS = {"oror-real-runners": "pytest -x || pytest --lf",
-                    "separator-free-substitution": "pytest $(cat args)"}
+              "oror-newline-leading-echo": "echo ok ||\npytest",
+              "oror-piped-operand": "pytest | tee log.txt || pytest",
+              "oror-background-head": "pytest & wait || pytest"}
+    # Separator-free commands outside the grammar keep their 5801cb9 default (a disclosed limit: `set -n &&
+    # pytest` never runs pytest), but strict evaluation applies the grammar to every command.
+    STRICT_ONLY = {"hidden-pipe-ansi-c": "pytest $'\\'' | true ''",
+                   "separator-free-substitution": "pytest $(cat args)",
+                   "separator-free-noexec": "set -n && pytest"}
+    # Every operand of the trailing `||` run is a real runner inside the grammar.
+    OROR_RUNNERS = {"oror-real-runners": "pytest -x || pytest --lf"}
     # `pytest # --version` runs a bare pytest: the gate reads version/help on the comment-free last
     # statement only, so it is a real run (the whole-command helper value alone still sees `--version`).
-    ONE_RUNNER = {"comment-after-runner": "pytest # ; echo x", "here-string": "pytest; cat <<<x; pytest",
-                  "comment-version": "pytest # --version"}
-    # Disclosed conservative limit: a false 'missing', never a false satisfy. hasUnquotedHeredoc reads
-    # the arithmetic shift `$((1<<2))` as a heredoc. A precise fix may flip the row to satisfied.
-    # Also disclosed: any `$(`, backtick, `<(`, `>(` or `$'` together with a `;`, newline or `||`
-    # anywhere in the raw command fails closed, so a legitimate `cd repo; pytest $(cat args)` is missing.
+    ONE_RUNNER = {"comment-after-runner": "pytest # ; echo x", "comment-version": "pytest # --version"}
+    # Disclosed conservative limits of the grammar: a false 'missing', never a false satisfy. Any syntax or
+    # command word outside the safe grammar together with a `;`, newline or `||` fails closed, so a
+    # legitimate `cd repo; pytest $(cat args)` or `source .venv/bin/activate; pytest` is missing.
     CONSERVATIVE = {"arith-shift": "pytest; echo $((1<<2)); pytest",
-                    "substitution-with-separator": "cd repo; pytest $(cat args)"}
+                    "substitution-with-separator": "cd repo; pytest $(cat args)",
+                    "here-string": "pytest; cat <<<x; pytest",
+                    "source-venv": "source .venv/bin/activate; pytest"}
 
     def _outcomes(self, rows, env_extra=None):
         cwd = self._cwd()
@@ -1385,14 +1400,14 @@ class TestCommentAndHeredocForgery(_Tmp):
         self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.ONE_RUNNER})
         self.assertEqual(_strictly_attributable(rows), [True] * len(rows))
 
-    def test_piped_oror_operand_not_strictly_attributable(self):
-        # Mutation: checking the pipe on the last `||` operand only. The default keeps AC31 (pipes pass).
+    def test_single_statement_outside_grammar_is_strict_only(self):
+        # Mutation: applying the grammar to strict separator commands only. The default keeps 5801cb9 for them.
         rows = self._rows(self.STRICT_ONLY)
         self.assertEqual(_strictly_attributable(rows), [False] * len(rows))
         self.assertEqual(self._outcomes(rows, STRICT_ON), {name: "missing" for name in self.STRICT_ONLY})
         self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.STRICT_ONLY})
 
-    def test_real_runner_oror_run_and_separator_free_substitution_still_satisfy(self):
+    def test_real_runner_oror_run_still_satisfies(self):
         rows = self._rows(self.OROR_RUNNERS)
         self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.OROR_RUNNERS})
         self.assertEqual(_strictly_attributable(rows), [True] * len(rows))

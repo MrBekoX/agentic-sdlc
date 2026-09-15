@@ -887,6 +887,12 @@ def exported_doc_sample(prefix: str) -> str:
     return proc.stdout.strip()
 
 
+def marked_placeholder_then_real_password_line() -> str:
+    """One marked line: a change-me password assignment, then a password assignment with an 11-character synthetic value."""
+    keyword = "pass" + "word="
+    return keyword + "change" + "me" + " " + keyword + "Fixture" + "7Val" + "  # agentic-sdlc:allow-secret"
+
+
 class TestVerifySecretScan(ScratchTestCase):
     def built_with(self, extra: dict):
         repo = self.scratch()
@@ -896,6 +902,27 @@ class TestVerifySecretScan(ScratchTestCase):
         self.assertEqual(result.exit_code, 0, text)
         return repo, out
 
+    def test_verify_lists_marker_suppression_hidden_behind_placeholder(self):
+        # D22 (AC94): the marker is what suppresses the real value after the placeholder, so the line is listed.
+        repo, out = self.built_with({"notes/marked.txt": (marked_placeholder_then_real_password_line() + "\n").encode("ascii")})
+        report, text = self.quiet(build_release.verify_archive, out, repo.root)
+        lines = text.splitlines()
+        self.assertEqual(report.exit_code, 0, text)
+        self.assertIn("verify=passed", lines)
+        self.assertIn("suppressed_finding=notes/marked.txt:1:password-literal:allow-marker", lines)
+        self.assertIn("suppressed_count=1", lines)
+        self.assertEqual([l for l in lines if l.startswith("secret_finding=")], [])
+
+    def test_verify_marker_reason_names_marker_when_real_token_shares_line_with_sample(self):
+        # D22: a documentation sample on a marked line must not claim the suppression of the real key beside it.
+        key = synthetic_aws_key()
+        line = exported_doc_sample("AK" + "IA") + " " + key + "  # agentic-sdlc:allow-secret\n"
+        repo, out = self.built_with({"notes/marked.txt": line.encode("ascii")})
+        report, text = self.quiet(build_release.verify_archive, out, repo.root)
+        self.assertEqual(report.exit_code, 0, text)
+        self.assertIn("suppressed_finding=notes/marked.txt:1:aws-access-key-id:allow-marker", text.splitlines())
+        self.assertFalse(key in text, "the synthetic key was printed")
+
     def test_verify_fails_on_unmarked_high_confidence_key_naming_member_masked(self):
         key = synthetic_aws_key()
         repo, out = self.built_with({"config/keys.txt": ("# keys\naws_key_id = " + key + "\n").encode("ascii")})
@@ -904,6 +931,19 @@ class TestVerifySecretScan(ScratchTestCase):
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("secret_finding=config/keys.txt:2:aws-access-key-id", lines)
         self.assertIn("verify=failed", lines)
+        self.assertNotIn(key, proc.stdout + proc.stderr)
+
+    def test_verify_fails_on_real_key_sharing_a_line_with_a_documentation_sample(self):
+        # D22: a suppressed documentation sample earlier on the line must not hide the real key after it.
+        key = synthetic_aws_key()
+        line = exported_doc_sample("AK" + "IA") + " " + key + "\n"
+        repo, out = self.built_with({"config/keys.txt": line.encode("ascii")})
+        proc = self.cli(["--verify", out], cwd=repo.root, env=repo.env)
+        lines = proc.stdout.splitlines()
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("secret_finding=config/keys.txt:1:aws-access-key-id", lines)
+        self.assertIn("verify=failed", lines)
+        self.assertEqual([l for l in lines if l.startswith("suppressed_finding=config/keys.txt:1:")], [])
         self.assertNotIn(key, proc.stdout + proc.stderr)
 
     def test_verify_fails_when_allow_marker_is_on_previous_line(self):
@@ -1210,6 +1250,18 @@ class TestHistorySecretScan(HistoryTestCase):
         self.assertEqual(report.exit_code, 0, text)
         self.assertIn(
             f"suppressed_finding=path=fixture.txt label=private-key first_commit={commit} line=1 reason=allow-marker",
+            text.splitlines(),
+        )
+        self.assertEqual(values(text, "unresolved_count"), ["0"])
+
+    def test_marker_suppression_hidden_behind_placeholder_is_listed_in_history(self):
+        # D22 (AC94, AC99): the history scan lists the marker suppression of the real value after the placeholder.
+        repo = self.scratch()
+        commit = repo.commit({"fixture.txt": (marked_placeholder_then_real_password_line() + "\n").encode("ascii")}, "fixture")
+        report, text = self.scan(self.mirror(repo))
+        self.assertEqual(report.exit_code, 0, text)
+        self.assertIn(
+            f"suppressed_finding=path=fixture.txt label=password-literal first_commit={commit} line=1 reason=allow-marker",
             text.splitlines(),
         )
         self.assertEqual(values(text, "unresolved_count"), ["0"])

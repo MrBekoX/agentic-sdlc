@@ -324,8 +324,10 @@ BINARY_PROBE_BYTES = 8000
 
 # BR22 bridge: the commit scanner's rules (scanLines over HIGH) stay the single implementation.
 # Text arrives only on stdin as JSON lines; only line numbers, labels and reasons leave the bridge.
-# A suppressed line is one scanLines does not report; its reason follows the scanner's own order:
-# an exact documentation sample, then a degenerate token, then a same-line allow marker.
+# A suppressed line is one scanLines does not report. A marked line that still has an unsuppressed match
+# once its marker text is blanked is listed as allow-marker, with that match's label (D22: the marker is
+# what suppresses it). Otherwise the reason follows the scanner's own order: an exact documentation
+# sample, then a degenerate token, then a same-line allow marker.
 _SCAN_BRIDGE = r"""
 import { pathToFileURL } from 'node:url';
 const { HIGH, scanLines, looksPlaceholder, ALLOW_MARKER, DOC_SAMPLES, isDegenerateToken } =
@@ -342,6 +344,10 @@ for (const raw of input.split('\n')) {
   const suppressed = [];
   String(text).split(/\r?\n/).forEach((line, i) => {
     if (reported.has(i + 1)) return;
+    if (ALLOW_MARKER.test(line)) {
+      const hidden = scanLines(line.replace(new RegExp(ALLOW_MARKER.source, 'gi'), ' '), HIGH);
+      if (hidden.length) { suppressed.push({ line: i + 1, label: hidden[0].label, reason: 'allow-marker' }); return; }
+    }
     for (const p of HIGH) {
       p.re.lastIndex = 0;
       const m = p.re.exec(line);

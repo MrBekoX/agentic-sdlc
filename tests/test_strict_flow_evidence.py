@@ -325,6 +325,33 @@ class TestStrictFlowEvidenceCli(unittest.TestCase):
         rc, lines, _, stderr = self._run(_fixture("verified-green"), self._tree(), env={"PATH": str(self._dir())})
         self.assertEqual((lines, rc, stderr.strip()), (ERROR_LINES, 2, "node_missing"))
 
+    def test_background_green_run_is_never_green(self):  # E3 gaming vector (D21)
+        # Mutation: dropping the background-job check from isStrictlyAttributable prints green for each subTest.
+        cwd = self._tree()
+        red = _exec_pair("call_red001", "pytest", 1, "1 failed")
+        for command in ("pytest & wait", "pytest \\&& wait"):
+            with self.subTest(command=command):
+                records = SPEC_WRITE + PLAN_WRITE + SRC_WRITE + red + _exec_pair("call_bg0001", command, 0, "1 failed")
+                rc, _, values, _ = self._run(self._write(records + [_final(NO_CLAIM)]), cwd)
+                self.assertEqual((values.get("strict_evidence"), values.get("strict_completion"), rc), ("partial", "n/a", 1))
+        control = SPEC_WRITE + PLAN_WRITE + SRC_WRITE + red + _exec_pair("call_bg0001", "pytest", 0, "1 passed")
+        rc, _, values, _ = self._run(self._write(control + [_final(NO_CLAIM)]), cwd)
+        self.assertEqual((values.get("strict_evidence"), rc), ("green", 0))
+
+    def test_grammar_forged_green_run_is_never_green(self):  # D23 safe grammar
+        # Mutation: attributing a separator command outside the grammar, or judging only the last `||` operand.
+        cwd = self._tree()
+        red = _exec_pair("call_red001", "pytest", 1, "1 failed")
+        for command in ("pytest; echo ${x:-; pytest #}", "pytest() { true; }; pytest", "pytest & wait || pytest",
+                        "set -n; pytest"):
+            with self.subTest(command=command):
+                records = SPEC_WRITE + PLAN_WRITE + SRC_WRITE + red + _exec_pair("call_g0001", command, 0, "1 failed")
+                rc, _, values, _ = self._run(self._write(records + [_final(NO_CLAIM)]), cwd)
+                self.assertEqual((values.get("strict_evidence"), values.get("strict_completion"), rc), ("partial", "n/a", 1))
+        control = SPEC_WRITE + PLAN_WRITE + SRC_WRITE + red + _exec_pair("call_g0001", "pytest -x || pytest --lf", 0, "1 passed")
+        rc, _, values, _ = self._run(self._write(control + [_final(NO_CLAIM)]), cwd)
+        self.assertEqual((values.get("strict_evidence"), rc), ("green", 0))
+
     def test_output_is_three_lines_without_input_bytes(self):
         cwd = self._tree(name="SENTINELCWDXYZ")
         rollout = self._write(_records("verified-green"), name="SENTINELROLLOUTXYZ.jsonl")

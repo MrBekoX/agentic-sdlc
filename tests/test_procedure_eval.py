@@ -952,6 +952,44 @@ def trace_from_carrier(row):
 
 RED_GREEN_CASE = {"id": "red-green-probe", "prompt": "probe", "strict": {"require_red_green": True}}
 
+# D23 safe-grammar production lists, shared with the Node grammar test in test_codex_current_rollout.py.
+GRAMMAR_INSIDE = (
+    "pytest",
+    "cd repo; pytest -x",
+    "A=1 B=$HOME/x pytest -k \"$K\" $1 $? $# $@",
+    "pytest -k 'a;b $( ` ${'",
+    "pytest -k \"a\\\"b \\$(x) \\`y\\`\"",
+    "pytest \\( \\) \\{ \\} \\; \\|",
+    "pytest tests/test_[ab].py ]",
+    "pytest # (x) {y} $(z) [[",
+    "pytest > out 2>&1 >> log < in <> rw >| clob &> both &>> both2 >&2 <&0",
+    "pytest |& tee x | cat && true || false; x & y",
+    "pytest \\\n-q",
+    "pytest ~/x @a %b ^c !d ?e *f ,g +h :i =j",
+    "pytest é",
+    "set -euo pipefail; set +e -o errexit +o nounset; pytest",
+    "cd repo; export X=1; unset X; echo ok; printf '%s' x; pwd; : note; true; false; wait; pytest",
+    "test -f x && [ -d y ] && pytest",
+    "2>err.txt pytest",
+    "> out.txt pytest",
+    "echo>out.txt x; pytest",
+    "X='eval' Y=\"$Z\" pytest",
+    "ev\\\nal=1 pytest",
+    "pytest eval source trap 'exit 0'",
+)
+GRAMMAR_OUTSIDE = (
+    "pytest $(x)", "pytest $((1))", "pytest ${x}", "pytest $'x'", "pytest $\"x\"", "pytest $[1]", "pytest $",
+    "pytest $ x", "pytest \"$(x)\"", "pytest \"${x}\"", "pytest `x`", "pytest \"`x`\"", "(pytest)", "pytest )",
+    "{ pytest; }", "pytest }", "[[ -n x ]] && pytest", "pytest <<EOF", "pytest <<-EOF", "pytest <<<x", "pytest <(x)",
+    "pytest >(x)", "pytest >", "pytest > ;", "pytest >#x", "pytest 'x", "pytest \"x", "pytest \\", "pytest\r",
+    "eval x; pytest", ". ./f.sh; pytest", "source f.sh && pytest", "set -n; pytest", "set -x; pytest",
+    "set -o noexec", "set -- a", "hash -p /usr/bin/true pytest", "trap x EXIT; pytest", "exit 0", "exec true",
+    "builtin true", "command true", "alias pytest=true", "shopt -s expand_aliases", "$E x; pytest", "\"eval\" x",
+    "e\\val x", "ev\\\nal x", "function f if true; then true; fi", "! pytest", "time pytest",
+    "BASH_CMDS[pytest]=x; pytest", "printf -v 'a[b]' x", "echo '[x]'; pytest", "test -v \"a[b]\"",
+    "2>/dev/null eval x", "X=1 eval x", "type pytest", "p?test", "pyt*st", "[x] && pytest",
+) + ('pytest "a' + chr(1) + 'b"',)
+
 
 class TestStrictRedGreen(unittest.TestCase):
     """AC69, AC123: attributable RED-before-GREEN runs, judged by the shared BR6 table's strict column."""
@@ -965,10 +1003,86 @@ class TestStrictRedGreen(unittest.TestCase):
                 self.assertEqual(statements, row["statements"])
                 last = statements[-1]
                 self.assertEqual(procedure_eval.has_unquoted_pipe(last), row["lastHasPipe"])
+                self.assertEqual(procedure_eval.has_unquoted_background(last), row["lastHasBackground"])
                 self.assertEqual(procedure_eval.is_version_or_help_only(last, TEST_RE), row["lastVersionOrHelpOnly"])
+                self.assertEqual(procedure_eval.in_safe_br6_grammar(row["command"]), row["inSafeGrammar"])
+                self.assertEqual(procedure_eval.br6_trailing_or_run(row["command"]), row["orRun"])
                 runs = procedure_eval.attributable_test_runs(trace_from_carrier(row), TEST_RE)
                 self.assertEqual(bool(runs), row["strictAttributable"])
                 self.assertEqual(any(run.exit == 0 for run in runs), row["strictTests"] == "satisfied")
+
+    def test_safe_grammar_production_lists(self):
+        # Mutation: dropping any character or command-word production (each listed construct would be admitted).
+        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (22, 62))
+        for command, expected in [(c, True) for c in GRAMMAR_INSIDE] + [(c, False) for c in GRAMMAR_OUTSIDE]:
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.in_safe_br6_grammar(command), expected)
+
+    def test_statement_joins_carry_oror(self):
+        # The values slice B's test_trailing_oror_run_records_the_joining_separator pins for Node (D23 mirror).
+        cases = {"cd a; pytest || true": ["pytest", "true"], "echo ok ||\npytest": ["echo ok", "pytest"],
+                 "a ||\n# note\nb": ["a", "b"], "a || b; c": ["c"], "a || b\nc": ["c"],
+                 "a && b || c": ["a && b", "c"], "pytest -k 'a||b'": ["pytest -k 'a||b'"], "": []}
+        for command, run in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(procedure_eval.br6_trailing_or_run(command), run)
+        # A backslash-newline inside single quotes is data (the Task 125 global replacement removed it).
+        self.assertEqual(procedure_eval.br6_statements("'a\\\nb'; pytest"), ["'a\\\nb'", "pytest"])
+
+    def test_grammar_forged_green_run_not_counted(self):
+        # Mutation: judging only the last statement lets each forged exit 0 count as GREEN.
+        red = claude_run("t1", "python -m pytest -q", True, "1 failed")
+        for command in ("python -m pytest -q; echo ${x:-; python -m pytest -q #}", "true || python -m pytest -q",
+                        "python -m pytest -q & wait || python -m pytest -q", "set -n; python -m pytest -q"):
+            with self.subTest(command=command):
+                errors = self.strict_errors(red + claude_run("t2", command, False, "1 failed"))
+                self.assertIn("strict_missing_green", errors)
+                self.assertIn("strict_test_run_unattributable", errors)
+        control = self.strict_errors(red + claude_run("t2", "python -m pytest -q -x || python -m pytest -q --lf", False,
+                                                      "2 passed"))
+        self.assertNotIn("strict_missing_green", control)
+        self.assertNotIn("strict_test_run_unattributable", control)
+
+    def test_safe_grammar_linear(self):
+        import time
+        floods = ["pytest " + "a;" * 200000, '"' + "x" * 399999, "# " * 200000 + "\npytest", "$a" * 200000,
+                  "X=1 " * 100000 + "pytest"]
+        started = time.time()
+        for text in floods:
+            procedure_eval.in_safe_br6_grammar(text)
+            procedure_eval.br6_statement_joins(text)
+        self.assertLess(time.time() - started, 5.0, "the safe grammar pass must stay linear")
+
+    # Shared literal lists (D21): hooks/codex-rollout.mjs hasUnquotedBackground is checked against the same forms.
+    BACKGROUND_TRUE = ("pytest &", "pytest & wait", "pytest&", "cd a && pytest &", "pytest \\&& wait", "pytest \\>& wait",
+                       "pytest \\|& wait", "pytest &\\> x")
+    BACKGROUND_FALSE = ("pytest && true", "pytest 2>&1", "pytest >&2", "pytest <&0", "pytest &> log.txt",
+                        "pytest &>> log.txt", "pytest |& tee log", 'pytest -k "a&b"', "pytest -k 'a&b'", "pytest \\& x",
+                        "pytest # & wait")
+
+    def test_has_unquoted_background_operator_forms(self):
+        # Mutation: reading raw neighbour characters (an escaped `&`, `>` or `|` would join), or scanning comments.
+        for command, expected in [(c, True) for c in self.BACKGROUND_TRUE] + [(c, False) for c in self.BACKGROUND_FALSE]:
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.has_unquoted_background(command), expected)
+
+    def test_br6_statements_drop_word_start_comments(self):
+        # Mutation: keeping a word-start comment (its `&` or `|` would taint the last statement).
+        for command, expected in (("pytest # & wait", ["pytest"]), ("pytest # | tail", ["pytest"]),
+                                  ("pytest\n# done", ["pytest"]), ("echo a#b; pytest", ["echo a#b", "pytest"]),
+                                  ("pytest '#' x", ["pytest '#' x"])):
+            with self.subTest(command=command):
+                self.assertEqual(procedure_eval.br6_statements(command), expected)
+
+    def test_background_green_run_not_counted(self):
+        # E3 gaming vector: a backgrounded runner's exit is the shell's, so its exit 0 must never count as GREEN.
+        red = claude_run("t1", "python -m pytest -q", True, "1 failed")
+        for command, forged in (("python -m pytest -q & wait", True), ("python -m pytest -q \\&& wait", True),
+                                ("python -m pytest -q 2>&1", False)):
+            with self.subTest(command=command):
+                errors = self.strict_errors(red + claude_run("t2", command, False, "1 failed"))
+                for name in ("strict_missing_green", "strict_test_run_unattributable"):
+                    self.assertEqual(name in errors, forged, name)
 
     def strict_errors(self, events):
         return procedure_eval.evaluate_case(RED_GREEN_CASE, procedure_eval.trace_events(events), REPO, strict=True)
@@ -1131,6 +1245,77 @@ class TestStrictCriticalAudit(unittest.TestCase):
         self.assertEqual(audit_errors(errors), [])
 
 
+AUDITOR_PARTIAL = "overallStatus: PARTIAL\nfinalDecision: block-final"
+AUDITOR_PASS = "overallStatus: PASS\nfinalDecision: allow-final"
+CONTROL_SKILL_TEMPLATE = "# Implementation Control Report\n\n## Overall Status\nPASS / PARTIAL / FAIL\n"
+PARTIAL_REPORT = "# Implementation Control Report\n\n## Overall Status\nPARTIAL\n\n## Final Decision\nblock-final\n"
+BOTH_CRITICAL = ["strict_critical_audit:finalDecision=block-final", "strict_critical_audit:overallStatus=PARTIAL"]
+
+
+class TestStrictAuditorCarriers(unittest.TestCase):
+    """AC68 (D21): auditor verdict carriers are scoped per runtime, so the model under test cannot override an audit."""
+
+    def verdict(self, events):
+        return procedure_eval.latest_auditor_verdict(procedure_eval.trace_events(events))
+
+    def critical(self, trace):
+        return audit_errors(procedure_eval.evaluate_case(AUDIT_CASE, trace, REPO, strict=True))
+
+    def skill_result(self, tool_id, text):
+        return [full_tool_use(tool_id, "Skill", {"skill": "agentic-sdlc:implementation-control"}),
+                claude_result(tool_id, False, text)]
+
+    def test_claude_main_loop_pass_does_not_override_auditor_partial(self):
+        # Probe P2. Mutation: counting main-loop assistant text after an auditor result lets PASS win.
+        events = auditor_result("a1", AUDITOR_PARTIAL) + [assistant_text_event(AUDITOR_PASS)]
+        self.assertEqual(self.verdict(events), ("PARTIAL", "block-final"))
+        self.assertEqual(self.critical(procedure_eval.trace_events(events)), BOTH_CRITICAL)
+
+    def test_claude_other_sub_agent_result_is_not_a_carrier(self):
+        # Probe P3b. Mutation: a substring match on the dispatch input makes a general-purpose result a carrier.
+        other = [full_tool_use("g1", "Agent", {"subagent_type": "general-purpose", "prompt": "act as implementation-auditor"}),
+                 claude_result("g1", False, AUDITOR_PASS)]
+        with self.subTest(case="alone"):
+            self.assertEqual(self.verdict(other), (None, None))
+        with self.subTest(case="after-auditor-partial"):
+            self.assertEqual(self.verdict(auditor_result("a1", AUDITOR_PARTIAL) + other), ("PARTIAL", "block-final"))
+
+    def test_claude_skill_result_text_is_not_a_carrier(self):
+        # Probe P3d. Mutation: reading the implementation-control skill body, whose template line reads as PASS.
+        with self.subTest(case="after-auditor-partial"):
+            events = auditor_result("a1", AUDITOR_PARTIAL) + self.skill_result("k1", CONTROL_SKILL_TEMPLATE)
+            self.assertEqual(self.verdict(events), ("PARTIAL", "block-final"))
+        with self.subTest(case="alone"):
+            self.assertEqual(self.verdict(self.skill_result("k1", CONTROL_SKILL_TEMPLATE)), (None, None))
+
+    # ---- guards: pass before and after the carrier scoping ----
+    def test_claude_skill_path_main_loop_partial_fails_named(self):
+        """D21 rule (2): on the Skill-only control path no auditor result exists, so the main loop's own verdict is
+        read. A critical verdict written by the main loop there still fails (the self-authored AC39 limit)."""
+        events = self.skill_result("k1", "skill loaded") + [assistant_text_event(AUDITOR_PARTIAL)]
+        self.assertEqual(self.critical(procedure_eval.trace_events(events)), BOTH_CRITICAL)
+
+    def test_claude_main_loop_read_when_auditor_result_has_no_verdict(self):
+        events = auditor_result("a1", "done") + [assistant_text_event("overallStatus: PARTIAL")]
+        self.assertEqual(self.critical(procedure_eval.trace_events(events)), ["strict_critical_audit:overallStatus=PARTIAL"])
+
+    def test_codex_carriers_are_assistant_messages_last_verdict_decides(self):
+        user_partial = rollout({"type": "message", "role": "user", "content": [{"type": "input_text", "text": AUDITOR_PARTIAL}]})
+        final_partial = rollout({"type": "task_complete", "last_agent_message": PARTIAL_REPORT}, "event_msg")
+        cases = (
+            ("assistant-partial-then-pass", [assistant_message(PARTIAL_REPORT), assistant_message(CONTROL_REPORT)], []),
+            ("partial-only-in-exec-output", [exec_call("c1", "cat report.md"), exec_output("c1", 0, AUDITOR_PARTIAL),
+                                             assistant_message("done")], []),
+            ("partial-only-in-user-message", [user_partial, assistant_message("done")], []),
+            ("pass-then-task-complete-partial", [assistant_message(CONTROL_REPORT), final_partial], BOTH_CRITICAL),
+        )
+        for label, events, expected in cases:
+            with self.subTest(case=label):
+                trace = procedure_eval.trace_events(events, strict=True)
+                self.assertEqual(trace.runtime, "codex-rollout")
+                self.assertEqual(self.critical(trace), expected)
+
+
 STRICT_ORDER = ["dispatch-strategy", "spec-written", "plan-written", "core-skill", "red-run", "green-run",
                 "security", "control", "completion-claim-gate"]
 SECURITY_REVIEWER = {"step": "security", "skills": ["agentic-sdlc:security-audit"], "agents": ["security-reviewer"],
@@ -1252,8 +1437,48 @@ class TestStrictReviewerOrder(unittest.TestCase):
                 procedure_eval.load_eval(eval_set)
 
 
+class TestStrictReviewerMembership(unittest.TestCase):
+    """AC70 (D21): strict reviewer membership reads the exact subagent_type and skill fields, never a substring."""
+
+    def dispatch_errors(self, name, input_obj, reviewers):
+        trace = procedure_eval.trace_events([full_tool_use("m1", name, input_obj), claude_result("m1", False, "done")])
+        return procedure_eval.reviewer_result_errors(trace, reviewers)
+
+    def test_general_purpose_agent_naming_reviewers_is_not_a_member(self):
+        # Probe P3. Mutation: a substring search over the JSON input clears both steps from the prompt text.
+        errors = self.dispatch_errors("Agent", {"subagent_type": "general-purpose",
+                                                "prompt": "act as security-reviewer and implementation-auditor"},
+                                      [SECURITY_REVIEWER, CONTROL_REVIEWER])
+        self.assertEqual(errors, ["strict_reviewer_result_missing:security", "strict_reviewer_result_missing:control"])
+
+    def test_skill_args_naming_reviewer_skill_is_not_a_member(self):
+        # Probe P3c. Mutation: matching the reviewer skill name anywhere in the Skill input (here: args).
+        errors = self.dispatch_errors("Skill", {"skill": "agentic-sdlc:feature-build", "args": "then run security-audit"},
+                                      [SECURITY_REVIEWER])
+        self.assertEqual(errors, ["strict_reviewer_result_missing:security"])
+
+    def test_agent_type_must_equal_listed_agent_or_house_prefix(self):
+        # Mutation: prefix/suffix matching, a foreign namespace, or reading description instead of subagent_type.
+        missing = ["strict_reviewer_result_missing:security"]
+        for input_obj, expected in (({"subagent_type": "security-reviewer"}, []),
+                                    ({"subagent_type": "agentic-sdlc:security-reviewer"}, []),
+                                    ({"subagent_type": "other-plugin:security-reviewer"}, missing),
+                                    ({"subagent_type": "security-reviewer-lite"}, missing),
+                                    ({"description": "security-reviewer"}, missing)):
+            with self.subTest(input=input_obj):
+                self.assertEqual(self.dispatch_errors("Agent", input_obj, [SECURITY_REVIEWER]), expected)
+
+    def test_skill_field_must_equal_listed_skill_or_short_name(self):
+        # Mutation: accepting any skill that merely starts with or contains the listed name.
+        missing = ["strict_reviewer_result_missing:security"]
+        for skill, expected in (("agentic-sdlc:security-audit", []), ("security-audit", []),
+                                ("agentic-sdlc:security-audit-extra", missing)):
+            with self.subTest(skill=skill):
+                self.assertEqual(self.dispatch_errors("Skill", {"skill": skill}, [SECURITY_REVIEWER]), expected)
+
+
 PACKET_CASE = "agentic-sdlc-pipeline-feature-no-commit"
-BASIC_FIXTURE = REPO / "tests" / "fixtures" / "agentic-sdlc-pipeline-basic"
+BASIC_FIXTURE =REPO / "tests" / "fixtures" / "agentic-sdlc-pipeline-basic"
 BUILD_RELEASE = REPO / "scripts" / "build_release.py"
 UNAVAILABLE_IDENTITIES = {
     "unavailable:no-git-checkout",
@@ -1349,6 +1574,41 @@ class TestEvidencePacket(unittest.TestCase):
         self.assertEqual({p["runtime_payload_identity"]["sha256"] for p in packets}, {"ab" * 32})
         self.assertEqual(calls, [(procedure_eval.REPO, packets[0]["git_commit"])])
 
+    def test_packet_commit_resolved_once_and_bound_to_identity(self):
+        """AC65, D21: one resolved commit feeds both the packet's git_commit and its payload identity.
+
+        Mutation: resolving HEAD again inside build_evidence_packet records a second commit ("b" * 40) that the
+        identity does not cover, and calls repository_commit twice.
+        """
+        answers = iter(["a" * 40, "b" * 40])
+        resolved = []
+
+        def repository_commit():
+            value = next(answers, "c" * 40)
+            resolved.append(value)
+            return value
+
+        member_commits = []
+
+        def release_members(repo_root, commit):
+            member_commits.append(commit)
+            return {"a.txt": b"a"}
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(procedure_eval, "repository_commit", side_effect=repository_commit), \
+                mock.patch.object(procedure_eval, "BUILD_RELEASE_SCRIPT", REPO / "scripts" / "run_procedure_eval.py"), \
+                stub_build_release(release_members=release_members, payload_identity=lambda members, exclude: "ab" * 32,
+                                   RUNTIME_PAYLOAD_EXCLUDE=frozenset()):
+            evidence = Path(td) / "ev"
+            _code, stdout = run_main(["--eval-set", PIPELINE_EVAL, "--transcript", PASS_TRANSCRIPT,
+                                      "--case-id", PACKET_CASE, "--strict-evidence", "--evidence-dir", evidence,
+                                      "--fixture-root", self.copy_fixture_root(td)])
+            packet = json.loads((evidence / f"{PACKET_CASE}.json").read_text(encoding="utf-8"))
+        self.assertEqual(resolved, ["a" * 40], stdout)
+        self.assertEqual(packet["git_commit"], "a" * 40)
+        self.assertEqual(packet["runtime_payload_identity"]["commit"], "a" * 40)
+        self.assertEqual(member_commits, ["a" * 40])
+
     def test_identity_fallback_when_build_release_absent(self):
         with tempfile.TemporaryDirectory() as td, \
                 mock.patch.object(procedure_eval, "BUILD_RELEASE_SCRIPT", Path(td) / "missing.py"):
@@ -1376,18 +1636,29 @@ class TestEvidencePacket(unittest.TestCase):
                 self.assertEqual(procedure_eval.runtime_payload_identity_for_commit("0" * 40, cache={}), expected)
 
     def test_stub_wins_after_real_build_release_import_in_same_process(self):
-        # Order-independent regression: a real `scripts.build_release` import earlier in the process binds the
-        # submodule as a `scripts` package attribute, which `from scripts import build_release` returns ahead of
-        # sys.modules. The stub must still control exactly the loader `_payload_identity` uses.
-        if not BUILD_RELEASE.exists():
-            self.skipTest("scripts/build_release.py absent (slice D pre-integration)")
-        import importlib
-        importlib.import_module("scripts.build_release")
-        self.assertIn("build_release", vars(sys.modules["scripts"]))
+        # Order-independent regression: an earlier `scripts.build_release` import binds the submodule as a `scripts`
+        # package attribute, which `from scripts import build_release` returns ahead of sys.modules. Hermetic: a decoy
+        # bound on that attribute stands in for the real import, so no real module is loaded and nothing is skipped.
+        # The stub must still control exactly the loader `_payload_identity` uses.
+        decoy = types.ModuleType("build_release")
+        decoy.release_members = lambda repo_root, commit: {}
+        decoy.payload_identity = lambda members, exclude: "ef" * 32
+        decoy.RUNTIME_PAYLOAD_EXCLUDE = frozenset()
+        scripts_package = sys.modules["scripts"]
+        with mock.patch.object(scripts_package, "build_release", decoy, create=True), \
+                mock.patch.object(procedure_eval, "BUILD_RELEASE_SCRIPT", REPO / "scripts" / "run_procedure_eval.py"):
+            from scripts import build_release as bound
+            self.assertIs(bound, decoy)  # precondition: the package attribute wins over sys.modules
+            with stub_build_release(release_members=lambda repo_root, commit: {},
+                                    payload_identity=lambda m, e: "cd" * 32, RUNTIME_PAYLOAD_EXCLUDE=frozenset()):
+                self.assertEqual(procedure_eval.runtime_payload_identity_for_commit("0" * 40, cache={}), "cd" * 32)
+
+    def test_identity_loader_raising_is_named_failed(self):
+        # Mutation: narrowing the loader's `except Exception` (a SyntaxError in build_release.py) lets the eval crash.
         with mock.patch.object(procedure_eval, "BUILD_RELEASE_SCRIPT", REPO / "scripts" / "run_procedure_eval.py"), \
-                stub_build_release(release_members=lambda repo_root, commit: {}, payload_identity=lambda m, e: "cd" * 32,
-                                   RUNTIME_PAYLOAD_EXCLUDE=frozenset()):
-            self.assertEqual(procedure_eval.runtime_payload_identity_for_commit("0" * 40, cache={}), "cd" * 32)
+                mock.patch.object(procedure_eval, "_import_build_release", side_effect=SyntaxError("broken module")):
+            self.assertEqual(procedure_eval.runtime_payload_identity_for_commit("0" * 40, cache={}),
+                             "unavailable:build-release-failed")
 
     def test_traversal_non_slug_and_reserved_case_ids_write_nothing(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1447,7 +1718,8 @@ class TestEvidencePacket(unittest.TestCase):
     def test_live_harness_packet_not_scorable(self):
         case = {"id": "safe-case", "prompt": "probe"}
         with tempfile.TemporaryDirectory() as td:
-            common = {"cwd": Path(td), "fixture_root": None, "identity": "unavailable:build-release-absent"}
+            common = {"cwd": Path(td), "fixture_root": None, "identity": "unavailable:build-release-absent",
+                      "git_commit": "0" * 40}
             live = procedure_eval.build_evidence_packet(case, procedure_eval.Trace(), [], scoring_source="live-harness",
                                                         strict=True, **common)
             replay = procedure_eval.build_evidence_packet(case, procedure_eval.Trace(), [],
@@ -1589,3 +1861,62 @@ class TestStrictCodexFixtures(StrictFixtureAssertions):
     @unittest.skipUnless(shutil.which("node"), "node unavailable: the redaction check needs hooks/redact-sensitive.mjs")
     def test_codex_strict_fixtures_are_committed_clean_lf(self):
         self.assert_committed_clean_lf("procedure-strict-codex-*.jsonl", len(self.CODEX_FIXTURES))
+
+
+MIXED_RUNTIME_ERROR = "strict_mixed_runtime_carriers"
+CODEX_EXEC_MESSAGE = {"type": "item.completed", "item": {"id": "m1", "type": "agent_message", "text": "working"}}
+
+
+class TestStrictMixedRuntime(unittest.TestCase):
+    """AC68, AC70, AC123 (D21): a strict transcript carrying records of more than one runtime family fails named."""
+
+    def test_leading_session_meta_then_claude_text_fails_named(self):
+        # Probe P4. Mutation: keeping first-event-wins under strict lets Codex-style assistant text clear both steps.
+        events = [rollout({"id": "s1", "cli_version": "0.154.0"}, "session_meta"),
+                  assistant_text_event(FINDINGS_TABLE), assistant_text_event(CONTROL_REPORT)]
+        trace = procedure_eval.trace_events(events, strict=True)
+        errors = procedure_eval.evaluate_case(reviewer_case(SECURITY_REVIEWER, CONTROL_REVIEWER), trace, REPO, strict=True)
+        self.assertEqual(trace.runtime, "unknown")
+        self.assertIn(MIXED_RUNTIME_ERROR, errors)
+        self.assertEqual(reviewer_errors(errors), ["strict_reviewer_result_missing:control",
+                                                   "strict_reviewer_result_missing:security"])
+
+    def test_codex_exec_item_then_claude_events_fails_named(self):
+        # Probe P5. Mutation: dropping the family set leaves runtime codex-exec with no error.
+        events = [CODEX_EXEC_MESSAGE] + claude_run("t1", "pytest", False, "1 passed")
+        trace = procedure_eval.trace_events(events, strict=True)
+        errors = procedure_eval.evaluate_case(AUDIT_CASE, trace, REPO, strict=True)
+        self.assertIn(MIXED_RUNTIME_ERROR, errors)
+        self.assertEqual(errors.count(MIXED_RUNTIME_ERROR), 1)
+
+    def test_cli_concatenated_positive_fixtures_fail_named(self):
+        codex = (TRANSCRIPTS / "procedure-strict-codex-complete-pass.jsonl").read_bytes()
+        claude = (TRANSCRIPTS / "procedure-strict-claude-complete-pass.jsonl").read_bytes()
+        with tempfile.TemporaryDirectory() as td:
+            transcript = Path(td) / "mixed.jsonl"
+            transcript.write_bytes(codex + (b"" if codex.endswith(b"\n") else b"\n") + claude)
+            root = Path(td) / "fixture"
+            shutil.copytree(BASIC_FIXTURE, root)
+            proc = run_cli("--eval-set", PIPELINE_EVAL, "--transcript", transcript, "--strict-evidence",
+                           "--fixture-root", root)
+        self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        for case_id in PIPELINE_CASES:
+            self.assertIn(f"error={case_id}:{MIXED_RUNTIME_ERROR}", proc.stdout)
+
+    def test_single_runtime_fixtures_have_no_mixed_error(self):
+        # Guard: every committed single-runtime strict fixture keeps its runtime and gets no mixed-runtime error.
+        for pattern, runtime in (("procedure-strict-claude-*.jsonl", "claude"),
+                                 ("procedure-strict-codex-*.jsonl", "codex-rollout")):
+            paths = sorted(TRANSCRIPTS.glob(pattern))
+            self.assertTrue(paths, pattern)
+            for path in paths:
+                with self.subTest(fixture=path.name):
+                    trace = procedure_eval.trace_events(procedure_eval.load_json_lines(path), strict=True)
+                    self.assertNotIn(MIXED_RUNTIME_ERROR, trace.strict_errors)
+                    self.assertEqual(trace.runtime, runtime)
+
+    def test_default_mode_keeps_first_event_runtime(self):
+        # Guard: with strict off, first-event-wins is exact and no strict error is recorded.
+        trace = procedure_eval.trace_events([CODEX_EXEC_MESSAGE] + claude_run("t1", "pytest", False, "1 passed"))
+        self.assertEqual(trace.runtime, "codex-exec")
+        self.assertEqual(trace.strict_errors, [])
