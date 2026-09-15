@@ -1061,11 +1061,9 @@ BR6_BASH_BUILTINS = frozenset({
     "printf", "pushd", "pwd", "read", "readarray", "readonly", "return", "set", "shift", "shopt", "source", "suspend",
     "test", "times", "trap", "true", "type", "typeset", "ulimit", "umask", "unalias", "unset", "wait",
 })
-BR6_SAFE_BUILTINS = frozenset({":", "[", "cd", "echo", "export", "false", "printf", "pwd", "set", "test", "true", "unset",
-                               "wait"})
-# Safe builtins that assign to or arithmetically evaluate a variable name taken from an argument (`printf -v`, `test -v`,
-# `wait -p`): a parameter or glob in that argument can supply a BASH_CMDS subscript.
-BR6_NAME_BUILTINS = frozenset({"printf", "test", "[", "wait"})
+# printf, test, `[`, wait and unset stay out: each takes a variable name or evaluates an arithmetic subscript from an
+# argument, so any expansion there (parameter, glob, tilde) can supply a BASH_CMDS subscript.
+BR6_SAFE_BUILTINS = frozenset({":", "cd", "echo", "export", "false", "pwd", "set", "true"})
 _ASCII_ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 _GRAMMAR_WORD_CHARS = frozenset(_ASCII_ALNUM + "_-./:=+,@%^~!?*]")
 _GRAMMAR_PARAMETER_CHARS = frozenset(_ASCII_ALNUM + "_?#$!@*-")
@@ -1081,9 +1079,8 @@ def in_safe_br6_grammar(command: str) -> bool:
     One linear left-to-right pass: unquoted words, single quotes, double quotes without substitution, `$NAME`-style
     parameters, backslash pairs and continuations, word-start comments, the separators `;`, newline, `||`, `&&`, `|`,
     `|&` and a background `&`, and simple redirections followed by a word. Each simple command's command word must be an
-    external program or one of BR6_SAFE_BUILTINS; after such a builtin no later `[` may appear; after a BR6_NAME_BUILTINS
-    name no later parameter (`$`, unquoted or in double quotes) and no unquoted `?` or `*` glob may appear either; and
-    `set` only takes the errexit/nounset/pipefail forms. A word of only digits directly before `<` or `>` is that
+    external program or one of BR6_SAFE_BUILTINS; after such a builtin no later `[` may appear; and `set` only takes the
+    errexit/nounset/pipefail forms. A word of only digits directly before `<` or `>` is that
     redirection's file descriptor in any position. Anything else is outside.
     """
     text = str(command or "")
@@ -1093,13 +1090,12 @@ def in_safe_br6_grammar(command: str) -> bool:
     word_start = True
     command_seen = False
     safe_builtin = False
-    name_builtin = False
     set_command = False
     redirect_pending = False  # an operator was read and its target word has not started
     target_word = False       # the current word is a redirection target
 
     def finish_word(next_char: str) -> bool:
-        nonlocal in_word, command_seen, safe_builtin, name_builtin, set_command, target_word
+        nonlocal in_word, command_seen, safe_builtin, set_command, target_word
         if not in_word:
             return True
         in_word = False
@@ -1113,27 +1109,24 @@ def in_safe_br6_grammar(command: str) -> bool:
             if _GRAMMAR_ASSIGNMENT_RE.match(raw):
                 return True
             command_seen = True
-            if raw != "[" and not all(c in _GRAMMAR_COMMAND_WORD_CHARS or ord(c) >= 0x80 for c in raw):
+            if not all(c in _GRAMMAR_COMMAND_WORD_CHARS or ord(c) >= 0x80 for c in raw):
                 return False
             if raw in BR6_RESERVED_WORDS or (raw in BR6_BASH_BUILTINS and raw not in BR6_SAFE_BUILTINS):
                 return False
             safe_builtin = raw in BR6_SAFE_BUILTINS
-            name_builtin = raw in BR6_NAME_BUILTINS
             set_command = raw == "set"
             return True
         return not set_command or bool(_GRAMMAR_SET_OPTION_RE.fullmatch(raw)) or raw in _GRAMMAR_SET_WORDS
 
     def end_simple_command() -> None:
-        nonlocal command_seen, safe_builtin, name_builtin, set_command
-        command_seen = safe_builtin = name_builtin = set_command = False
+        nonlocal command_seen, safe_builtin, set_command
+        command_seen = safe_builtin = set_command = False
 
     index = 0
     while index < length:
         ch = text[index]
         nxt = text[index + 1] if index + 1 < length else ""
         if ch == "[" and safe_builtin:
-            return False
-        if ch in ("$", "?", "*") and name_builtin:
             return False
         if ch in (" ", "\t"):
             if not finish_word(ch):
@@ -1215,7 +1208,7 @@ def in_safe_br6_grammar(command: str) -> bool:
                     continue
                 if inner == "$":
                     following = text[scan + 1] if scan + 1 < length else ""
-                    if name_builtin or not following or following not in _GRAMMAR_PARAMETER_CHARS:
+                    if not following or following not in _GRAMMAR_PARAMETER_CHARS:
                         return False
                     scan += 2
                     continue

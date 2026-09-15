@@ -968,8 +968,7 @@ GRAMMAR_INSIDE = (
     "pytest ~/x @a %b ^c !d ?e *f ,g +h :i =j",
     "pytest é",
     "set -euo pipefail; set +e -o errexit +o nounset; pytest",
-    "cd repo; export X=1; unset X; echo ok; printf '%s' x; pwd; : note; true; false; wait; pytest",
-    "test -f x && [ -d y ] && pytest",
+    "cd repo; export X=1; echo ok; pwd; : note; true; false; pytest",
     "2>err.txt pytest",
     "> out.txt pytest",
     "echo>out.txt x; pytest",
@@ -977,7 +976,15 @@ GRAMMAR_INSIDE = (
     "ev\\\nal=1 pytest",
     "pytest eval source trap 'exit 0'",
     "set -euo pipefail 2>/dev/null; pytest",
-    "echo $? *.txt; cd \"$D\"; export PATH=$PATH:bin; unset $X; pytest",
+    "echo $? *.txt; cd \"$D\"; export PATH=$PATH:bin; pytest",
+    # Expansions after the minimized safe builtins that bash 5.2.37 still follows with a real runner run.
+    "OLDPWD='BASH_CMDS[pytest]'; cd ~-; pytest",
+    "OLDPWD='BASH_CMDS[pytest]'; echo ~- ~+; pytest",
+    "V='BASH_CMDS[pytest]=/usr/bin/true'; echo $V; pwd; pytest",
+    "V='BASH_CMDS[pytest]=/usr/bin/true'; : $V; true; pytest",
+    "X='BASH_CMDS[pytest]'; cd \"$X\" 2>/dev/null; pytest",
+    "CDPATH='BASH_CMDS[pytest]'; cd -P . ; pytest",
+    "set -euo pipefail; cd .; echo ok; pytest",
 )
 GRAMMAR_OUTSIDE = (
     "pytest $(x)", "pytest $((1))", "pytest ${x}", "pytest $'x'", "pytest $\"x\"", "pytest $[1]", "pytest $",
@@ -990,7 +997,14 @@ GRAMMAR_OUTSIDE = (
     "e\\val x", "ev\\\nal x", "function f if true; then true; fi", "! pytest", "time pytest",
     "BASH_CMDS[pytest]=x; pytest", "printf -v 'a[b]' x", "echo '[x]'; pytest", "test -v \"a[b]\"",
     "2>/dev/null eval x", "X=1 eval x", "type pytest", "p?test", "pyt*st", "[x] && pytest",
-    # A parameter or glob after printf, test, `[` or wait carries a subscript past the `[` check (bash 5.2.37 exit 0).
+    # printf, test, `[`, wait and unset take a variable name or evaluate an arithmetic subscript, so any expansion
+    # (parameter, glob, tilde) carries a BASH_CMDS subscript past the `[` check (bash 5.2.37 exit 0); they are outside.
+    "OLDPWD='BASH_CMDS[pytest]'; printf -v ~- %s /usr/bin/true; pytest",
+    "cp /usr/bin/true 0; a=1; V='a[BASH_CMDS[pytest]=0]'; unset $V; pytest",
+    "test -f x; pytest", "printf '%s\\n' x; pytest", "unset X; pytest", "unset $X; pytest", "wait; pytest",
+    "test -f x && [ -d y ] && pytest",
+    # A `[` after a safe builtin stays outside even where bash rejects the identifier and the runner runs.
+    "export 'BASH_CMDS[pytest]=/usr/bin/true'; pytest",
     "V='BASH_CMDS[pytest]'; printf -v $V %s /usr/bin/true; pytest",
     "V='BASH_CMDS[pytest]'; printf -v \"$V\" %s /usr/bin/true; pytest",
     "ls 'BASH_CMDS[pytest]'; printf -v $_ %s /usr/bin/true; pytest",
@@ -1024,7 +1038,7 @@ class TestStrictRedGreen(unittest.TestCase):
 
     def test_safe_grammar_production_lists(self):
         # Mutation: dropping any character or command-word production (each listed construct would be admitted).
-        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (24, 70))
+        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (30, 79))
         for command, expected in [(c, True) for c in GRAMMAR_INSIDE] + [(c, False) for c in GRAMMAR_OUTSIDE]:
             with self.subTest(command=command):
                 self.assertIs(procedure_eval.in_safe_br6_grammar(command), expected)

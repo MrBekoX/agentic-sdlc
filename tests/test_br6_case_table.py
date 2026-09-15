@@ -156,17 +156,17 @@ SPEC_SHAPES = {
     ),
 }
 
-# R10 (D23): bash 5.2.37 `compgen -k` reserved words, its `compgen -b` builtins outside the safe set, and `set`
-# (safe only in its errexit/nounset/pipefail forms). A command of plain words and characters none of which is in
-# this set must lie inside the safe grammar.
+# R10 (D23): bash 5.2.37 `compgen -k` reserved words, its `compgen -b` builtins outside the safe set (`:`, true,
+# false, cd, echo, pwd, export, set), and `set` (safe only in its errexit/nounset/pipefail forms). A command of plain
+# words and characters none of which is in this set must lie inside the safe grammar.
 R10_EXCLUDED_WORDS = frozenset({
     "!", "[[", "]]", "{", "}", "case", "coproc", "do", "done", "elif", "else", "esac", "fi", "for", "function",
     "if", "in", "select", "then", "time", "until", "while",
-    ".", "alias", "bg", "bind", "break", "builtin", "caller", "command", "compgen", "complete", "compopt",
+    ".", "[", "alias", "bg", "bind", "break", "builtin", "caller", "command", "compgen", "complete", "compopt",
     "continue", "declare", "dirs", "disown", "enable", "eval", "exec", "exit", "fc", "fg", "getopts", "hash",
-    "help", "history", "jobs", "kill", "let", "local", "logout", "mapfile", "popd", "pushd", "read", "readarray",
-    "readonly", "return", "shift", "shopt", "source", "suspend", "times", "trap", "type", "typeset", "ulimit",
-    "umask", "unalias",
+    "help", "history", "jobs", "kill", "let", "local", "logout", "mapfile", "popd", "printf", "pushd", "read",
+    "readarray", "readonly", "return", "shift", "shopt", "source", "suspend", "test", "times", "trap", "type",
+    "typeset", "ulimit", "umask", "unalias", "unset", "wait",
     "set",
 })
 
@@ -377,13 +377,35 @@ class TestBR6CaseTable(unittest.TestCase):
             with self.subTest(id=row_id):
                 self.assertIs(rows[row_id]["inSafeGrammar"], False)
                 self.assertIs(rows[row_id]["strictAttributable"], False)
+        # Expansion forgeries through printf, unset and `[`, closed by the minimized safe-builtin set.
+        for row_id in ("edge-forged-printf-hash-table-tilde", "edge-forged-unset-arithmetic-subscript",
+                       "edge-forged-bracket-hash-table-arithmetic"):
+            with self.subTest(id=row_id):
+                self.assertIs(rows[row_id]["inSafeGrammar"], False)
+                self.assertEqual(rows[row_id]["defaultTests"], "missing")
+                self.assertIs(rows[row_id]["strictAttributable"], False)
         oror = [i for i in rows if i.startswith("edge-forged-oror-")]
         self.assertEqual(len(oror), 5)
         for row_id in oror:
             with self.subTest(id=row_id):
-                self.assertIs(rows[row_id]["inSafeGrammar"], True)
+                # `wait` is outside the safe builtins, so only the background-head operand lies outside the grammar.
+                self.assertIs(rows[row_id]["inSafeGrammar"], row_id != "edge-forged-oror-background-head")
                 self.assertEqual(rows[row_id]["defaultTests"], "missing")
                 self.assertIs(rows[row_id]["strictAttributable"], False)
+        # Disclosed false 'missing' rows: a builtin outside the minimized safe set together with a separator.
+        for row_id in ("edge-outside-test-builtin", "edge-outside-printf-builtin", "edge-outside-unset-builtin",
+                       "edge-outside-wait-builtin", "edge-outside-export-subscript-literal"):
+            with self.subTest(id=row_id):
+                self.assertIs(rows[row_id]["inSafeGrammar"], False)
+                self.assertEqual(rows[row_id]["defaultTests"], "missing")
+                self.assertIs(rows[row_id]["strictAttributable"], False)
+        for row_id in ("edge-inside-cd-tilde-oldpwd", "edge-inside-echo-tilde-oldpwd",
+                       "edge-inside-echo-parameter-subscript-text", "edge-inside-colon-parameter-subscript-text",
+                       "edge-inside-cd-quoted-parameter", "edge-inside-cdpath-subscript-text",
+                       "edge-inside-set-cd-echo-before-runner"):
+            with self.subTest(id=row_id):
+                self.assertIs(rows[row_id]["inSafeGrammar"], True)
+                self.assertIs(rows[row_id]["strictAttributable"], True)
         for row_id in ("edge-single-statement-substitution", "edge-forged-hidden-pipe-ansi-c",
                        "edge-forged-set-noexec-andand"):
             with self.subTest(id=row_id):

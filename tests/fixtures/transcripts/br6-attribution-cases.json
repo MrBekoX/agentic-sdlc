@@ -1577,7 +1577,7 @@
       "lastVersionOrHelpOnly": false,
       "lastHasPipe": false,
       "lastHasBackground": true,
-      "inSafeGrammar": true,
+      "inSafeGrammar": false,
       "orRun": [
         "pytest & wait"
       ],
@@ -1612,7 +1612,7 @@
       "lastVersionOrHelpOnly": false,
       "lastHasPipe": false,
       "lastHasBackground": true,
-      "inSafeGrammar": true,
+      "inSafeGrammar": false,
       "orRun": [
         "pytest \\&& wait"
       ],
@@ -1647,7 +1647,7 @@
       "lastVersionOrHelpOnly": false,
       "lastHasPipe": false,
       "lastHasBackground": true,
-      "inSafeGrammar": true,
+      "inSafeGrammar": false,
       "orRun": [
         "pytest \\>& wait"
       ],
@@ -1682,7 +1682,7 @@
       "lastVersionOrHelpOnly": false,
       "lastHasPipe": false,
       "lastHasBackground": true,
-      "inSafeGrammar": true,
+      "inSafeGrammar": false,
       "orRun": [
         "pytest \\|& wait"
       ],
@@ -3032,7 +3032,7 @@
       "lastVersionOrHelpOnly": false,
       "lastHasPipe": false,
       "lastHasBackground": false,
-      "inSafeGrammar": true,
+      "inSafeGrammar": false,
       "orRun": [
         "pytest & wait",
         "pytest"
@@ -4593,6 +4593,562 @@
         "cp /usr/bin/true 0",
         "V='a[BASH_CMDS[pytest]=0]'",
         "test -v $V",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": false,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-cd-tilde-oldpwd",
+      "command": "OLDPWD='BASH_CMDS[pytest]'; cd ~-; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "OLDPWD='BASH_CMDS[pytest]'",
+        "cd ~-",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-echo-tilde-oldpwd",
+      "command": "OLDPWD='BASH_CMDS[pytest]'; echo ~- ~+; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "OLDPWD='BASH_CMDS[pytest]'",
+        "echo ~- ~+",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-echo-parameter-subscript-text",
+      "command": "V='BASH_CMDS[pytest]=/usr/bin/true'; echo $V; pwd; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "V='BASH_CMDS[pytest]=/usr/bin/true'",
+        "echo $V",
+        "pwd",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-colon-parameter-subscript-text",
+      "command": "V='BASH_CMDS[pytest]=/usr/bin/true'; : $V; true; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "V='BASH_CMDS[pytest]=/usr/bin/true'",
+        ": $V",
+        "true",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-cd-quoted-parameter",
+      "command": "X='BASH_CMDS[pytest]'; cd \"$X\" 2>/dev/null; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "X='BASH_CMDS[pytest]'",
+        "cd \"$X\" 2>/dev/null",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-cdpath-subscript-text",
+      "command": "CDPATH='BASH_CMDS[pytest]'; cd -P . ; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "CDPATH='BASH_CMDS[pytest]'",
+        "cd -P .",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-set-cd-echo-before-runner",
+      "command": "set -euo pipefail; cd .; echo ok; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "set -euo pipefail",
+        "cd .",
+        "echo ok",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-outside-export-subscript-literal",
+      "command": "export 'BASH_CMDS[pytest]=/usr/bin/true'; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "export 'BASH_CMDS[pytest]=/usr/bin/true'",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": false,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-outside-test-builtin",
+      "command": "test -f x; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "test -f x",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": false,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-outside-printf-builtin",
+      "command": "printf '%s\\n' x; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "printf '%s\\n' x",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": false,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-outside-unset-builtin",
+      "command": "unset X; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "unset X",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": false,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-outside-wait-builtin",
+      "command": "wait; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "wait",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": false,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-printf-hash-table-tilde",
+      "command": "OLDPWD='BASH_CMDS[pytest]'; printf -v ~- %s /usr/bin/true; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "OLDPWD='BASH_CMDS[pytest]'",
+        "printf -v ~- %s /usr/bin/true",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": false,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-unset-arithmetic-subscript",
+      "command": "cp /usr/bin/true 0; a=1; V='a[BASH_CMDS[pytest]=0]'; unset $V; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "cp /usr/bin/true 0",
+        "a=1",
+        "V='a[BASH_CMDS[pytest]=0]'",
+        "unset $V",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": false,
+      "orRun": [
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-bracket-hash-table-arithmetic",
+      "command": "cp /usr/bin/true 0; V='a[BASH_CMDS[pytest]=0]'; [ -v \"$V\" ]; pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "cp /usr/bin/true 0",
+        "V='a[BASH_CMDS[pytest]=0]'",
+        "[ -v \"$V\" ]",
         "pytest"
       ],
       "lastIsRealRunner": true,

@@ -332,7 +332,7 @@ class BR6SafeGrammarTests(unittest.TestCase):
         self.assertEqual(mismatches, [], "rows where the Node grammar columns disagree with the table")
 
     def test_grammar_production_lists(self):
-        # The same 84 commands test_procedure_eval.TestStrictRedGreen.test_safe_grammar_production_lists checks in Python.
+        # The same 109 commands test_procedure_eval.TestStrictRedGreen.test_safe_grammar_production_lists checks in Python.
         from test_procedure_eval import GRAMMAR_INSIDE, GRAMMAR_OUTSIDE
         script = ("import {inSafeBr6Grammar} from " + json.dumps(ROLLOUT_URI) + ";"
                   "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () =>"
@@ -340,7 +340,7 @@ class BR6SafeGrammarTests(unittest.TestCase):
         commands = list(GRAMMAR_INSIDE) + list(GRAMMAR_OUTSIDE)
         got = self.node(script, commands)
         wrong = [c for c, value in zip(commands, got) if value is not (c in GRAMMAR_INSIDE)]
-        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (24, 70))
+        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (30, 79))
         self.assertEqual(wrong, [], "commands whose Node grammar verdict is wrong")
 
     def test_unmodeled_syntax_is_separator_outside_grammar(self):
