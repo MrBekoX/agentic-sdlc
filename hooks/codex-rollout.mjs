@@ -492,8 +492,10 @@ export function readRolloutSignals(path) {
 // command treated as DATA (no eval, no spawn, no backtracking regex), so each is linear (BR10).
 const VERSION_HELP_ARGS = new Set(['--version', '-V', '--help', '-h']);
 // An unquoted `#` starts a comment only at the start of a word: the start of the command or statement,
-// or right after one of these characters. The comment runs to the next newline and hides its separators.
-const COMMENT_BOUNDARY = new Set([' ', '\t', '\n', ';', '|', '&', '(']);
+// or right after one of these characters, which are exactly bash's word-breaking metacharacters. The
+// comment runs to the next newline and hides its separators. `)` matters: in `pytest; (echo x)# ; pytest`
+// bash ends on the subshell. After `(`, `<` or `>` bash stops on a syntax error, so no later statement runs.
+const COMMENT_BOUNDARY = new Set([' ', '\t', '\n', ';', '|', '&', '(', ')', '<', '>']);
 
 // Index of the newline that ends a comment starting at i, or the string length.
 function commentEnd(str, i) {
@@ -562,7 +564,8 @@ function forEachUnquoted(str, visit) {
 
 // True when the command holds an unquoted heredoc operator (`<<` or `<<-`, not the `<<<` here-string).
 // Its body lines are data to bash but separate statements to splitBr6Statements, so no exit code of
-// such a command is attributed to its last statement.
+// such a command is attributed to its last statement. Disclosed conservative limit: an arithmetic shift
+// such as `$((1<<2))` matches too, which gives a false 'missing', never a false satisfy.
 export function hasUnquotedHeredoc(command) {
   const str = String(command || '');
   let heredoc = false;

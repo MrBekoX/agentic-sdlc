@@ -1067,10 +1067,37 @@ class TestBR6StatementSplit(unittest.TestCase):
             "pytest -k a#b; echo x": (["pytest -k a#b", "echo x"], "echo x"),
             "echo $#; pytest": (["echo $#", "pytest"], "pytest"),
             "pytest -k 'a # ;b'": (["pytest -k 'a # ;b'"], "pytest -k 'a # ;b'"),
+            "pytest; (echo x)# ; pytest": (["pytest", "(echo x)"], "(echo x)"),
         }
         for (command, (statements, last)), got in zip(cases.items(), _br6_eval(list(cases))):
             with self.subTest(command=command):
                 self.assertEqual((got["statements"], got["last"]), (statements, last))
+
+    # Every bash metacharacter after which an unquoted `#` starts a comment. Bash 5.2 probe:
+    # `false; (true)<b># ; echo RAN` never prints RAN for any of them (a syntax error for `(`, `|`,
+    # `<` and `>` also stops bash). COMMENT_BOUNDARY in hooks/codex-rollout.mjs must equal this set.
+    COMMENT_BOUNDARIES = (" ", "\t", "\n", ";", "|", "&", "(", ")", "<", ">")
+
+    def test_comment_starts_after_every_bash_metacharacter(self):
+        # Mutation: dropping any character from COMMENT_BOUNDARY, so the separator hidden in the
+        # comment splits again (splitBr6Statements) or the pipe in the comment counts (forEachUnquoted).
+        splits = ["pytest; (echo x)" + b + "# ; pytest" for b in self.COMMENT_BOUNDARIES]
+        pipes = ["pytest" + b + "# | tee x" for b in self.COMMENT_BOUNDARIES]
+        got = _br6_eval(splits + pipes)
+        for n, b in enumerate(self.COMMENT_BOUNDARIES):
+            with self.subTest(boundary=repr(b)):
+                head = "(echo x)" if b in ";\n" else ("(echo x)" + b).strip()
+                split = got[n]
+                self.assertEqual((split["statements"], split["last"]), (["pytest", head], head))
+                self.assertEqual(got[len(splits) + n]["hasPipe"], b == "|")  # only a real `|` pipes
+
+    def test_hash_glued_to_a_word_character_is_data(self):
+        # Mutation: widening COMMENT_BOUNDARY past bash's metacharacters (`$#`, `x}#`, `a=#` are words).
+        glued = ("a", "$", "=", "}", "/", "-", "#")
+        commands = ["pytest -k x" + c + "#; pytest" for c in glued]
+        for c, command, got in zip(glued, commands, _br6_eval(commands)):
+            with self.subTest(glued=c):
+                self.assertEqual(got["statements"], ["pytest -k x" + c + "#", "pytest"])
 
     def test_quoted_separators_are_data(self):
         # Mutation: splitting inside single or double quotes.
@@ -1275,8 +1302,15 @@ class TestCommentAndHeredocForgery(_Tmp):
     the heredoc check in attributable() / isStrictlyAttributable()."""
 
     FORGED = {"comment": "pytest; echo EXIT=$? # ; pytest", "heredoc": "pytest; cat <<EOF\npytest",
-              "heredoc-dash": "pytest; cat <<-EOF\npytest"}
-    ONE_RUNNER = {"comment-after-runner": "pytest # ; echo x", "here-string": "pytest; cat <<<x; pytest"}
+              "heredoc-dash": "pytest; cat <<-EOF\npytest",
+              "paren-comment": "pytest; (echo x)# ; pytest"}  # bash ends on the subshell's exit 0
+    # `pytest # --version` runs a bare pytest: the gate reads version/help on the comment-free last
+    # statement only, so it is a real run (the whole-command helper value alone still sees `--version`).
+    ONE_RUNNER = {"comment-after-runner": "pytest # ; echo x", "here-string": "pytest; cat <<<x; pytest",
+                  "comment-version": "pytest # --version"}
+    # Disclosed conservative limit: a false 'missing', never a false satisfy. hasUnquotedHeredoc reads
+    # the arithmetic shift `$((1<<2))` as a heredoc. A precise fix may flip the row to satisfied.
+    CONSERVATIVE = {"arith-shift": "pytest; echo $((1<<2)); pytest"}
 
     def _outcomes(self, rows, env_extra=None):
         cwd = self._cwd()
@@ -1304,6 +1338,11 @@ class TestCommentAndHeredocForgery(_Tmp):
         rows = self._rows(self.ONE_RUNNER)
         self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.ONE_RUNNER})
         self.assertEqual(_strictly_attributable(rows), [True] * len(rows))
+
+    def test_disclosed_conservative_limits_never_satisfy(self):
+        rows = self._rows(self.CONSERVATIVE)
+        self.assertEqual(self._outcomes(rows), {name: "missing" for name in self.CONSERVATIVE})
+        self.assertEqual(self._outcomes(rows, STRICT_ON), {name: "missing" for name in self.CONSERVATIVE})
 
 
 # ---- AC35: the locked Codex Stop guard never reports the branch step (Task 19) ----

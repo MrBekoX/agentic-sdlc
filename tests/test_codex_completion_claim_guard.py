@@ -449,8 +449,9 @@ class TestOwnerSignalScanner(unittest.TestCase):
         # bash ends both commands on `true` / `cat <<EOF`, so the installed SKILL.md is never read.
         path = INSTALLED.format(skill="verification-before-completion")
         forged = ["cat /nonexistent; true # ; cat " + path,
-                  "cat /nonexistent; cat <<EOF\ncat " + path]
-        self.assertEqual(_delivery_skills(forged), [None, None])
+                  "cat /nonexistent; cat <<EOF\ncat " + path,
+                  "cat /nonexistent; (true)# ; cat " + path]  # `#` right after `)` starts a comment
+        self.assertEqual(_delivery_skills(forged), [None] * len(forged))
         for n, command in enumerate(forged):
             with self.subTest(command=command):
                 lines = [_user(CHOICE), _exec_read(command, f"c{n}"), _read_output(f"c{n}", 0)]
