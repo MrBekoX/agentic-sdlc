@@ -388,6 +388,10 @@ def load_safety():
     return json.loads((FIXTURES_DIR / "safety.json").read_text(encoding="utf-8"))
 
 
+def load_submission_cases():
+    return json.loads((Path(__file__).resolve().parent / "submission" / "cases.json").read_text(encoding="utf-8"))
+
+
 def load_trigger_evalset(skill):
     p = EVALS_DIR / f"{skill}.json"
     if not p.exists():
