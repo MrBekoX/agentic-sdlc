@@ -499,8 +499,10 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
     recorded_ids: set[str] = set()
     streamed_records: dict[str, dict[str, Any]] = {}
     tool_lists = ("tools", "tool_inputs", "commands", "writes", "artifact_writes")  # every list _record_tool fills
+    runtime_families: set[str] = set()  # every carrier family seen: claude | codex-exec | codex-rollout
 
     def set_runtime(name: str) -> None:
+        runtime_families.add(name)
         if trace.runtime == "unknown":
             trace.runtime = name
 
@@ -632,6 +634,11 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
         elif strict and (payload := _rollout_payload(event)) is not None:
             set_runtime("codex-rollout")
             _record_rollout(trace, event.get("type"), payload, rollout_exits.get(position), pending_patches)
+    # D21: native transcripts never interleave families, so under strict a mixed transcript has no single runtime
+    # whose carrier rules apply. With strict off, first-event-wins stays exactly as before.
+    if strict and len(runtime_families) > 1:
+        trace.runtime = "unknown"
+        trace.strict_errors.append("strict_mixed_runtime_carriers")
     return trace
 
 
@@ -890,23 +897,355 @@ def _unquoted_mask(text: str) -> list[bool]:
     return mask
 
 
-def br6_statements(command: str) -> list[str]:
-    """Split on unquoted `;`, newline and `||` (never `&&`, `|` or `&`) after joining backslash-newlines."""
-    text = command.replace("\\\n", "")
-    mask = _unquoted_mask(text)
-    pieces: list[str] = []
-    start = index = 0
+# hooks/codex-rollout.mjs COMMENT_BOUNDARY: an unquoted `#` right after one of these (or at the start) opens a comment.
+_BR6_COMMENT_BOUNDARY = frozenset(" \t\n;|&()<>")
+
+
+def _br6_scan(text: str) -> tuple[list[bool], list[bool]]:
+    """(unquoted, comment) per character in one linear pass, mirroring forEachUnquoted in hooks/codex-rollout.mjs.
+
+    unquoted: outside quotes, not backslash-escaped and not in a comment. comment: from a word-start unquoted `#` to
+    the next newline (exclusive). An escape or a quote clears word start.
+    """
+    unquoted = [False] * len(text)
+    comment = [False] * len(text)
+    quote = ""
+    word_start = True
+    index = 0
     while index < len(text):
-        if mask[index] and text[index] in ";\n":
-            pieces.append(text[start:index])
-            start = index + 1
-        elif mask[index] and text.startswith("||", index) and mask[index + 1]:
-            pieces.append(text[start:index])
-            start = index + 2
-            index += 1
+        ch = text[index]
+        if quote:
+            if ch == quote:
+                quote = ""
+            elif quote == '"' and ch == "\\":
+                index += 1  # the escaped character inside double quotes stays data
+        elif ch == "\\":
+            index += 1  # the escaped next character is literal
+            word_start = False
+        elif ch in ("'", '"'):
+            quote = ch
+            word_start = False
+        elif ch == "#" and word_start:
+            end = text.find("\n", index)
+            end = len(text) if end == -1 else end
+            comment[index:end] = [True] * (end - index)
+            index = end
+            continue  # the newline is scanned next with word start unchanged
+        else:
+            word_start = ch in _BR6_COMMENT_BOUNDARY
+            unquoted[index] = True
         index += 1
-    pieces.append(text[start:])
-    return [piece.strip() for piece in pieces if piece.strip() and not piece.strip().startswith("#")]
+    return unquoted, comment
+
+
+def has_unquoted_background(statement: str) -> bool:
+    """An unquoted, unescaped `&` not joined to an adjacent unquoted `&`, `>`, `<` or `|` before it or `&`/`>` after it.
+
+    Neighbours are judged through the unquoted mask, never as raw characters, so `\\&& wait` is a background job; a `&`
+    inside a word-start comment does not count (D21).
+    """
+    unquoted, _comment = _br6_scan(statement)
+    for index, ch in enumerate(statement):
+        if ch != "&" or not unquoted[index]:
+            continue
+        joined_before = index > 0 and unquoted[index - 1] and statement[index - 1] in "&><|"
+        joined_after = index + 1 < len(statement) and unquoted[index + 1] and statement[index + 1] in "&>"
+        if not (joined_before or joined_after):
+            return True
+    return False
+
+
+# String.prototype.trim's whitespace set, so a Python statement is trimmed exactly as the Node splitter trims it.
+_JS_TRIM = ("\t\n\x0b\x0c\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007"
+            "\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff")
+
+
+def br6_statement_joins(command: str) -> list[tuple[str, bool]]:
+    """(statement, joined by `||`) pairs, mirroring splitBr6StatementJoins in hooks/codex-rollout.mjs (D23).
+
+    Single quotes are literal; a backslash-newline outside single quotes is removed and any other backslash pair kept;
+    a word-start comment is dropped up to its newline; `;` and newline end a statement; `||` ends one and marks the next
+    non-empty statement as joined. Empty statements are dropped and the join carries over them.
+    """
+    text = str(command or "")
+    length = len(text)
+    statements: list[tuple[str, bool]] = []
+    current: list[str] = []
+    quote = ""
+    word_start = True
+    pending_or = False
+    index = 0
+
+    def flush(via_or: bool) -> None:
+        nonlocal current, pending_or
+        statement = "".join(current).strip(_JS_TRIM)
+        if statement:
+            statements.append((statement, pending_or))
+            pending_or = False
+        current = []
+        if via_or:
+            pending_or = True
+
+    while index < length:
+        ch = text[index]
+        if quote == "'":
+            end = text.find("'", index)
+            stop = length if end == -1 else end + 1
+            current.append(text[index:stop])
+            quote = "" if end != -1 else quote
+            index = stop
+            continue
+        nxt = text[index + 1] if index + 1 < length else ""
+        if ch == "\\":
+            if nxt == "\n":
+                index += 2  # a line continuation joins the lines
+                continue
+            current.append(text[index:index + 2])
+            index += 2 if nxt else 1
+            word_start = False
+            continue
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                quote = ""
+            index += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            current.append(ch)
+            word_start = False
+            index += 1
+            continue
+        if ch == "#" and word_start:
+            newline = text.find("\n", index)
+            index = length if newline == -1 else newline  # the newline still separates
+            continue
+        word_start = ch in _BR6_COMMENT_BOUNDARY
+        if ch in ";\n":
+            flush(False)
+        elif ch == "|" and nxt == "|":
+            flush(True)
+            index += 1
+        else:
+            current.append(ch)
+        index += 1
+    flush(False)
+    return statements
+
+
+def br6_statements(command: str) -> list[str]:
+    """The BR6 statements (split on unquoted `;`, newline and `||`, never `&&`, `|` or `&`), as splitBr6Statements."""
+    return [statement for statement, _joined in br6_statement_joins(command)]
+
+
+def br6_trailing_or_run(command: str) -> list[str]:
+    """The maximal trailing run of `||`-joined statements, mirroring trailingOrRun (an exit can come from any of them)."""
+    joined = br6_statement_joins(command)
+    start = len(joined) - 1
+    while start > 0 and joined[start][1]:
+        start -= 1
+    return [statement for statement, _joined in joined[max(start, 0):]]
+
+
+# --- D23 safe shell grammar (spec DP35), mirrored by inSafeBr6Grammar in hooks/codex-rollout.mjs. An exit code is
+# attributable only while the command lies entirely inside it. The word sets are bash 5.2.37's own `compgen -k` reserved
+# words and `compgen -b` builtins; a builtin a later bash adds is read as an external program (a disclosed limit).
+BR6_RESERVED_WORDS = frozenset({
+    "!", "[[", "]]", "{", "}", "case", "coproc", "do", "done", "elif", "else", "esac", "fi", "for", "function", "if",
+    "in", "select", "then", "time", "until", "while",
+})
+BR6_BASH_BUILTINS = frozenset({
+    ".", ":", "[", "alias", "bg", "bind", "break", "builtin", "caller", "cd", "command", "compgen", "complete",
+    "compopt", "continue", "declare", "dirs", "disown", "echo", "enable", "eval", "exec", "exit", "export", "false",
+    "fc", "fg", "getopts", "hash", "help", "history", "jobs", "kill", "let", "local", "logout", "mapfile", "popd",
+    "printf", "pushd", "pwd", "read", "readarray", "readonly", "return", "set", "shift", "shopt", "source", "suspend",
+    "test", "times", "trap", "true", "type", "typeset", "ulimit", "umask", "unalias", "unset", "wait",
+})
+# bash 5.2.37's integer-attributed variables (`bash -c 'declare -p' | grep '^declare -[a-zA-Z]*i'`; SECONDS is not marked).
+# Assigning one evaluates the value as arithmetic, which can write BASH_CMDS, so an assignment to one (standalone, prefix
+# or as an export argument) lies outside the grammar.
+BR6_INTEGER_VARIABLES = frozenset({"BASHPID", "EUID", "HISTCMD", "OPTIND", "PPID", "RANDOM", "SRANDOM", "UID"})
+# printf, test, `[`, wait and unset stay out: each takes a variable name or evaluates an arithmetic subscript from an
+# argument, so any expansion there (parameter, glob, tilde) can supply a BASH_CMDS subscript.
+BR6_SAFE_BUILTINS = frozenset({":", "cd", "echo", "export", "false", "pwd", "set", "true"})
+_ASCII_ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+_GRAMMAR_WORD_CHARS = frozenset(_ASCII_ALNUM + "_-./:=+,@%^~!?*]")
+_GRAMMAR_PARAMETER_CHARS = frozenset(_ASCII_ALNUM + "_?#$!@*-")
+_GRAMMAR_COMMAND_WORD_CHARS = frozenset(_ASCII_ALNUM + "_-./:=+,@%^~!#")
+_GRAMMAR_ASSIGNMENT_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\+?=")
+_GRAMMAR_PLAIN_ARGUMENT_RE = re.compile(r"[A-Za-z0-9_-]+")
+_GRAMMAR_SET_OPTION_RE = re.compile(r"[-+][euo]+")
+_GRAMMAR_SET_WORDS = frozenset({"errexit", "nounset", "pipefail"})
+
+
+def in_safe_br6_grammar(command: str) -> bool:
+    """True only when every character and every simple command of `command` lies inside the D23 safe grammar.
+
+    One linear left-to-right pass: unquoted words, single quotes, double quotes without substitution, `$NAME`-style
+    parameters, backslash pairs and continuations, word-start comments, the separators `;`, newline, `||`, `&&`, `|`,
+    `|&` and a background `&`, and simple redirections followed by a word. Each simple command's command word must be an
+    external program or one of BR6_SAFE_BUILTINS; after such a builtin no later `[` may appear; `set` only takes the
+    errexit/nounset/pipefail forms; no assignment word names one of BR6_INTEGER_VARIABLES; and each `export` argument is a
+    literal `NAME=`/`NAME+=` assignment or a plain word of letters, digits, `_` and `-`, so no expansion, quote or glob
+    can build the assigned name. A word of only digits directly before `<` or `>` is that
+    redirection's file descriptor in any position. Anything else is outside.
+    """
+    text = str(command or "")
+    length = len(text)
+    word: list[str] = []
+    in_word = False
+    word_start = True
+    command_seen = False
+    safe_builtin = False
+    set_command = False
+    export_command = False
+    redirect_pending = False  # an operator was read and its target word has not started
+    target_word = False       # the current word is a redirection target
+
+    def finish_word(next_char: str) -> bool:
+        nonlocal in_word, command_seen, safe_builtin, set_command, export_command, target_word
+        if not in_word:
+            return True
+        in_word = False
+        raw = "".join(word)
+        if target_word:
+            target_word = False
+            return True
+        if next_char in ("<", ">") and raw and all(c in "0123456789" for c in raw):
+            return True  # the file descriptor of the redirection that follows
+        assignment = _GRAMMAR_ASSIGNMENT_RE.match(raw)
+        if not command_seen:
+            if assignment:
+                return assignment.group(1) not in BR6_INTEGER_VARIABLES
+            command_seen = True
+            if not all(c in _GRAMMAR_COMMAND_WORD_CHARS or ord(c) >= 0x80 for c in raw):
+                return False
+            if raw in BR6_RESERVED_WORDS or (raw in BR6_BASH_BUILTINS and raw not in BR6_SAFE_BUILTINS):
+                return False
+            safe_builtin = raw in BR6_SAFE_BUILTINS
+            set_command = raw == "set"
+            export_command = raw == "export"
+            return True
+        if export_command:
+            if assignment:
+                return assignment.group(1) not in BR6_INTEGER_VARIABLES
+            return bool(_GRAMMAR_PLAIN_ARGUMENT_RE.fullmatch(raw))
+        return not set_command or bool(_GRAMMAR_SET_OPTION_RE.fullmatch(raw)) or raw in _GRAMMAR_SET_WORDS
+
+    def end_simple_command() -> None:
+        nonlocal command_seen, safe_builtin, set_command, export_command
+        command_seen = safe_builtin = set_command = export_command = False
+
+    index = 0
+    while index < length:
+        ch = text[index]
+        nxt = text[index + 1] if index + 1 < length else ""
+        if ch == "[" and safe_builtin:
+            return False
+        if ch in (" ", "\t"):
+            if not finish_word(ch):
+                return False
+            word_start = True
+            index += 1
+            continue
+        if ch in (";", "\n", "|", "&") and not (ch == "&" and nxt == ">"):
+            if not finish_word(ch) or redirect_pending:
+                return False
+            index += 2 if (ch == "|" and nxt in ("|", "&")) or (ch == "&" and nxt == "&") else 1
+            end_simple_command()
+            word_start = True
+            continue
+        if ch in ("<", ">") or ch == "&":  # `&` here is `&>` or `&>>`
+            if not finish_word(ch) or redirect_pending:
+                return False
+            if ch == "&":
+                index += 3 if text.startswith("&>>", index) else 2
+            elif ch == "<":
+                if nxt in ("<", "("):
+                    return False
+                index += 2 if nxt in (">", "&") else 1
+            else:
+                if nxt == "(":
+                    return False
+                index += 2 if nxt in (">", "|", "&") else 1
+            redirect_pending = True
+            word_start = True
+            continue
+        code = ord(ch)
+        if ch in ("(", ")", "{", "}", "`") or code < 32 or code == 127:
+            return False
+        if not in_word:
+            if ch == "#" and word_start:
+                if redirect_pending:
+                    return False
+                newline = text.find("\n", index)
+                index = length if newline == -1 else newline
+                continue
+            if ch == "\\" and nxt == "\n":
+                index += 2  # a continuation keeps the word-start state
+                continue
+            in_word = True
+            word = []
+            target_word = redirect_pending
+            redirect_pending = False
+        if ch == "$":
+            if nxt not in _GRAMMAR_PARAMETER_CHARS or not nxt:
+                return False
+            word.append(text[index:index + 2])
+            index += 2
+        elif ch == "\\":
+            if nxt == "\n":
+                index += 2  # removed from the word, as bash removes it
+                continue
+            if not nxt or (safe_builtin and nxt == "["):
+                return False
+            word.append(text[index:index + 2])
+            index += 2
+        elif ch == "'":
+            end = text.find("'", index + 1)
+            if end == -1 or (safe_builtin and "[" in text[index:end]):
+                return False
+            word.append(text[index:end + 1])
+            index = end + 1
+        elif ch == '"':
+            scan = index + 1
+            while True:
+                if scan >= length:
+                    return False  # unterminated
+                inner = text[scan]
+                if inner == '"':
+                    break
+                if inner == "\\":
+                    if scan + 1 >= length or (safe_builtin and text[scan + 1] == "["):
+                        return False
+                    scan += 2
+                    continue
+                if inner == "$":
+                    following = text[scan + 1] if scan + 1 < length else ""
+                    if not following or following not in _GRAMMAR_PARAMETER_CHARS:
+                        return False
+                    scan += 2
+                    continue
+                inner_code = ord(inner)
+                if inner == "`" or (inner_code < 32 and inner not in "\t\n") or inner_code == 127:
+                    return False
+                if safe_builtin and inner == "[":
+                    return False
+                scan += 1
+            word.append(text[index:scan + 1])
+            index = scan + 1
+        elif ch == "[":
+            if nxt == "[":
+                return False
+            word.append(ch)
+            index += 1
+        elif ch == "#" or ch in _GRAMMAR_WORD_CHARS or code >= 0x80:
+            word.append(ch)
+            index += 1
+        else:
+            return False
+        word_start = False
+    return finish_word("") and not redirect_pending
 
 
 def has_unquoted_pipe(statement: str) -> bool:
@@ -992,27 +1331,27 @@ class AttributableRun:
 def attributable_test_runs(trace: Trace, test_re: re.Pattern[str]) -> list[AttributableRun]:
     """BR6 strictAttributable runs in timeline order.
 
-    A run needs: a real-runner last statement that is not version/help-only and has no pipe; exactly one call
-    event and exactly one output record for its call id; and a numeric exit (Claude: 1 if is_error else 0;
-    Codex exec: the completed exit_code; rollout: the parsed exit).
+    A run needs: a command inside the D23 safe grammar; a trailing `||` run whose every operand is a real runner that is
+    not version/help-only and has no pipe or background `&`; exactly one call event and exactly one output record for
+    its call id; and a numeric exit (Claude: 1 if is_error else 0; Codex exec: the completed exit_code; rollout: the
+    parsed exit).
     """
     first_result: dict[str, dict[str, Any]] = {}
     for record in trace.timeline:
         if record["kind"] == "tool_result" and record.get("id"):
             first_result.setdefault(record["id"], record)
-    candidates: list[tuple[int, str, str, str, int]] = []
+    candidates: list[tuple[int, str, str, list[str], int]] = []
     for index, record in enumerate(trace.timeline):
         call_id = record.get("id")
         command = record.get("input", {}).get("command") if record["kind"] == "tool_call" else None
-        if not call_id or not isinstance(command, str):
+        if not call_id or not isinstance(command, str) or not in_safe_br6_grammar(command):
             continue
-        statements = br6_statements(command)
-        if not statements:
-            continue
-        last = statements[-1]
-        # isRealRunnerInvocation can only accept a statement the runner regex matches somewhere, so a
-        # non-matching statement is decided here without spawning node.
-        if test_re.search(last) is None or is_version_or_help_only(last, test_re) or has_unquoted_pipe(last):
+        operands = br6_trailing_or_run(command)
+        # isRealRunnerInvocation can only accept an operand the runner regex matches somewhere, so a
+        # non-matching operand is decided here without spawning node.
+        if not operands or any(test_re.search(operand) is None or is_version_or_help_only(operand, test_re)
+                               or has_unquoted_pipe(operand) or has_unquoted_background(operand)
+                               for operand in operands):
             continue
         counts = trace.call_event_counts.get(call_id, {})
         if max(counts.get("full", 0), counts.get("streamed", 0)) != 1 or counts.get("outputs", 0) != 1:
@@ -1020,19 +1359,21 @@ def attributable_test_runs(trace: Trace, test_re: re.Pattern[str]) -> list[Attri
         exit_code = first_result.get(call_id, {}).get("exit")
         if type(exit_code) is not int:
             continue
-        candidates.append((index, call_id, command, last, exit_code))
+        candidates.append((index, call_id, command, operands, exit_code))
     if not candidates:
         return []
-    classified = run_node_helpers(commands=[candidate[3] for candidate in candidates], test_command=test_re.pattern)
+    operands_flat = [operand for candidate in candidates for operand in candidate[3]]
+    classified = run_node_helpers(commands=operands_flat, test_command=test_re.pattern)
     if classified is None:
         if "strict_runner_classifier_unavailable" not in trace.strict_errors:
             trace.strict_errors.append("strict_runner_classifier_unavailable")
         return []  # fail closed: no run is attributable
-    return [
-        AttributableRun(call_id, command, exit_code, index)
-        for (index, call_id, command, _last, exit_code), real in zip(candidates, classified["real"])
-        if real
-    ]
+    verdicts = iter(classified["real"])
+    runs: list[AttributableRun] = []
+    for index, call_id, command, operands, exit_code in candidates:
+        if all([next(verdicts) for _operand in operands]):  # a list, so every operand's verdict is consumed
+            runs.append(AttributableRun(call_id, command, exit_code, index))
+    return runs
 
 
 def red_green_errors(trace: Trace, runs: list[AttributableRun], test_re: re.Pattern[str]) -> list[str]:
@@ -1058,7 +1399,7 @@ def red_green_errors(trace: Trace, runs: list[AttributableRun], test_re: re.Patt
 # --- Implementation-auditor verdicts (AC68). Two documented shapes: the agents/implementation-auditor.md fields
 # (`overallStatus`, `finalDecision`) and the skills/implementation-control/SKILL.md report headings. Every
 # pattern is linear (disjoint classes, no nested quantifier); a generic "Overall: PASS" matches neither shape.
-AUDITOR_NAMES = ("implementation-auditor", "implementation-control")
+AUDITOR_AGENT = "implementation-auditor"
 _VERDICT_DECOR = r"[`*\"']*"
 OVERALL_STATUS_FIELD_RE = re.compile(
     r"overallStatus" + _VERDICT_DECOR + r"[ \t]*[:=][ \t]*" + _VERDICT_DECOR + r"(PASS|PARTIAL|FAIL)\b"
@@ -1100,32 +1441,40 @@ def auditor_verdict_occurrences(text: str) -> list[tuple[int, str, str]]:
     return sorted(found)
 
 
-def latest_auditor_verdict(trace: Trace) -> tuple[str | None, str | None]:
-    """The last overall status and the last final decision, in timeline order.
-
-    Carriers: tool_result text correlated to an Agent/Task/Skill call naming implementation-auditor or
-    implementation-control, and assistant_text. Write content, tool inputs and user text never count, so a
-    verdict quoted inside spec text is ignored.
-    """
-    auditor_calls = {
-        record["id"] for record in trace.timeline
-        if record["kind"] == "tool_call" and record.get("id") and record.get("name") in ("Agent", "Task", "Skill")
-        and any(name in json.dumps(record.get("input", {}), ensure_ascii=False) for name in AUDITOR_NAMES)
-    }
+def _last_verdict(records: list[dict[str, Any]]) -> tuple[str | None, str | None]:
     status: str | None = None
     decision: str | None = None
-    for record in trace.timeline:
-        is_carrier = record["kind"] == "assistant_text" or (
-            record["kind"] == "tool_result" and record.get("id") in auditor_calls
-        )
-        if not is_carrier:
-            continue
+    for record in records:
         for _offset, kind, value in auditor_verdict_occurrences(record.get("text") or ""):
             if kind == "status":
                 status = value
             else:
                 decision = value
     return status, decision
+
+
+def latest_auditor_verdict(trace: Trace) -> tuple[str | None, str | None]:
+    """The last overall status and the last final decision among the runtime's carriers (D21), in timeline order.
+
+    Codex: only assistant_text records. Claude and unknown (a mixed transcript): the results of Agent/Task dispatches
+    whose subagent_type is implementation-auditor (or its house prefix) when any holds a documented verdict, so the
+    model under test cannot override an audit; otherwise main-loop assistant_text (the self-authored AC39 limit). A
+    Skill result, any other sub-agent result, write content, tool inputs and user text never count.
+    """
+    assistant = [record for record in trace.timeline if record["kind"] == "assistant_text"]
+    if _is_codex_trace(trace):
+        return _last_verdict(assistant)
+    auditor_calls = {
+        record["id"] for record in trace.timeline
+        if record["kind"] == "tool_call" and record.get("id")
+        and _agent_type_matches(_dispatch_agent_type(record), AUDITOR_AGENT)
+    }
+    auditor_results = [
+        record for record in trace.timeline if record["kind"] == "tool_result" and record.get("id") in auditor_calls
+    ]
+    if any(auditor_verdict_occurrences(record.get("text") or "") for record in auditor_results):
+        return _last_verdict(auditor_results)
+    return _last_verdict(assistant)
 
 
 # --- Strict reviewer results and step order (AC70). The case `strict` object is inert without --strict-evidence.
@@ -1171,13 +1520,30 @@ def _is_codex_trace(trace: Trace) -> bool:
     return trace.runtime.startswith("codex")
 
 
+def _dispatch_agent_type(record: dict[str, Any]) -> str | None:
+    """The `subagent_type` string of an Agent/Task timeline tool_call, else None."""
+    if record.get("kind") != "tool_call" or str(record.get("name", "")).lower() not in ("agent", "task"):
+        return None
+    payload = record.get("input")
+    value = payload.get("subagent_type") if isinstance(payload, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _agent_type_matches(value: str | None, agent: str) -> bool:
+    """Exactly the listed agent or the house-prefixed `agentic-sdlc:<agent>` (D21); never a substring."""
+    return value == agent or value == "agentic-sdlc:" + agent
+
+
 def _names_reviewer_member(record: dict[str, Any], reviewer: dict[str, Any]) -> bool:
-    payload = json.dumps(record.get("input", {}), ensure_ascii=False)
+    """Strict membership from the exact dispatch fields (D21): Agent/Task `subagent_type`, Skill `skill`."""
     name = str(record.get("name", "")).lower()
     if name == "skill":
-        return any(alias in payload for skill in reviewer.get("skills", []) for alias in expected_aliases(skill))
+        payload = record.get("input")
+        skill = payload.get("skill") if isinstance(payload, dict) else None
+        return isinstance(skill, str) and any(skill in expected_aliases(listed) for listed in reviewer.get("skills", []))
     if name in ("agent", "task"):
-        return any(agent in payload for agent in reviewer.get("agents", []))
+        agent_type = _dispatch_agent_type(record)
+        return any(_agent_type_matches(agent_type, agent) for agent in reviewer.get("agents", []))
     return False
 
 
@@ -1580,9 +1946,13 @@ def helper_paths(evidence_root: Path) -> list[dict[str, str]]:
 
 
 def build_evidence_packet(case: dict[str, Any], trace: Trace, errors: list[str], *, cwd: Path,
-                          fixture_root: Path | None, scoring_source: str, strict: bool, identity: str) -> dict[str, Any]:
-    """The packet body; helper_paths are resolved by write_evidence_packet against the evidence root."""
-    git_commit = repository_commit()
+                          fixture_root: Path | None, scoring_source: str, strict: bool, identity: str,
+                          git_commit: str) -> dict[str, Any]:
+    """The packet body; helper_paths are resolved by write_evidence_packet against the evidence root.
+
+    `git_commit` is the one commit the caller resolved and computed `identity` over (D21), so the packet never
+    records a commit its runtime payload identity does not cover.
+    """
     root = fixture_root
     if root is None and case.get("fixture_dir"):
         root = resolve_under(REPO, case["fixture_dir"], f"case {case['id']} fixture_dir")
@@ -1664,12 +2034,14 @@ def write_case_evidence(case: dict[str, Any], trace: Trace, errors: list[str], a
     roots = [root for root in (fixture_root, live_copy) if root is not None]
     if case.get("fixture_dir"):
         roots.append(resolve_under(REPO, case["fixture_dir"], f"case {case['id']} fixture_dir"))
+    git_commit = repository_commit()  # resolved once: the identity and the packet bind the same commit
     packet = build_evidence_packet(
         case, trace, errors, cwd=cwd,
         fixture_root=fixture_root if fixture_root is not None else live_copy,
         scoring_source="live-harness" if args.live else "transcript-replay",
         strict=args.strict_evidence,
-        identity=runtime_payload_identity_for_commit(repository_commit(), identity_cache),
+        identity=runtime_payload_identity_for_commit(git_commit, identity_cache),
+        git_commit=git_commit,
     )
     try:
         transcript_text = read_transcript_text(transcript_path)

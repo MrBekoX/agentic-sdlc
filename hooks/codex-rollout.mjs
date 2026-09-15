@@ -560,16 +560,196 @@ export function trailingOrRun(command) {
   return joined.slice(Math.max(start, 0)).map((s) => s.text);
 }
 
-// Fail closed on shell syntax the one-level quote mask does not model: command substitution `$(`
-// (arithmetic `$((` too), a backtick, process substitution `<(` / `>(` and ANSI-C `$'` (where `\'`
-// does not close the quote) can each turn a `;`, newline or `||` into data. Raw text is checked, not
-// the mask these constructs defeat, so no exit code of such a command is attributed and no delivery
-// read counts. Disclosed conservative limit: `cd repo; pytest $(cat args)` gives a false 'missing'.
-const UNMODELED_OPENERS = ['$(', '`', '<(', '>(', "$'"];
+// D23 safe shell grammar (spec DP35). An exit code is attributable only while the command lies entirely
+// inside it; anything outside is not attributable. The word sets are bash 5.2.37's own `compgen -k`
+// reserved words and `compgen -b` builtins. Within one bash process a later literal command name runs
+// other code, or the exit status is rewritten, only through a reserved word, a builtin, a shell-variable
+// assignment that needs `[` or `set -x`, or an assignment to an integer-attributed variable (its value is
+// evaluated as arithmetic, which can write BASH_CMDS); a builtin a later bash adds is read as an external
+// program (a disclosed limit), and how a name resolves outside the command text (PATH, profile functions)
+// is not seen.
+const BR6_RESERVED_WORDS = new Set([
+  '!', '[[', ']]', '{', '}', 'case', 'coproc', 'do', 'done', 'elif', 'else', 'esac', 'fi', 'for', 'function', 'if',
+  'in', 'select', 'then', 'time', 'until', 'while',
+]);
+const BR6_BASH_BUILTINS = new Set([
+  '.', ':', '[', 'alias', 'bg', 'bind', 'break', 'builtin', 'caller', 'cd', 'command', 'compgen', 'complete',
+  'compopt', 'continue', 'declare', 'dirs', 'disown', 'echo', 'enable', 'eval', 'exec', 'exit', 'export', 'false',
+  'fc', 'fg', 'getopts', 'hash', 'help', 'history', 'jobs', 'kill', 'let', 'local', 'logout', 'mapfile', 'popd',
+  'printf', 'pushd', 'pwd', 'read', 'readarray', 'readonly', 'return', 'set', 'shift', 'shopt', 'source', 'suspend',
+  'test', 'times', 'trap', 'true', 'type', 'typeset', 'ulimit', 'umask', 'unalias', 'unset', 'wait',
+]);
+// bash 5.2.37's integer-attributed variables (`bash -c 'declare -p' | grep '^declare -[a-zA-Z]*i'`; SECONDS is not
+// marked). An assignment to one, standalone, prefix or as an export argument, lies outside the grammar.
+const BR6_INTEGER_VARIABLES = new Set(['BASHPID', 'EUID', 'HISTCMD', 'OPTIND', 'PPID', 'RANDOM', 'SRANDOM', 'UID']);
+// printf, test, `[`, wait and unset stay out: each takes a variable name or evaluates an arithmetic subscript from
+// an argument, so any expansion there (parameter, glob, tilde) can supply a BASH_CMDS subscript.
+const BR6_SAFE_BUILTINS = new Set([':', 'cd', 'echo', 'export', 'false', 'pwd', 'set', 'true']);
+const GRAMMAR_ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const GRAMMAR_WORD_CHARS = new Set(GRAMMAR_ALNUM + '_-./:=+,@%^~!?*]');
+const GRAMMAR_PARAMETER_CHARS = new Set(GRAMMAR_ALNUM + '_?#$!@*-');
+const GRAMMAR_COMMAND_WORD = /^[A-Za-z0-9_\-./:=+,@%^~!#\u0080-\uFFFF]+$/;
+const GRAMMAR_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/;
+const GRAMMAR_PLAIN_ARGUMENT = /^[A-Za-z0-9_-]+$/;
+const GRAMMAR_DIGITS = /^[0-9]+$/;
+const GRAMMAR_SET_OPTION = /^[-+][euo]+$/;
+const GRAMMAR_SET_WORDS = new Set(['errexit', 'nounset', 'pipefail']);
+
+// One linear left-to-right pass. Inside the grammar: unquoted words, single quotes, double quotes without
+// substitution, `$NAME`-style parameters, backslash pairs and continuations, word-start comments, the
+// separators `;`, newline, `||`, `&&`, `|`, `|&` and a background `&`, and simple redirections followed by a
+// word. Each simple command's command word is an external program or a BR6_SAFE_BUILTINS name; after such a
+// builtin no later `[` may appear (an array subscript reaches BASH_CMDS); `set` only takes the
+// errexit/nounset/pipefail forms; no assignment word names an integer-attributed variable; and each `export`
+// argument is a literal `NAME=`/`NAME+=` assignment or a plain word of letters, digits, `_` and `-`, so
+// no expansion, quote or glob can build the assigned name. A word of only
+// digits directly before `<` or `>` is that redirection's file descriptor in any position. Always outside: `(`,
+// `)`, `{`, `}`, a backtick, `[[`, `<<`, `<(` and `>(`.
+// scripts/run_procedure_eval.py in_safe_br6_grammar mirrors this pass branch for branch.
+export function inSafeBr6Grammar(command) {
+  const str = String(command || '');
+  const length = str.length;
+  let word = [];
+  let inWord = false;
+  let wordStart = true;
+  let commandSeen = false;
+  let safeBuiltin = false;
+  let setCommand = false;
+  let exportCommand = false;
+  let redirectPending = false; // an operator was read and its target word has not started
+  let targetWord = false;      // the current word is a redirection target
+  const finishWord = (next) => {
+    if (!inWord) return true;
+    inWord = false;
+    const raw = word.join('');
+    if (targetWord) { targetWord = false; return true; }
+    if ((next === '<' || next === '>') && GRAMMAR_DIGITS.test(raw)) return true; // the redirection's fd
+    const assignment = GRAMMAR_ASSIGNMENT.exec(raw);
+    if (!commandSeen) {
+      if (assignment) return !BR6_INTEGER_VARIABLES.has(assignment[1]);
+      commandSeen = true;
+      if (!GRAMMAR_COMMAND_WORD.test(raw)) return false;
+      if (BR6_RESERVED_WORDS.has(raw) || (BR6_BASH_BUILTINS.has(raw) && !BR6_SAFE_BUILTINS.has(raw))) return false;
+      safeBuiltin = BR6_SAFE_BUILTINS.has(raw);
+      setCommand = raw === 'set';
+      exportCommand = raw === 'export';
+      return true;
+    }
+    if (exportCommand) return assignment ? !BR6_INTEGER_VARIABLES.has(assignment[1]) : GRAMMAR_PLAIN_ARGUMENT.test(raw);
+    return !setCommand || GRAMMAR_SET_OPTION.test(raw) || GRAMMAR_SET_WORDS.has(raw);
+  };
+  let i = 0;
+  while (i < length) {
+    const c = str[i];
+    const n = i + 1 < length ? str[i + 1] : '';
+    if (c === '[' && safeBuiltin) return false;
+    if (c === ' ' || c === '\t') {
+      if (!finishWord(c)) return false;
+      wordStart = true;
+      i += 1;
+      continue;
+    }
+    if ((c === ';' || c === '\n' || c === '|' || c === '&') && !(c === '&' && n === '>')) {
+      if (!finishWord(c) || redirectPending) return false;
+      i += (c === '|' && (n === '|' || n === '&')) || (c === '&' && n === '&') ? 2 : 1;
+      commandSeen = false;
+      safeBuiltin = false;
+      setCommand = false;
+      exportCommand = false;
+      wordStart = true;
+      continue;
+    }
+    if (c === '<' || c === '>' || c === '&') { // `&` here is `&>` or `&>>`
+      if (!finishWord(c) || redirectPending) return false;
+      if (c === '&') i += str.startsWith('&>>', i) ? 3 : 2;
+      else if (c === '<') {
+        if (n === '<' || n === '(') return false;
+        i += n === '>' || n === '&' ? 2 : 1;
+      } else {
+        if (n === '(') return false;
+        i += n === '>' || n === '|' || n === '&' ? 2 : 1;
+      }
+      redirectPending = true;
+      wordStart = true;
+      continue;
+    }
+    const code = str.charCodeAt(i);
+    if (c === '(' || c === ')' || c === '{' || c === '}' || c === '`' || code < 32 || code === 127) return false;
+    if (!inWord) {
+      if (c === '#' && wordStart) {
+        if (redirectPending) return false;
+        const nl = str.indexOf('\n', i);
+        i = nl === -1 ? length : nl;
+        continue;
+      }
+      if (c === '\\' && n === '\n') { i += 2; continue; } // a continuation keeps the word-start state
+      inWord = true;
+      word = [];
+      targetWord = redirectPending;
+      redirectPending = false;
+    }
+    if (c === '$') {
+      if (!n || !GRAMMAR_PARAMETER_CHARS.has(n)) return false;
+      word.push(str.slice(i, i + 2));
+      i += 2;
+    } else if (c === '\\') {
+      if (n === '\n') { i += 2; continue; } // removed from the word, as bash removes it
+      if (!n || (safeBuiltin && n === '[')) return false;
+      word.push(str.slice(i, i + 2));
+      i += 2;
+    } else if (c === "'") {
+      const end = str.indexOf("'", i + 1);
+      if (end === -1 || (safeBuiltin && str.slice(i, end).includes('['))) return false;
+      word.push(str.slice(i, end + 1));
+      i = end + 1;
+    } else if (c === '"') {
+      let scan = i + 1;
+      for (;;) {
+        if (scan >= length) return false; // unterminated
+        const inner = str[scan];
+        if (inner === '"') break;
+        if (inner === '\\') {
+          if (scan + 1 >= length || (safeBuiltin && str[scan + 1] === '[')) return false;
+          scan += 2;
+          continue;
+        }
+        if (inner === '$') {
+          const following = scan + 1 < length ? str[scan + 1] : '';
+          if (!following || !GRAMMAR_PARAMETER_CHARS.has(following)) return false;
+          scan += 2;
+          continue;
+        }
+        const innerCode = str.charCodeAt(scan);
+        if (inner === '`' || (innerCode < 32 && inner !== '\t' && inner !== '\n') || innerCode === 127) return false;
+        if (safeBuiltin && inner === '[') return false;
+        scan += 1;
+      }
+      word.push(str.slice(i, scan + 1));
+      i = scan + 1;
+    } else if (c === '[') {
+      if (n === '[') return false;
+      word.push(c);
+      i += 1;
+    } else if (c === '#' || GRAMMAR_WORD_CHARS.has(c) || code >= 0x80) {
+      word.push(c);
+      i += 1;
+    } else {
+      return false;
+    }
+    wordStart = false;
+  }
+  return finishWord('') && !redirectPending;
+}
+
+// True when the command holds a `;`, newline or `||` (so bash could form a second BR6 statement) and lies
+// outside the safe shell grammar, whose constructs and command words can hide such a separator, shadow the
+// runner or rewrite the exit status. No exit code of such a command is attributed and no delivery read
+// counts. Disclosed conservative limit: a legitimate `cd repo; pytest $(cat args)` or
+// `source .venv/bin/activate; pytest` gives a false 'missing', never a false satisfy.
 export function hasUnmodeledShellSyntax(command) {
   const str = String(command || '');
-  if (!UNMODELED_OPENERS.some((o) => str.includes(o))) return false;
-  return str.includes(';') || str.includes('\n') || str.includes('||');
+  if (!(str.includes(';') || str.includes('\n') || str.includes('||'))) return false;
+  return !inSafeBr6Grammar(str);
 }
 
 // Visit every character outside single/double quotes and comments that is not backslash-escaped. A
@@ -617,6 +797,23 @@ export function hasUnquotedPipe(statement) {
     return false;
   });
   return pipe;
+}
+
+// A background job `&` gives the shell's own exit status, never the job's, so no exit code of such a statement is
+// attributed (D21). A `&` joined to an adjacent unquoted `&`, `>`, `<` or `|` before it, or `&` or `>` after it, is
+// part of `&&`, `>&`, `<&`, `|&`, `&>` or `&>>`. Neighbours are read only through the recorded unquoted indexes, so
+// an escaped neighbour (`pytest \&& wait`) never joins, and a `&` inside a comment is never visited. Linear.
+export function hasUnquotedBackground(statement) {
+  const str = String(statement || '');
+  const unquoted = new Uint8Array(str.length);
+  const amps = [];
+  forEachUnquoted(str, (i, c) => {
+    unquoted[i] = 1;
+    if (c === '&') amps.push(i);
+    return true;
+  });
+  const operatorAt = (i, chars) => i >= 0 && i < str.length && unquoted[i] === 1 && chars.includes(str[i]);
+  return amps.some((i) => !operatorAt(i - 1, '&><|') && !operatorAt(i + 1, '&>'));
 }
 
 // Quote-aware argument words after the runner match, up to the first unquoted pipe.
@@ -759,11 +956,11 @@ function withoutTrailingSlashes(p) {
 }
 
 // BR19 delivery read (D9): only `cat <absolute installed SKILL.md path>` as the last statement counts.
-// Any other form (pipe, background, `&&`, subshell, substitution, a `cd` anywhere, a relative path, a
-// `..` segment, a path under the session cwd, a heredoc, syntax hasUnmodeledShellSyntax rejects, a last
-// statement reached through `||`) returns null, which leaves the phase Ambiguous.
+// Any other form (a command outside the D23 safe shell grammar, pipe, background, `&&`, a `cd` anywhere, a
+// relative path, a `..` segment, a path under the session cwd, a last statement reached through `||`)
+// returns null, which leaves the phase Ambiguous.
 export function deliveryReadSkill(command, cwd) {
-  if (hasUnquotedHeredoc(command) || hasUnmodeledShellSyntax(command)) return null;
+  if (!inSafeBr6Grammar(command)) return null;
   const joined = splitBr6StatementJoins(command);
   if (!joined.length || joined.some((s) => s.text.startsWith('cd'))) return null;
   if (joined[joined.length - 1].viaOr) return null; // `true || cat <SKILL.md>` never runs the cat

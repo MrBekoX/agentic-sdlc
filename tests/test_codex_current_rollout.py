@@ -257,5 +257,134 @@ class NativeOwnerCarrierFixtureTests(unittest.TestCase):
         self.assertEqual(self.owner_phase([n["user"], n["call"], n["output"], n["compacted"]]), "ambiguous")
 
 
+BR6_TABLE = REPO / "tests/fixtures/transcripts/br6-attribution-cases.json"
+FLOW_EVIDENCE = REPO / "hooks/flow-evidence.mjs"
+CODEX_FLOW_EVIDENCE = REPO / "hooks/codex-flow-evidence.mjs"
+# The same literal lists as test_procedure_eval.TestStrictRedGreen (D21), so both implementations see one set of forms.
+BACKGROUND_TRUE = ("pytest &", "pytest & wait", "pytest&", "cd a && pytest &", "pytest \\&& wait", "pytest \\>& wait",
+                   "pytest \\|& wait", "pytest &\\> x")
+BACKGROUND_FALSE = ("pytest && true", "pytest 2>&1", "pytest >&2", "pytest <&0", "pytest &> log.txt",
+                    "pytest &>> log.txt", "pytest |& tee log", 'pytest -k "a&b"', "pytest -k 'a&b'", "pytest \\& x",
+                    "pytest # & wait")
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class BR6BackgroundAttributionTests(unittest.TestCase):
+    """AC31, AC42, AC43, AC44, AC123 (D21): a background-job `&` never lends the shell's exit to the runner."""
+
+    def node(self, script, payload):
+        result = subprocess.run([NODE, "--input-type=module", "-e", script], input=json.dumps(payload),
+                                capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr[-400:])
+        return json.loads(result.stdout)
+
+    def test_table_background_and_strict_attribution(self):
+        # Mutation: dropping the background check from isStrictlyAttributable, or reading raw neighbours.
+        rows = json.loads(BR6_TABLE.read_text(encoding="utf-8"))["rows"]
+        script = ("import {splitBr6Statements, hasUnquotedBackground} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "import {isStrictlyAttributable} from " + json.dumps(CODEX_FLOW_EVIDENCE.as_uri()) + ";"
+                  "import {loadRequirements} from " + json.dumps(FLOW_EVIDENCE.as_uri()) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () => {"
+                  " const re = new RegExp(loadRequirements().testCommand, 'i');"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((r) => {"
+                  " const st = splitBr6Statements(r.command);"
+                  " return [hasUnquotedBackground(st[st.length - 1]), isStrictlyAttributable(r, re)]; }))); });")
+        payload = [{"command": r["command"], "callEvents": r["carrier"]["callEvents"],
+                    "outputRecords": r["carrier"]["outputRecords"], "exitCode": r["carrier"]["exitCode"]} for r in rows]
+        got = self.node(script, payload)
+        mismatches = [r["id"] for r, (background, strict) in zip(rows, got)
+                      if (background, strict) != (r["lastHasBackground"], r["strictAttributable"])]
+        self.assertEqual(mismatches, [], "rows where the background or strict verdict disagrees with the table")
+
+    def test_has_unquoted_background_operator_forms(self):
+        # Mutation: treating an escaped neighbour as an operator, or a `&` inside quotes or a comment as a job.
+        script = ("import {hasUnquotedBackground} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () =>"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => hasUnquotedBackground(c)))));")
+        commands = list(BACKGROUND_TRUE) + list(BACKGROUND_FALSE)
+        got = dict(zip(commands, self.node(script, commands)))
+        expected = {c: c in BACKGROUND_TRUE for c in commands}
+        self.assertEqual(got, expected)
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class BR6SafeGrammarTests(unittest.TestCase):
+    """AC28-AC31, AC118, AC123 (D23): the Node safe grammar agrees with the shared table and with the production lists
+    the Python mirror is checked against, so both implementations read one grammar."""
+
+    node = BR6BackgroundAttributionTests.node
+
+    def test_table_grammar_columns(self):
+        # Mutation: any dropped production or word set, or judging only the last `||` operand, mismatches a row.
+        rows = json.loads(BR6_TABLE.read_text(encoding="utf-8"))["rows"]
+        script = ("import {inSafeBr6Grammar, trailingOrRun, isVersionOrHelpOnly, hasUnquotedPipe, hasUnquotedBackground}"
+                  " from " + json.dumps(ROLLOUT_URI) + ";"
+                  "import {isRealRunnerInvocation, loadRequirements} from " + json.dumps(FLOW_EVIDENCE.as_uri()) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () => {"
+                  " const re = new RegExp(loadRequirements().testCommand, 'i');"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => { const run = trailingOrRun(c);"
+                  " return [inSafeBr6Grammar(c), run,"
+                  " run.length > 0 && run.every((x) => isRealRunnerInvocation(x, re) && !isVersionOrHelpOnly(x, re)),"
+                  " run.slice(0, -1).some((x) => hasUnquotedPipe(x) || hasUnquotedBackground(x))]; }))); });")
+        got = self.node(script, [r["command"] for r in rows])
+        columns = ("inSafeGrammar", "orRun", "orRunAllRealRunners", "orRunHeadHasPipeOrBackground")
+        mismatches = [r["id"] for r, values in zip(rows, got) if values != [r[c] for c in columns]]
+        self.assertEqual(mismatches, [], "rows where the Node grammar columns disagree with the table")
+
+    def test_grammar_production_lists(self):
+        # The same 129 commands test_procedure_eval.TestStrictRedGreen.test_safe_grammar_production_lists checks in Python.
+        from test_procedure_eval import GRAMMAR_INSIDE, GRAMMAR_OUTSIDE
+        script = ("import {inSafeBr6Grammar} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () =>"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => inSafeBr6Grammar(c)))));")
+        commands = list(GRAMMAR_INSIDE) + list(GRAMMAR_OUTSIDE)
+        got = self.node(script, commands)
+        wrong = [c for c, value in zip(commands, got) if value is not (c in GRAMMAR_INSIDE)]
+        self.assertEqual((len(GRAMMAR_INSIDE), len(GRAMMAR_OUTSIDE)), (33, 96))
+        self.assertEqual(wrong, [], "commands whose Node grammar verdict is wrong")
+
+    def test_integer_attributed_assignments_outside(self):
+        # Mutation: dropping a name from BR6_INTEGER_VARIABLES, or checking only standalone assignments, admits that
+        # name's arithmetic BASH_CMDS write (the Python mirror pins the same set).
+        from test_procedure_eval import INTEGER_VARIABLES
+        outside = [c for name in sorted(INTEGER_VARIABLES)
+                   for c in (f"{name}=V; pytest", f"{name}+=V; pytest", f"{name}=V true; pytest",
+                             f"export X=1 {name}=V; pytest")]
+        inside = ["SECONDS=V; pytest", "export SECONDS=V PATH=$PATH:bin; pytest", "RANDOMX=V; pytest"]
+        script = ("import {inSafeBr6Grammar} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () =>"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => inSafeBr6Grammar(c)))));")
+        got = dict(zip(outside + inside, self.node(script, outside + inside)))
+        self.assertEqual(got, {c: c in inside for c in outside + inside})
+
+    def test_unmodeled_syntax_is_separator_outside_grammar(self):
+        # Mutation: keeping the construct-opener list (the six forgeries below hold none of its openers).
+        outside = ("pytest; echo ${x:-; pytest #}", "pytest() { true; }; pytest", "[[ x &&\npytest ||\npytest ]]",
+                   "pytest; cat <<<x; pytest", "set -n; pytest", "hash -p /usr/bin/true pytest; pytest")
+        inside_or_no_separator = ("pytest $(cat args)", "set -n && pytest", "cd repo; pytest -k 'a (b)'",
+                                  "cd repo; pytest > out.txt 2>&1", "set -euo pipefail; pytest")
+        script = ("import {hasUnmodeledShellSyntax} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () =>"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => hasUnmodeledShellSyntax(c)))));")
+        commands = list(outside) + list(inside_or_no_separator)
+        got = dict(zip(commands, self.node(script, commands)))
+        self.assertEqual(got, {c: c in outside for c in commands})
+
+    def test_grammar_linear(self):
+        import time
+        floods = ["pytest " + "a;" * 200000, '"' + "x" * 399999, "# " * 200000 + "\npytest", "$a" * 200000,
+                  "X=1 " * 100000 + "pytest"]
+        script = ("import {inSafeBr6Grammar} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () =>"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => inSafeBr6Grammar(c)))));")
+        started = time.time()
+        got = self.node(script, floods)
+        self.assertLess(time.time() - started, 5.0, "inSafeBr6Grammar must stay linear")
+        self.assertEqual(len(got), len(floods))
+
+
+ROLLOUT_URI = (REPO / "hooks/codex-rollout.mjs").as_uri()
+
+
 if __name__ == "__main__":
     unittest.main()

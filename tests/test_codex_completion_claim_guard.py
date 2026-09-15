@@ -475,6 +475,26 @@ class TestOwnerSignalScanner(unittest.TestCase):
         self.assertEqual(_delivery_skills(["cat /nonexistent || true; cat " + path]),
                          ["verification-before-completion"])
 
+    def test_grammar_forged_delivery_read_returns_null(self):
+        # D23: bash 5.2.37 exited 0 for each command without printing the installed body. Mutation: reading the
+        # command without the safe-grammar check (each reaches a `cat <installed SKILL.md>` last statement).
+        path = INSTALLED.format(skill="verification-before-completion")
+        forged = ["cat /nonexistent; echo ${x:-; cat " + path + " #}",
+                  "echo ${x:-\ncat " + path + " #}",
+                  "shopt -s extglob\ncat /nonexistent; echo @(x; cat " + path + " #)",
+                  "eval 'cat() { true; }'; cat " + path,
+                  "function cat if true; then true; fi; cat " + path,
+                  "set -n; cat " + path,
+                  "V='BASH_CMDS[cat]'; printf -v $V %s /usr/bin/true; cat " + path,
+                  "OLDPWD='BASH_CMDS[cat]'; printf -v ~- %s /usr/bin/true; cat " + path,
+                  "cp /usr/bin/true 0; a=1; V='a[BASH_CMDS[cat]=0]'; unset $V; cat " + path,
+                  "echo exit 0 > 1; chmod +x 1; RANDOM=BASH_CMDS[cat]=1; cat " + path,
+                  "echo exit 0 > 1; chmod +x 1; ls BASH_CMDS[cat]=1; RANDOM=_; cat " + path,
+                  "echo exit 0 > 1; chmod +x 1; V=BASH_CMDS[cat]=1; export RANDOM=V; cat " + path,
+                  "echo exit 0 > 1; chmod +x 1; W='RANDOM=BASH_CMDS[cat]=1'; export $W; cat " + path]
+        self.assertEqual(_delivery_skills(forged), [None] * len(forged))
+        self.assertEqual(_delivery_skills(["cat " + path + "\n# done"]), ["verification-before-completion"])
+
     def test_unreadable_or_over_ceiling_rollout_not_readable(self):
         body = ("const m = await import(%s);"
                 "process.stdout.write(JSON.stringify(m.readOwnerSignals(input, '/work/repo').readable));"
