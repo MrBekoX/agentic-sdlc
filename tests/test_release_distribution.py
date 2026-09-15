@@ -682,6 +682,26 @@ def flip_stored_byte(path: Path, name: str) -> None:
     path.write_bytes(bytes(raw))
 
 
+def patch_member_headers(path: Path, name: str, *, method: int | None = None, flag_or: int = 0) -> None:
+    """Rewrite the method and general-purpose flag fields of one member in its local and central headers."""
+    raw = bytearray(path.read_bytes())
+    with zipfile.ZipFile(path) as zf:
+        local = zf.getinfo(name).header_offset
+        central = zf.start_dir
+    encoded = name.encode("utf-8")
+    while raw[central:central + 4] == b"PK\x01\x02":
+        name_len, extra_len, comment_len = struct.unpack("<HHH", bytes(raw[central + 28:central + 34]))
+        if bytes(raw[central + 46:central + 46 + name_len]) == encoded:
+            break
+        central += 46 + name_len + extra_len + comment_len
+    else:
+        raise AssertionError("central header not found: " + name)
+    for flags_at in (local + 6, central + 8):
+        flags, current_method = struct.unpack("<HH", bytes(raw[flags_at:flags_at + 4]))
+        raw[flags_at:flags_at + 4] = struct.pack("<HH", flags | flag_or, current_method if method is None else method)
+    path.write_bytes(bytes(raw))
+
+
 def commit_layout(repo: ScratchRepo) -> str:
     repo.write({
         "a.txt": b"lower\n",
@@ -767,6 +787,24 @@ class TestVerifyIntegrity(ScratchTestCase):
         flip_stored_byte(out, "a.txt")
         report, _text, lines = self.verify(out, repo.root)
         self.assert_failed_naming(lines, report, "error=crc_mismatch:a.txt")
+
+    def test_verify_names_unsupported_compression_member(self):
+        repo, out = self.built_layout()
+        patch_member_headers(out, "a.txt", method=99)
+        report, _text, lines = self.verify(out, repo.root)
+        self.assert_failed_naming(lines, report, "error=unsupported_compression:a.txt")
+
+    def test_verify_names_encrypted_member(self):
+        repo, out = self.built_layout()
+        patch_member_headers(out, "a.txt", flag_or=0x1)
+        report, _text, lines = self.verify(out, repo.root)
+        self.assert_failed_naming(lines, report, "error=encrypted_member:a.txt")
+
+    def test_verify_names_member_with_unsupported_flag_as_unreadable(self):
+        repo, out = self.built_layout()
+        patch_member_headers(out, "a.txt", flag_or=0x20)  # compressed-patch flag: zipfile refuses to read it
+        report, _text, lines = self.verify(out, repo.root)
+        self.assert_failed_naming(lines, report, "error=unreadable_member:a.txt")
 
     def test_verify_names_content_mismatch_with_valid_crc(self):
         repo, out = self.built_layout()
@@ -984,13 +1022,21 @@ class TestHistoryArguments(ScratchTestCase):
 
     def test_url_user_info_is_masked_in_rejection(self):
         value = "".join(["s3", "cr", "etV", "alue9"])
-        argument = "https://user:" + value + "@example.invalid/r.git"
-        with mock.patch.object(build_release, "_run_git") as run_git:
-            code, text = self.scan_cli(argument)
-        self.assertEqual(code, 2, text)
-        self.assertIn("error=url_argument_rejected:https://***MASKED***@example.invalid/r.git", text.splitlines())
-        self.assertNotIn(value, text)
-        run_git.assert_not_called()
+        cases = {
+            "https://user:" + value + "@example.invalid/r.git": "https://***MASKED***@example.invalid/r.git",
+            "https://user:p@" + value + "@example.invalid/r.git": "https://***MASKED***@example.invalid/r.git",
+            "user:" + value + "@example.invalid:r.git": "***MASKED***@example.invalid:r.git",
+            value + "@example.invalid:r.git": "***MASKED***@example.invalid:r.git",
+            "user:p@" + value + "@example.invalid:o/r.git": "***MASKED***@example.invalid:o/r.git",
+        }
+        for argument, shown in cases.items():
+            with self.subTest(shown=shown):
+                with mock.patch.object(build_release, "_run_git") as run_git:
+                    code, text = self.scan_cli(argument)
+                self.assertEqual(code, 2, text)
+                self.assertIn(f"error=url_argument_rejected:{shown}", text.splitlines())
+                self.assertNotIn(value, text)
+                run_git.assert_not_called()
 
     def test_mirror_inside_repository_worktree_rejected(self):
         inside = REPO / "dist" / "history-mirror.git"
@@ -1064,6 +1110,60 @@ class TestHistorySecretScan(HistoryTestCase):
             self.assertEqual(finding["state"], "unresolved")
             self.assertRegex(finding["key"], r"^[0-9a-f]{64}$")
         self.assertEqual(values(text, "scan_history"), ["failed"])
+
+    def in_mirror(self, repo: ScratchRepo, mirror: Path, *args: str, stdin: bytes | None = None) -> str:
+        return repo.git("--git-dir", str(mirror), *args, stdin=stdin, cwd=self.tmp)
+
+    def assert_masked_ref_finding(self, text, report, key, path, origin):
+        self.assertEqual(report.exit_code, 1, text)
+        findings = [self.finding_fields(v) for v in values(text, "secret_finding")]
+        matching = [f for f in findings if f["path"] == path]
+        self.assertEqual(len(matching), 1, text)
+        self.assertEqual(matching[0]["label"], "aws-access-key-id")
+        self.assertEqual(matching[0]["state"], "unresolved")
+        self.assertEqual({k: matching[0].get(k) for k in origin}, origin)
+        self.assertEqual(values(text, "scan_history"), ["failed"])
+        self.assertNotIn(key, text)
+
+    def test_ref_pointing_at_blob_is_scanned(self):
+        key = synthetic_aws_key()
+        repo = self.scratch()
+        repo.commit({"README.md": b"readme\n"}, "c1")
+        mirror = self.mirror(repo)
+        oid = self.in_mirror(repo, mirror, "hash-object", "-w", "--stdin", stdin=("key = " + key + "\n").encode("ascii"))
+        self.in_mirror(repo, mirror, "update-ref", "refs/tags/blobref", oid)
+        report, text = self.scan(mirror)
+        self.assert_masked_ref_finding(text, report, key, ":ref-blob:refs/tags/blobref", {"first_ref": "refs/tags/blobref"})
+
+    def test_ref_pointing_at_tree_is_scanned_for_secrets_and_private_paths(self):
+        key = synthetic_aws_key()
+        repo = self.scratch()
+        repo.commit({"README.md": b"readme\n"}, "c1")
+        mirror = self.mirror(repo)
+        leak = self.in_mirror(repo, mirror, "hash-object", "-w", "--stdin", stdin=("key = " + key + "\n").encode("ascii"))
+        agents = self.in_mirror(repo, mirror, "hash-object", "-w", "--stdin", stdin=b"local instructions\n")
+        tree = self.in_mirror(
+            repo, mirror, "mktree", stdin=f"100644 blob {agents}\tAGENTS.md\n100644 blob {leak}\tkeys.txt\n".encode("ascii")
+        )
+        self.in_mirror(repo, mirror, "update-ref", "refs/misc/treeref", tree)
+        report, text = self.scan(mirror)
+        self.assert_masked_ref_finding(text, report, key, "keys.txt", {"first_ref": "refs/misc/treeref"})
+        self.assertIn(
+            "private_path_finding=path=AGENTS.md class=3 first_ref=refs/misc/treeref state=unresolved", text.splitlines()
+        )
+
+    def test_annotated_tag_messages_are_scanned_through_nested_tags(self):
+        key = synthetic_aws_key()
+        repo = self.scratch()
+        repo.commit({"README.md": b"readme\n"}, "c1")
+        repo.git("tag", "-a", "v1", "-m", "release notes\n\naws_key_id " + key)
+        repo.git("tag", "-a", "v1-outer", "-m", "clean outer message", "v1")
+        report, text = self.scan(self.mirror(repo))
+        self.assert_masked_ref_finding(text, report, key, ":tag-message:refs/tags/v1", {"first_ref": "refs/tags/v1"})
+        self.assert_masked_ref_finding(
+            text, report, key, ":tag-message:refs/tags/v1-outer", {"first_ref": "refs/tags/v1-outer"}
+        )
+        self.assertEqual(values(text, "refs_scanned"), ["3"])
 
     def test_output_never_contains_raw_value(self):
         key = synthetic_aws_key()

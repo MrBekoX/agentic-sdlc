@@ -437,10 +437,20 @@ def _read_archive(raw: bytes, emit) -> tuple | None:
         if not errors:
             data = {}
             for info in infos:
+                name = info.orig_filename
+                # The builder writes only unencrypted STORED members; anything else is named, never raised.
+                if info.flag_bits & 0x1:
+                    errors.append(f"error=encrypted_member:{name}")
+                    continue
+                if info.compress_type != zipfile.ZIP_STORED:
+                    errors.append(f"error=unsupported_compression:{name}")
+                    continue
                 try:
-                    data[info.orig_filename] = zf.read(info)
+                    data[name] = zf.read(info)
                 except (zipfile.BadZipFile, zlib.error, EOFError):
-                    errors.append(f"error=crc_mismatch:{info.orig_filename}")
+                    errors.append(f"error=crc_mismatch:{name}")
+                except (NotImplementedError, RuntimeError):
+                    errors.append(f"error=unreadable_member:{name}")
         for line in errors:
             emit(line)
         if errors:
@@ -702,26 +712,62 @@ def scan_history(mirror, record=None) -> HistoryReport:
             flush()
 
     try:
-        refs = [r for r in _git_ok(["for-each-ref", "--format=%(objectname) %(refname)"], **git).decode("utf-8").splitlines() if r]
-        pull_refs = sum(1 for r in refs if _PULL_HEAD_REF.match(r.split(" ", 1)[1]))
+        refs = [
+            line.split(" ", 2)
+            for line in _git_ok(["for-each-ref", "--format=%(objectname) %(objecttype) %(refname)"], **git)
+            .decode("utf-8").splitlines()
+            if line
+        ]
+        pull_refs = sum(1 for _oid, _type, name in refs if _PULL_HEAD_REF.match(name))
         commits = _git_ok(["rev-list", "--all", "--topo-order", "--reverse"], **git).decode("ascii").split()
+        # Sighting index -> origin: commits first, then every ref whose object is not a commit (AC99).
+        origins = list(commits)
         blob_sightings: dict = {}
         private_paths: dict = {}
-        for index, commit in enumerate(commits):
-            for mode, otype, oid, path in _tree_entries(commit, **git):
-                # AC125: a BR13 path is reported with its first introducing commit; its content is never read.
+
+        def sight(oid: str, index: int, path: str) -> None:
+            sightings = blob_sightings.setdefault(oid, [])
+            if all(p != path for _i, p in sightings):
+                sightings.append((index, path))
+
+        def sight_tree(treeish: str, index: int) -> None:
+            for mode, otype, oid, path in _tree_entries(treeish, **git):
+                # AC125: a BR13 path is reported with its first introducing origin; its content is never read.
                 cls = exclusion_class(path, mode)
                 if cls is not None:
                     private_paths.setdefault((path, cls), index)
-                    continue
-                if otype != "blob":
-                    continue
-                sightings = blob_sightings.setdefault(oid, [])
-                if all(p != path for _i, p in sightings):
-                    sightings.append((index, path))
+                elif otype == "blob":
+                    sight(oid, index, path)
+
+        for index, commit in enumerate(commits):
+            sight_tree(commit, index)
         messages = _read_objects(commits, **git)
         for index, commit in enumerate(commits):
             queue(messages[commit].partition(b"\n\n")[2].decode("utf-8", "replace"), [(index, MESSAGE_PATH)])
+        # Refs rev-list cannot walk: tag objects (every message in a nested chain), and blob or tree targets.
+        peeling = []
+        for oid, otype, name in refs:
+            if otype != "commit":
+                peeling.append([oid, otype, name, len(origins)])
+                origins.append(name)
+        while any(entry[1] == "tag" for entry in peeling):
+            tags = _read_objects([entry[0] for entry in peeling if entry[1] == "tag"], **git)
+            for entry in peeling:
+                if entry[1] != "tag":
+                    continue
+                header, _, message = tags[entry[0]].partition(b"\n\n")
+                queue(message.decode("utf-8", "replace"), [(entry[3], f":tag-message:{entry[2]}")])
+                fields = dict(line.split(b" ", 1) for line in header.split(b"\n") if b" " in line)
+                # A header without object/type leaves an empty type, which fails closed below.
+                entry[0], entry[1] = (fields.get(b"object", b"").decode("ascii"),
+                                      fields.get(b"type", b"").decode("ascii"))
+        for oid, otype, name, index in peeling:
+            if otype == "tree":
+                sight_tree(oid, index)
+            elif otype == "blob":
+                sight(oid, index, f":ref-blob:{name}")
+            elif otype != "commit":
+                raise ReleaseError([f"error=unscanned_ref:{name}"])
         oids = list(blob_sightings)
         text_blobs = binary_blobs = 0
         for start in range(0, len(oids), SCAN_BATCH_SIZE):
@@ -750,23 +796,27 @@ def scan_history(mirror, record=None) -> HistoryReport:
     emit(f"text_blobs_scanned={text_blobs}")
     emit(f"binary_blobs_skipped={binary_blobs}")
     emit(f"scan_batches={counters['batches']}")
+
+    def first(index: int) -> str:
+        return f"first_commit={origins[index]}" if index < len(commits) else f"first_ref={origins[index]}"
+
     unresolved = 0
     for entry in _ordered(findings.secrets):
         state = recorded_secrets.get((entry["path"], entry["label"], entry["line_sha256"]), "unresolved")
         unresolved += state == "unresolved"
         emit(
             f"secret_finding=path={entry['path']} label={entry['label']} key={entry['key']} "
-            f"first_commit={commits[entry['commit_index']]} line={entry['line']} state={state}"
+            f"{first(entry['commit_index'])} line={entry['line']} state={state}"
         )
     for entry in _ordered(findings.suppressed):
         emit(
             f"suppressed_finding=path={entry['path']} label={entry['label']} "
-            f"first_commit={commits[entry['commit_index']]} line={entry['line']} reason={entry['reason']}"
+            f"{first(entry['commit_index'])} line={entry['line']} reason={entry['reason']}"
         )
     for (path, cls), index in sorted(private_paths.items(), key=lambda kv: (kv[1], kv[0][0].encode("utf-8"), kv[0][1])):
         state = "maintainer-accepted" if (path, cls) in accepted_paths else "unresolved"
         unresolved += state == "unresolved"
-        emit(f"private_path_finding=path={path} class={cls} first_commit={commits[index]} state={state}")
+        emit(f"private_path_finding=path={path} class={cls} {first(index)} state={state}")
     emit(f"unresolved_count={unresolved}")
     passed = unresolved == 0 and not record_invalid
     emit("scan_history=" + ("passed" if passed else "failed"))
@@ -779,14 +829,26 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 FINDINGS_RECORD_PATH = REPOSITORY_ROOT / "tests" / "artifacts" / "publication" / "history" / "reviewed-findings.json"
 _URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 _URL_SCP = re.compile(r"^[^/\\\s]+@[^/\\\s:]+:")
-_URL_USER_INFO = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@")
+# User-info runs to the LAST '@' before the first '/', so an unescaped '@' inside a credential never leaks.
+_URL_USER_INFO = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/]*@")
+_SCP_USER_INFO = re.compile(r"^([^/]*)@")
+
+
+def _masked_url(argument: str) -> str:
+    """AC126: replace URL user-info with ***MASKED***; the bare scp user 'git' carries no credential."""
+    if _URL_SCHEME.match(argument):
+        return _URL_USER_INFO.sub(r"\1***MASKED***@", argument)
+    user = _SCP_USER_INFO.match(argument)
+    if user and user.group(1) != "git":
+        return "***MASKED***" + argument[user.end(1):]
+    return argument
 
 
 def _history_mirror(argument: str, emit) -> Path | None:
     """AC126/AC101 guards for --scan-history; returns the bare mirror path or None after a named error."""
     # (1) A URL is rejected before any git process starts, with credential-bearing user-info masked.
     if _URL_SCHEME.match(argument) or _URL_SCP.match(argument):
-        emit("error=url_argument_rejected:" + _URL_USER_INFO.sub(r"\1***MASKED***@", argument))
+        emit("error=url_argument_rejected:" + _masked_url(argument))
         return None
     # (2) Pure-path containment check before any existence check, so nothing is created.
     mirror = Path(argument).resolve()
