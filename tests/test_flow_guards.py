@@ -588,6 +588,7 @@ class TestBranchStep(unittest.TestCase):
     def test_block_flag_branch_only_no_block_decision(self):  # AC33
         out = self.stop(_satisfied_events(RCF), self.make_repo("main"), block=True)
         self.assertNotEqual(out.get("decision"), "block")
+        self.assertEqual(_reminder_ids(out), ["branch"])
 
     def test_block_flag_block_step_also_missing_lists_only_block_ids(self):  # AC33
         raw = self.stop_raw([skill(RCF), edit("src/app.py"), ev_text("Fixed.")], self.make_repo("main"), block=True)
@@ -700,6 +701,7 @@ class TestReviewResultStep(unittest.TestCase):
     def test_block_flag_errored_control_no_block_decision(self):  # AC38
         errored = self.run_guard(_review_transcript(FB, [(CONTROL_AGENT, "error"), (SECURITY_AGENT, "ok")]), block=True)
         self.assertNotEqual(errored.get("decision"), "block")
+        self.assertEqual(_reminder_ids(errored), ["review-result"])
         cleared = _review_transcript(FB, [(CONTROL_AGENT, "ok"), (SECURITY_AGENT, "ok")])
         self.assertEqual(self.run_guard(cleared, block=True), {})
 
