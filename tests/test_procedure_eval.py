@@ -500,6 +500,54 @@ class TestTraceDedup(unittest.TestCase):
                            "--transcript", transcript)
         self.assertIn("case_agentic-sdlc-pipeline-feature-no-commit_tools=1", proc.stdout, proc.stdout + proc.stderr)
 
+    def test_full_block_replaces_unparseable_or_empty_streamed_reconstruction(self):
+        """The full assistant block is authoritative over a streamed reconstruction with the same id.
+
+        Mutation: keeping the first (streamed) copy drops the real command, so commands is [] and the
+        forbidden_command error disappears.
+        """
+        full_command = {"command": "git push --force origin main"}
+        start = {"type": "stream_event", "event": {"type": "content_block_start", "index": 0,
+                                                   "content_block": {"type": "tool_use", "id": "toolu_x", "name": "Bash"}}}
+        stop = {"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}
+        malformed = {"type": "stream_event", "event": {"type": "content_block_delta", "index": 0,
+                                                       "delta": {"type": "input_json_delta", "partial_json": '{"command": "git pu'}}}
+        case = {"id": "dedup-probe", "prompt": "probe", "forbidden_commands": ["git\\s+push"]}
+        for label, streamed in (("malformed", [start, malformed, stop]), ("empty", [start, stop])):
+            with self.subTest(stream=label):
+                trace = procedure_eval.trace_events(streamed + [full_tool_use("toolu_x", "Bash", full_command)])
+                self.assertEqual(trace.tools, ["Bash"])
+                self.assertEqual(trace.commands, [full_command["command"]])
+                self.assertEqual(trace.tool_inputs, [{"name": "Bash", "input": full_command}])
+                calls = [entry for entry in trace.timeline if entry["kind"] == "tool_call"]
+                self.assertEqual([call["input"] for call in calls], [full_command])
+                self.assertIn("forbidden_command:git\\s+push", procedure_eval.evaluate_case(case, trace, REPO))
+
+    def test_replaced_streamed_records_keep_stream_order(self):
+        """Full blocks arriving in reverse order still leave commands and writes in stream order.
+
+        Mutation: dropping the position shift for later streamed records puts the second call first.
+        """
+        def empty_stream(tool_id, name, index):
+            return [
+                {"type": "stream_event", "event": {"type": "content_block_start", "index": index,
+                                                   "content_block": {"type": "tool_use", "id": tool_id, "name": name}}},
+                {"type": "stream_event", "event": {"type": "content_block_stop", "index": index}},
+            ]
+
+        edit = {"file_path": "src/app.py", "content": "x = 1\n"}
+        events = (empty_stream("toolu_a", "Bash", 0) + empty_stream("toolu_w", "Write", 1)
+                  + empty_stream("toolu_b", "Bash", 2)
+                  + [full_tool_use("toolu_b", "Bash", {"command": "second"}), full_tool_use("toolu_w", "Write", edit),
+                     full_tool_use("toolu_a", "Bash", {"command": "first"})])
+        trace = procedure_eval.trace_events(events)
+        self.assertEqual(trace.tools, ["Bash", "Write", "Bash"])
+        self.assertEqual(trace.commands, ["first", "second"])
+        self.assertEqual(trace.writes, ["src/app.py"])
+        self.assertEqual(trace.artifact_writes, [("src/app.py", "x = 1\n")])
+        self.assertEqual([(e["kind"], e.get("id")) for e in trace.timeline],
+                         [("tool_call", "toolu_a"), ("tool_call", "toolu_w"), ("write", None), ("tool_call", "toolu_b")])
+
     def test_distinct_ids_and_idless_blocks_still_recorded(self):
         distinct = procedure_eval.trace_events(
             [full_tool_use("toolu_a", "Bash", self.COMMAND), full_tool_use("toolu_b", "Bash", self.COMMAND)]
@@ -1390,6 +1438,20 @@ class TestEvidencePacket(unittest.TestCase):
                                                           scoring_source="transcript-replay", strict=True, **common)
         self.assertIs(live["procedure_row_scorable"], False)
         self.assertIs(replay["procedure_row_scorable"], True)
+
+    def test_unwritable_evidence_dir_named_write_failure_not_unreadable_transcript(self):
+        """A filesystem write failure is named evidence_write_failed; the transcript itself is readable.
+
+        Mutation: letting mkdir's OSError reach the transcript-read handler reports evidence_transcript_unreadable.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            blocker = Path(td) / "blocker"
+            blocker.write_bytes(b"regular file\n")
+            proc = strict_replay(blocker / "ev", self.copy_fixture_root(td))
+            self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn(f"error=evidence_write_failed:{PACKET_CASE}", proc.stdout)
+            self.assertNotIn("evidence_transcript_unreadable", proc.stdout)
+            self.assertEqual(blocker.read_bytes(), b"regular file\n")
 
     def test_existing_packet_not_overwritten(self):
         with tempfile.TemporaryDirectory() as td:

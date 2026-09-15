@@ -494,29 +494,58 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
     trace = Trace()
     partial: dict[int, dict[str, Any]] = {}
     # AC63: a streamed tool_use reconstruction and its full assistant block share one id; record the
-    # call once. Blocks without an id keep the 5801cb9 behavior (always recorded).
+    # call once. The full block is authoritative: when it follows a streamed record (possibly unparseable
+    # or empty), it replaces that record in place. Blocks without an id keep the 5801cb9 behavior.
     recorded_ids: set[str] = set()
+    streamed_records: dict[str, dict[str, Any]] = {}
+    tool_lists = ("tools", "tool_inputs", "commands", "writes", "artifact_writes")  # every list _record_tool fills
 
     def set_runtime(name: str) -> None:
         if trace.runtime == "unknown":
             trace.runtime = name
 
-    def record_once(tool_id: Any, name: str, input_obj: Any, carrier: str) -> None:
-        if isinstance(tool_id, str) and tool_id:
-            _call_counts(trace, tool_id)[carrier] += 1
-            if tool_id in recorded_ids:
-                return
-            recorded_ids.add(tool_id)
-        _record_tool(trace, name, input_obj)
-        trace.timeline.append({
+    def tool_record(tool_id: Any, name: str, input_obj: Any) -> tuple[Trace, list[dict[str, Any]]]:
+        record = Trace()
+        _record_tool(record, name, input_obj)
+        entries = [{
             "kind": "tool_call",
             "id": tool_id if isinstance(tool_id, str) and tool_id else None,
             "name": name,
             "input": input_obj if isinstance(input_obj, dict) else {},
-        })
+        }]
         file_path = input_obj.get("file_path") if isinstance(input_obj, dict) else None
         if name in ("Write", "Edit", "MultiEdit", "NotebookEdit") and isinstance(file_path, str):
-            trace.timeline.append({"kind": "write", "path": file_path})
+            entries.append({"kind": "write", "path": file_path})
+        return record, entries
+
+    def replace_streamed(old: dict[str, Any], record: Trace, entries: list[dict[str, Any]]) -> None:
+        for key in tool_lists:
+            start, old_len, new = old["starts"][key], len(getattr(old["record"], key)), getattr(record, key)
+            getattr(trace, key)[start:start + old_len] = new
+            for later in streamed_records.values():  # streamed after `old`, so positioned after it
+                if later["seq"] > old["seq"]:
+                    later["starts"][key] += len(new) - old_len
+        at = next(i for i, entry in enumerate(trace.timeline) if entry is old["entries"][0])
+        trace.timeline[at:at + len(old["entries"])] = entries
+
+    def record_once(tool_id: Any, name: str, input_obj: Any, carrier: str) -> None:
+        has_id = isinstance(tool_id, str) and bool(tool_id)
+        if has_id:
+            _call_counts(trace, tool_id)[carrier] += 1
+        record, entries = tool_record(tool_id, name, input_obj)
+        if has_id and tool_id in recorded_ids:
+            if carrier == "full" and tool_id in streamed_records:
+                replace_streamed(streamed_records.pop(tool_id), record, entries)
+            return
+        starts = {key: len(getattr(trace, key)) for key in tool_lists}
+        for key in tool_lists:
+            getattr(trace, key).extend(getattr(record, key))
+        trace.timeline.extend(entries)
+        if has_id:
+            recorded_ids.add(tool_id)
+            if carrier == "streamed":
+                streamed_records[tool_id] = {"seq": len(recorded_ids), "starts": starts, "record": record,
+                                             "entries": entries}
 
     # Default mode (strict False) ignores rollout records exactly as at 5801cb9.
     rollout_exits = _rollout_exit_codes(events, trace) if strict else {}
@@ -1617,11 +1646,14 @@ def write_evidence_packet(packet: dict[str, Any], evidence_dir: Path, case_id: s
         clean_transcript = redact_text(transcript_text)
     except (RuntimeError, OSError, ValueError) as exc:  # redaction fails closed: nothing is written
         raise RuntimeError("evidence_redaction_failed") from exc
-    evidence_root.mkdir(parents=True, exist_ok=True)
-    transcript_target = resolve_under(evidence_root, f"{case_id}.transcript.jsonl", "evidence transcript")
-    packet_target = resolve_under(evidence_root, f"{case_id}.json", "evidence packet")
-    _write_text_atomically(transcript_target, clean_transcript)
-    _write_text_atomically(packet_target, json.dumps(clean_packet, indent=2, ensure_ascii=False) + "\n")
+    try:
+        evidence_root.mkdir(parents=True, exist_ok=True)
+        transcript_target = resolve_under(evidence_root, f"{case_id}.transcript.jsonl", "evidence transcript")
+        packet_target = resolve_under(evidence_root, f"{case_id}.json", "evidence packet")
+        _write_text_atomically(transcript_target, clean_transcript)
+        _write_text_atomically(packet_target, json.dumps(clean_packet, indent=2, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        raise RuntimeError("evidence_write_failed") from exc
 
 
 def write_case_evidence(case: dict[str, Any], trace: Trace, errors: list[str], args: argparse.Namespace, *,
@@ -1640,10 +1672,11 @@ def write_case_evidence(case: dict[str, Any], trace: Trace, errors: list[str], a
         identity=runtime_payload_identity_for_commit(repository_commit(), identity_cache),
     )
     try:
-        write_evidence_packet(packet, args.evidence_dir, case["id"], read_transcript_text(transcript_path),
-                              fixture_roots=roots)
+        transcript_text = read_transcript_text(transcript_path)
     except OSError:
         return f"evidence_transcript_unreadable:{case['id']}"
+    try:
+        write_evidence_packet(packet, args.evidence_dir, case["id"], transcript_text, fixture_roots=roots)
     except (ValueError, RuntimeError) as exc:
         return f"{exc}:{case['id']}"
     return None
