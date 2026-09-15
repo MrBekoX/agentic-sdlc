@@ -51,7 +51,10 @@ def preflight(rollout: Path, cwd: Path) -> None:
         text = rollout.read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError) as error:
         raise StrictEvidenceError("rollout_unreadable") from error
-    for line in text.splitlines():
+    # Split on "\n" only, like the Node readers: str.splitlines() would also break on U+2028, U+2029 and
+    # U+0085, which JSON may carry raw inside a string.
+    for line in text.split("\n"):
+        line = line.rstrip("\r")
         if not line.strip():
             continue
         try:

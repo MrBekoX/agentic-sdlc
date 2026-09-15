@@ -225,6 +225,18 @@ class TestStrictFlowEvidenceCli(unittest.TestCase):
         rc, _, values, _ = self._run(path, self._tree())
         self.assertEqual((values.get("strict_branch"), rc), ("ok", 1))
 
+    def test_raw_unicode_line_separators_inside_strings_are_not_malformed(self):  # plan Task 26 preflight
+        # Mutation: splitting records with str.splitlines(), which also breaks on U+2028, U+2029 and U+0085
+        # that JSON may carry raw inside a string (the Node readers split on \r?\n only).
+        cwd = self._tree()
+        _, want_lines, _, _ = self._run(_fixture("green-only"), cwd)
+        note = {"type": "event_msg", "payload": {"type": "note", "text": "a\u2028b\u2029c\u0085d"}}
+        path = self._dir() / "separators.jsonl"
+        path.write_bytes(("\n".join(json.dumps(r, ensure_ascii=False) for r in [note] + _records("green-only"))
+                          + "\n").encode("utf-8"))
+        rc, lines, _, stderr = self._run(path, cwd)
+        self.assertEqual((lines, rc, stderr), (want_lines, 1, ""))
+
     def test_no_active_flow_no_source_edit_missing_na_ok_exit1(self):  # AC119
         rollout = self._write(_exec_pair("call_ls0001", "ls", 0, "README.md") + [_final("Listed the files.")])
         rc, lines, _, _ = self._run(rollout, self._tree())
