@@ -2,7 +2,7 @@
 
 This page lists what the runtime hooks wired in `hooks/hooks-claude.json` and `hooks/hooks-codex.json`, the hook modules they import, and the eval and review helpers named below read and write on the machine where they run. It does not cover the Git hooks that `scripts/install_git_hooks.py` installs. Each statement cites the source that implements it.
 
-`tests/test_release_readiness_docs.py` re-derives part of the hook inventory on every run: a hook source under `hooks/` that contains `transcript_path`, `writeFileSync`, `readdirSync` or `spawnSync` fails the local gate until this page names it. The same test checks the work-package and eval persistence statements below against the source text that implements them.
+`tests/test_release_readiness_docs.py` re-derives part of the hook inventory on every run: a hook source under `hooks/` that contains `transcript_path`, `writeFileSync`, `readdirSync` or `spawnSync` fails the local gate until this page names it. The same test checks the hook read, work-package and eval persistence statements below against the source text that implements them.
 
 ## What hooks read
 
@@ -35,19 +35,19 @@ The `SessionStart` hooks `hooks/session-start.mjs` (Claude Code) and `hooks/sess
 
 ### Commands and Git state
 
-The command guards `hooks/branch-guard.mjs`, `hooks/scan-commit.mjs` and `hooks/destructive-command-guard.mjs` read the shell command from the tool input (`tool_input.command`). `hooks/branch-guard.mjs` and `hooks/scan-commit.mjs` also run `git` to read repository state: the branch, and for commits the added diff lines and the commit message.
+The command guards `hooks/branch-guard.mjs`, `hooks/scan-commit.mjs` and `hooks/destructive-command-guard.mjs` read the shell command from the tool input (`tool_input.command`). `hooks/branch-guard.mjs` and `hooks/scan-commit.mjs` read Git alias definitions through `hooks/git-invocation.mjs`, which runs `git config --get alias.<name>`, so an aliased commit or push is recognized. `hooks/branch-guard.mjs` runs `git` to read the current branch. `hooks/scan-commit.mjs` runs `git diff` to read the added diff lines of a commit, takes the commit message from the `-m` text in the command, and reads the contents of any file named by `-F` or `--file`, resolved against the working directory of the statement that names it.
 
 ### Written content
 
-`hooks/scan-write.mjs` (Claude Code, `PostToolUse` for `Write`, `Edit`, `MultiEdit`) reads the content carried in the tool input of those calls. `hooks/scan-write-codex.mjs` (Codex, `PreToolUse`) reads the content of a recognized literal write before it runs.
+`hooks/scan-write.mjs` (Claude Code, `PostToolUse` for `Write`, `Edit`, `MultiEdit`) reads the new text from the tool input (`new_string`, `edits[].new_string` or `content`). When none of those fields is present, it reads the file named by `tool_input.file_path`. `hooks/scan-write-codex.mjs` (Codex, `PreToolUse`) reads the content of a recognized literal write before it runs.
 
 ### Working tree
 
-`hooks/worktree-scan.mjs` (Claude Code, `Stop`) runs `git` to list changed and untracked files, gitignored files included, and reads the bytes of those files to scan them for secret-shaped content. Binary files and files over its size cap are skipped.
+`hooks/worktree-scan.mjs` (Claude Code, `Stop`) runs `git` to read the added lines of `git diff HEAD` for tracked changes, and to list untracked files, gitignored files included. It reads the bytes of those untracked files to scan them for secret-shaped content. It skips vendor and tool-state directories, such as `node_modules` and `.claude`, and caps the scan at 200 files, 256 KiB per file and 4 MiB in total; binary files and files over the per-file cap are skipped. It also flags changed or untracked files whose names mark them as credential files.
 
 ## What hooks write
 
-`hooks/worktree-scan.mjs:125-141` writes one per-session deduplication state file under the operating system's temporary directory, at `agentic-sdlc/worktree-scan-<session>.json`, or at the path set in the `AGENTIC_WORKTREE_SCAN_STATE` environment variable. The file holds finding keys only: the first 16 hexadecimal characters of a SHA-256 digest over a finding's pattern label and file path.
+`hooks/worktree-scan.mjs:125-141` writes one per-session deduplication state file under the operating system's temporary directory, at `agentic-sdlc/worktree-scan-<session>.json`, or at the path set in the `AGENTIC_WORKTREE_SCAN_STATE` environment variable. The file holds finding keys only: the first 16 hexadecimal characters of a SHA-256 digest over a finding's pattern label and its location, which is a file path or, for a finding in the tracked diff, the literal `uncommitted change`.
 
 Hooks report their results to the runtime as JSON on standard output.
 
@@ -59,11 +59,11 @@ Eval and review artifacts that the helper scripts persist pass through `scripts/
 
 ## Eval artifact persistence
 
-The helpers below persist transcripts, review packages and task briefs, redacted as described under Masking, to these locations:
+The helpers below write transcripts, review packages and task briefs, redacted as described under Masking, to these locations:
 
 - `scripts/run_trigger_eval.py`, `scripts/run_codex_trigger_eval.py`, `scripts/run_routing_eval.py` and `scripts/run_glm_trigger_eval.py` write a transcript file only when `--transcript-dir` is given, and write it into that directory.
 - `scripts/run_all_trigger_evals.py:22` sets the default `--transcript-dir` that it passes to the Claude and Codex trigger runners to `tests/artifacts/trigger-matrix`, inside the gitignored `tests/artifacts/` directory.
-- `scripts/run_procedure_eval.py` writes live-run transcripts into `--transcript-dir` when it is given, and otherwise into a `transcripts` folder inside the temporary directory it creates for the run.
+- `scripts/run_procedure_eval.py` writes live-run transcripts into `--transcript-dir` when it is given, and otherwise into a `transcripts` folder inside the temporary directory it creates for the run. Python removes that temporary directory when the run ends; because cleanup errors are ignored, a file it cannot delete is left in place.
 - `scripts/review_package.py` writes a review package into `--out-dir` when it is given, and otherwise into the Git `sdd` path (`git rev-parse --git-path sdd`), or `.sdd` when that Git command fails or prints nothing.
 - `scripts/task_brief.py` writes a task brief into `--out-dir` when it is given, and otherwise into a `.handoffs` folder beside the plan file.
 
