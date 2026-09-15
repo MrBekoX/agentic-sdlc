@@ -457,6 +457,24 @@ class TestOwnerSignalScanner(unittest.TestCase):
                 lines = [_user(CHOICE), _exec_read(command, f"c{n}"), _read_output(f"c{n}", 0)]
                 self.assertFalse(_owner_signals(lines)["verificationDelivered"])
 
+    def test_unmodeled_syntax_or_oror_forged_delivery_read_returns_null(self):
+        # Mutation: dropping hasUnmodeledShellSyntax from deliveryReadSkill, or accepting a last statement
+        # reached through `||`. bash ends the first two on echo and never runs the `cat` after `true ||`.
+        path = INSTALLED.format(skill="verification-before-completion")
+        forged = ["cat /nonexistent; echo $'\\'; cat " + path + "'",
+                  'cat /nonexistent; echo "$(echo "; cat ' + path,
+                  "cat /nonexistent; echo $(true; cat " + path + ")",
+                  "true || cat " + path,
+                  "true ||\ncat " + path]
+        self.assertEqual(_delivery_skills(forged), [None] * len(forged))
+        for n, command in enumerate(forged):
+            with self.subTest(command=command):
+                lines = [_user(CHOICE), _exec_read(command, f"c{n}"), _read_output(f"c{n}", 0)]
+                self.assertFalse(_owner_signals(lines)["verificationDelivered"])
+        # Guard: a `||` earlier in the command does not reach a last statement joined by `;`.
+        self.assertEqual(_delivery_skills(["cat /nonexistent || true; cat " + path]),
+                         ["verification-before-completion"])
+
     def test_unreadable_or_over_ceiling_rollout_not_readable(self):
         body = ("const m = await import(%s);"
                 "process.stdout.write(JSON.stringify(m.readOwnerSignals(input, '/work/repo').readable));"

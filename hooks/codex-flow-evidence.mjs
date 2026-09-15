@@ -16,8 +16,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation, resolveBranchState } from './flow-evidence.mjs';
 import {
-  readRolloutSignals, readRolloutRuns, splitBr6Statements, lastStatement, isVersionOrHelpOnly, hasUnquotedPipe,
-  hasUnquotedHeredoc, readRollout, readOwnerSignals, COMPLETION_CLAIM, COMPLETION_NEGATED,
+  readRolloutSignals, readRolloutRuns, splitBr6Statements, trailingOrRun, isVersionOrHelpOnly, hasUnquotedPipe,
+  hasUnquotedHeredoc, hasUnmodeledShellSyntax, readRollout, readOwnerSignals, COMPLETION_CLAIM, COMPLETION_NEGATED,
 } from './codex-rollout.mjs';
 
 export const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
@@ -30,13 +30,15 @@ export function strictFlag() {
 }
 
 // The shared BR6 table's strictAttributable rule (D3), a cross-slice contract: exactly one call event
-// and one output record, a numeric exit code, no heredoc, and a last statement that is a real runner,
-// not version/help-only and not piped. Accepts a readRolloutRuns record directly.
+// and one output record, a numeric exit code, no heredoc, no unmodeled shell syntax, and a trailing `||`
+// run (a single last statement without `||`) whose EVERY operand is a real runner, not version/help-only
+// and not piped. Accepts a readRolloutRuns record directly.
 export function isStrictlyAttributable({ command, callEvents, outputRecords, exitCode }, re) {
   if (callEvents !== 1 || outputRecords !== 1 || typeof exitCode !== 'number') return false;
-  if (hasUnquotedHeredoc(command)) return false;
-  const last = lastStatement(command);
-  return isRealRunnerInvocation(last, re) && !isVersionOrHelpOnly(last, re) && !hasUnquotedPipe(last);
+  if (hasUnquotedHeredoc(command) || hasUnmodeledShellSyntax(command)) return false;
+  const run = trailingOrRun(command);
+  return run.length > 0
+    && run.every((s) => isRealRunnerInvocation(s, re) && !isVersionOrHelpOnly(s, re) && !hasUnquotedPipe(s));
 }
 
 const ORDER = ['spec', 'plan', 'tests']; // canonical fixed emission order (DP-ORDER, AC25/AC30)
@@ -209,14 +211,16 @@ function stepMissing(step, workId, signals, req, cwd, runs) {
 // BR6: a correlated exit code belongs to the command's LAST statement (split on unquoted `;`, newline
 // and `||`), so `pytest; echo EXIT=$?` no longer lends echo's exit 0 to pytest. Attributable when the
 // command is a single statement (the 5801cb9 outcome), when no exit code was correlated (fail-open,
-// as at 5801cb9), or when the last statement is a real runner that is not version/help-only. A heredoc
-// body is data to bash, not statements, so a heredoc command is never attributable.
+// as at 5801cb9), or when every operand of the trailing `||` run is a real runner that is not
+// version/help-only (a left operand that succeeds means bash never runs the right side). A heredoc body
+// is data to bash, not statements, so a heredoc command is never attributable. Unmodeled shell syntax
+// is checked before the single-statement shortcut, because a hidden separator can collapse the split.
 function attributable(r, re) {
-  if (splitBr6Statements(r.command).length <= 1) return true;
   if (typeof r.exitCode !== 'number') return true;
+  if (hasUnmodeledShellSyntax(r.command)) return false;
+  if (splitBr6Statements(r.command).length <= 1) return true;
   if (hasUnquotedHeredoc(r.command)) return false;
-  const last = lastStatement(r.command);
-  return isRealRunnerInvocation(last, re) && !isVersionOrHelpOnly(last, re);
+  return trailingOrRun(r.command).every((s) => isRealRunnerInvocation(s, re) && !isVersionOrHelpOnly(s, re));
 }
 
 // Active-flow detection (BR4): only an in-session WRITE under the spec/plan artifactRoots, or a

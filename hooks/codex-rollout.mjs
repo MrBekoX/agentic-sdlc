@@ -503,16 +503,20 @@ function commentEnd(str, i) {
   return nl === -1 ? str.length : nl;
 }
 
-export function splitBr6Statements(command) {
+// Statements in order, each with `viaOr`: true when an unquoted `||` joins it to the statement before.
+// The join survives the empty lines and comments bash allows after `||` (`echo ok ||\npytest`).
+export function splitBr6StatementJoins(command) {
   const str = String(command || '');
   const statements = [];
   let cur = '';
   let q = null;
   let wordStart = true;
-  const flush = () => {
+  let pendingOr = false;
+  const flush = (viaOr) => {
     const s = cur.trim();
-    if (s) statements.push(s); // empty and comment-only statements are ignored
+    if (s) { statements.push({ text: s, viaOr: pendingOr }); pendingOr = false; } // empty/comment-only ignored
     cur = '';
+    if (viaOr) pendingOr = true;
   };
   for (let i = 0; i < str.length; i += 1) {
     const c = str[i];
@@ -529,17 +533,43 @@ export function splitBr6Statements(command) {
     if (c === "'" || c === '"') { q = c; cur += c; wordStart = false; continue; }
     if (c === '#' && wordStart) { i = commentEnd(str, i) - 1; continue; } // the newline still separates
     wordStart = COMMENT_BOUNDARY.has(c);
-    if (c === ';' || c === '\n') { flush(); continue; }
-    if (c === '|' && n === '|') { flush(); i += 1; continue; }
+    if (c === ';' || c === '\n') { flush(false); continue; }
+    if (c === '|' && n === '|') { flush(true); i += 1; continue; }
     cur += c;
   }
-  flush();
+  flush(false);
   return statements;
+}
+
+export function splitBr6Statements(command) {
+  return splitBr6StatementJoins(command).map((s) => s.text);
 }
 
 export function lastStatement(command) {
   const statements = splitBr6Statements(command);
   return statements.length ? statements[statements.length - 1] : '';
+}
+
+// The maximal trailing run of statements joined by `||`, whose exit the command's exit can come from.
+// When a left operand succeeds bash never runs the right side, so `true || pytest` exits with true's 0:
+// the exit is attributable only when EVERY operand of this run is a real runner (plan for callers).
+export function trailingOrRun(command) {
+  const joined = splitBr6StatementJoins(command);
+  let start = joined.length - 1;
+  while (start > 0 && joined[start].viaOr) start -= 1;
+  return joined.slice(Math.max(start, 0)).map((s) => s.text);
+}
+
+// Fail closed on shell syntax the one-level quote mask does not model: command substitution `$(`
+// (arithmetic `$((` too), a backtick, process substitution `<(` / `>(` and ANSI-C `$'` (where `\'`
+// does not close the quote) can each turn a `;`, newline or `||` into data. Raw text is checked, not
+// the mask these constructs defeat, so no exit code of such a command is attributed and no delivery
+// read counts. Disclosed conservative limit: `cd repo; pytest $(cat args)` gives a false 'missing'.
+const UNMODELED_OPENERS = ['$(', '`', '<(', '>(', "$'"];
+export function hasUnmodeledShellSyntax(command) {
+  const str = String(command || '');
+  if (!UNMODELED_OPENERS.some((o) => str.includes(o))) return false;
+  return str.includes(';') || str.includes('\n') || str.includes('||');
 }
 
 // Visit every character outside single/double quotes and comments that is not backslash-escaped. A
@@ -730,12 +760,14 @@ function withoutTrailingSlashes(p) {
 
 // BR19 delivery read (D9): only `cat <absolute installed SKILL.md path>` as the last statement counts.
 // Any other form (pipe, background, `&&`, subshell, substitution, a `cd` anywhere, a relative path, a
-// `..` segment, a path under the session cwd, a heredoc) returns null, which leaves the phase Ambiguous.
+// `..` segment, a path under the session cwd, a heredoc, syntax hasUnmodeledShellSyntax rejects, a last
+// statement reached through `||`) returns null, which leaves the phase Ambiguous.
 export function deliveryReadSkill(command, cwd) {
-  if (hasUnquotedHeredoc(command)) return null;
-  const statements = splitBr6Statements(command);
-  if (!statements.length || statements.some((s) => s.startsWith('cd'))) return null;
-  const last = statements[statements.length - 1];
+  if (hasUnquotedHeredoc(command) || hasUnmodeledShellSyntax(command)) return null;
+  const joined = splitBr6StatementJoins(command);
+  if (!joined.length || joined.some((s) => s.text.startsWith('cd'))) return null;
+  if (joined[joined.length - 1].viaOr) return null; // `true || cat <SKILL.md>` never runs the cat
+  const last = joined[joined.length - 1].text;
   if (/[|&()`]/.test(last)) return null;
   const tokens = shellTokens(last);
   if (tokens.length !== 2 || tokens[0] !== 'cat') return null;

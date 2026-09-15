@@ -1099,6 +1099,33 @@ class TestBR6StatementSplit(unittest.TestCase):
             with self.subTest(glued=c):
                 self.assertEqual(got["statements"], ["pytest -k x" + c + "#", "pytest"])
 
+    def _helpers(self, commands):
+        script = ("const r = await import(%s);"
+                  "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).map((c) => ["
+                  "r.trailingOrRun(c), r.hasUnmodeledShellSyntax(c)])));" % json.dumps(ROLLOUT.as_uri()))
+        return json.loads(_node(script, json.dumps(list(commands))))
+
+    def test_trailing_oror_run_records_the_joining_separator(self):
+        # Mutation: resetting the `||` join on a newline or comment after `||` (bash continues the
+        # list there), or carrying it past a `;` or newline that ends a statement.
+        cases = {"cd a; pytest || true": ["pytest", "true"], "echo ok ||\npytest": ["echo ok", "pytest"],
+                 "a ||\n# note\nb": ["a", "b"], "a || b; c": ["c"], "a || b\nc": ["c"],
+                 "a && b || c": ["a && b", "c"], "pytest -k 'a||b'": ["pytest -k 'a||b'"], "": []}
+        for (command, run), (got, _) in zip(cases.items(), self._helpers(cases)):
+            with self.subTest(command=command):
+                self.assertEqual(got, run)
+
+    # Constructs the lexer does not model, each paired with every separator it can hide.
+    UNMODELED = ("$(", "`", "<(", ">(", "$'")
+    HIDDEN_SEPARATORS = (";", "\n", "||")
+
+    def test_unmodeled_syntax_with_any_separator_fails_closed(self):
+        # Mutation: dropping any construct or separator, or reading the quote mask instead of raw text.
+        commands = ["pytest " + u + "x" + s + "y" for u in self.UNMODELED for s in self.HIDDEN_SEPARATORS]
+        controls = ["pytest " + u + "x" for u in self.UNMODELED] + ["pytest; pytest || pytest", "echo $x; pytest"]
+        got = [flag for _, flag in self._helpers(commands + controls)]
+        self.assertEqual(got, [True] * len(commands) + [False] * len(controls))
+
     def test_quoted_separators_are_data(self):
         # Mutation: splitting inside single or double quotes.
         for command in ('pytest -k "a;b"', "pytest -k 'a;b'", "pytest -k 'a||b'"):
@@ -1303,14 +1330,33 @@ class TestCommentAndHeredocForgery(_Tmp):
 
     FORGED = {"comment": "pytest; echo EXIT=$? # ; pytest", "heredoc": "pytest; cat <<EOF\npytest",
               "heredoc-dash": "pytest; cat <<-EOF\npytest",
-              "paren-comment": "pytest; (echo x)# ; pytest"}  # bash ends on the subshell's exit 0
+              "paren-comment": "pytest; (echo x)# ; pytest",  # bash ends on the subshell's exit 0
+              # Constructs the one-level quote mask does not model hide a separator inside a word, so
+              # bash ends on echo/cat (bash 5.2.37: rc=0 from the trailing echo/cat for every row).
+              "command-substitution": "pytest; echo $(echo x; pytest)",
+              "process-substitution": "pytest; cat <(echo x; pytest)",
+              "backtick": "pytest; echo `true; pytest`",
+              "substitution-in-double-quotes": 'pytest; echo "$(echo "; pytest")"',
+              "ansi-c-quote": "pytest; echo $'\\'; pytest'",
+              # A left `||` operand that succeeds means bash never runs the right side.
+              "oror-leading-success": "true || pytest",
+              "oror-leading-version": "pytest --version || pytest",
+              "oror-newline-leading-echo": "echo ok ||\npytest"}
+    # Strict also rejects a piped operand anywhere in the trailing `||` run (tee owns its exit code).
+    STRICT_ONLY = {"oror-piped-operand": "pytest | tee log.txt || pytest"}
+    # Every operand of the trailing `||` run is a real runner, or a substitution holds no separator.
+    OROR_RUNNERS = {"oror-real-runners": "pytest -x || pytest --lf",
+                    "separator-free-substitution": "pytest $(cat args)"}
     # `pytest # --version` runs a bare pytest: the gate reads version/help on the comment-free last
     # statement only, so it is a real run (the whole-command helper value alone still sees `--version`).
     ONE_RUNNER = {"comment-after-runner": "pytest # ; echo x", "here-string": "pytest; cat <<<x; pytest",
                   "comment-version": "pytest # --version"}
     # Disclosed conservative limit: a false 'missing', never a false satisfy. hasUnquotedHeredoc reads
     # the arithmetic shift `$((1<<2))` as a heredoc. A precise fix may flip the row to satisfied.
-    CONSERVATIVE = {"arith-shift": "pytest; echo $((1<<2)); pytest"}
+    # Also disclosed: any `$(`, backtick, `<(`, `>(` or `$'` together with a `;`, newline or `||`
+    # anywhere in the raw command fails closed, so a legitimate `cd repo; pytest $(cat args)` is missing.
+    CONSERVATIVE = {"arith-shift": "pytest; echo $((1<<2)); pytest",
+                    "substitution-with-separator": "cd repo; pytest $(cat args)"}
 
     def _outcomes(self, rows, env_extra=None):
         cwd = self._cwd()
@@ -1337,6 +1383,18 @@ class TestCommentAndHeredocForgery(_Tmp):
     def test_single_runner_statement_shapes_still_satisfy(self):
         rows = self._rows(self.ONE_RUNNER)
         self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.ONE_RUNNER})
+        self.assertEqual(_strictly_attributable(rows), [True] * len(rows))
+
+    def test_piped_oror_operand_not_strictly_attributable(self):
+        # Mutation: checking the pipe on the last `||` operand only. The default keeps AC31 (pipes pass).
+        rows = self._rows(self.STRICT_ONLY)
+        self.assertEqual(_strictly_attributable(rows), [False] * len(rows))
+        self.assertEqual(self._outcomes(rows, STRICT_ON), {name: "missing" for name in self.STRICT_ONLY})
+        self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.STRICT_ONLY})
+
+    def test_real_runner_oror_run_and_separator_free_substitution_still_satisfy(self):
+        rows = self._rows(self.OROR_RUNNERS)
+        self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.OROR_RUNNERS})
         self.assertEqual(_strictly_attributable(rows), [True] * len(rows))
 
     def test_disclosed_conservative_limits_never_satisfy(self):
