@@ -79,7 +79,7 @@ def _fixture_errors(label, fixture, root):
         if not resolved.is_dir():
             return [f"fixture_not_directory:{label}:{fixture}"]
         require_link_free_tree(resolved, "fixture")
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         return [f"fixture_invalid:{label}:{exc}"]
     return []
 
@@ -405,6 +405,20 @@ class TestSubmissionCases(unittest.TestCase):
             for case in data["cases"]:
                 case["fixture"] = "fx"
             self._assert_error(data, "contains link/reparse point", root=root)
+
+    def test_schema_rejects_fixture_symlink_loop(self):
+        # Python 3.12 Path.resolve() turns ELOOP into RuntimeError; the schema check must still return a label.
+        data = _valid_submission_dataset()
+        with tempfile.TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            try:
+                os.symlink(root / "loopb", root / "loopa", target_is_directory=True)
+                os.symlink(root / "loopa", root / "loopb", target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("os.symlink unsupported or not permitted on this host")
+            for case in data["cases"]:
+                case["fixture"] = "loopa"
+            self._assert_error(data, "fixture_invalid:case[0]", root=root)
 
     def test_schema_rejects_fixture_that_is_a_file(self):
         data = _valid_submission_dataset()
