@@ -50,12 +50,12 @@ export function looksPlaceholder(s) {
 
 // Inline, per-line suppression. `gitleaks:allow` is honoured too so a repo already using that
 // convention needs no second annotation.
-const ALLOW_MARKER = /agentic-sdlc:allow-secret|gitleaks:allow/i;
+export const ALLOW_MARKER = /agentic-sdlc:allow-secret|gitleaks:allow/i;
 
 // Published documentation samples, matched EXACTLY. An exact-value allowlist cannot suppress a
 // class of tokens the way a substring rule can; this is the mechanism gitleaks uses for the
 // octokit README sample and the Stripe docs keys.
-const DOC_SAMPLES = new Set([
+export const DOC_SAMPLES = new Set([
   'AKIAIOSFODNN7EXAMPLE',                        // AWS docs
   'AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe',     // Google docs
   'sk_test_4eC39HqLyjWDarjtT1zdp7dc',            // Stripe docs
@@ -66,7 +66,7 @@ const DOC_SAMPLES = new Set([
 // letters inside a token carry no meaning, its DISTRIBUTION does. Meli et al. use a run-length
 // threshold of 4; we require the run to DOMINATE so a real token that merely contains a short
 // run is untouched. Linear, single pass.
-function isDegenerateToken(token) {
+export function isDegenerateToken(token) {
   const t = String(token);
   if (t.length < 12) return false;
   const freq = new Map();
