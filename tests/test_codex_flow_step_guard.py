@@ -1057,6 +1057,21 @@ class TestBR6StatementSplit(unittest.TestCase):
         empty = self._one("")
         self.assertEqual((empty["statements"], empty["last"]), ([], ""))
 
+    def test_midline_comment_hides_its_separators(self):
+        # Mutation: splitting on a `;` inside a comment that starts mid-line, or reading a `#` that
+        # does not start a word as a comment.
+        cases = {
+            "pytest; echo EXIT=$? # ; pytest": (["pytest", "echo EXIT=$?"], "echo EXIT=$?"),
+            "pytest # ; echo x": (["pytest"], "pytest"),
+            "pytest;# ; echo x": (["pytest"], "pytest"),
+            "pytest -k a#b; echo x": (["pytest -k a#b", "echo x"], "echo x"),
+            "echo $#; pytest": (["echo $#", "pytest"], "pytest"),
+            "pytest -k 'a # ;b'": (["pytest -k 'a # ;b'"], "pytest -k 'a # ;b'"),
+        }
+        for (command, (statements, last)), got in zip(cases.items(), _br6_eval(list(cases))):
+            with self.subTest(command=command):
+                self.assertEqual((got["statements"], got["last"]), (statements, last))
+
     def test_quoted_separators_are_data(self):
         # Mutation: splitting inside single or double quotes.
         for command in ('pytest -k "a;b"', "pytest -k 'a;b'", "pytest -k 'a||b'"):
@@ -1244,6 +1259,51 @@ class TestStrictEvidenceFlag(_Tmp):
         for i in ("edge-standalone-version", "carrier-substrate-absent", "carrier-missing-exit-code"):
             with self.subTest(id=i):
                 self.assertEqual(self.default[i], "satisfied")
+
+
+# ---- AC28 closure: a mid-line comment or a heredoc cannot lend a trailing exit 0 to the runner ----
+def _synthetic_row(row_id, command, exit_code=0):
+    """A carrier shaped like a shared-table row (one call event, one output record), built in this
+    module only: the shared table is read-only (D3)."""
+    return {"id": row_id, "command": command,
+            "carrier": {"callEvents": 1, "outputRecords": 1, "exitCode": exit_code, "outputSummary": "5 passed"}}
+
+
+class TestCommentAndHeredocForgery(_Tmp):
+    """bash ends `pytest; echo EXIT=$? # ; pytest` on echo and `pytest; cat <<EOF\\npytest` on cat, so
+    their exit 0 never belongs to pytest. Mutation: dropping the comment skip in splitBr6Statements, or
+    the heredoc check in attributable() / isStrictlyAttributable()."""
+
+    FORGED = {"comment": "pytest; echo EXIT=$? # ; pytest", "heredoc": "pytest; cat <<EOF\npytest",
+              "heredoc-dash": "pytest; cat <<-EOF\npytest"}
+    ONE_RUNNER = {"comment-after-runner": "pytest # ; echo x", "here-string": "pytest; cat <<<x; pytest"}
+
+    def _outcomes(self, rows, env_extra=None):
+        cwd = self._cwd()
+        paths = [_br6_rollout(cwd, row) for row in rows]
+        for path in paths:
+            self.addCleanup(os.unlink, path)
+        results = _derive_env(paths, cwd, env_extra)
+        return {row["id"]: ("missing" if "tests" in res["missingBlockSteps"] else "satisfied")
+                for row, res in zip(rows, results)}
+
+    def _rows(self, commands):
+        return [_synthetic_row(name, command) for name, command in commands.items()]
+
+    def test_forged_shapes_default_tests_step_missing(self):
+        got = self._outcomes(self._rows(self.FORGED))
+        self.assertEqual(got, {name: "missing" for name in self.FORGED})
+
+    def test_forged_shapes_not_strictly_attributable(self):
+        rows = self._rows(self.FORGED)
+        self.assertEqual(_strictly_attributable(rows), [False] * len(rows))
+        self.assertEqual(self._outcomes(rows, STRICT_ON), {name: "missing" for name in self.FORGED})
+
+    # ---- guards: pass before and after the closure ----
+    def test_single_runner_statement_shapes_still_satisfy(self):
+        rows = self._rows(self.ONE_RUNNER)
+        self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.ONE_RUNNER})
+        self.assertEqual(_strictly_attributable(rows), [True] * len(rows))
 
 
 # ---- AC35: the locked Codex Stop guard never reports the branch step (Task 19) ----

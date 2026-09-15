@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation, resolveBranchState } from './flow-evidence.mjs';
 import {
   readRolloutSignals, readRolloutRuns, splitBr6Statements, lastStatement, isVersionOrHelpOnly, hasUnquotedPipe,
-  readRollout, readOwnerSignals, COMPLETION_CLAIM, COMPLETION_NEGATED,
+  hasUnquotedHeredoc, readRollout, readOwnerSignals, COMPLETION_CLAIM, COMPLETION_NEGATED,
 } from './codex-rollout.mjs';
 
 export const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
@@ -30,10 +30,11 @@ export function strictFlag() {
 }
 
 // The shared BR6 table's strictAttributable rule (D3), a cross-slice contract: exactly one call event
-// and one output record, a numeric exit code, and a last statement that is a real runner, not
-// version/help-only and not piped. Accepts a readRolloutRuns record directly.
+// and one output record, a numeric exit code, no heredoc, and a last statement that is a real runner,
+// not version/help-only and not piped. Accepts a readRolloutRuns record directly.
 export function isStrictlyAttributable({ command, callEvents, outputRecords, exitCode }, re) {
   if (callEvents !== 1 || outputRecords !== 1 || typeof exitCode !== 'number') return false;
+  if (hasUnquotedHeredoc(command)) return false;
   const last = lastStatement(command);
   return isRealRunnerInvocation(last, re) && !isVersionOrHelpOnly(last, re) && !hasUnquotedPipe(last);
 }
@@ -208,10 +209,12 @@ function stepMissing(step, workId, signals, req, cwd, runs) {
 // BR6: a correlated exit code belongs to the command's LAST statement (split on unquoted `;`, newline
 // and `||`), so `pytest; echo EXIT=$?` no longer lends echo's exit 0 to pytest. Attributable when the
 // command is a single statement (the 5801cb9 outcome), when no exit code was correlated (fail-open,
-// as at 5801cb9), or when the last statement is a real runner that is not version/help-only.
+// as at 5801cb9), or when the last statement is a real runner that is not version/help-only. A heredoc
+// body is data to bash, not statements, so a heredoc command is never attributable.
 function attributable(r, re) {
   if (splitBr6Statements(r.command).length <= 1) return true;
   if (typeof r.exitCode !== 'number') return true;
+  if (hasUnquotedHeredoc(r.command)) return false;
   const last = lastStatement(r.command);
   return isRealRunnerInvocation(last, re) && !isVersionOrHelpOnly(last, re);
 }

@@ -491,15 +491,25 @@ export function readRolloutSignals(path) {
 // side stops the chain), and `|` / `&` stay inside one statement. Pure single-pass helpers over the
 // command treated as DATA (no eval, no spawn, no backtracking regex), so each is linear (BR10).
 const VERSION_HELP_ARGS = new Set(['--version', '-V', '--help', '-h']);
+// An unquoted `#` starts a comment only at the start of a word: the start of the command or statement,
+// or right after one of these characters. The comment runs to the next newline and hides its separators.
+const COMMENT_BOUNDARY = new Set([' ', '\t', '\n', ';', '|', '&', '(']);
+
+// Index of the newline that ends a comment starting at i, or the string length.
+function commentEnd(str, i) {
+  const nl = str.indexOf('\n', i);
+  return nl === -1 ? str.length : nl;
+}
 
 export function splitBr6Statements(command) {
   const str = String(command || '');
   const statements = [];
   let cur = '';
   let q = null;
+  let wordStart = true;
   const flush = () => {
     const s = cur.trim();
-    if (s && !s.startsWith('#')) statements.push(s); // empty and comment-only statements are ignored
+    if (s) statements.push(s); // empty and comment-only statements are ignored
     cur = '';
   };
   for (let i = 0; i < str.length; i += 1) {
@@ -510,10 +520,13 @@ export function splitBr6Statements(command) {
       if (n === '\n') { i += 1; continue; }                        // line continuation joins the lines
       cur += c;
       if (n !== undefined) { cur += n; i += 1; }                    // an escaped character is data
+      wordStart = false;
       continue;
     }
     if (q) { cur += c; if (c === q) q = null; continue; }
-    if (c === "'" || c === '"') { q = c; cur += c; continue; }
+    if (c === "'" || c === '"') { q = c; cur += c; wordStart = false; continue; }
+    if (c === '#' && wordStart) { i = commentEnd(str, i) - 1; continue; } // the newline still separates
+    wordStart = COMMENT_BOUNDARY.has(c);
     if (c === ';' || c === '\n') { flush(); continue; }
     if (c === '|' && n === '|') { flush(); i += 1; continue; }
     cur += c;
@@ -527,10 +540,11 @@ export function lastStatement(command) {
   return statements.length ? statements[statements.length - 1] : '';
 }
 
-// Visit every character outside single/double quotes that is not backslash-escaped. A visit that
-// returns false stops the scan.
+// Visit every character outside single/double quotes and comments that is not backslash-escaped. A
+// visit that returns false stops the scan.
 function forEachUnquoted(str, visit) {
   let q = null;
+  let wordStart = true;
   for (let i = 0; i < str.length; i += 1) {
     const c = str[i];
     if (q) {
@@ -538,10 +552,26 @@ function forEachUnquoted(str, visit) {
       else if (q === '"' && c === '\\') i += 1;
       continue;
     }
-    if (c === '\\') { i += 1; continue; }
-    if (c === "'" || c === '"') { q = c; continue; }
+    if (c === '\\') { i += 1; wordStart = false; continue; }
+    if (c === "'" || c === '"') { q = c; wordStart = false; continue; }
+    if (c === '#' && wordStart) { i = commentEnd(str, i) - 1; continue; }
+    wordStart = COMMENT_BOUNDARY.has(c);
     if (visit(i, c, str[i + 1]) === false) return;
   }
+}
+
+// True when the command holds an unquoted heredoc operator (`<<` or `<<-`, not the `<<<` here-string).
+// Its body lines are data to bash but separate statements to splitBr6Statements, so no exit code of
+// such a command is attributed to its last statement.
+export function hasUnquotedHeredoc(command) {
+  const str = String(command || '');
+  let heredoc = false;
+  forEachUnquoted(str, (i, c, n) => {
+    if (c !== '<' || n !== '<' || str[i - 1] === '<' || str[i + 2] === '<') return true;
+    heredoc = true;
+    return false;
+  });
+  return heredoc;
 }
 
 export function hasUnquotedPipe(statement) {
@@ -697,8 +727,9 @@ function withoutTrailingSlashes(p) {
 
 // BR19 delivery read (D9): only `cat <absolute installed SKILL.md path>` as the last statement counts.
 // Any other form (pipe, background, `&&`, subshell, substitution, a `cd` anywhere, a relative path, a
-// `..` segment, a path under the session cwd) returns null, which leaves the phase Ambiguous.
+// `..` segment, a path under the session cwd, a heredoc) returns null, which leaves the phase Ambiguous.
 export function deliveryReadSkill(command, cwd) {
+  if (hasUnquotedHeredoc(command)) return null;
   const statements = splitBr6Statements(command);
   if (!statements.length || statements.some((s) => s.startsWith('cd'))) return null;
   const last = statements[statements.length - 1];

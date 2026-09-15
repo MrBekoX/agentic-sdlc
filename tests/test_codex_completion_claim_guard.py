@@ -444,6 +444,18 @@ class TestOwnerSignalScanner(unittest.TestCase):
         self.assertEqual(self._phase([_user(CHOICE), _exec_read(command, "c1"), _read_output("c1", 0)]),
                          "superpowers")
 
+    def test_comment_or_heredoc_forged_delivery_read_returns_null(self):
+        # Mutation: splitting inside a mid-line comment, or accepting a command that holds a heredoc.
+        # bash ends both commands on `true` / `cat <<EOF`, so the installed SKILL.md is never read.
+        path = INSTALLED.format(skill="verification-before-completion")
+        forged = ["cat /nonexistent; true # ; cat " + path,
+                  "cat /nonexistent; cat <<EOF\ncat " + path]
+        self.assertEqual(_delivery_skills(forged), [None, None])
+        for n, command in enumerate(forged):
+            with self.subTest(command=command):
+                lines = [_user(CHOICE), _exec_read(command, f"c{n}"), _read_output(f"c{n}", 0)]
+                self.assertFalse(_owner_signals(lines)["verificationDelivered"])
+
     def test_unreadable_or_over_ceiling_rollout_not_readable(self):
         body = ("const m = await import(%s);"
                 "process.stdout.write(JSON.stringify(m.readOwnerSignals(input, '/work/repo').readable));"
