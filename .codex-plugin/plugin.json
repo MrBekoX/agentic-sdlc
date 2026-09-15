@@ -34,12 +34,8 @@
       "Use Agentic SDLC to implement this change.",
       "Run the full agentic-sdlc-pipeline for this bug fix."
     ],
-    "websiteURL": "https://github.com/MrBekoX/agentic-sdlc",
-    "privacyPolicyURL": "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement",
-    "termsOfServiceURL": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service",
-    "brandColor": "#58DBC0",
+    "brandColor": "#20806E",
     "composerIcon": "./assets/icon.png",
-    "logo": "./assets/logo.png",
-    "screenshots": []
+    "logo": "./assets/logo.png"
   }
 }
