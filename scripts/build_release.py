@@ -21,11 +21,11 @@ import io
 import json
 import os
 import re
-import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import urllib.parse
 import zipfile
 import zlib
@@ -69,10 +69,15 @@ def _is_symlink_mode(mode) -> bool:
     return stat.S_IFMT(int(mode)) == _SYMLINK_MODE
 
 
+def _has_unsafe_character(path: str) -> bool:
+    """A control character, DEL or a lone surrogate (an undecodable git path byte)."""
+    return any(ch < " " or ch == "\x7f" or "\ud800" <= ch <= "\udfff" for ch in path)
+
+
 def _is_unsafe_path(path: str) -> bool:
     if not path or path.startswith("/") or "\\" in path or _DRIVE_PREFIX.match(path):
         return True
-    if ".." in path.split("/"):
+    if ".." in path.split("/") or _has_unsafe_character(path):
         return True
     try:
         require_relative_pattern(path, "archive member")
@@ -81,17 +86,26 @@ def _is_unsafe_path(path: str) -> bool:
     return False
 
 
+def _display_path(path: str) -> str:
+    """The path as printed on a result line: escaped when it holds an unsafe character (SEC-13)."""
+    return path.encode("unicode_escape").decode("ascii") if _has_unsafe_character(path) else path
+
+
 def exclusion_class(path: str, mode) -> int | None:
-    """Return the BR13 exclusion class (1..7) of a member path and git mode, or None."""
+    """Return the BR13 exclusion class (1..7) of a member path and git mode, or None.
+
+    Classes 1-6 compare case-folded segments with trailing dots and spaces stripped, because a
+    case-insensitive filesystem (NTFS, APFS) opens those spellings as the excluded file (SEC-8).
+    """
     if _is_symlink_mode(mode) or _is_unsafe_path(path):
         return 7
-    parts = path.split("/")
+    parts = [part.casefold().rstrip(". ") for part in path.split("/")]
     base = parts[-1]
     if parts[0] == "agentic-sdlc-prompts":
         return 1
-    if path == "tests/test_superpowers_referenced_eval_prompt.py":
+    if parts == ["tests", "test_superpowers_referenced_eval_prompt.py"]:
         return 2
-    if base in ("AGENTS.md", "CLAUDE.md"):
+    if base in ("agents.md", "claude.md"):
         return 3
     if (
         any(part in (".claude", ".codex") for part in parts[:-1])
@@ -106,9 +120,38 @@ def exclusion_class(path: str, mode) -> int | None:
     return None
 
 
+_ABSOLUTE_WINDOWS_ENTRY = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|//)")
+
+
+def _program_on_absolute_path(name: str) -> str | None:
+    """The first candidate for name in an absolute PATH entry, or None (D25 model 5).
+
+    A current directory or relative PATH entry is never searched. On win32 only <name>.exe and
+    <name>.com are tried (PATHEXT is not consulted, so no batch file starts without a shell);
+    elsewhere a candidate must be an executable regular file.
+    """
+    windows = sys.platform == "win32"
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if windows:
+            if not _ABSOLUTE_WINDOWS_ENTRY.match(entry):
+                continue
+            candidates = [os.path.join(entry, name + suffix) for suffix in (".exe", ".com")]
+        else:
+            if not entry.startswith("/"):
+                continue
+            candidates = [os.path.join(entry, name)]
+        for candidate in candidates:
+            if os.path.isfile(candidate) and (windows or os.access(candidate, os.X_OK)):
+                return candidate
+    return None
+
+
 def _run_git(args, *, git_dir=None, cwd=None, stdin=None) -> subprocess.CompletedProcess:
     """Run one local git command: fixed argv, no shell, no protocol, no fsmonitor, bytes I/O."""
-    argv = ["git", "-c", "protocol.allow=never", "-c", "core.fsmonitor=false"]
+    git = _program_on_absolute_path("git")
+    if git is None:
+        raise ReleaseError(["error=git_not_found"], exit_code=2)
+    argv = [git, "-c", "protocol.allow=never", "-c", "core.fsmonitor=false"]
     if git_dir is not None:
         argv += ["--git-dir", str(git_dir)]
     argv += [str(a) for a in args]
@@ -119,7 +162,9 @@ def _run_git(args, *, git_dir=None, cwd=None, stdin=None) -> subprocess.Complete
 
 ARCHIVE_COMMENT_PREFIX = b"agentic-sdlc-archive source_commit="
 # BR20: the runtime payload identity covers every release member except the two result ledgers.
-RUNTIME_PAYLOAD_EXCLUDE = frozenset({"docs/release-evidence-0.4.3.md", "docs/release-readiness.md"})
+# The versioned ledger name follows the VERSION file next to scripts/ (QUAL-8).
+_RELEASE_VERSION = (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8").strip()
+RUNTIME_PAYLOAD_EXCLUDE = frozenset({f"docs/release-evidence-{_RELEASE_VERSION}.md", "docs/release-readiness.md"})
 # BR24: the skills-only archive holds exactly these committed roots plus LICENSE.
 SKILLS_ONLY_ROOTS = (".codex-plugin/", "skills/", "hooks/", "contracts/skills/", "scripts/", "assets/")
 CODEX_MANIFEST = ".codex-plugin/plugin.json"
@@ -171,7 +216,7 @@ def _tree_entries(commit: str, **git) -> list:
             continue
         meta, _, path = record.partition(b"\t")
         mode, otype, oid = meta.decode("ascii").split(" ")
-        entries.append((mode, otype, oid, path.decode("utf-8")))
+        entries.append((mode, otype, oid, path.decode("utf-8", "surrogateescape")))
     return entries
 
 
@@ -194,17 +239,47 @@ def _read_objects(oids, **git) -> dict:
     return objects
 
 
+def _collisions(paths) -> list:
+    """error=case_collision lines for members one extraction filesystem path maps together (SEC-9).
+
+    The key is the NFC form, case-folded, with trailing dots and spaces stripped from each segment.
+    Two clashes count: equal full keys, and a file key equal to another member's directory prefix.
+    Each pair is printed in UTF-8 order.
+    """
+    def order(path: str) -> bytes:
+        return path.encode("utf-8", "surrogateescape")
+
+    keys = {
+        path: tuple(part.casefold().rstrip(". ") for part in unicodedata.normalize("NFC", path).split("/"))
+        for path in sorted(set(paths), key=order)
+    }
+    owners = {}
+    lines = []
+    for path, key in keys.items():
+        other = owners.setdefault(key, path)
+        if other != path:
+            lines.append((order(other), order(path), other, path))
+    for path, key in keys.items():
+        for end in range(1, len(key)):
+            other = owners.get(key[:end])
+            if other is not None:
+                first, second = sorted((other, path), key=order)
+                lines.append((order(first), order(second), first, second))
+    return [f"error=case_collision:{_display_path(a)}:{_display_path(b)}" for _ka, _kb, a, b in sorted(lines)]
+
+
 def _commit_members(commit: str, *, cwd: Path) -> dict:
     """BR13-filtered members of the commit tree: path -> (git mode, bytes)."""
     entries = _tree_entries(commit, cwd=cwd)
     violations = []
     for mode, _otype, _oid, path in entries:
         if mode == "160000":
-            violations.append(f"error=unsupported_member:{path}")
+            violations.append(f"error=unsupported_member:{_display_path(path)}")
             continue
         cls = exclusion_class(path, mode)
         if cls is not None:
-            violations.append(f"error=excluded_member:class-{cls}:{path}")
+            violations.append(f"error=excluded_member:class-{cls}:{_display_path(path)}")
+    violations += _collisions([path for _mode, _otype, _oid, path in entries])
     if violations:
         raise ReleaseError(violations)
     blobs = _read_objects([oid for _m, _t, oid, _p in entries], cwd=cwd)
@@ -309,7 +384,12 @@ def build_archive(repo_root, output, *, skills_only: bool = False) -> BuildResul
         emit("build=failed")
         return BuildResult(exc.exit_code, emit.lines)
     data = _zip_bytes(members, commit)
-    _write_atomic(Path(output), data)
+    try:
+        _write_atomic(Path(output), data)
+    except OSError:
+        emit("error=output_unwritable")
+        emit("build=failed")
+        return BuildResult(2, emit.lines)
     emit("archive_kind=" + ("skills-only" if skills_only else "release"))
     emit(f"source_commit={commit}")
     emit(f"members={len(members)}")
@@ -366,30 +446,75 @@ process.stdout.write(out.map((l) => l + '\n').join(''));
 """
 
 
+CREDENTIAL_NAMES_MODULE = SECRET_PATTERNS_MODULE.parent / "scan-commit-names.mjs"
+CREDENTIAL_FILENAME_LABEL = "credential-filename"
+
+# SEC-12 bridge: the commit scanner's credential-filename rule stays the single implementation.
+# Only member paths enter it, one JSON line each; only a boolean per id leaves it.
+_NAME_BRIDGE = r"""
+import { pathToFileURL } from 'node:url';
+const { isCredentialFilename } = await import(pathToFileURL(__NAMES__).href);
+let input = '';
+process.stdin.setEncoding('utf8');
+for await (const chunk of process.stdin) input += chunk;
+const out = [];
+for (const raw of input.split('\n')) {
+  if (!raw) continue;
+  const { id, path } = JSON.parse(raw);
+  out.push(JSON.stringify({ id, credential: isCredentialFilename(path) === true }));
+}
+process.stdout.write(out.map((l) => l + '\n').join(''));
+"""
+
+
 class NodeUnavailable(Exception):
     """node is required for the BR22 secret stage; the stage fails closed without it."""
 
 
-def scan_texts(items) -> dict:
-    """Scan (id, text) items with one node process; return id -> {findings, suppressed}."""
-    node = shutil.which("node")
+def _node_bridge(script: str, records: list) -> dict:
+    """Send JSON-line records (each with an 'id') to one node process; return id -> result record."""
+    node = _program_on_absolute_path("node")
     if not node:
         raise NodeUnavailable()
-    payload = "".join(json.dumps({"id": item_id, "text": text}) + "\n" for item_id, text in items)
-    script = _SCAN_BRIDGE.replace("__PATTERNS__", json.dumps(str(SECRET_PATTERNS_MODULE)))
+    payload = "".join(json.dumps(record) + "\n" for record in records)
     proc = subprocess.run(
         [node, "--input-type=module", "-e", script], input=payload.encode("utf-8"), capture_output=True
     )
     if proc.returncode != 0:
         raise ReleaseError(["error=secret_scan_failed"], exit_code=2)
     results = {}
-    for raw in proc.stdout.decode("utf-8").splitlines():
+    # D25 model (4): JSON.stringify leaves U+2028/U+2029 raw, so split on newline only.
+    for raw in proc.stdout.decode("utf-8").split("\n"):
+        raw = raw.removesuffix("\r")
         if raw:
             record = json.loads(raw)
             results[record["id"]] = record
-    if set(results) != {item_id for item_id, _text in items}:
+    if set(results) != {record["id"] for record in records}:
         raise ReleaseError(["error=secret_scan_failed"], exit_code=2)
     return results
+
+
+def scan_texts(items) -> dict:
+    """Scan (id, text) items with one node process; return id -> {findings, suppressed}."""
+    script = _SCAN_BRIDGE.replace("__PATTERNS__", json.dumps(str(SECRET_PATTERNS_MODULE)))
+    return _node_bridge(script, [{"id": item_id, "text": text} for item_id, text in items])
+
+
+def credential_filenames(paths) -> set:
+    """The paths the commit scanner's isCredentialFilename rule matches, checked in one node process.
+
+    The rule sees each path in NFC with trailing dots and spaces stripped from every segment, the
+    name Windows extraction writes (SEC-8), so `.npmrc.` is matched; the original path is returned.
+    """
+    paths = list(paths)
+    if not paths:
+        return set()
+    script = _NAME_BRIDGE.replace("__NAMES__", json.dumps(str(CREDENTIAL_NAMES_MODULE)))
+    results = _node_bridge(script, [
+        {"id": index, "path": "/".join(seg.rstrip(". ") for seg in unicodedata.normalize("NFC", path).split("/"))}
+        for index, path in enumerate(paths)
+    ])
+    return {path for index, path in enumerate(paths) if results[index]["credential"] is True}
 
 
 def _is_text(data: bytes) -> bool:
@@ -398,14 +523,20 @@ def _is_text(data: bytes) -> bool:
 
 def _scan_members(data: dict) -> tuple:
     """Masked secret_finding and suppressed_finding lines for text members, plus the binary count."""
-    texts = [(name, data[name].decode("utf-8", "replace")) for name in _utf8_order(data) if _is_text(data[name])]
+    ordered = _utf8_order(data)
+    credentials = credential_filenames(ordered)
+    texts = [(name, data[name].decode("utf-8", "replace")) for name in ordered if _is_text(data[name])]
     results = scan_texts(texts)
-    findings, suppressed = [], []
+    findings = [
+        f"secret_finding={_display_path(name)}:0:{CREDENTIAL_FILENAME_LABEL}" for name in ordered if name in credentials
+    ]
+    suppressed = []
     for name, _text in texts:
         record = results[name]
-        findings += [f"secret_finding={name}:{f['line']}:{f['label']}" for f in record["findings"]]
+        shown = _display_path(name)
+        findings += [f"secret_finding={shown}:{f['line']}:{f['label']}" for f in record["findings"]]
         suppressed += [
-            f"suppressed_finding={name}:{s['line']}:{s['label']}:{s['reason']}" for s in record["suppressed"]
+            f"suppressed_finding={shown}:{s['line']}:{s['label']}:{s['reason']}" for s in record["suppressed"]
         ]
     return findings, suppressed, len(data) - len(texts)
 
@@ -427,7 +558,7 @@ def _read_archive(raw: bytes, emit) -> tuple | None:
     """Steps 1-2: safe unique member names, then every member readable with a valid CRC."""
     try:
         zf = zipfile.ZipFile(io.BytesIO(raw))
-    except zipfile.BadZipFile:
+    except (zipfile.BadZipFile, NotImplementedError, ValueError, EOFError, OSError):
         emit("error=unreadable_archive")
         return None
     with zf:
@@ -436,10 +567,11 @@ def _read_archive(raw: bytes, emit) -> tuple | None:
         for info in infos:
             name = info.orig_filename
             if name in seen:
-                errors.append(f"error=duplicate_member:{name}")
+                errors.append(f"error=duplicate_member:{_display_path(name)}")
             seen.add(name)
             if exclusion_class(name, info.external_attr >> 16) is not None:
-                errors.append(f"error=unsafe_member:{name}")
+                errors.append(f"error=unsafe_member:{_display_path(name)}")
+        errors += _collisions(seen)
         if not errors:
             data = {}
             for info in infos:
@@ -490,13 +622,13 @@ def verify_archive(zip_path, repo_root) -> VerifyReport:
     commit = recorded.group(1).decode("ascii")
     # DP22: without a checkout holding the recorded commit, mode and rebuild checks cannot run.
     # No fetch or clone is attempted, and no partial pass line is printed.
-    if (
-        _run_git(["rev-parse", "--show-toplevel"], cwd=repo_root).returncode != 0
-        or _run_git(["cat-file", "-e", f"{commit}^{{commit}}"], cwd=repo_root).returncode != 0
-    ):
-        emit(f"error=source_commit_unavailable:{commit}")
-        return finish(1)
     try:
+        if (
+            _run_git(["rev-parse", "--show-toplevel"], cwd=repo_root).returncode != 0
+            or _run_git(["cat-file", "-e", f"{commit}^{{commit}}"], cwd=repo_root).returncode != 0
+        ):
+            emit(f"error=source_commit_unavailable:{commit}")
+            return finish(1)
         release = _commit_members(commit, cwd=repo_root)
     except ReleaseError as exc:
         for line in exc.lines:
@@ -583,9 +715,21 @@ class _HistoryFindings:
                     }
                     self._keep_earliest(table, key if kind == "findings" else (key, hit.get("reason")), entry)
 
+    def record_credential_filename(self, path: str, commit_index: int) -> None:
+        """A path-only finding: its DP23 key uses the SHA-256 of the empty trimmed line (SEC-12)."""
+        label, line_sha256 = CREDENTIAL_FILENAME_LABEL, hashlib.sha256(b"").hexdigest()
+        key = hashlib.sha256(f"{path}\0{label}\0{line_sha256}".encode("utf-8", "surrogateescape")).hexdigest()
+        self._keep_earliest(self.secrets, key, {
+            "order": (commit_index, 0), "path": path, "label": label, "key": key,
+            "commit_index": commit_index, "line": 0, "line_sha256": line_sha256, "reason": None,
+        })
+
 
 def _ordered(table: dict) -> list:
-    return sorted(table.values(), key=lambda e: (e["commit_index"], e["path"].encode("utf-8"), e["line"], e["label"]))
+    return sorted(
+        table.values(),
+        key=lambda e: (e["commit_index"], e["path"].encode("utf-8", "surrogateescape"), e["line"], e["label"]),
+    )
 
 
 # DP23 reviewed findings record. Entries carry keys and states only; a value-bearing or otherwise
@@ -730,6 +874,7 @@ def scan_history(mirror, record=None) -> HistoryReport:
         origins = list(commits)
         blob_sightings: dict = {}
         private_paths: dict = {}
+        tree_paths: dict = {}
 
         def sight(oid: str, index: int, path: str) -> None:
             sightings = blob_sightings.setdefault(oid, [])
@@ -738,6 +883,8 @@ def scan_history(mirror, record=None) -> HistoryReport:
 
         def sight_tree(treeish: str, index: int) -> None:
             for mode, otype, oid, path in _tree_entries(treeish, **git):
+                if otype == "blob":
+                    tree_paths.setdefault(path, index)
                 # AC125: a BR13 path is reported with its first introducing origin; its content is never read.
                 cls = exclusion_class(path, mode)
                 if cls is not None:
@@ -786,6 +933,8 @@ def scan_history(mirror, record=None) -> HistoryReport:
                 else:
                     binary_blobs += 1
         flush()
+        for path in credential_filenames(tree_paths):
+            findings.record_credential_filename(path, tree_paths[path])
     except NodeUnavailable:
         emit("error=node_unavailable")
         emit("scan_history=failed")
@@ -811,18 +960,20 @@ def scan_history(mirror, record=None) -> HistoryReport:
         state = recorded_secrets.get((entry["path"], entry["label"], entry["line_sha256"]), "unresolved")
         unresolved += state == "unresolved"
         emit(
-            f"secret_finding=path={entry['path']} label={entry['label']} key={entry['key']} "
+            f"secret_finding=path={_display_path(entry['path'])} label={entry['label']} key={entry['key']} "
             f"{first(entry['commit_index'])} line={entry['line']} state={state}"
         )
     for entry in _ordered(findings.suppressed):
         emit(
-            f"suppressed_finding=path={entry['path']} label={entry['label']} "
+            f"suppressed_finding=path={_display_path(entry['path'])} label={entry['label']} "
             f"{first(entry['commit_index'])} line={entry['line']} reason={entry['reason']}"
         )
-    for (path, cls), index in sorted(private_paths.items(), key=lambda kv: (kv[1], kv[0][0].encode("utf-8"), kv[0][1])):
+    for (path, cls), index in sorted(
+        private_paths.items(), key=lambda kv: (kv[1], kv[0][0].encode("utf-8", "surrogateescape"), kv[0][1])
+    ):
         state = "maintainer-accepted" if (path, cls) in accepted_paths else "unresolved"
         unresolved += state == "unresolved"
-        emit(f"private_path_finding=path={path} class={cls} {first(index)} state={state}")
+        emit(f"private_path_finding=path={_display_path(path)} class={cls} {first(index)} state={state}")
     emit(f"unresolved_count={unresolved}")
     passed = unresolved == 0 and not record_invalid
     emit("scan_history=" + ("passed" if passed else "failed"))
@@ -859,7 +1010,12 @@ def _history_mirror(argument: str, emit) -> Path | None:
     # (2) Pure-path containment check before any existence check, so nothing is created.
     mirror = Path(argument).resolve()
     roots = [REPOSITORY_ROOT]
-    toplevel = _run_git(["rev-parse", "--show-toplevel"], cwd=Path.cwd())
+    try:
+        toplevel = _run_git(["rev-parse", "--show-toplevel"], cwd=Path.cwd())
+    except ReleaseError as exc:
+        for line in exc.lines:
+            emit(line)
+        return None
     if toplevel.returncode == 0 and toplevel.stdout.strip():
         roots.append(Path(toplevel.stdout.decode("utf-8").strip()).resolve())
     if any(mirror == root or mirror.is_relative_to(root) for root in roots):
@@ -879,6 +1035,9 @@ def _history_mirror(argument: str, emit) -> Path | None:
 # D4 verbose-log grammar. The result-line pattern tolerates the docstring line Python 3.11+ prints
 # between the test id and the outcome; failure ids also come from the summary headers, so a result
 # the pattern cannot see is never counted as a pass (fail closed).
+# Limit (QUAL-17): a result line that test stderr output splits is not matched. A skipped result split
+# that way is missing from the parsed skips, so the parsed skip count differs from the summary's
+# skipped=N and the comparison fails closed: a possible false failure, never a false pass.
 _RESULT_LINE = re.compile(
     r"^\S+ \(([\w.]+)\)(?:\n[^\n]*?)? \.\.\. (ok|skipped '.*'|FAIL|ERROR|expected failure|unexpected success)$",
     re.M,

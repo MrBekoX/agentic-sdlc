@@ -222,6 +222,43 @@ class TestMemberPolicy(unittest.TestCase):
                 self.assertIsNone(build_release.exclusion_class(path, "100644"))
         self.assertIsNone(build_release.exclusion_class("scripts/tool.py", "100755"))
 
+    def test_exclusion_classes_fold_case_and_trailing_dots(self):
+        # SEC-8: a case-insensitive filesystem treats these as the excluded files.
+        samples = {
+            "Claude.md": 3,
+            ".Claude/settings.json": 4,
+            "tests/Artifacts/x.jsonl": 5,
+            "Audit-Docs/x.md": 6,
+            ".ENV": 4,
+            "Agentic-SDLC-Prompts/x": 1,
+            "CLAUDE.md.": 3,
+            "Tests/Test_Superpowers_Referenced_Eval_Prompt.py": 2,
+            "docs/Settings.Local.json ": 4,
+        }
+        for path, expected in samples.items():
+            with self.subTest(path=path):
+                self.assertEqual(build_release.exclusion_class(path, "100644"), expected)
+                self.assertEqual(build_release.exclusion_class(path.lower(), "100644"), expected)
+        self.assertIsNone(build_release.exclusion_class(".env.EXAMPLE", "100644"))
+
+    def test_control_and_surrogate_paths_are_unsafe_and_escaped(self):
+        # SEC-13: a control character in a member path could forge a result line in a scan log.
+        for path in ("docs/x\nverify=passed", "a\rb", "a\x00b", "a\x1fb", "a\x7fb", "bad\udcff.md"):
+            with self.subTest(path=path):
+                self.assertEqual(build_release.exclusion_class(path, "100644"), 7)
+                shown = build_release._display_path(path)
+                self.assertEqual(shown, path.encode("unicode_escape").decode("ascii"))
+                self.assertFalse(any(ord(ch) < 0x20 or ord(ch) == 0x7F or 0xD800 <= ord(ch) <= 0xDFFF for ch in shown))
+        for path in ("docs/é.md", "a\\b", "docs/a b.md"):
+            with self.subTest(unchanged=path):
+                self.assertEqual(build_release._display_path(path), path)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("docs/x\nverify=passed", b"x\n")
+        lines = []
+        self.assertIsNone(build_release._read_archive(buf.getvalue(), lines.append))
+        self.assertEqual(lines, ["error=unsafe_member:docs/x\\nverify=passed"])
+
 
 class TestScratchRepoIsolation(ScratchTestCase):
     def test_scratch_repo_ignores_host_git_config(self):
@@ -358,6 +395,69 @@ class TestReleaseBuild(ScratchTestCase):
         self.assertIn("error=excluded_member:class-7:a\\b", lines)
         self.assertFalse(out.exists())
 
+    def test_case_colliding_members_fail_build(self):
+        # SEC-9: members that one case-insensitive or normalizing filesystem path maps together.
+        nfc, nfd = "x/é.md", "x/é.md"
+        cases = {
+            "case": (("Docs/A.md", "docs/a.md"), "error=case_collision:Docs/A.md:docs/a.md"),
+            "nfc": ((nfc, nfd), f"error=case_collision:{nfd}:{nfc}"),
+            "file-dir": (("a", "A/b"), "error=case_collision:A/b:a"),
+        }
+        for label, (paths, expected) in cases.items():
+            with self.subTest(case=label):
+                repo = self.scratch(f"collide-{label}")
+                repo.git("config", "core.ignorecase", "false")
+                repo.git("config", "core.precomposeunicode", "false")
+                repo.add_cacheinfo("100644", b"readme\n", "README.md")
+                for index, path in enumerate(paths):
+                    repo.add_cacheinfo("100644", f"member {index}\n".encode("ascii"), path)
+                repo.git("commit", "-q", "-m", f"collision {label}")
+                listed = repo.git("ls-tree", "-r", "-z", "--name-only", "HEAD").split("\0")
+                self.assertEqual(sorted(p for p in listed if p), sorted(["README.md", *paths]))
+                result, text, out = self.build(repo.root, f"{label}.zip")
+                self.assertEqual(result.exit_code, 1, text)
+                self.assertIn(expected, text.splitlines())
+                self.assertIn("build=failed", text.splitlines())
+                self.assertFalse(out.exists())
+
+    def test_unwritable_output_is_named(self):
+        # QUAL-9: a write failure is a named environment error, not a traceback.
+        repo = self.scratch()
+        repo.commit(self.base_files(), "c1")
+        target = self.tmp / "out" / "existing-directory.zip"
+        target.mkdir(parents=True)
+        result, text = self.quiet(build_release.build_archive, repo.root, target)
+        lines = text.splitlines()
+        self.assertEqual(result.exit_code, 2, text)
+        self.assertEqual(lines, ["error=output_unwritable", "build=failed"])
+        self.assertTrue(target.is_dir())
+        self.assertEqual(sorted(p.name for p in target.parent.iterdir()), ["existing-directory.zip"])
+
+    def test_program_lookup_skips_relative_path_entries(self):
+        # SEC-7 model (5): git and node start only from an absolute PATH entry.
+        repo = self.scratch()
+        repo.commit(self.base_files(), "c1")
+        sentinel = self.tmp / "planted-git-ran"
+        if sys.platform == "win32":
+            whoami = shutil.which("whoami")
+            if whoami is None:
+                self.skipTest("whoami.exe unavailable to plant as git.exe")
+            shutil.copyfile(whoami, repo.root / "git.exe")
+        else:
+            planted = repo.root / "git"
+            planted.write_bytes(f"#!/bin/sh\n: > '{sentinel}'\nexit 1\n".encode("utf-8"))
+            planted.chmod(0o755)
+        env = {**repo.env, "PATH": "." + os.pathsep + repo.env.get("PATH", "")}
+        out = self.tmp / "cli" / "planted.zip"
+        proc = self.cli(["--output", out], cwd=repo.root, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(proc.stdout.splitlines()[-1], "build=passed")
+        self.assertFalse(sentinel.exists())
+        only_relative = self.cli(["--output", self.tmp / "cli" / "none.zip"], cwd=repo.root, env={**env, "PATH": "."})
+        self.assertEqual(only_relative.returncode, 2, only_relative.stdout + only_relative.stderr)
+        self.assertEqual(only_relative.stdout.splitlines(), ["error=git_not_found", "build=failed"])
+        self.assertFalse(sentinel.exists())
+
     def test_build_rejects_os_symlink_escaping_root(self):
         repo = self.scratch()
         repo.git("config", "core.symlinks", "true")
@@ -413,7 +513,9 @@ class TestReleaseBuild(ScratchTestCase):
 # Recorded when Task 47 went GREEN; asserted on both CI operating systems.
 GOLDEN_COMMIT = "51e01c39dc9290011b206ec409745c6909da541b"
 GOLDEN_ARCHIVE_SHA256 = "ae1f6d17756a9f44a677d4e3aa37eee60ed3409eadc1320ac3bcbb50b29158f3"
-LEDGER_DOCS = ("docs/release-evidence-0.4.3.md", "docs/release-readiness.md")
+RELEASE_VERSION = (REPO / "VERSION").read_text(encoding="utf-8").strip()
+# QUAL-8: the excluded ledger name follows VERSION; at 0.4.3 the golden identities are unchanged.
+LEDGER_DOCS = (f"docs/release-evidence-{RELEASE_VERSION}.md", "docs/release-readiness.md")
 
 
 def manifest_identity(members: dict, exclude=()) -> str:
@@ -500,6 +602,24 @@ class TestDeterministicLayout(ScratchTestCase):
             with self.subTest(changed=name):
                 changed = {**members, name: members[name] + b"edited\n"}
                 self.assertNotEqual(build_release.payload_identity(changed, build_release.RUNTIME_PAYLOAD_EXCLUDE), expected)
+
+    def test_payload_exclude_follows_version(self):
+        # QUAL-8: after a bump, the new ledger stays out of the runtime payload identity.
+        tree = self.tmp / "copied"
+        (tree / "scripts").mkdir(parents=True)
+        for name in ("build_release.py", "eval_safety.py"):
+            shutil.copyfile(REPO / "scripts" / name, tree / "scripts" / name)
+        (tree / "VERSION").write_bytes(b"9.9.9\n")
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             "import json, sys; sys.path.insert(0, sys.argv[1]); import build_release; "
+             "print(json.dumps(sorted(build_release.RUNTIME_PAYLOAD_EXCLUDE)))",
+             str(tree / "scripts")],
+            cwd=tree, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout), ["docs/release-evidence-9.9.9.md", "docs/release-readiness.md"])
+        self.assertIsInstance(build_release.RUNTIME_PAYLOAD_EXCLUDE, frozenset)
 
     def test_committed_ledger_edit_changes_archive_hash_not_payload_identity(self):
         repo = self.layout_repo()
@@ -842,6 +962,28 @@ class TestVerifyIntegrity(ScratchTestCase):
                 self.assertIn(f"error=unsafe_member:{name}", lines)
         self.assertNotIn("verify=passed", lines)
 
+    def test_unsupported_extract_version_is_unreadable(self):
+        # QUAL-10: zipfile raises NotImplementedError at open for an extract version it cannot read.
+        repo, out = self.built_layout()
+        raw = bytearray(out.read_bytes())
+        with zipfile.ZipFile(out) as zf:
+            central = zf.start_dir
+        self.assertEqual(bytes(raw[central:central + 4]), b"PK\x01\x02")
+        raw[central + 6] = 99
+        out.write_bytes(bytes(raw))
+        report, text, lines = self.verify(out, repo.root)
+        self.assertEqual(lines, ["error=unreadable_archive", "verify=failed"])
+        self.assertEqual(report.exit_code, 1, text)
+
+    def test_case_colliding_members_fail_verify(self):
+        # SEC-9: an NTFS extraction would let the later member overwrite the earlier one.
+        repo, out = self.built_layout()
+        crafted = [("A.TXT", b"shadow\n", 0o100644), ("Run.sh/x", b"shadow\n", 0o100644)]
+        tampered = rewrite_zip(out, self.tmp / "collide.zip", extra=crafted)
+        report, _text, lines = self.verify(tampered, repo.root)
+        self.assert_failed_naming(lines, report, "error=case_collision:A.TXT:a.txt")
+        self.assertIn("error=case_collision:Run.sh/x:run.sh", lines)
+
     def test_verify_passes_after_uncommitted_ledger_edit(self):
         repo, out = self.built_layout()
         repo.write({LEDGER_DOCS[0]: b"# ledger\narchive_sha256 recorded, uncommitted\n"})
@@ -973,11 +1115,57 @@ class TestVerifySecretScan(ScratchTestCase):
         self.assertEqual([l for l in lines if l.startswith("secret_finding=")], [])
         self.assertEqual(lines[-1], "verify=passed")
 
+    def test_credential_filename_member_fails_verify(self):
+        # SEC-12: the commit scanner's filename rule applies to every member, binary or text.
+        repo, out = self.built_with({
+            ".npmrc": b"registry=https://registry.example.invalid/\n",
+            "certs/cert.p12": b"\x00\x01\x02 binary container\n",
+            "notes/keys.md": b"# about keys\n",
+        })
+        report, text = self.quiet(build_release.verify_archive, out, repo.root)
+        lines = text.splitlines()
+        self.assertEqual(report.exit_code, 1, text)
+        self.assertEqual(
+            [l for l in lines if l.startswith("secret_finding=")],
+            ["secret_finding=.npmrc:0:credential-filename", "secret_finding=certs/cert.p12:0:credential-filename"],
+        )
+        self.assertIn("binary_members_skipped=1", lines)
+        self.assertEqual(lines[-1], "verify=failed")
+        # Windows extraction strips a trailing dot or space, so these names land on disk as the credential file.
+        for name in (".npmrc.", "id_rsa "):
+            with self.subTest(name=name):
+                repo = self.scratch(f"trailing-{len(name)}-{name.strip('. ')}")
+                commit_layout(repo)
+                repo.git("-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo",
+                         "100644,%s,%s" % (repo.git("hash-object", "-w", "--stdin", stdin=b"x\n"), name))
+                repo.git("commit", "-q", "-m", "trailing dot or space")
+                result, text, out = self.build(repo.root)
+                self.assertEqual(result.exit_code, 0, text)
+                report, text = self.quiet(build_release.verify_archive, out, repo.root)
+                lines = text.splitlines()
+                self.assertEqual(report.exit_code, 1, text)
+                self.assertEqual(
+                    [l for l in lines if l.startswith("secret_finding=")],
+                    [f"secret_finding={name}:0:credential-filename"],
+                )
+
+    def test_line_separator_in_member_path_keeps_the_bridge_readable(self):
+        # Model (4): node writes U+2028 raw inside a JSON string, so the reader splits on newline only.
+        repo = self.scratch()
+        commit_layout(repo)
+        repo.add_cacheinfo("100644", b"separator in the path\n", "docs/a b.md")
+        repo.git("commit", "-q", "-m", "line separator path")
+        result, text, out = self.build(repo.root)
+        self.assertEqual(result.exit_code, 0, text)
+        report, text = self.quiet(build_release.verify_archive, out, repo.root)
+        self.assertEqual(report.exit_code, 0, text)
+        self.assertEqual(text.splitlines()[-1], "verify=passed")
+
     def test_verify_fails_closed_when_node_unavailable(self):
         repo, out = self.built_with({"notes/plain.txt": b"nothing secret\n"})
-        real_which = shutil.which
-        with mock.patch.object(build_release.shutil, "which",
-                               side_effect=lambda name, *a, **k: None if name == "node" else real_which(name, *a, **k)):
+        real_lookup = build_release._program_on_absolute_path
+        with mock.patch.object(build_release, "_program_on_absolute_path",
+                               side_effect=lambda name: None if name == "node" else real_lookup(name)):
             report, text = self.quiet(build_release.verify_archive, out, repo.root)
         lines = text.splitlines()
         self.assertEqual(report.exit_code, 2, text)
@@ -1266,6 +1454,45 @@ class TestHistorySecretScan(HistoryTestCase):
         )
         self.assertEqual(values(text, "unresolved_count"), ["0"])
 
+    def test_credential_filename_path_is_a_finding(self):
+        # SEC-12: a credential file name is a path-only finding keyed on the empty trimmed line (DP23).
+        repo = self.scratch()
+        commit = repo.commit({"README.md": b"readme\n", "home/.netrc": b"machine example.invalid\n"}, "netrc")
+        mirror = self.mirror(repo)
+        empty_line = hashlib.sha256(b"").hexdigest()
+        key = hashlib.sha256(f"home/.netrc\0credential-filename\0{empty_line}".encode("utf-8")).hexdigest()
+        report, text = self.scan(mirror)
+        self.assertEqual(report.exit_code, 1, text)
+        self.assertEqual(
+            values(text, "secret_finding"),
+            [f"path=home/.netrc label=credential-filename key={key} first_commit={commit} line=0 state=unresolved"],
+        )
+        self.assertEqual(values(text, "scan_history"), ["failed"])
+        record = self.tmp / "record.json"
+        record.write_bytes(json.dumps({"entries": [{
+            "kind": "secret", "path": "home/.netrc", "label": "credential-filename",
+            "line_sha256": empty_line, "state": "false-positive",
+        }]}).encode("utf-8"))
+        report, text = self.scan(mirror, record=record)
+        self.assertEqual(report.exit_code, 0, text)
+        self.assertEqual([self.finding_fields(v)["state"] for v in values(text, "secret_finding")], ["false-positive"])
+        self.assertEqual(values(text, "scan_history"), ["passed"])
+
+    def test_credential_filename_with_trailing_dot_is_a_finding(self):
+        # SEC-12 + SEC-8: Windows checkout strips the trailing dot, so the path is the credential file there.
+        repo = self.scratch()
+        repo.commit({"README.md": b"readme\n"}, "readme")
+        oid = repo.git("hash-object", "-w", "--stdin", stdin=b"machine example.invalid\n")
+        repo.git("-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo", f"100644,{oid},home/.netrc.")
+        repo.git("commit", "-q", "-m", "netrc with trailing dot")
+        commit = repo.git("rev-parse", "HEAD")
+        report, text = self.scan(self.mirror(repo))
+        self.assertEqual(report.exit_code, 1, text)
+        self.assertEqual(
+            [self.finding_fields(v)["path"] for v in values(text, "secret_finding")], ["home/.netrc."]
+        )
+        self.assertIn(f"first_commit={commit} line=0 state=unresolved", values(text, "secret_finding")[0])
+
     def test_binary_blob_skipped_and_counted(self):
         key = synthetic_aws_key()
         repo = self.scratch()
@@ -1305,13 +1532,15 @@ class TestHistorySecretScan(HistoryTestCase):
             repo.commit({f"unique/file-{i}.txt": f"unique text {i}\n".encode("ascii")}, f"c{i}")
         mirror = self.mirror(repo)
 
-        def node_calls(run):
-            return [c for c in run.call_args_list if "--input-type=module" in c.args[0]]
+        def node_calls(run, marker="scanLines"):
+            return [c for c in run.call_args_list if "--input-type=module" in c.args[0] and marker in c.args[0][-1]]
 
         with mock.patch.object(build_release.subprocess, "run", wraps=subprocess.run) as run:
             report, text = self.scan(mirror)
         self.assertEqual(report.exit_code, 0, text)
         self.assertEqual(len(node_calls(run)), 1)
+        # SEC-12: every tree path goes through one credential-filename bridge process.
+        self.assertEqual(len(node_calls(run, "isCredentialFilename")), 1)
         with mock.patch.object(build_release, "SCAN_BATCH_SIZE", 16), \
                 mock.patch.object(build_release.subprocess, "run", wraps=subprocess.run) as run:
             report, text = self.scan(mirror)
@@ -1375,6 +1604,28 @@ class TestHistoryPrivatePaths(HistoryTestCase):
         report, text = self.scan(self.mirror(repo))
         self.assertEqual(report.exit_code, 1, text)
         self.assertIn(f"private_path_finding=path=.handoffs/h.md class=6 first_commit={pull} state=unresolved", text.splitlines())
+
+    def test_undecodable_tree_path_is_named(self):
+        # QUAL-11: a tree path that is not UTF-8 is named as class 7 instead of raising UnicodeDecodeError.
+        repo = self.scratch()
+        readme = repo.git("hash-object", "-w", "--stdin", stdin=b"readme\n").encode("ascii")
+        bad = repo.git("hash-object", "-w", "--stdin", stdin=b"bad\n").encode("ascii")
+        tree = repo.git(
+            "mktree", "-z",
+            stdin=b"100644 blob " + readme + b"\tREADME.md\0" + b"100644 blob " + bad + b"\tbad\xff.md\0",
+        )
+        commit = repo.git("commit-tree", tree, "-m", "undecodable path")
+        repo.git("update-ref", "refs/heads/main", commit)
+        shown = "bad\\udcff.md"
+        result, text, out = self.build(repo.root)
+        self.assertEqual(result.exit_code, 1, text)
+        self.assertIn(f"error=excluded_member:class-7:{shown}", text.splitlines())
+        self.assertIn("build=failed", text.splitlines())
+        self.assertFalse(out.exists())
+        report, text = self.scan(self.mirror(repo))
+        self.assertEqual(report.exit_code, 1, text)
+        self.assertIn(f"private_path_finding=path={shown} class=7 first_commit={commit} state=unresolved", text.splitlines())
+        self.assertEqual(values(text, "scan_history"), ["failed"])
 
 
 def second_synthetic_aws_key() -> str:
@@ -1611,6 +1862,27 @@ class TestCiArchiveSteps(unittest.TestCase):
         for target in targets:
             with self.subTest(target=target):
                 self.assertTrue(target.rsplit("/", 1)[-1].startswith("archive-"), target)
+
+    def test_archive_build_and_verify_logs_capture_stderr(self):
+        # QUAL-16: a traceback on stderr reaches the tee'd archive log.
+        runs = {name: run for name, run, _block in self.steps}
+        for name, flag in (("Archive build", "--output"), ("Archive verify", "--verify")):
+            with self.subTest(step=name):
+                calls = [line for line in runs[name].splitlines() if f"scripts/build_release.py {flag}" in line]
+                self.assertEqual(len(calls), 1, runs[name])
+                self.assertRegex(calls[0], r' 2>&1 \| tee "\$RUNNER_TEMP/archive-logs/archive-[a-z-]+\.log"$')
+
+    def test_result_line_limit_is_documented(self):
+        # QUAL-17: the fail-closed false-failure limit is stated next to the pattern.
+        source = (REPO / "scripts" / "build_release.py").read_text(encoding="utf-8").splitlines()
+        at = source.index("_RESULT_LINE = re.compile(")
+        start = at
+        while start > 0 and source[start - 1].startswith("#"):
+            start -= 1
+        comment = " ".join(line.lstrip("# ") for line in source[start:at])
+        for phrase in ("stderr", "skip count", "fails closed"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, comment)
 
 
 SAMPLE_TESTS = b'''import unittest
