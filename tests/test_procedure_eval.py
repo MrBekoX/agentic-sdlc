@@ -881,6 +881,18 @@ class TestStrictTrace(unittest.TestCase):
                                    .encode("utf-8"))
             strict_code, strict_out = run_main(["--eval-set", eval_set, "--transcript", transcript, "--strict-evidence"])
             default_code, default_out = run_main(["--eval-set", eval_set, "--transcript", transcript])
+            # Valid JSON that is not an object is malformed on its own (no invalid-JSON line to trip the check).
+            for non_object in ("[1]", '"x"'):
+                with self.subTest(line=non_object):
+                    only = Path(td) / "only.jsonl"
+                    only.write_bytes((json.dumps(text) + "\n" + non_object + "\n" + json.dumps(text) + "\n")
+                                     .encode("utf-8"))
+                    code, out = run_main(["--eval-set", eval_set, "--transcript", only, "--strict-evidence"])
+                    self.assertEqual(code, 1, out)
+                    self.assertIn("error=malformed-probe:strict_transcript_malformed_line", out.splitlines())
+                    code, out = run_main(["--eval-set", eval_set, "--transcript", only])
+                    self.assertEqual(code, 0, out)
+                    self.assertIn("case_malformed-probe=passed", out.splitlines())
         self.assertEqual(strict_code, 1)
         self.assertEqual(strict_out.splitlines().count("error=malformed-probe:strict_transcript_malformed_line"), 1)
         self.assertNotIn("{not json", strict_out)
@@ -1902,14 +1914,31 @@ class TestEvidencePacket(unittest.TestCase):
                 parsed.append(False)
         self.assertTrue(all(parsed), "a transcript copy line no longer parses as a JSON object")
 
+    def test_scalar_json_lines_do_not_split_a_private_key_block(self):  # D25 models (4) and (6)
+        # Mutation: treating any line json.loads accepts (a bare number, true, null) as a structured event, which
+        # splits the PEM run so the body lines after the scalar reach disk, and rewrites the scalar line itself.
+        begin, end = "-----BEGIN " + "RSA PRIVATE KEY-----", "-----END " + "RSA PRIVATE KEY-----"  # runtime-built
+        body = ["MIIEow" + "A" * 40, "12", "true", "QWERTY" + "B" * 40]
+        big = "1" * 64
+        text = "\n".join(['{"type": "x"}', big, begin, *body, end, "null", ""])
+        out = procedure_eval.redact_transcript_lines(text)
+        for line in (body[0], body[3], end):
+            self.assertFalse(line in out, "a private-key block line persisted in the redacted copy")
+        self.assertTrue("***MASKED" in out, "redacted copy lacks the masked form")
+        self.assertEqual(out.split("\n")[:2], ['{"type": "x"}', big])  # the scalar line keeps its bytes
+        self.assertEqual(out.split("\n")[-2:], ["null", ""])
+
     def test_home_directory_segments_masked_in_packet_and_transcript(self):  # D25 model (6), follow-up b
-        # Mutation: skipping mask_home_paths for the packet or the copy, or missing JSON-escaped separators.
-        user = "evaluser"
+        # Mutation: skipping mask_home_paths for the packet or the copy, missing JSON-escaped separators, ending the
+        # segment at a blank (a spaced profile name leaks its tail) or matching `home`/`Users` case-sensitively.
+        user, spaced, folded = "evaluser", "Evan Doe", "lowname"
         with tempfile.TemporaryDirectory() as td:
             transcript = write_jsonl(Path(td) / "home.jsonl", [
                 full_tool_use("w1", "Write", {"file_path": "/home/" + user + "/work/docs/agentic-sdlc/specs/x.md",
                                               "content": "spec\n"}),
                 full_tool_use("b1", "Bash", {"command": "dir C:\\Users\\" + user + "\\repo"}),
+                full_tool_use("b2", "Bash", {"command": "dir C:\\Users\\" + spaced + "\\repo"}),
+                full_tool_use("b3", "Bash", {"command": "ls /home/" + spaced + "/x c:/users/" + folded + "/x"}),
             ])
             self.assertTrue(b"C:\\\\Users\\\\" + user.encode() in transcript.read_bytes(), "precondition: escaped path")
             evidence = Path(td) / "ev"
@@ -1919,9 +1948,13 @@ class TestEvidencePacket(unittest.TestCase):
             copy_bytes = (evidence / f"{PACKET_CASE}.transcript.jsonl").read_bytes()
         for label, data in (("packet", packet_bytes), ("transcript copy", copy_bytes)):
             with self.subTest(file=label):
-                self.assertFalse(user.encode() in data, f"home user segment persisted in the {label}")
+                for part in (user, "Evan", "Doe", folded):
+                    self.assertFalse(part.encode() in data, f"home user segment {part!r} persisted in the {label}")
                 self.assertTrue(b"***MASKED:home***" in data, f"{label} lacks the masked home segment")
         self.assertTrue(b"unsafe_artifact_path:/home/***MASKED:home***/work/" in packet_bytes)
+        raw = "C:\\Users\\" + spaced + "\\repo /home/" + spaced + "\tx/y c:/users/" + folded + "/z"
+        self.assertEqual(procedure_eval.mask_home_paths(raw),
+                         "C:\\Users\\***MASKED:home***\\repo /home/***MASKED:home***/y c:/users/***MASKED:home***/z")
 
     def test_live_harness_packet_not_scorable(self):
         case = {"id": "safe-case", "prompt": "probe"}

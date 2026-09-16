@@ -2088,8 +2088,10 @@ def _write_text_atomically(target: Path, text: str) -> None:
         raise
 
 
-# D25 model (6): the path segment after a `home` or `Users` directory, also after JSON-escaped separators.
-_HOME_SEGMENT_RE = re.compile(r"(?<![A-Za-z0-9_.-])((?:home|Users)[/\\]+)(?!\*\*\*MASKED)[^/\\\s\"'<>|:;,*]+")
+# D25 model (6): the path segment after a `home` or `Users` directory (any case), also after JSON-escaped
+# separators. The segment runs to the next separator, quote, line break or delimiter, so a profile name holding a
+# space or tab is masked whole (over-masking a trailing argument is the safe direction).
+_HOME_SEGMENT_RE = re.compile(r"(?<![A-Za-z0-9_.-])((?i:home|users)[/\\]+)(?!\*\*\*MASKED)[^/\\\r\n\"'<>|:;,*]+")
 
 
 def mask_home_paths(text: str) -> str:
@@ -2100,7 +2102,7 @@ def mask_home_paths(text: str) -> str:
 def redact_transcript_lines(text: str) -> str:
     """Redact a transcript copy line by line (D25 model (6)).
 
-    Lines that parse as JSON go through one batched structured redaction (which decodes string values and keeps key
+    Lines that parse as a JSON object or array go through one batched structured redaction (which decodes string values and keeps key
     context) and are re-serialized with ensure_ascii=False. Each run of consecutive other lines goes through the text
     redactor as one block, so a multi-line private key between them is still masked whole. Any redaction failure
     raises, and the caller writes nothing.
@@ -2109,9 +2111,11 @@ def redact_transcript_lines(text: str) -> str:
     parsed: dict[int, Any] = {}
     for index, line in enumerate(lines):
         try:
-            parsed[index] = json.loads(line[:-1] if line.endswith("\r") else line)
+            value = json.loads(line[:-1] if line.endswith("\r") else line)
         except json.JSONDecodeError:
             continue
+        if isinstance(value, (dict, list)):  # a bare scalar stays in the text run (it may sit inside a key block)
+            parsed[index] = value
     clean = redact_json(list(parsed.values())) if parsed else []
     if not isinstance(clean, list) or len(clean) != len(parsed):
         raise RuntimeError("structured transcript redaction returned an unexpected shape")
