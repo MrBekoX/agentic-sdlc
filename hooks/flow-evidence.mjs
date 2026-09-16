@@ -8,7 +8,7 @@
 //   - branch   : the Stop-time working-directory branch is not main/master (warn-level step).
 //   - reviewResult : a dispatched reviewer returned a correlated non-error tool_result (warn-level).
 // Every reader fails OPEN (treats as allowed / satisfied) on its own error, matching the other guards.
-import { readFileSync, readdirSync } from 'node:fs';
+import { accessSync, constants as fsConstants, readFileSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -327,17 +327,43 @@ export const BRANCH_GIT_ARGV = Object.freeze({
     'rev-parse', '--verify', '--quiet', 'HEAD']),
 });
 
+// D25 model (5): a program is started only by an absolute path found in an absolute PATH entry, so
+// neither a relative entry nor the win32 cwd-first lookup can reach a program planted in the
+// untrusted cwd. On win32 only <name>.exe and <name>.com are tried (PATHEXT is not consulted, so a
+// batch file is never a candidate); elsewhere a candidate must be an executable regular file.
+function programOnAbsolutePath(name) {
+  const win = process.platform === 'win32';
+  const absolute = win ? /^(?:[A-Za-z]:[\\/]|\\\\|\/\/)/ : /^\//;
+  const names = win ? [`${name}.exe`, `${name}.com`] : [name];
+  for (const entry of String(process.env.PATH ?? '').split(win ? ';' : ':')) {
+    if (!absolute.test(entry)) continue;
+    for (const candidate of names) {
+      const full = join(entry, candidate);
+      try {
+        if (!statSync(full).isFile()) continue;
+        if (!win) accessSync(full, fsConstants.X_OK);
+        return full;
+      } catch {
+        // missing or not executable: try the next candidate
+      }
+    }
+  }
+  return null;
+}
+
 export function resolveBranchState(cwd) {
   try {
+    const git = programOnAbsolutePath('git');
+    if (!git) return 'unknown';
     const options = {
       cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5000,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', NoDefaultCurrentDirectoryInExePath: '1' },
     };
-    const name = execFileSync('git', BRANCH_GIT_ARGV.symbolicRef, options).trim();
-    execFileSync('git', BRANCH_GIT_ARGV.verifyHead, options); // throws when there is no commit yet
+    const name = execFileSync(git, BRANCH_GIT_ARGV.symbolicRef, options).trim();
+    execFileSync(git, BRANCH_GIT_ARGV.verifyHead, options); // throws when there is no commit yet
     return name === 'main' || name === 'master' ? 'protected' : 'ok';
   } catch {
     return 'unknown'; // git missing, not a repository, detached HEAD, no commits, or a timeout

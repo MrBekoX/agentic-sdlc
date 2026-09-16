@@ -310,7 +310,10 @@ export function redactSecrets(text, patterns = HIGH) {
       let rebuilt = '';
       let copied = 0;
       for (const m of hits) {
-        if (m.start < copied) continue; // inside a span this pass already masked
+        if (m.start < copied) { // starts inside a span this pass already masked: extend it over the hit
+          copied = Math.max(copied, m.end);
+          continue;
+        }
         rebuilt += redacted.slice(copied, m.start) + `***MASKED:${p.label}***`;
         copied = m.end;
       }

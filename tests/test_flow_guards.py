@@ -569,6 +569,51 @@ class TestBranchStep(unittest.TestCase):
         self.assertEqual(proc.stdout, "protected")
         self.assertFalse(sentinel.exists())
 
+    # ---- D25 model (5): git is started only from an absolute PATH entry (SEC-6) ----
+    def _resolve_in(self, repo, env):
+        """resolveBranchState(process.cwd()) run by node with its cwd set to `repo`."""
+        script = ("const m = await import(%s); process.stdout.write(String(m.resolveBranchState(process.cwd())));"
+                  % json.dumps(FLOW_EVID.as_uri()))
+        env["GIT_CEILING_DIRECTORIES"] = str(repo.parent)
+        proc = subprocess.run([NODE, "--input-type=module", "-e", script], capture_output=True,
+                              text=True, encoding="utf-8", cwd=repo, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout
+
+    def _plant_git(self, repo):
+        """A program named git in `repo`. POSIX: a sentinel writer that exits 1. win32: a whoami.exe copy,
+        which rejects git's argv (exit 1) and cannot write a sentinel. Returns the sentinel path."""
+        sentinel = repo.parent / "planted-git-ran"
+        if sys.platform == "win32":
+            whoami = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "whoami.exe"
+            if not whoami.is_file():
+                self.skipTest("whoami.exe is not available to stand in for a planted git.exe")
+            shutil.copyfile(whoami, repo / "git.exe")
+        else:
+            fake = repo / "git"
+            fake.write_text(f"#!/bin/sh\ntouch '{sentinel}'\nexit 1\n", encoding="utf-8")
+            fake.chmod(0o755)
+        return sentinel
+
+    def test_git_behind_relative_path_entry_is_not_run(self):  # AC32, AC120
+        # Mutation: resolveBranchState spawning a bare `git`, so the lookup walks the relative `.` entry.
+        repo = self.make_repo("main")
+        sentinel = self._plant_git(repo)
+        env = os.environ.copy()
+        env["PATH"] = "." + os.pathsep + env.get("PATH", "")
+        self.assertEqual(self._resolve_in(repo, env), "protected")
+        self.assertFalse(sentinel.exists(), "the planted git ran")
+
+    @unittest.skipUnless(sys.platform == "win32", "the cwd-first program lookup exists only on win32")
+    def test_planted_git_exe_in_cwd_is_not_run(self):  # AC32, AC120
+        # Mutation: a bare `git` spawn; with NoDefaultCurrentDirectoryInExePath unset, win32 searches the cwd first.
+        repo = self.make_repo("main")
+        self._plant_git(repo)
+        env = os.environ.copy()
+        for name in [k for k in env if k.lower() == "nodefaultcurrentdirectoryinexepath"]:
+            del env[name]
+        self.assertEqual(self._resolve_in(repo, env), "protected")
+
     # ---- guards: pass before and after the branch step ----
     def test_feature_branch_no_branch_id(self):  # AC32
         self.assertEqual(self.stop(_satisfied_events(RCF), self.make_repo("feature/x")), {})
