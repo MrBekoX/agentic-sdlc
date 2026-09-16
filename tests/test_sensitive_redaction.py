@@ -1,7 +1,15 @@
-import unittest
 import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
 
 from scripts.sensitive_redaction import redact_text
+
+REPO = Path(__file__).resolve().parents[1]
 
 
 class TestSensitiveRedaction(unittest.TestCase):
@@ -66,6 +74,65 @@ class TestSensitiveRedaction(unittest.TestCase):
         body = "QWxhZGRpbjpvcGVuIHNlc2FtZQ=="
         out = redact_text("-----BEGIN PRIVATE KEY-----\n" + body)  # agentic-sdlc:allow-secret
         self.assertEqual(out, "***MASKED:private-key***")
+
+    def test_quote_inside_credential_value_is_masked(self):
+        # SEC-14. Mutation: the structured member test re-serializing a value whose `"` ends the value class early.
+        from scripts.sensitive_redaction import redact_json
+        tail = "Wd4" + "Qx8Ls2Np6Rt9Vb3Kz"
+        self.assertEqual(len(tail), 20)
+        out = redact_json({"pass" + "word": "ab" + '"' + tail})
+        dumped = json.dumps(out)
+        self.assertFalse(tail in dumped, "the value after the quote survived redaction")
+        self.assertFalse("ab" + '\\"' in dumped, "the value before the quote survived redaction")
+
+    # D25 model (5): node is started only from an absolute PATH entry (SEC-7 class).
+    def _in_dir_with_path(self, cwd, path):
+        """Run the rest of the test with the process cwd and PATH replaced; both are restored afterwards."""
+        from unittest import mock
+        previous = os.getcwd()
+        os.chdir(cwd)
+        self.addCleanup(os.chdir, previous)
+        patcher = mock.patch.dict(os.environ, {"PATH": path})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _redact_or_none(self, text):
+        try:
+            return redact_text(text)
+        except RuntimeError:
+            return None  # a planted program ran and failed
+
+    def test_node_behind_relative_path_entry_is_not_run(self):
+        # Mutation: shutil.which("node"), which walks the relative `.` entry first.
+        root = Path(tempfile.mkdtemp(prefix="redact-node-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        sentinel = root.parent / (root.name + "-sentinel")
+        self.addCleanup(lambda: sentinel.exists() and sentinel.unlink())
+        if sys.platform == "win32":
+            whoami = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "whoami.exe"
+            if not whoami.is_file():
+                self.skipTest("whoami.exe is not available to stand in for a planted node.exe")
+            shutil.copyfile(whoami, root / "node.exe")
+        else:
+            fake = root / "node"
+            fake.write_text(f"#!/bin/sh\ntouch '{sentinel}'\nexit 1\n", encoding="utf-8")
+            fake.chmod(0o755)
+        self._in_dir_with_path(root, "." + os.pathsep + os.environ.get("PATH", ""))
+        self.assertEqual(self._redact_or_none("x"), "x")
+        self.assertFalse(sentinel.exists(), "the planted node ran")
+
+    @unittest.skipUnless(sys.platform == "win32", "PATHEXT batch candidates exist only on win32")
+    def test_batch_file_is_not_a_candidate(self):
+        # Mutation: a PATHEXT-driven lookup that accepts node.cmd from the first absolute entry.
+        root = Path(tempfile.mkdtemp(prefix="redact-cmd-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        sentinel = root / "sentinel"
+        (bin_dir / "node.cmd").write_bytes(f'@echo off\r\ntype nul > "{sentinel}"\r\n'.encode("utf-8"))
+        self._in_dir_with_path(root, str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+        self.assertEqual(self._redact_or_none("x"), "x")
+        self.assertFalse(sentinel.exists(), "the batch file ran")
 
 
 # D22 (Task 129): every unsuppressed match is masked, including a value glued to or joined with a suppressed one.
@@ -139,6 +206,23 @@ class TestPerMatchRedaction(unittest.TestCase):
         # CONTROL: suppressed matches are copied unchanged.
         line = GH_PLACEHOLDER + " " + AWS_SAMPLE + " " + PASSWORD + CHANGE_ME + "\n"
         self.assertTrue(redact_text(line) == line, "a suppressed sample line was changed")
+
+    def test_overlapping_json_credential_hit_extends_the_mask(self):
+        # SEC-11. Mutation: skipping a hit that starts inside the span this pass masked, although it ends past it.
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is required for the hook-layer scanner")
+        key = "my_" + "pass" + "word_text_long_value"
+        value = "Zq9" + "Lm4Rt8Vx2Kp6Hn3Bw5Jc7"
+        self.assertEqual((len(key), len(value)), (27, 24))
+        line = '"to' + 'ken": "' + key + '": "' + value + '"'
+        script = ("import('./hooks/secret-patterns.mjs').then(m=>{let s='';process.stdin.on('data',d=>s+=d)"
+                  ".on('end',()=>process.stdout.write(String(m.scanLines(s,m.HIGH).length)))})")
+        proc = subprocess.run([node, "-e", script], input=line, capture_output=True, text=True,
+                              encoding="utf-8", cwd=str(REPO))
+        self.assertEqual(proc.returncode, 0, "the scanner probe failed")
+        self.assertTrue(proc.stdout == "1", "scanLines did not report exactly one hit")
+        self.assertFalse(value in redact_text(line + "\n"), "the overlapping credential value survived redaction")
 
     def test_redaction_stays_linear_on_long_suppressed_chains(self):
         import time
