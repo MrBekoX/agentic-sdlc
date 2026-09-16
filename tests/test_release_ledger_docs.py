@@ -363,8 +363,55 @@ def _decision(**overrides):
     return base
 
 
+IDENTITY_CHECK_HEADING = "## Release identity check"
+UTC_STAMP = re.compile(r"^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\b")
+DEPENDENCY_CLAIM = "no skill relies on commands or agents"
+
+
+def identity_check_violations(text):
+    """Every bullet of the release identity check is a UTC-timestamped record of a run (plan Task 84, AC115)."""
+    lines = text.splitlines()
+    if IDENTITY_CHECK_HEADING not in lines:
+        return ["missing_identity_check_section"]
+    bullets = [line for line in _section(lines, lines.index(IDENTITY_CHECK_HEADING)) if line.startswith("- ")]
+    violations = []
+    if len(bullets) < 2:
+        violations.append("missing_identity_recheck")
+    for bullet in bullets:
+        if not UTC_STAMP.match(bullet):
+            violations.append("identity_check_without_utc_timestamp")
+        if "not run" in bullet:
+            violations.append("identity_check_not_run")
+    return violations
+
+
+def packet_dependency_violations(packet, skill_texts, command_names, agent_names):
+    """The OpenAI packet states the no-commands/agents rule as a guide requirement and names each GAP."""
+    violations = []
+    for line in packet.splitlines():
+        if DEPENDENCY_CLAIM in line.lower() and "requires" not in line:
+            violations.append("dependency_claim_as_fact")
+    gap_lines = [line for line in packet.splitlines() if "GAP" in line]
+    joined = "\n".join(skill_texts)
+    for name in command_names:
+        if name in joined and not any(name in line for line in gap_lines):
+            violations.append("missing_command_gap:" + name)
+    for name in agent_names:
+        if name in joined and not any(name in line for line in gap_lines):
+            violations.append("missing_agent_gap:" + name)
+    return violations
+
+
 def _real(path):
     return (REPO / path).read_text(encoding="utf-8")
+
+
+def _names(directory):
+    return sorted(p.stem for p in (REPO / directory).glob("*.md") if p.stem.lower() != "readme")
+
+
+def _skill_texts():
+    return [p.read_text(encoding="utf-8") for p in sorted((REPO / "skills").rglob("*.md"))]
 
 
 class TestLedgerAnnotations(unittest.TestCase):
@@ -479,6 +526,66 @@ class TestDecisionBlock(unittest.TestCase):
 
     def test_real_path_verdicts_are_no_go_or_reviewed(self):
         self.assertEqual(path_verdict_violations(_real("docs/release-evidence-0.4.3.md")), [])
+
+
+GOOD_IDENTITY_CHECK = "\n".join(
+    [
+        "## Release identity check",
+        "",
+        "- 2026-09-14T19:56:26Z: 0 remote tags; no collision.",
+        "- 2026-09-16T18:36:39Z re-check: 0 remote tags, 0 GitHub releases; no collision.",
+        "",
+        "## Required release rows",
+    ]
+)
+
+
+class TestReleaseIdentityCheck(unittest.TestCase):
+    def test_identity_check_rule_synthetic_cases(self):
+        self.assertEqual(identity_check_violations(GOOD_IDENTITY_CHECK), [])
+        undated = GOOD_IDENTITY_CHECK.replace("- 2026-09-16T18:36:39Z re-check: 0 remote tags", "- 2026-09-16 re-check: 0 remote tags")
+        cases = [
+            ("missing_identity_check_section", GOOD_IDENTITY_CHECK.replace("## Release identity check", "## Identity")),
+            ("missing_identity_recheck", GOOD_IDENTITY_CHECK.replace("- 2026-09-16T18:36:39Z re-check: 0 remote tags, 0 GitHub releases; no collision.\n", "")),
+            ("identity_check_without_utc_timestamp", undated),
+            ("identity_check_not_run", GOOD_IDENTITY_CHECK.replace("0 remote tags, 0 GitHub releases", "not run, no network")),
+        ]
+        for name, text in cases:
+            with self.subTest(name=name):
+                self.assertIn(name, identity_check_violations(text))
+
+    def test_real_identity_check_records_a_dated_recheck(self):
+        self.assertEqual(identity_check_violations(_real("docs/release-evidence-0.4.3.md")), [])
+
+
+class TestOpenAIPacketDependencies(unittest.TestCase):
+    GOOD = "\n".join(
+        [
+            "- The OpenAI guide requires that no skill relies on commands or agents (link).",
+            "- GAP: pipeline step 16 names the `git-safety-check` command; skills name `code-reviewer` roles.",
+        ]
+    )
+    SKILLS = ["Run the read-only git-safety-check command.", "Delegate to the code-reviewer agent."]
+
+    def test_packet_dependency_rule_synthetic_cases(self):
+        args = (self.SKILLS, ["git-safety-check"], ["code-reviewer"])
+        self.assertEqual(packet_dependency_violations(self.GOOD, *args), [])
+        fact = "- It has no MCP configuration, and no skill relies on commands or agents (link)."
+        cases = [
+            ("dependency_claim_as_fact", fact + "\n" + self.GOOD.splitlines()[1]),
+            ("missing_command_gap:git-safety-check", self.GOOD.replace("`git-safety-check` command", "a command")),
+            ("missing_agent_gap:code-reviewer", self.GOOD.replace("`code-reviewer` roles", "agent roles")),
+        ]
+        for name, text in cases:
+            with self.subTest(name=name):
+                self.assertIn(name, packet_dependency_violations(text, *args))
+        self.assertEqual(packet_dependency_violations("no GAP needed", ["plain skill"], ["git-safety-check"], ["code-reviewer"]), [])
+
+    def test_real_openai_packet_names_command_and_agent_gaps(self):
+        violations = packet_dependency_violations(
+            _real("docs/publication/openai-skills-only.md"), _skill_texts(), _names("commands"), _names("agents")
+        )
+        self.assertEqual(violations, [])
 
 
 if __name__ == "__main__":

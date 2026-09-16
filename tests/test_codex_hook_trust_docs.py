@@ -2,7 +2,7 @@
 
 The pure helpers return named violations, so the synthetic cases prove each rule fires without
 editing a real file. The real-file tests read README.md, .codex-plugin/README.md,
-docs/troubleshooting.md and docs/runtime-adapter.md.
+docs/troubleshooting.md, docs/runtime-adapter.md and the ledger row state in docs/release-evidence-0.4.3.md.
 """
 import re
 import unittest
@@ -15,6 +15,8 @@ TRUSTED_LINE = "codex_hook_trust=trusted"
 BYPASS_FLAG = "--dangerously-bypass-hook-trust"
 SECTION_HEADING = "Codex hook trust"
 SECTION_ANCHOR = "troubleshooting.md#codex-hook-trust"
+LEDGER_ROW = "hook_trust_list_records"
+VERIFIED_CLAIM = re.compile(r"\bverified through\b", re.IGNORECASE)
 
 
 def section(text, heading):
@@ -31,7 +33,17 @@ def section(text, heading):
     return None
 
 
-def trust_section_violations(text):
+def ledger_row_state(ledger, row_id):
+    """Return the State cell of a `## Required release rows` row, or None when the row is absent."""
+    for line in ledger.splitlines():
+        cells = [cell.strip() for cell in line.split("|")]
+        if len(cells) > 3 and cells[1] == "`" + row_id + "`":
+            return cells[3]
+    return None
+
+
+def trust_section_violations(text, ledger_state=None):
+    """A row may claim `verified through` only while the ledger row it cites reads PASS (spec AC132)."""
     body = section(text, SECTION_HEADING)
     if body is None:
         return ["missing_section"]
@@ -49,6 +61,8 @@ def trust_section_violations(text):
             violations.append("row_missing_check_command:" + env)
         if "node" not in row.lower():
             violations.append("row_missing_node_requirement:" + env)
+        if VERIFIED_CLAIM.search(row) and ledger_state != "PASS":
+            violations.append("unverified_platform_claim:" + env)
     joined = "\n".join(body)
     if "not live-tested" not in joined:
         violations.append("missing_not_live_tested")
@@ -117,6 +131,16 @@ class TestTrustSectionRules(unittest.TestCase):
         for name, text in cases:
             with self.subTest(name=name):
                 self.assertIn(name, trust_section_violations(text))
+        claimed = GOOD_SECTION.replace(_row("Linux"), _row("Linux").replace("| not live-tested |", "| verified through WSL Ubuntu 24.04 |"))
+        for state in (None, "not-run", "FAIL"):
+            with self.subTest(name="unverified_platform_claim:Linux", state=state):
+                self.assertIn("unverified_platform_claim:Linux", trust_section_violations(claimed, state))
+        self.assertEqual(trust_section_violations(claimed, "PASS"), [])
+
+    def test_ledger_row_state_reads_the_state_cell(self):
+        ledger = "| Row id | BR3 required | State |\n|---|---|---|\n| `hook_trust_list_records` | yes | not-run |"
+        self.assertEqual(ledger_row_state(ledger, LEDGER_ROW), "not-run")
+        self.assertIsNone(ledger_row_state(ledger, "other_row"))
 
     def test_install_doc_and_adapter_rule_synthetic_cases(self):
         good = "Run `python3 scripts/check_codex_hook_trust.py`; expect `codex_hook_trust=trusted` (docs/troubleshooting.md#codex-hook-trust)."
@@ -133,7 +157,10 @@ class TestTrustSectionRules(unittest.TestCase):
 class TestRealTrustDocs(unittest.TestCase):
     def test_troubleshooting_trust_section_covers_every_environment(self):
         text = (REPO / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
-        self.assertEqual(trust_section_violations(text), [])
+        ledger = (REPO / "docs" / "release-evidence-0.4.3.md").read_text(encoding="utf-8")
+        state = ledger_row_state(ledger, LEDGER_ROW)
+        self.assertIsNotNone(state)
+        self.assertEqual(trust_section_violations(text, state), [])
 
     def test_install_docs_give_the_check_command_and_trusted_line(self):
         violations = []

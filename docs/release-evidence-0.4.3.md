@@ -90,7 +90,7 @@ This source-archive recipe has not created a commit or published a release. Arch
 ## Release identity check
 
 - 2026-09-14T19:56:26Z: `git ls-remote --tags origin` listed 0 remote tags, so neither `v0.4.3` nor `agentic-sdlc--v0.4.3` (the intended form, DP9) exists; the GitHub release `0.4.3` does not exist; the OpenAI portal version is BLOCKED on portal access. No collision was found, so no stop was recorded.
-- 2026-09-15 re-check: not run in the slice F worktree, which runs without network access (`git ls-remote` and the GitHub API need it). The release identity check is repeated before any tag, release or portal version is created.
+- 2026-09-16T18:36:39Z re-check: `git ls-remote --tags origin` exited 0 and listed 0 remote tags (no `v0.4.3` or `agentic-sdlc--v0.4.3`), and `gh api repos/MrBekoX/agentic-sdlc/releases --jq length` exited 0 and printed 0 (no GitHub releases); no collision was found. The release identity check is repeated before any tag, release or portal version is created.
 
 ## Required release rows
 
