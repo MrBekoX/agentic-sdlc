@@ -34,10 +34,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/archive" "$RUNNER_TEMP/archive-logs"
-          python3 scripts/build_release.py --output "$RUNNER_TEMP/archive/agentic-sdlc.zip" | tee "$RUNNER_TEMP/archive-logs/archive-build.log"
+          python3 scripts/build_release.py --output "$RUNNER_TEMP/archive/agentic-sdlc.zip" 2>&1 | tee "$RUNNER_TEMP/archive-logs/archive-build.log"
       - name: Archive verify
         shell: bash
-        run: python3 scripts/build_release.py --verify "$RUNNER_TEMP/archive/agentic-sdlc.zip" | tee "$RUNNER_TEMP/archive-logs/archive-verify.log"
+        run: python3 scripts/build_release.py --verify "$RUNNER_TEMP/archive/agentic-sdlc.zip" 2>&1 | tee "$RUNNER_TEMP/archive-logs/archive-verify.log"
       - name: Archive extract to clean directory
         shell: bash
         run: |
