@@ -501,12 +501,19 @@ def scan_texts(items) -> dict:
 
 
 def credential_filenames(paths) -> set:
-    """The paths the commit scanner's isCredentialFilename rule matches, checked in one node process."""
+    """The paths the commit scanner's isCredentialFilename rule matches, checked in one node process.
+
+    The rule sees each path in NFC with trailing dots and spaces stripped from every segment, the
+    name Windows extraction writes (SEC-8), so `.npmrc.` is matched; the original path is returned.
+    """
     paths = list(paths)
     if not paths:
         return set()
     script = _NAME_BRIDGE.replace("__NAMES__", json.dumps(str(CREDENTIAL_NAMES_MODULE)))
-    results = _node_bridge(script, [{"id": index, "path": path} for index, path in enumerate(paths)])
+    results = _node_bridge(script, [
+        {"id": index, "path": "/".join(seg.rstrip(". ") for seg in unicodedata.normalize("NFC", path).split("/"))}
+        for index, path in enumerate(paths)
+    ])
     return {path for index, path in enumerate(paths) if results[index]["credential"] is True}
 
 

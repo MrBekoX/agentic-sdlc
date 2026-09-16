@@ -1131,6 +1131,23 @@ class TestVerifySecretScan(ScratchTestCase):
         )
         self.assertIn("binary_members_skipped=1", lines)
         self.assertEqual(lines[-1], "verify=failed")
+        # Windows extraction strips a trailing dot or space, so these names land on disk as the credential file.
+        for name in (".npmrc.", "id_rsa "):
+            with self.subTest(name=name):
+                repo = self.scratch(f"trailing-{len(name)}-{name.strip('. ')}")
+                commit_layout(repo)
+                repo.git("-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo",
+                         "100644,%s,%s" % (repo.git("hash-object", "-w", "--stdin", stdin=b"x\n"), name))
+                repo.git("commit", "-q", "-m", "trailing dot or space")
+                result, text, out = self.build(repo.root)
+                self.assertEqual(result.exit_code, 0, text)
+                report, text = self.quiet(build_release.verify_archive, out, repo.root)
+                lines = text.splitlines()
+                self.assertEqual(report.exit_code, 1, text)
+                self.assertEqual(
+                    [l for l in lines if l.startswith("secret_finding=")],
+                    [f"secret_finding={name}:0:credential-filename"],
+                )
 
     def test_line_separator_in_member_path_keeps_the_bridge_readable(self):
         # Model (4): node writes U+2028 raw inside a JSON string, so the reader splits on newline only.
@@ -1460,6 +1477,21 @@ class TestHistorySecretScan(HistoryTestCase):
         self.assertEqual(report.exit_code, 0, text)
         self.assertEqual([self.finding_fields(v)["state"] for v in values(text, "secret_finding")], ["false-positive"])
         self.assertEqual(values(text, "scan_history"), ["passed"])
+
+    def test_credential_filename_with_trailing_dot_is_a_finding(self):
+        # SEC-12 + SEC-8: Windows checkout strips the trailing dot, so the path is the credential file there.
+        repo = self.scratch()
+        repo.commit({"README.md": b"readme\n"}, "readme")
+        oid = repo.git("hash-object", "-w", "--stdin", stdin=b"machine example.invalid\n")
+        repo.git("-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo", f"100644,{oid},home/.netrc.")
+        repo.git("commit", "-q", "-m", "netrc with trailing dot")
+        commit = repo.git("rev-parse", "HEAD")
+        report, text = self.scan(self.mirror(repo))
+        self.assertEqual(report.exit_code, 1, text)
+        self.assertEqual(
+            [self.finding_fields(v)["path"] for v in values(text, "secret_finding")], ["home/.netrc."]
+        )
+        self.assertIn(f"first_commit={commit} line=0 state=unresolved", values(text, "secret_finding")[0])
 
     def test_binary_blob_skipped_and_counted(self):
         key = synthetic_aws_key()
