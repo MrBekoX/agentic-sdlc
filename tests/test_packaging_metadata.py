@@ -769,7 +769,13 @@ class TestVersionDeclarations(unittest.TestCase):
     RELEASE_READINESS = (
         "# Release Readiness\n\nThis file is the publish gate for `agentic-sdlc` version `0.4.3`. "
         "It keeps the release decision evidence-based.\n"
+        "\n## Release Verdict Template\n\n```text\nversion=0.4.3\nscope=Claude Code, Codex\n```\n"
     )
+    MANIFESTS = {
+        ".claude-plugin/plugin.json": {"name": "agentic-sdlc", "version": "0.4.3"},
+        ".claude-plugin/marketplace.json": {"plugins": [{"name": "agentic-sdlc", "version": "0.4.3"}]},
+        ".codex-plugin/plugin.json": {"name": "agentic-sdlc", "version": "0.4.3"},
+    }
 
     @classmethod
     def setUpClass(cls):
@@ -777,28 +783,97 @@ class TestVersionDeclarations(unittest.TestCase):
         cls.bump_version = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.bump_version)
 
-    def run_check(self, release=False, readme=None, plugin_readme=None, release_readiness=None):
+    def write_tree(self, root, readme=None, plugin_readme=None, release_readiness=None, manifests=None):
+        manifest_data = {**self.MANIFESTS, **(manifests or {})}
         files = {
             "VERSION": "0.4.3\n",
-            ".claude-plugin/plugin.json": json.dumps({"name": "agentic-sdlc", "version": "0.4.3"}) + "\n",
-            ".claude-plugin/marketplace.json": json.dumps({"plugins": [{"name": "agentic-sdlc", "version": "0.4.3"}]}) + "\n",
-            ".codex-plugin/plugin.json": json.dumps({"name": "agentic-sdlc", "version": "0.4.3"}) + "\n",
+            **{rel: json.dumps(data) + "\n" for rel, data in manifest_data.items()},
             "README.md": self.README if readme is None else readme,
             "docs/plugin-readme.md": self.PLUGIN_README if plugin_readme is None else plugin_readme,
             "docs/release-readiness.md": self.RELEASE_READINESS if release_readiness is None else release_readiness,
             "CHANGELOG.md": "# Changelog\n\n## Unreleased\n\n## 0.4.3 - 2026-09-14\n\n- Publication readiness.\n",
         }
+        for rel, text in files.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # LF on every host: the (?m)^ anchors must not see a stray \r.
+            path.write_text(text, encoding="utf-8", newline="\n")
+
+    def run_check(self, release=False, readme=None, plugin_readme=None, release_readiness=None, manifests=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for rel, text in files.items():
-                path = root / rel
-                path.parent.mkdir(parents=True, exist_ok=True)
-                # LF on every host: the (?m)^ anchors must not see a stray \r.
-                path.write_text(text, encoding="utf-8", newline="\n")
+            self.write_tree(root, readme, plugin_readme, release_readiness, manifests)
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 code = self.bump_version.check(release=release, root=root)
         return code, out.getvalue()
+
+    def test_bump_rewrites_every_declaration_then_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_tree(root)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = self.bump_version.bump("0.4.4", root=root)
+            self.assertEqual(code, 0, out.getvalue())
+            self.assertIn("version_check=passed", out.getvalue())
+            self.assertEqual((root / "VERSION").read_bytes(), b"0.4.4\n")
+            template = (root / "docs" / "release-readiness.md").read_bytes()
+            self.assertRegex(template, rb"(?m)^version=0\.4\.4\n")
+            self.assertNotIn(b"0.4.3", template)
+            self.assertIn(b"scope=Claude Code, Codex\n", template)
+            readme = (root / "README.md").read_bytes()
+            self.assertIn(b"> `Version 0.4.4` - `MIT`", readme)
+            self.assertIn(b"Current version: `0.4.4`.", readme)
+            self.assertIn(b"> Version: `0.4.4`.", (root / "docs" / "plugin-readme.md").read_bytes())
+            for rel in self.MANIFESTS:
+                data = (root / rel).read_bytes()
+                self.assertNotIn(b"\r", data, rel)
+                self.assertIn(b'"version": "0.4.4"', data, rel)
+
+    def test_bump_rejects_non_release_version_before_writing(self):
+        # The verdict template line only admits X.Y.Z; a pre-release or build bump would
+        # strand it (version_missing forever), so bump must refuse before touching the tree.
+        for version in ("0.5.0-rc1", "0.5.0+build.7"):
+            with self.subTest(version), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self.write_tree(root)
+                before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    code = self.bump_version.bump(version, root=root)
+                self.assertEqual(code, 2, out.getvalue())
+                self.assertIn(f"error=unsupported_version:{version}", out.getvalue())
+                after = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+                self.assertEqual(after, before)
+
+    def test_manifest_version_drift_fails(self):
+        cases = {
+            "plugin 0.4.2": (".claude-plugin/plugin.json", {"name": "agentic-sdlc", "version": "0.4.2"}),
+            "plugin missing": (".claude-plugin/plugin.json", {"name": "agentic-sdlc"}),
+            "marketplace 0.4.2": (".claude-plugin/marketplace.json", {"plugins": [{"name": "agentic-sdlc", "version": "0.4.2"}]}),
+            "marketplace missing": (".claude-plugin/marketplace.json", {"plugins": [{"name": "agentic-sdlc"}]}),
+            "codex 0.4.2": (".codex-plugin/plugin.json", {"name": "agentic-sdlc", "version": "0.4.2"}),
+            "codex missing": (".codex-plugin/plugin.json", {"name": "agentic-sdlc"}),
+        }
+        for label, (rel, data) in cases.items():
+            with self.subTest(label):
+                code, out = self.run_check(manifests={rel: data})
+                self.assertEqual(code, 1, out)
+                self.assertIn(f"version_mismatch={rel}:version:", out)
+                self.assertIn("version_check=failed", out)
+
+    def test_verdict_template_version_drift_fails(self):
+        stale = self.RELEASE_READINESS.replace("\nversion=0.4.3\n", "\nversion=0.4.2\n")
+        self.assertNotEqual(stale, self.RELEASE_READINESS)
+        code, out = self.run_check(release_readiness=stale)
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"(?m)^version_mismatch=docs/release-readiness\.md:verdict-template-version:0\.4\.2$")
+        self.assertIn("version_check=failed", out)
+        missing = self.RELEASE_READINESS.replace("\nversion=0.4.3\n", "\n")
+        code, out = self.run_check(release_readiness=missing)
+        self.assertEqual(code, 1, out)
+        self.assertIn("version_missing=docs/release-readiness.md:verdict-template-version", out)
 
     def test_stale_current_version_sentence_fails(self):
         code, out = self.run_check(readme=self.README.replace("Current version: `0.4.3`.", "Current version: `0.4.2`."))
@@ -829,7 +904,7 @@ class TestVersionDeclarations(unittest.TestCase):
     def test_historical_version_text_is_not_a_declaration(self):
         history = (
             "\n## Historical evidence\n\nPlugin cache refreshed to `agentic-sdlc@personal` version `0.3.0` before the run.\n"
-            "\n```text\nversion=0.4.2\n```\n"
+            "\n```text\nprevious version=0.4.2\n```\n"
         )
         code, out = self.run_check(release_readiness=self.RELEASE_READINESS + history)
         self.assertEqual(code, 0, out)
