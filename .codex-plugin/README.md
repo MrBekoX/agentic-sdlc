@@ -20,15 +20,26 @@ The manifest explicitly points to:
 }
 ```
 
-The `interface` block supplies display metadata, capabilities, default prompts, external links, and bundled square icon/logo assets. `screenshots` is empty because this skills-only package has no custom MCP UI; the [submission contract](https://developers.openai.com/plugins/deploy/submission-errors) requests screenshots only for custom UI. The documentation overview below illustrates the process and is not runtime evidence.
+The `interface` block supplies display metadata, capabilities, default prompts and bundled square icon/logo assets. It declares no `screenshots` key and no interface website, privacy or terms link; each such link is added only once its [link-check record](../docs/publication/link-checks.json) shows an unauthenticated 200 (BR7, BR8). The documentation overview below illustrates the process and is not runtime evidence.
 
 ![Agentic SDLC workflow overview](../assets/workflow-overview.png)
 
 The [official packaging guide](https://developers.openai.com/plugins/build/plugins) recommends a portable root `plugin.json` for new packages and still supports this compatibility manifest. This package deliberately retains the compatibility format: Codex **0.154.0** suppresses portable-package hooks in its [released loader](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/core-plugins/src/loader.rs#L954). A native comparison with identical files discovered 16 skills in both formats, but **0 portable hooks versus 8 compatibility-format hooks**. Do not add a portable root manifest until a new native probe proves hook parity; otherwise it silently disables the backstops. See [runtime evidence and limits](../docs/runtime-adapter.md).
 
+## Distribution paths
+
+Four paths exist; each has its own go condition and state. The per-path verdicts are in [release readiness](../docs/release-readiness.md#distribution-paths-and-gono-go), and a state is a snapshot bound to the [release evidence ledger](../docs/release-evidence-0.4.3.md). Codex 0.154.0 has no `codex plugin validate` command, so no Codex-native validation step is listed.
+
+| Path | Prerequisites | Steps | Go condition | State |
+|---|---|---|---|---|
+| Claude own marketplace | Claude Code; see [`../.claude-plugin/README.md`](../.claude-plugin/README.md). | `/plugin marketplace add MrBekoX/agentic-sdlc`, then `/plugin install agentic-sdlc@mrbekox`. | Go condition: a public repository, both strict Claude manifest validations passing, and a recorded clean install. | State: BLOCKED. The repository is private and its unauthenticated URL returns 404. |
+| Claude community marketplace submission | A public repository, a clean-package validation result and maintainer form access. | Submit through the Anthropic form; packet [`docs/publication/claude-community.md`](../docs/publication/claude-community.md). | Go condition: public repository and a passing `claude plugin validate` on the submitted root; acceptance is not guaranteed. | State: BLOCKED. Needs a public repository, validation and form access. |
+| Codex personal marketplace | Codex CLI 0.154.0; `node` on `PATH`; plugin at `~/plugins/agentic-sdlc`. | `codex plugin add agentic-sdlc@personal`; open `/hooks` in Codex and trust each agentic-sdlc hook; run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal` and expect `codex_hook_trust=trusted` ([Codex hook trust](../docs/troubleshooting.md#codex-hook-trust)). | Go condition: catalog `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`; native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; hook trust granted through the native `/hooks` protocol as a required step. | State: GAP. Final-package discovery and real-profile trust are not yet recorded. |
+| OpenAI public directory | Maintainer-verified identity and Apps Management Write (`api.apps.write`). | Build the BR24 skills-only archive (members `.codex-plugin/`, `skills/`, `hooks/`, `contracts/skills/`, `scripts/`, `assets/` and `LICENSE`) with `python3 scripts/build_release.py --output <zip> --skills-only`, verify it with `--verify`, then upload; packet [`docs/publication/openai-skills-only.md`](../docs/publication/openai-skills-only.md). | Go condition: a verified skills-only archive (`archive_kind=skills-only`); submission, acceptance and publication are three separate stages; after publication the listing changes only through a newly reviewed version ([app review](https://developers.openai.com/plugins/deploy/app-review)). | State: BLOCKED. Needs verified identity, `api.apps.write` and a verified skills-only archive. |
+
 ## Install
 
-Codex discovers the default personal marketplace at `~/.agents/plugins/marketplace.json`. Its `agentic-sdlc` entry should point at `~/.codex/plugins/agentic-sdlc`, which can be a real copy or a symlink/junction to this clone. In the default personal marketplace, the `./plugins/agentic-sdlc` source path resolves to that plugin directory.
+Codex discovers the default personal marketplace at `~/.agents/plugins/marketplace.json`. Its `agentic-sdlc` entry points at `~/plugins/agentic-sdlc`, which can be a real copy or a symlink/junction to this clone. The personal catalog root is the home directory, so the `./plugins/agentic-sdlc` source path resolves to `~/plugins/agentic-sdlc`.
 
 Example `~/.agents/plugins/marketplace.json`:
 
@@ -59,7 +70,7 @@ Example `~/.agents/plugins/marketplace.json`:
 codex plugin add agentic-sdlc@personal
 ```
 
-`@personal` is the supported local install. Codex 0.153.0+ also has `codex plugin marketplace add` for a Codex-shaped catalog, but this repo's `.claude-plugin/marketplace.json` is Claude's marketplace schema. Do not add that file as a Codex marketplace.
+`@personal` is the supported local install. Codex 0.153.0+ also has `codex plugin marketplace add`, but this repo's `.claude-plugin/marketplace.json` is Claude's marketplace schema and not the supported Codex install path. Codex 0.154.0 can read it as a legacy-compatible layout, and `codex plugin marketplace add MrBekoX/agentic-sdlc` surfacing the `mrbekox` marketplace has been observed, but that route is unsupported. Installing both routes can list the plugin twice, once from `mrbekox` and once from `personal`.
 
 Start a new Codex thread after install or reinstall so the runtime reloads plugin skills and hooks. If Codex reports bundled hooks pending review, open `/hooks` and review the plugin commands before relying on them.
 
@@ -127,7 +138,7 @@ The Codex manifest declares `"hooks": "./hooks/hooks-codex.json"`. It wires bloc
 
 ## Requirements
 
-- Codex CLI/runtime with plugin marketplace support.
+- Codex CLI/runtime with plugin marketplace support. Versions re-captured on 2026-09-15: Codex 0.154.0 on Windows and 0.154.0 on WSL Ubuntu 24.04 (`~/.local/bin/codex`). Codex 0.154.0 has no `codex plugin validate` command. See [CLI versions by platform](../docs/runtime-adapter.md#cli-versions-by-platform).
 - Node.js on `PATH` for manual hook-script checks and local gates.
 - Python 3 for validators, probes, and local gates.
 - Git for branch, diff, commit, PR, and worktree flows.

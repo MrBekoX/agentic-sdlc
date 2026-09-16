@@ -22,7 +22,7 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 | `hooks/hooks-claude.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
 | `hooks/hooks-codex.json` | Codex | Blocking `PreToolUse`, bootstrap `SessionStart`, and advisory/env-gated `Stop` wiring, subject to Codex hook review/trust. |
 
-`.claude-plugin/marketplace.json` is Claude's marketplace schema. Codex 0.153.0+ can add a remote catalog with `codex plugin marketplace add`, but that command expects a Codex-shaped catalog. The supported Codex install remains `codex plugin add agentic-sdlc@personal`.
+`.claude-plugin/marketplace.json` is Claude's marketplace schema and not the supported Codex install path. Codex 0.154.0 can read it as a legacy-compatible layout, and `codex plugin marketplace add MrBekoX/agentic-sdlc` surfacing the `mrbekox` marketplace has been observed, but that route is unsupported. Installing both routes can list the plugin twice, once from `mrbekox` and once from `personal`. The supported Codex install remains `codex plugin add agentic-sdlc@personal`.
 
 Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Runtime root variables are:
 
@@ -40,7 +40,7 @@ Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Run
 | `agents/` | Bounded role contracts used for fresh-context analysis, review, audit, and author/critic passes; diagnostic roles may run tests, while reviewer/auditor roles omit shell tools. |
 | `workflows/` | Claude Code dynamic workflow scripts. Codex does not run these directly. |
 | `hooks/` | Deterministic guard scripts, active-flow evidence rules, and runtime hook wiring. |
-| `commands/` | Manual slash-command definitions such as `/git-safety-check`. |
+| `commands/` | Manual slash-command definitions such as `/agentic-sdlc:git-safety-check`. |
 | `scripts/` | Deterministic probes, validators, eval runners, version helpers, and review-package helpers. |
 | `tests/` | Unit tests, harness, fixtures, golden references, and eval seeds. |
 | `.claude-plugin/` / `.codex-plugin/` | Runtime manifests and runtime README files. |
@@ -116,8 +116,8 @@ The scripts are shared, but runtime wiring differs.
 | `flow-order-guard-codex.mjs` | Not wired | `PreToolUse` for `Bash\|apply_patch` | With `AGENTIC_FLOW_ORDER_BLOCK=true`, requires this-session spec/plan or test-run ordering evidence. |
 | `flow-order-guard.mjs` | `PreToolUse` for `Write`/`Edit`/`MultiEdit` | Not wired | Checks current-turn pre-edit evidence for active implementation flows before source edits; can deny with `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `completion-claim-guard.mjs` | `Stop` | Not wired | Warns, or blocks with `AGENTIC_COMPLETION_GATE_BLOCK=true`, when final completion claims skip `completion-claim-gate`. |
-| `flow-step-guard.mjs` | `Stop` | Not wired | Re-derives active-flow step evidence from validated artifacts, tool calls, and commands; can block missing required steps with `AGENTIC_FLOW_GATE_BLOCK=true`. |
-| `completion-claim-guard-codex.mjs` | Not wired | `Stop` | Warns, or continues the turn with `AGENTIC_COMPLETION_GATE_BLOCK=true`, when completion evidence is absent. |
+| `flow-step-guard.mjs` | `Stop` | Not wired | Re-derives active-flow step evidence from validated artifacts, tool calls, and commands; can block missing required steps with `AGENTIC_FLOW_GATE_BLOCK=true`. Its warn-level `branch` and `review-result` steps never block. |
+| `completion-claim-guard-codex.mjs` | Not wired | `Stop` | Warns, or continues the turn with `AGENTIC_COMPLETION_GATE_BLOCK=true`, when completion evidence is absent. In a Superpowers-owned or Ambiguous phase the message is owner-neutral (fresh verification evidence); otherwise it is the unchanged house message. |
 | `flow-step-guard-codex.mjs` | Not wired | `Stop` | Re-derives Codex-observable evidence; can continue the turn with `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `flow-evidence.mjs` | Shared library | Shared library | Evidence engine used by the flow guards. |
 | `secret-patterns.mjs` | Shared library | Shared library | Secret-pattern scanner used by hook scripts. |
@@ -126,11 +126,14 @@ The scripts are shared, but runtime wiring differs.
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
-## 11. Deterministic scripts (17)
+## 11. Deterministic scripts (20)
 
 | Script | Purpose |
 |---|---|
 | `check_all.py` | Skill frontmatter and validator tests. |
+| `build_release.py` | Builds the release or skills-only (`--skills-only`) archive from the recorded HEAD commit (`--output`), verifies an archive against its recorded commit (`--verify`), and scans a local bare mirror's history (`--scan-history`). |
+| `strict_flow_evidence.py` | Offline strict evaluation of one Codex rollout (`--rollout`, `--cwd`), printing `strict_evidence=`, `strict_completion=` and `strict_branch=`. |
+| `check_codex_hook_trust.py` | Read-only post-install Codex hook trust check over `codex app-server --stdio` `hooks/list`, printing `codex_hook_trust=`. |
 | `eval_safety.py` | Shared eval slug and path-containment boundaries. |
 | `sensitive_redaction.py` | Canonical high-confidence redaction adapter for persisted artifacts. |
 | `validate_artifacts.py` | Spec/plan validation: structure, AC coverage, placeholders/secrets, task verification, deferral, and security hand-wave checks. |

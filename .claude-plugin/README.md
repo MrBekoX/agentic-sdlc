@@ -14,7 +14,7 @@ Claude Code reads:
 | `workflows/*.js` | Claude Code dynamic workflow scripts. |
 | `agents/*.md` | Fresh-context role contracts used by workflows and subagents. |
 | `hooks/hooks-claude.json` | Claude hook wiring, declared by `.claude-plugin/plugin.json`. |
-| `commands/*.md` | Manual slash commands such as `/git-safety-check`. |
+| `commands/*.md` | Manual slash commands such as `/agentic-sdlc:git-safety-check`. |
 
 Skills are intentionally stored in root `skills/`, not `.claude/skills/`. The local `.claude/` directory is workspace settings only.
 
@@ -87,9 +87,31 @@ continue the turn, but cannot undo a secret that already reached disk.
 
 The flow guards are the deterministic backstop for active implementation flows. `flow-order-guard.mjs` checks before source edits that required pre-edit evidence exists in the current turn; `flow-step-guard.mjs` checks at Stop that required flow steps have observable evidence. Both use `hooks/flow-requirements.json` and `flow-evidence.mjs`, warn by default, and block/deny only when `AGENTIC_FLOW_GATE_BLOCK=true`.
 
+## Distribution paths
+
+Four paths exist; each has its own go condition and state. The per-path verdicts are in [release readiness](../docs/release-readiness.md#distribution-paths-and-gono-go), and a state is a snapshot bound to the [release evidence ledger](../docs/release-evidence-0.4.3.md).
+
+| Path | Prerequisites | Steps | Go condition | State |
+|---|---|---|---|---|
+| Claude own marketplace | Claude Code with plugin marketplace support; `node` on `PATH`; read access to `MrBekoX/agentic-sdlc`. | `/plugin marketplace add MrBekoX/agentic-sdlc`, then `/plugin install agentic-sdlc@mrbekox`. | Go condition: anonymous users need a public repository (a private one installs only through a git credential helper or SSH; a token only in an environment variable does not authenticate, [private repositories](https://code.claude.com/docs/en/plugin-marketplaces.md#private-repositories), observed 2026-09-14); both strict validations below pass; a clean install from an empty profile runs marketplace add, install, a new session or `/reload-plugins`, then skill, command and hook discovery plus one real invocation, with the clone transport (SSH or HTTPS) recorded. | State: BLOCKED. The repository is private and its unauthenticated URL returns 404 in `docs/publication/link-checks.json`; visibility is blocked by an unresolved Git history finding. |
+| Claude community marketplace submission | A public repository; a recorded clean-package `claude plugin validate` result; maintainer form access (claude.ai form: Team or Enterprise with directory management; Console form: Developer, Admin or Owner role). | Submit the plugin root through [claude.com/docs/plugins/submit](https://claude.com/docs/plugins/submit); packet [`docs/publication/claude-community.md`](../docs/publication/claude-community.md). | Go condition: public repository and a passing `claude plugin validate` on the submitted root; acceptance is not guaranteed. Observed 2026-09-14: [code.claude.com/docs/en/plugins](https://code.claude.com/docs/en/plugins.md) says approved plugins "are pinned to a specific commit SHA" with CI bumping the pin as commits are pushed, and [claude.com/docs/plugins/submit](https://claude.com/docs/plugins/submit) says updates pushed to the repository "are picked up automatically", so every default-branch push after approval counts as publication. The pages name `claude-community` and `claude-plugins-official` as targets; neither is promised. | State: BLOCKED. Needs a public repository, the clean-package validation and maintainer form access. |
+| Codex personal marketplace | Codex CLI 0.154.0; `node` on `PATH`; plugin at `~/plugins/agentic-sdlc`. | See [`../.codex-plugin/README.md`](../.codex-plugin/README.md): `codex plugin add agentic-sdlc@personal`, trust the hooks in `/hooks`, then run the hook trust check. | Go condition: catalog `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`; native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; hook trust granted through the native `/hooks` protocol. | State: GAP. Final-package discovery and real-profile trust are not yet recorded. |
+| OpenAI public directory | Maintainer-verified identity and Apps Management Write (`api.apps.write`). | Build the skills-only archive with `python3 scripts/build_release.py --output <zip> --skills-only`, verify it, then upload; see [`../.codex-plugin/README.md`](../.codex-plugin/README.md). | Go condition: a verified skills-only archive; submission, acceptance and publication are three separate stages, and the listing changes after publication only through a newly reviewed version. | State: BLOCKED. Needs verified identity, `api.apps.write` and a verified skills-only archive. |
+
+### Verification
+
+Native Claude validation is two separate checks:
+
+```bash
+claude plugin validate .claude-plugin/marketplace.json --strict
+claude plugin validate .claude-plugin/plugin.json --strict
+```
+
+Marketplace validation checks no plugin contents; hook-config validity comes from the repository tests (`tests/test_hooks_policy.py`, `tests/test_skill_integration.py`). A strict `plugin.json` exit 1 in a working tree caused by an untracked local agent instruction file is not the clean-package result; that result comes from a package extracted from a verified release archive.
+
 ## Requirements
 
-- Claude Code with local plugin/marketplace support.
+- Claude Code with local plugin/marketplace support. Versions re-captured on 2026-09-15: Windows 2.1.271 and WSL Ubuntu 24.04 2.1.269; see [CLI versions by platform](../docs/runtime-adapter.md#cli-versions-by-platform) for the last live-tested versions.
 - Node.js on `PATH` for `.mjs` hooks.
 - Python 3 for deterministic scripts and local gates.
 - Git for branch, diff, commit, PR, and worktree flows.

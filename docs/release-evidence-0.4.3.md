@@ -4,7 +4,7 @@ Status: release preparation. The current publish verdict is **do-not-publish** u
 
 ## Scope and required results
 
-The supported runtimes are Claude Code and Codex. The selected release models are `claude-sonnet-5` with Low effort and `gpt-5.3-codex-spark` with Low reasoning. Native execution uses WSL with isolated copies of the development plugin, preserving existing authentication in native stores. Model-access checks and deterministic replay do not substitute for live behavior.
+The supported runtimes are Claude Code and Codex. The historical 2026-09-13 batch recorded below used `claude-sonnet-5` with Low effort and `gpt-5.3-codex-spark` with Low reasoning. The current batch uses `claude-sonnet-5`/Low and `gpt-5.5`/Low, a new Codex baseline that is not comparable to the Spark results. Native execution uses WSL with isolated copies of the development plugin, preserving existing authentication in native stores. Model-access checks and deterministic replay do not substitute for live behavior.
 
 | Release requirement | Current result | Passing criterion |
 |---|---|---|
@@ -18,6 +18,12 @@ The supported runtimes are Claude Code and Codex. The selected release models ar
 | Distribution and native manifests | PASS for corrective payload144ca634: 201 source members, sixteen skill archives, both native manifest validations successful | Rebuild the final ZIP after this result ledger is completed |
 | Public source and artifact scans | Prepared source/archive scan passes: three inspected synthetic/documentation matches, zero unresolved findings or private host paths | Scan generated live artifacts after execution too |
 | Independent release review | Assessment complete: do-not-publish; required procedure findings remain open | Every required result above has inspected evidence and no unresolved in-scope finding |
+
+### Annotations to historical rows (2026-09-15)
+
+- **Version/changelog consistency**: contradicted by F5 (`README.md:250` read `0.4.2`); the current result is row `current_version_declarations` (AC85).
+- **Public source and artifact scans**: scope was source and archive only, not Git history; the F4 finding is held by row `history_private_path_finding` (AC125).
+- **Source-archive recipe (paragraph at line 60)**: its reviewed-new-file packaging recipe is superseded for the 0.4.3 final archive by commit-tree-only builds (BR13).
 
 Required commands and measurement boundaries are in [Release Readiness](release-readiness.md). Use the existing three-observation threshold; a single successful routing response cannot satisfy it. The original native batch completed ninety routing sessions and both Claude procedure cases, with no automatic retry. All92 CLI invocations are terminal. The routing verdict covers initial selection/delivery, not execution of every focused procedure.
 
@@ -74,12 +80,85 @@ This source-archive recipe has not created a commit or published a release. Arch
 - One fixture requests smoke drafts and the other requests normal per-package work; actual phase execution must be checked independently. The corrective smoke did not activate the pipeline, and the normal case required controller correction after an interrupted native turn.
 - Guard coverage is bounded, some checks are advisory or opt-in, and missing/unrecognized transcript evidence can fail open. These local checks complement human review; they do not provide universal security enforcement or model reliability.
 
+## Identity definitions
+
+- **Historical runtime input identity** (`9978383c0bd22fe6ca0c71bfc0c8138f403b958cd824f847b5e05de67600c699` original, `144ca634c0803a9af7f8ddd5c1c4ccbc9895547dd819c5944edec04d7ce93437` corrective), `definition: excludes only this result ledger`. It is the identity recorded for the 2026-09-13 batch above.
+- **BR20 runtime payload identity**: the SHA-256 of the sha256sum-manifest form of the release archive members, one `<member sha256>  <path>` line per member sorted by UTF-8 path, excluding `docs/release-evidence-0.4.3.md` and `docs/release-readiness.md` (`scripts/build_release.py` `payload_identity` with `RUNTIME_PAYLOAD_EXCLUDE`). It excludes one more file than the historical identity, so the two are not comparable.
+- **Skills-only payload identity**: the same manifest form over every member of the BR24 skills-only archive, with no exclusion.
+- **Archive hash**: the SHA-256 of the archive file bytes.
+
+## Release identity check
+
+- 2026-09-14T19:56:26Z: `git ls-remote --tags origin` listed 0 remote tags, so neither `v0.4.3` nor `agentic-sdlc--v0.4.3` (the intended form, DP9) exists; the GitHub release `0.4.3` does not exist; the OpenAI portal version is BLOCKED on portal access. No collision was found, so no stop was recorded.
+- 2026-09-16T18:36:39Z re-check: `git ls-remote --tags origin` exited 0 and listed 0 remote tags (no `v0.4.3` or `agentic-sdlc--v0.4.3`), and `gh api repos/MrBekoX/agentic-sdlc/releases --jq length` exited 0 and printed 0 (no GitHub releases); no collision was found. The release identity check is repeated before any tag, release or portal version is created.
+
+## Required release rows
+
+Row states are PASS, FAIL, BLOCKED, not-run or GAP. Cells of rows not yet measured read `not recorded (not-run)`; model/effort is `n/a` for static gate and deterministic replay rows. The release envelope fills measured values in place.
+
+| Row id | BR3 required | State | Identity (definition) | Git commit | CLI version | OS | Model/effort | Measurement type | Evidence |
+|---|---|---|---|---|---|---|---|---|---|
+| `local_gate` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run) |
+| `claude_routing_eval` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `codex_routing_eval` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | description classifier | not recorded (not-run) |
+| `claude_pipeline_procedure` | yes | FAIL | runtime input 144ca634… (definition: excludes only this result ledger) | not recorded (historical batch) | Claude Code 2.1.269 | WSL Ubuntu | claude-sonnet-5/Low | native live | Historical rows "Claude flat-layout pipeline" and "Claude per-package pipeline" in the result table above |
+| `codex_pipeline_procedure` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `secret_scan` | yes | BLOCKED: F4 history finding unresolved | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run); see row `history_private_path_finding` |
+| `clean_package_native_validation` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `codex_discovery_16_8` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `hook_trust_untrusted` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `hook_trust_exact_definition` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `hook_trust_retained_after_restart` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `hook_trust_rereview_after_change` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `hook_effects_allowed_denied` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `hook_native_resume_compact` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `hook_trust_list_records` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `archive_verify` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run) |
+| `archive_reproducibility` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run) |
+| `pr_text_actions_review` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run) |
+| `owner_skill_injection` | yes | BLOCKED: pending native capture | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `owner_resume` | yes | BLOCKED: pending native capture | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `owner_compaction` | yes | BLOCKED: pending native capture | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `current_version_declarations` | no | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | Bound to `python3 scripts/bump_version.py --check` on the integrated tree (AC85) |
+| `history_private_path_finding` | no | BLOCKED | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | `audit-docs/codex-audit-docs.md`, a class 6 audit dump, added in c173b99 on 2026-09-02 and deleted in 4d88cd7, reachable from `main` and `origin/main`; the authoritative scan result and the reviewed findings record SHA-256 are recorded by the history scan (D14) |
+| `security_report_mechanism` | no | GAP | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | The GitHub private vulnerability reporting API returns 404 while the repository is private; `LICENSE` and `SECURITY.md` are unchanged since 5801cb9 |
+| `skills_only_archive` | no | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run) |
+| `portal_normalized_manifest` | no | BLOCKED: needs a maintainer-approved portal upload | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run) |
+| `skill_archives` | no | BLOCKED: skill-creator toolkit not reviewed | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run); see [release readiness](release-readiness.md) |
+| `submission_cases_group` | no | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `coexistence_group` | no | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not recorded (not-run) |
+| `path_verdicts` | no | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | See `### Path verdicts` |
+
 ## Publication decision
 
-`version=0.4.3`
+```text
+version=0.4.3
+scope=Claude Code, Codex
+local_gate=not-run
+claude_routing_eval=not-run
+codex_routing_eval=not-run
+claude_pipeline_procedure=failed
+codex_pipeline_procedure=not-run
+secret_scan=blocked
+known_limitations_acknowledged=yes
+verdict=do-not-publish
+```
 
-`scope=Claude Code, Codex`
-
-`verdict=do-not-publish`
+| Key | Bound row |
+|---|---|
+| local_gate | `local_gate` |
+| claude_routing_eval | `claude_routing_eval` |
+| codex_routing_eval | `codex_routing_eval` |
+| claude_pipeline_procedure | `claude_pipeline_procedure` |
+| codex_pipeline_procedure | `codex_pipeline_procedure` |
+| secret_scan | `secret_scan` |
+| known_limitations_acknowledged | [docs/runtime-adapter.md#limits-of-branch-review-result-and-strict-evidence](runtime-adapter.md#limits-of-branch-review-result-and-strict-evidence) |
 
 Required procedure repairs remain in the result table. Repeated prompt-level corrections did not close the observed execution/evidence failures. The next repair must address trusted runtime receipts, activation/order checks and audit acceptance, then receive fresh runtime validation. No further paid trial is implied by this ledger and no publication was performed.
+
+### Path verdicts
+
+- Claude own marketplace: maintainer review pending -> no-go
+- Claude community marketplace submission: maintainer review pending -> no-go
+- Codex personal marketplace: maintainer review pending -> no-go
+- OpenAI public directory: maintainer review pending -> no-go

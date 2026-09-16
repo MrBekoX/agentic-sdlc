@@ -3,7 +3,7 @@ description: Read-only pre-commit git safety check (status, diff, log, secret sc
 allowed-tools: ["Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Read", "Grep"]
 ---
 
-# /git-safety-check — Git Safety Check
+# git-safety-check — Git Safety Check
 
 > **Read-only** only. Never commits or pushes. Governing contract: 08. Match the user's language.
 
@@ -18,7 +18,7 @@ git log --oneline -n 10
 ## Secret scan (read-only)
 Check staged changes for leaks:
 ```bash
-git diff --cached | grep -nEi "password=|secret|api[_-]?key|connection[_ ]?string|bearer |token|-----BEGIN"
+git diff --cached | grep -nEi "password=|secret|api[_-]?key|connection[_ ]?string|bearer |token|-----BEGIN" # agentic-sdlc:allow-secret
 ```
 - On a suspicious match: **do not print the real value** — mask it and report `file:line` + risk type.
 

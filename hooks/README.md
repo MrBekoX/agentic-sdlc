@@ -54,6 +54,12 @@ Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve t
 
 `flow-requirements.json` is the shared source for active-flow step definitions and source-file extensions. The live flow hooks read it at runtime, and `tests/test_flow_requirements.py` validates that its skill, workflow, agent, and validator references resolve.
 
+`flow-requirements.json` also defines two warn-level steps for the house flows. `branch` flags a source edit while the working directory is on `main` or `master`, observed at Stop on Claude. `review-result` flags a reviewer that was dispatched with no correlated non-error result: control = `implementation-control` / `implementation-auditor`, security = `security-audit` / `security-reviewer`. Both steps are observed on Claude only and never block or deny, under any flag; the live Codex Stop hook reports neither (see [strict evidence limits](../docs/runtime-adapter.md#limits-of-branch-review-result-and-strict-evidence)).
+
+Strict Codex evaluation is opt-in. `AGENTIC_FLOW_STRICT_EVIDENCE` (`true`, `1` or `yes`) makes the live Codex `tests` evidence strict. The offline `python3 scripts/strict_flow_evidence.py --rollout <path> --cwd <dir>` evaluates one rollout and prints exactly three lines: `strict_evidence=green|partial|missing`, `strict_completion=satisfied|unsatisfied|n/a` and `strict_branch=protected|ok|unknown`. It exits 0 only for green evidence with a satisfied or n/a completion, 1 otherwise, and 2 on a preflight or evaluation error. The live hooks never call it.
+
+`completion-claim-guard-codex.mjs` is owner-aware. In a Superpowers-owned or Ambiguous phase it emits a fixed owner-neutral message that asks for fresh verification evidence, and a successful `verification-before-completion` delivery recorded after the phase start silences it. The house message is unchanged in the no-owner, house-owned and unreadable owner-scan cases.
+
 These are bounded backstops, not comprehensive shell or secret enforcement. Most unexpected input/reader failures are fail-open; a recognized flow-order violation can still deny. See [runtime evidence limits](../docs/runtime-adapter.md#codex-flow-evidence-and-limits) for parser bounds, missing-exit fallback, runner-shaped no-op commands, and the absence of freshness checks after the latest source edit.
 
 ## Effect Layer: What It Closes, And What It Does Not
@@ -102,7 +108,7 @@ These checkpoints require model judgment, so they live as flow gates in skills a
 | `pre-test-command-check` | contract `05-testing`; `test-authoring`. |
 | `post-test-result-check` | contract `05-testing`; TDD loops in implementation skills. |
 | `security-sensitive-change-check` | contract `06-security`; `security-audit`. |
-| `pre-git-operation-check` | contract `08-git-safety`; `/git-safety-check`; `scan-commit.mjs`; `branch-guard.mjs`. |
+| `pre-git-operation-check` | contract `08-git-safety`; the runtime-neutral read-only `git-safety-check` command (Claude Code example: `/agentic-sdlc:git-safety-check`); `scan-commit.mjs`; `branch-guard.mjs`. |
 | `flow-step-evidence-check` | `flow-order-guard.mjs`; `flow-step-guard.mjs`; `hooks/flow-requirements.json`; implementation skills and `implementation-control`. |
 | `final-response-verification` | `implementation-control` plus `completion-claim-gate`; Claude `completion-claim-guard.mjs` is only a deterministic backstop. |
 
