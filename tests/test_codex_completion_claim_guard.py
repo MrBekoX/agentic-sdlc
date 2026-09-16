@@ -507,6 +507,20 @@ class TestOwnerSignalScanner(unittest.TestCase):
         self.assertEqual(_delivery_skills(["cat " + h + "/" + t], codex_home=None), [None])
         controls = ["cat " + h + "/" + t, "cat " + h + "/" + t + "\n# done"]
         self.assertEqual(_delivery_skills(controls), ["verification-before-completion"] * 2)
+        # Rows that pass the anchor and the `[^/]+` suffix segments but are not literal or canonical: only the
+        # literal/canonical check rejects them, so dropping it turns each one into a verification delivery.
+        cache, skill_tail = h + "/plugins/cache/", "/skills/verification-before-completion/SKILL.md"
+        unliteral = [
+            "cat " + cache + "*/superpowers/1.0.0" + skill_tail,
+            "cat " + cache + dollar + "M/superpowers/1.0.0" + skill_tail,
+            "cat " + cache + "../superpowers/1.0.0" + skill_tail,
+            "cat " + cache + "m/superpowers/.." + skill_tail,
+            "cat " + cache + "m/superpowers/1.0.?" + skill_tail,
+            "cat " + cache + "m/superpowers/1.0.[0]" + skill_tail,
+        ]
+        self.assertEqual(_delivery_skills(unliteral, cwd="/repo"), [None] * len(unliteral))
+        self.assertEqual(_delivery_skills(["cat " + cache + "m/superpowers/1.0.0" + skill_tail], cwd="/repo"),
+                         ["verification-before-completion"])
 
     def test_codex_home_resolution(self):  # D25 model (3)
         # Mutation: keeping a trailing slash, accepting a relative or non-canonical home, or reading the filesystem.
