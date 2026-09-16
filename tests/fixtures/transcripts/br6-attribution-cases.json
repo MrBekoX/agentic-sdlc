@@ -2775,14 +2775,14 @@
         "pytest $(cat args)"
       ],
       "lastIsRealRunner": true,
-      "lastVersionOrHelpOnly": false,
+      "lastVersionOrHelpOnly": true,
       "lastHasPipe": false,
       "lastHasBackground": false,
       "inSafeGrammar": false,
       "orRun": [
         "pytest $(cat args)"
       ],
-      "orRunAllRealRunners": true,
+      "orRunAllRealRunners": false,
       "orRunHeadHasPipeOrBackground": false,
       "runnerShape5801cb9": true,
       "defaultTests": "missing",
@@ -2810,14 +2810,14 @@
         "pytest $(cat args)"
       ],
       "lastIsRealRunner": true,
-      "lastVersionOrHelpOnly": false,
+      "lastVersionOrHelpOnly": true,
       "lastHasPipe": false,
       "lastHasBackground": false,
       "inSafeGrammar": false,
       "orRun": [
         "pytest $(cat args)"
       ],
-      "orRunAllRealRunners": true,
+      "orRunAllRealRunners": false,
       "orRunHeadHasPipeOrBackground": false,
       "runnerShape5801cb9": true,
       "defaultTests": "satisfied",
@@ -2845,14 +2845,14 @@
         "pytest $'\\'' | true ''"
       ],
       "lastIsRealRunner": true,
-      "lastVersionOrHelpOnly": false,
+      "lastVersionOrHelpOnly": true,
       "lastHasPipe": false,
       "lastHasBackground": false,
       "inSafeGrammar": false,
       "orRun": [
         "pytest $'\\'' | true ''"
       ],
-      "orRunAllRealRunners": true,
+      "orRunAllRealRunners": false,
       "orRunHeadHasPipeOrBackground": false,
       "runnerShape5801cb9": true,
       "defaultTests": "satisfied",
@@ -3356,19 +3356,19 @@
         "pytest -k \"$K\" $ARGS"
       ],
       "lastIsRealRunner": true,
-      "lastVersionOrHelpOnly": false,
+      "lastVersionOrHelpOnly": true,
       "lastHasPipe": false,
       "lastHasBackground": false,
       "inSafeGrammar": true,
       "orRun": [
         "pytest -k \"$K\" $ARGS"
       ],
-      "orRunAllRealRunners": true,
+      "orRunAllRealRunners": false,
       "orRunHeadHasPipeOrBackground": false,
       "runnerShape5801cb9": true,
-      "defaultTests": "satisfied",
-      "strictAttributable": true,
-      "strictTests": "satisfied",
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
       "baseline5801cb9": {
         "claudeStopTests": "satisfied",
         "codexOrderGuard": "satisfied",
@@ -5893,6 +5893,1161 @@
         "pytest"
       ],
       "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-escaped-long-version",
+      "command": "pytest; pytest --vers\\ion",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest --vers\\ion"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest --vers\\ion"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-escaped-short-version",
+      "command": "pytest; pytest -\\V",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -\\V"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest -\\V"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-escaped-help",
+      "command": "pytest; pytest \\--help",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest \\--help"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest \\--help"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-escaped-version-oror",
+      "command": "pytest || pytest --vers\\ion",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest --vers\\ion"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest",
+        "pytest --vers\\ion"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-escaped-version-single",
+      "command": "pytest --vers\\ion",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest --vers\\ion"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest --vers\\ion"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-parameter-version",
+      "command": "V=--version; pytest; pytest $V",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "V=--version",
+        "pytest",
+        "pytest $V"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest $V"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-quoted-parameter-help",
+      "command": "V=--help; pytest; pytest \"$V\"",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "V=--help",
+        "pytest",
+        "pytest \"$V\""
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest \"$V\""
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-tilde-oldpwd-version",
+      "command": "OLDPWD=--version; pytest; pytest ~-",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "OLDPWD=--version",
+        "pytest",
+        "pytest ~-"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest ~-"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-glob-version-file",
+      "command": "touch ./--version; pytest; pytest --versio?",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "touch ./--version",
+        "pytest",
+        "pytest --versio?"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest --versio?"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-escaped-pipe-version",
+      "command": "pytest; pytest \\| --version",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest \\| --version"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest \\| --version"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-redirect-glued-version",
+      "command": "pytest; pytest --version>out.txt",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest --version>out.txt"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest --version>out.txt"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-redirect-glued-both-streams",
+      "command": "pytest; pytest --version&>x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest --version&>x"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest --version&>x"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-redirect-glued-read-write",
+      "command": "pytest; pytest --version<>y",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest --version<>y"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest --version<>y"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-redirect-glued-help-oror",
+      "command": "pytest || pytest --help>o",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest --help>o"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest",
+        "pytest --help>o"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-word-continuation-version",
+      "command": "pytest; pytest --vers\\\nion",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest --version"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest --version"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-segment-noop-mention-before",
+      "command": "pytest; echo pytest && pytest --version",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "echo pytest && pytest --version"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "echo pytest && pytest --version"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-segment-noop-mention-after",
+      "command": "pytest; pytest -V && echo pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -V && echo pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest -V && echo pytest"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-segment-true-mention",
+      "command": "pytest; true pytest && pytest -V",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "true pytest && pytest -V"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "true pytest && pytest -V"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-blank-nbsp-comment-background",
+      "command": "\u00a0#x && pytest & true",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "\u00a0#x && pytest & true"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": true,
+      "inSafeGrammar": true,
+      "orRun": [
+        "\u00a0#x && pytest & true"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-blank-nbsp-comment-pipe",
+      "command": "\u00a0#x | pytest | tee log.txt",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "\u00a0#x | pytest | tee log.txt"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": true,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "\u00a0#x | pytest | tee log.txt"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-blank-ideographic-comment-background",
+      "command": "\u3000#x && pytest & true",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "\u3000#x && pytest & true"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": true,
+      "inSafeGrammar": true,
+      "orRun": [
+        "\u3000#x && pytest & true"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-forged-blank-nbsp-comment-pipe-head",
+      "command": "\u00a0#x | pytest | true || pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "\u00a0#x | pytest | true",
+        "pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "\u00a0#x | pytest | true",
+        "pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": true,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-word-double-quoted-backslash",
+      "command": "pytest; pytest \"--vers\\ion\"",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest \"--vers\\ion\""
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest \"--vers\\ion\""
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-word-single-quoted-dollar",
+      "command": "pytest; pytest -k '$V'",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -k '$V'"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest -k '$V'"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-word-glob-with-slash",
+      "command": "pytest; pytest tests/test_*.py",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest tests/test_*.py"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest tests/test_*.py"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-word-escaped-pipe-in-value",
+      "command": "pytest; pytest -k a\\|b",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -k a\\|b"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest -k a\\|b"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-word-redirect-glued-runner",
+      "command": "pytest; pytest>out.txt",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest>out.txt"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest>out.txt"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-word-escaped-redirect-in-value",
+      "command": "pytest; pytest -k a\\>b",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -k a\\>b"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest -k a\\>b"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-word-quoted-redirect-in-value",
+      "command": "pytest; pytest -k 'a>b'",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -k 'a>b'"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest -k 'a>b'"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-segment-runner-after-version",
+      "command": "pytest; pytest -V && pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -V && pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest -V && pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-segment-noop-mention-runner",
+      "command": "pytest; echo pytest && pytest",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "echo pytest && pytest"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "echo pytest && pytest"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-conservative-word-glob-without-slash",
+      "command": "pytest; pytest -k test_*",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "pytest",
+        "pytest -k test_*"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest -k test_*"
+      ],
+      "orRunAllRealRunners": false,
       "orRunHeadHasPipeOrBackground": false,
       "runnerShape5801cb9": true,
       "defaultTests": "missing",

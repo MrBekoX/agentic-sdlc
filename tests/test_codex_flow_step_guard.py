@@ -1144,6 +1144,39 @@ class TestBR6StatementSplit(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(result["versionOrHelpOnly"], command in true_cases)
 
+    def test_runner_words_follow_bash_quote_removal(self):
+        # D25 model (1), the Task 141 lists. Mutation: comparing raw words, splitting only at blanks, reading an
+        # expansion or a slash-free glob as literal text, or counting a segment that only names the runner.
+        from test_procedure_eval import TestStrictRedGreen as lists
+        bs = chr(92)
+        version_only = [c.replace("<bs>", bs) for c in lists.VERSION_ONLY_WORDS]
+        runner = [c.replace("<bs>", bs) for c in lists.RUNNER_WORDS]
+        got = _br6_eval(version_only + runner)
+        for command, result in zip(version_only + runner, got):
+            with self.subTest(command=command):
+                self.assertIs(result["versionOrHelpOnly"], command in version_only)
+        nbsp_pipe = chr(0xA0) + "#x | pytest | tee log.txt"
+        result = self._one(nbsp_pipe)
+        self.assertEqual(result["statements"], [nbsp_pipe])
+        self.assertIs(result["hasPipe"], True)
+
+    def test_heredoc_helper_is_not_exported(self):
+        # QUAL-12: the unused hasUnquotedHeredoc export is deleted, not left as dead API.
+        script = ("const r = await import(%s); process.stdout.write(JSON.stringify(["
+                  "'hasUnquotedHeredoc' in r, typeof r.isVersionOrHelpOnly]));" % json.dumps(ROLLOUT.as_uri()))
+        self.assertEqual(json.loads(_node(script, "[]")), [False, "function"])
+        self.assertNotIn("hasUnquotedHeredoc", ROLLOUT.read_text(encoding="utf-8"))
+
+    def test_rollout_module_imports_without_cycle(self):
+        # The rollout module now imports hooks/flow-evidence.mjs; loading it alone in a fresh process must succeed.
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "node binary missing")
+        script = "import(%s).then((m) => process.stdout.write(typeof m.deliveryReadSkill))" % json.dumps(
+            ROLLOUT.as_uri())
+        proc = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True,
+                              encoding="utf-8", timeout=60)
+        self.assertEqual((proc.returncode, proc.stdout), (0, "function"), proc.stderr[-400:])
+
     def test_pipe_detection_quote_aware(self):
         # Mutation: reading '||' as a pipe, or a quoted '|' as a pipe.
         cases = {"pytest | tee log": True, "pytest |& tee log": True,
@@ -1188,6 +1221,10 @@ class TestExitAttributionClosure(_Tmp):
 
     def test_semicolon_echo_exit_forgery_tests_missing(self):  # AC28
         self.assertEqual(self.outcome["ac28-semicolon-echo-exit"], "missing")
+
+    def test_nbsp_comment_pipe_head_is_missing_by_default(self):  # D25 model (2), QUAL-3
+        # Mutation: trimming U+00A0 off the statement (its `#` would start a comment and hide the head's pipe).
+        self.assertEqual(self.outcome["edge-forged-blank-nbsp-comment-pipe-head"], "missing")
 
     def test_trailing_version_help_oror_newline_forms_missing(self):  # AC118
         ids = [i for i, r in self.rows.items() if "AC118" in r["specRefs"] and r["defaultTests"] == "missing"]

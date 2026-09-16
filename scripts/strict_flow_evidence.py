@@ -15,7 +15,7 @@ deriveStrictEvidence in hooks/codex-flow-evidence.mjs, run under node; the live 
 import argparse
 import json
 import os
-import shutil
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +38,23 @@ NODE_SCRIPT = ("const [rollout, cwd] = process.argv.slice(1);"
 
 class StrictEvidenceError(Exception):
     """Carries a fixed error code word only, never an input path or byte."""
+
+
+def _program_on_absolute_path(name):
+    """`name` as an absolute path found in an absolute PATH entry, else None (D25 model (5)).
+
+    The cwd and relative PATH entries are never searched. On win32 only `<name>.exe` and `<name>.com` are candidates
+    (PATHEXT is not consulted); elsewhere a candidate must be an executable regular file.
+    """
+    windows = sys.platform == "win32"
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not (re.match(r"^(?:[A-Za-z]:[\\/]|\\\\|//)", entry) if windows else entry.startswith("/")):
+            continue
+        for candidate in ([os.path.join(entry, name + ext) for ext in (".exe", ".com")] if windows
+                          else [os.path.join(entry, name)]):
+            if os.path.isfile(candidate) and (windows or os.access(candidate, os.X_OK)):
+                return candidate
+    return None
 
 
 def preflight(rollout: Path, cwd: Path) -> None:
@@ -66,7 +83,7 @@ def preflight(rollout: Path, cwd: Path) -> None:
 
 
 def evaluate(rollout: Path, cwd: Path) -> dict:
-    node = shutil.which("node")
+    node = _program_on_absolute_path("node")
     if not node:
         raise StrictEvidenceError("node_missing")
     env = dict(os.environ, AGENTIC_SDLC_PYTHON=sys.executable)

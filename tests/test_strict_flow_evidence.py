@@ -164,6 +164,7 @@ class TestStrictFlowEvidenceCli(unittest.TestCase):
         for key in ("AGENTIC_FLOW_STRICT_EVIDENCE", "AGENTIC_FLOW_GATE_BLOCK"):
             full.pop(key, None)
         full["GIT_CEILING_DIRECTORIES"] = str(Path(cwd).parent)
+        full["CODEX_HOME"] = "/home/u/.codex"  # the home of INSTALLED, never the real Codex home (D25 model (3))
         if env:
             full.update(env)
         proc = subprocess.run([sys.executable, str(SCRIPT), "--rollout", str(rollout), "--cwd", str(cwd)],
@@ -289,6 +290,15 @@ class TestStrictFlowEvidenceCli(unittest.TestCase):
                 rc, _, values, _ = self._run(self._claimed(extra, final_text), cwd)
                 self.assertEqual((values.get("strict_evidence"), values.get("strict_completion"), rc), ("green", completion, code))
 
+    def test_unanchored_verification_read_leaves_claim_unsatisfied(self):  # D25 model (3)
+        # Mutation: accepting a verification read outside the Codex home plugin cache as a delivery.
+        cwd = self._tree()
+        owned = [_user("Use superpowers:brainstorming"),
+                 *_exec_pair("call_read01", "cat " + INSTALLED.format(skill="brainstorming"), 0, "---")]
+        unanchored = "cat " + INSTALLED.format(skill="verification-before-completion").replace("/home/u/.codex", "/tmp")
+        rc, _, values, _ = self._run(self._claimed(owned + _exec_pair("call_read02", unanchored, 0, "---"), CLAIM), cwd)
+        self.assertEqual((values.get("strict_evidence"), values.get("strict_completion"), rc), ("green", "unsatisfied", 1))
+
     def test_ambiguous_foo_unsatisfied_nonzero_even_with_marker(self):  # AC51 strict half
         rc, _, values, _ = self._run(self._claimed([_user("Use superpowers:foo")], CLAIM + " " + MARKER), self._tree())
         self.assertEqual((values.get("strict_evidence"), values.get("strict_completion"), rc), ("green", "unsatisfied", 1))
@@ -324,6 +334,25 @@ class TestStrictFlowEvidenceCli(unittest.TestCase):
     def test_node_missing_is_error_path(self):
         rc, lines, _, stderr = self._run(_fixture("verified-green"), self._tree(), env={"PATH": str(self._dir())})
         self.assertEqual((lines, rc, stderr.strip()), (ERROR_LINES, 2, "node_missing"))
+
+    def test_node_behind_relative_path_entry_is_not_run(self):  # D25 model (5), SEC-7
+        # Mutation: resolving node with shutil.which (a node planted in the process cwd would grade the rollout).
+        from test_procedure_eval import plant_fake_program, relative_first_env
+        planted = self._dir()
+        program, sentinel = plant_fake_program(planted, "node")
+        if program is None:
+            self.skipTest("whoami.exe absent: no planted win32 program")
+        env = relative_first_env()
+        for key in ("AGENTIC_FLOW_STRICT_EVIDENCE", "AGENTIC_FLOW_GATE_BLOCK"):
+            env.pop(key, None)
+        tree = self._tree()
+        env.update(GIT_CEILING_DIRECTORIES=str(tree.parent), CODEX_HOME="/home/u/.codex")
+        proc = subprocess.run([sys.executable, str(SCRIPT), "--rollout", str(_fixture("verified-green")),
+                               "--cwd", str(tree)], cwd=planted, env=env, capture_output=True, text=True,
+                              encoding="utf-8", timeout=300)
+        self.assertIn("strict_evidence=green", proc.stdout.splitlines(), proc.stderr)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertFalse(sentinel.exists(), "the planted node ran")
 
     def test_background_green_run_is_never_green(self):  # E3 gaming vector (D21)
         # Mutation: dropping the background-job check from isStrictlyAttributable prints green for each subTest.

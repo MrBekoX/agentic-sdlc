@@ -114,20 +114,23 @@ def _owner_choices(texts):
     return _node_json(body, list(texts))
 
 
-def _delivery_skills(commands, cwd=WORK_CWD):
+CODEX_HOME = "/home/u/.codex"  # the Codex home of INSTALLED; pure calls pass it explicitly (D25 model (3))
+
+
+def _delivery_skills(commands, cwd=WORK_CWD, codex_home=CODEX_HOME):
     body = ("const m = await import(%s);"
-            "process.stdout.write(JSON.stringify(input.commands.map((c) => m.deliveryReadSkill(c, input.cwd))));"
+            "process.stdout.write(JSON.stringify(input.commands.map((c) => m.deliveryReadSkill(c, input.cwd, input.home))));"
             % json.dumps(ROLLOUT.as_uri()))
-    return _node_json(body, {"commands": list(commands), "cwd": cwd})
+    return _node_json(body, {"commands": list(commands), "cwd": cwd, "home": codex_home})
 
 
-def _owner_signals(lines, cwd=WORK_CWD):
+def _owner_signals(lines, cwd=WORK_CWD, codex_home=CODEX_HOME):
     path = _write_rollout(lines)
     try:
         body = ("const m = await import(%s);"
-                "process.stdout.write(JSON.stringify(m.readOwnerSignals(input.path, input.cwd)));"
+                "process.stdout.write(JSON.stringify(m.readOwnerSignals(input.path, input.cwd, input.home)));"
                 % json.dumps(ROLLOUT.as_uri()))
-        return _node_json(body, {"path": path, "cwd": cwd})
+        return _node_json(body, {"path": path, "cwd": cwd, "home": codex_home})
     finally:
         os.unlink(path)
 
@@ -412,7 +415,8 @@ class TestOwnerSignalScanner(unittest.TestCase):
         path = INSTALLED.format(skill="brainstorming")
         cases = {
             "cat " + path: "brainstorming",
-            "cat C:\\Users\\u\\.codex\\plugins\\cache\\m\\superpowers\\1.0.0\\skills\\brainstorming\\SKILL.md": "brainstorming",
+            # D25 model (3): a backslash is not a literal path character (bash removes it), so this is Ambiguous.
+            "cat C:\\Users\\u\\.codex\\plugins\\cache\\m\\superpowers\\1.0.0\\skills\\brainstorming\\SKILL.md": None,
             "cat ./superpowers/skills/brainstorming/SKILL.md": None,
             "cat /work/repo/plugins/cache/m/superpowers/1.0.0/skills/brainstorming/SKILL.md": None,
             "cat " + path + "; true": None,
@@ -431,6 +435,11 @@ class TestOwnerSignalScanner(unittest.TestCase):
         for (command, expected), got in zip(cases.items(), _delivery_skills(list(cases))):
             with self.subTest(command=command):
                 self.assertEqual(got, expected)
+        # A forward-slash drive path under a Windows Codex home; the drive comparison is case-folded.
+        drive_tail = "/.codex/plugins/cache/m/superpowers/1.0.0/skills/brainstorming/SKILL.md"
+        drive = ["cat C:/Users/u" + drive_tail, "cat c:/users/u" + drive_tail]
+        self.assertEqual(_delivery_skills(drive, cwd="D:\\repo", codex_home="C:\\Users\\u\\.codex"),
+                         ["brainstorming", "brainstorming"])
         read = _exec_read("cat " + path, "c1")
         self.assertEqual(self._phase([_user(CHOICE), read, _read_output("c1", 0)]), "superpowers")
         self.assertEqual(self._phase([_user(CHOICE), read]), "ambiguous")  # no correlated exit code
@@ -471,9 +480,51 @@ class TestOwnerSignalScanner(unittest.TestCase):
             with self.subTest(command=command):
                 lines = [_user(CHOICE), _exec_read(command, f"c{n}"), _read_output(f"c{n}", 0)]
                 self.assertFalse(_owner_signals(lines)["verificationDelivered"])
-        # Guard: a `||` earlier in the command does not reach a last statement joined by `;`.
-        self.assertEqual(_delivery_skills(["cat /nonexistent || true; cat " + path]),
-                         ["verification-before-completion"])
+        # D25 single-statement rule: any earlier statement, even one that cannot skip the `cat`, leaves the phase
+        # Ambiguous (it could have written the file the `cat` reads).
+        self.assertEqual(_delivery_skills(["cat /nonexistent || true; cat " + path]), [None])
+
+    # <t> of the D25 matrix: the tail under the Codex home.
+    TAIL = "plugins/cache/m/superpowers/1.0.0/skills/verification-before-completion/SKILL.md"
+
+    def test_noncanonical_or_unanchored_delivery_path_returns_null(self):  # D25 model (3), SEC-1, SEC-2, QUAL-1
+        # Mutation: dropping any of the single-statement, two-word, literal, canonical, anchor or exact-suffix checks.
+        t, h, dollar = self.TAIL, CODEX_HOME, chr(36)
+        posix = [
+            "cat /" + dollar + "PWD/" + t, "cat /." + dollar + "PWD/" + t, "D=/work/repo; cat /" + dollar + "D/" + t,
+            "cat /work/rep?/" + t, "cat /work/rep*/" + t,
+            "cat /work//repo/" + t, "cat /work/./repo/" + t, "cat " + h + "//" + t, "cat /home/u/./.codex/" + t,
+            "cat /tmp/" + t, "printf x > /tmp/" + t + "; cat /tmp/" + t,
+            "printf x > " + h + "/" + t + "; cat " + h + "/" + t, "true; cat " + h + "/" + t,
+            "cat ~/.codex/" + t, "cat " + dollar + "HOME/.codex/" + t, "cat '" + h + "/" + t + "'",
+            "cat " + h + "/plugins/extra/cache/m/superpowers/1.0.0/skills/verification-before-completion/SKILL.md",
+            "cat " + h + "/plugins/cache/x/m/superpowers/1.0.0/skills/verification-before-completion/SKILL.md",
+        ]
+        self.assertEqual(_delivery_skills(posix), [None] * len(posix))
+        windows = ["cat D://repo/" + t, "cat D:/./repo/" + t, "cat C:/Users/u/.codex/../.codex/" + t]
+        self.assertEqual(_delivery_skills(windows, cwd="D:\\repo", codex_home="C:\\Users\\u\\.codex"),
+                         [None] * len(windows))
+        self.assertEqual(_delivery_skills(["cat " + h + "/" + t], codex_home=None), [None])
+        controls = ["cat " + h + "/" + t, "cat " + h + "/" + t + "\n# done"]
+        self.assertEqual(_delivery_skills(controls), ["verification-before-completion"] * 2)
+
+    def test_codex_home_resolution(self):  # D25 model (3)
+        # Mutation: keeping a trailing slash, accepting a relative or non-canonical home, or reading the filesystem.
+        body = ("const m = await import(%s);"
+                "process.stdout.write(JSON.stringify(input.map(([env, home]) => m.resolveCodexHome(env, home))));"
+                % json.dumps(ROLLOUT.as_uri()))
+        cases = [({"CODEX_HOME": "/x/y/"}, "/h"), ({}, "/h"), ({"CODEX_HOME": ""}, "C:\\Users\\u"),
+                 ({"CODEX_HOME": "rel/dir"}, "/h"), ({"CODEX_HOME": "/a/../b"}, "/h"), ({"CODEX_HOME": "/a//b"}, "/h")]
+        self.assertEqual(_node_json(body, cases), ["/x/y", "/h/.codex", "C:/Users/u/.codex", None, None, None])
+        with tempfile.TemporaryDirectory() as home:
+            env = {k: v for k, v in os.environ.items() if k != "CODEX_HOME"}
+            env.update(HOME=home, USERPROFILE=home)
+            script = ("import(%s).then((m) => process.stdout.write(JSON.stringify(m.resolveCodexHome())))"
+                      % json.dumps(ROLLOUT.as_uri()))
+            r = subprocess.run(["node", "--input-type=module", "-e", script], capture_output=True, text=True,
+                               encoding="utf-8", env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(json.loads(r.stdout), home.replace("\\", "/").rstrip("/") + "/.codex")
 
     def test_grammar_forged_delivery_read_returns_null(self):
         # D23: bash 5.2.37 exited 0 for each command without printing the installed body. Mutation: reading the
@@ -553,7 +604,8 @@ class TestOwnerAwareCompletion(unittest.TestCase):
     def _run(self, lines, env_extra=None, claim=CLAIM_TEXT):
         path = _write_rollout(list(lines) + [_task_complete(claim)])
         self.addCleanup(os.unlink, path)
-        return _run_hook({"last_assistant_message": claim, "transcript_path": path, "cwd": WORK_CWD}, env_extra)
+        env = {"CODEX_HOME": CODEX_HOME, **(env_extra or {})}  # never the real Codex home (D25 model (3))
+        return _run_hook({"last_assistant_message": claim, "transcript_path": path, "cwd": WORK_CWD}, env)
 
     def _assert_house_bytes(self, lines):
         self.assertEqual(self._run(lines, claim=HOUSE_CLAIM).encode("utf-8"), HOUSE_REMINDER.encode("utf-8"))
@@ -586,6 +638,19 @@ class TestOwnerAwareCompletion(unittest.TestCase):
         self._assert_neutral(foo)
         self.assertEqual(self._run(foo, BLOCK_ON, claim=CLAIM_TEXT + " " + MARKER).strip(), "")
         self.assertEqual(self._run(foo + _delivery("verification-before-completion", "c2"), BLOCK_ON).strip(), "")
+
+    def test_forged_delivery_path_does_not_silence_block(self):  # D25 model (3), SEC-1, SEC-2
+        # Mutation: accepting an unanchored, non-canonical or write-then-read verification read as a delivery.
+        t = TestOwnerSignalScanner.TAIL
+        foo = [_user("Use superpowers:foo")]
+        for n, command in enumerate(("cat /tmp/" + t, "cat " + CODEX_HOME + "//" + t,
+                                     "printf x > " + CODEX_HOME + "/" + t + "; cat " + CODEX_HOME + "/" + t)):
+            with self.subTest(command=command):
+                lines = foo + [_exec_read(command, f"f{n}"), _read_output(f"f{n}", 0)]
+                block = json.loads(self._run(lines, BLOCK_ON))
+                self.assertEqual(block, {"decision": "block", "reason": NEUTRAL, "systemMessage": BLOCK_SYSTEM})
+        # Control: the anchored single-statement read still silences the block.
+        self.assertEqual(self._run(foo + _delivery("verification-before-completion", "g1"), BLOCK_ON).strip(), "")
 
     def test_compaction_without_redelivery_is_neutral(self):  # AC56 second half
         self._assert_neutral([_user(CHOICE), *_delivery("brainstorming", "c1"), _compacted()])

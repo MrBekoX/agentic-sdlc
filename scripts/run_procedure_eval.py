@@ -32,8 +32,8 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any, Callable
 
 try:
     from scripts.eval_safety import require_link_free_tree, require_relative_pattern, require_slug, resolve_under
@@ -133,18 +133,38 @@ def read_transcript_text(path: Path) -> str:
     return raw_bytes.decode("utf-8", errors="replace")
 
 
-def load_json_lines(path: Path) -> list[dict[str, Any]]:
+def load_json_lines(path: Path, malformed: list[int] | None = None) -> list[dict[str, Any]]:
+    """JSON-object events, one per line (D25 model (4)).
+
+    Lines split only on `\\n`, and one trailing `\\r` is stripped, so a raw U+2028, U+2029 or U+0085 inside a JSON
+    string never ends a line. A non-empty line that is not a JSON object is skipped; when `malformed` is a list, its
+    1-based line number is appended (never its content).
+    """
     events = []
     text = read_transcript_text(path)
-    for raw in text.splitlines():
-        raw = raw.strip()
-        if not raw:
+    for number, raw in enumerate(text.split("\n"), start=1):
+        if raw.endswith("\r"):
+            raw = raw[:-1]
+        if not raw.strip():
             continue
         try:
-            events.append(json.loads(raw))
+            event = json.loads(raw)
         except json.JSONDecodeError:
-            continue
+            event = None
+        if isinstance(event, dict):
+            events.append(event)
+        elif malformed is not None:
+            malformed.append(number)
     return events
+
+
+def load_trace(path: Path, strict: bool) -> Trace:
+    """trace_events over a transcript file; under strict evidence a malformed line adds one named error."""
+    malformed: list[int] | None = [] if strict else None
+    trace = trace_events(load_json_lines(path, malformed), strict=strict)
+    if malformed:
+        trace.strict_errors.append("strict_transcript_malformed_line")
+    return trace
 
 
 def _record_tool(trace: Trace, name: str, input_obj: Any) -> None:
@@ -229,6 +249,27 @@ def _record_codex_item(trace: Trace, item: dict[str, Any]) -> None:
             trace.text += "\n" + message
 
 
+_WIN_ABSOLUTE_ENTRY_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|//)")
+
+
+def _program_on_absolute_path(name: str) -> str | None:
+    """`name` as an absolute path found in an absolute PATH entry, else None (D25 model (5)).
+
+    The cwd and relative PATH entries are never searched. On win32 only `<name>.exe` and `<name>.com` are candidates
+    (PATHEXT is not consulted, so a batch file never starts without a shell); elsewhere a candidate must be an
+    executable regular file.
+    """
+    windows = sys.platform == "win32"
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not (_WIN_ABSOLUTE_ENTRY_RE.match(entry) if windows else entry.startswith("/")):
+            continue
+        for candidate in ([os.path.join(entry, name + ext) for ext in (".exe", ".com")] if windows
+                          else [os.path.join(entry, name)]):
+            if os.path.isfile(candidate) and (windows or os.access(candidate, os.X_OK)):
+                return candidate
+    return None
+
+
 # One node process (fixed argv, no shell) reuses the hook exports instead of re-implementing them:
 # parseCodexExitCode (hooks/codex-rollout.mjs) and isRealRunnerInvocation (hooks/flow-evidence.mjs).
 NODE_HELPERS_JS = (
@@ -253,7 +294,7 @@ def run_node_helpers(*, texts: list[str] | None = None, commands: list[str] | No
         "texts": list(texts or []),
         "commands": list(commands or []),
     }
-    node = shutil.which("node")
+    node = _program_on_absolute_path("node")
     if not node:
         return None
     try:
@@ -701,21 +742,31 @@ def regex_present(pattern: str, text: str) -> bool:
     return bool(re.search(pattern, text, re.IGNORECASE | re.MULTILINE))
 
 
+def _anchored_pattern(pattern: str) -> bool:
+    """A root, drive or UNC anchor under either path flavor (`/Win*`, `C:*`, `C:\\x`), whatever the host OS."""
+    return bool(PureWindowsPath(pattern).anchor or PurePosixPath(pattern).anchor)
+
+
 def artifact_present(pattern: str, trace: Trace, cwd: Path) -> bool:
     if any(pattern.replace("\\", "/") in w.replace("\\", "/") for w in trace.writes):
         return True
     require_relative_pattern(pattern, "required artifact")
+    if _anchored_pattern(pattern):  # require_relative_pattern's error, also where Path.is_absolute() says no (SEC-10)
+        raise ValueError(f"required artifact must stay below the eval working directory: {pattern}")
     candidates = list(cwd.glob(pattern)) if any(ch in pattern for ch in "*?[]") else [resolve_under(cwd, pattern, "required artifact")]
     return any(p.exists() for p in candidates)
 
 
 def artifact_escapes(pattern: str, cwd: Path, contained_root: Path) -> bool:
-    """AC124: an absolute or `..` pattern, or any candidate resolving (through links) outside the root."""
+    """AC124: an anchored or `..` pattern, or any candidate resolving (through links) outside the root."""
     raw = Path(pattern)
-    if raw.is_absolute() or ".." in raw.parts:
+    if raw.is_absolute() or ".." in raw.parts or _anchored_pattern(pattern):
         return True
     root = Path(contained_root).resolve()
-    candidates = list(cwd.glob(pattern)) if any(ch in pattern for ch in "*?[]") else [cwd / pattern]
+    try:
+        candidates = list(cwd.glob(pattern)) if any(ch in pattern for ch in "*?[]") else [cwd / pattern]
+    except (NotImplementedError, ValueError):
+        return True  # a pattern the glob cannot evaluate relative to the root is an escape, never a traceback
     # Only existence and resolution are evaluated here, never file content.
     return any(not path_within(candidate.resolve(), root) for candidate in candidates)
 
@@ -875,27 +926,8 @@ def load_test_re() -> re.Pattern[str]:
     return re.compile(json.loads(FLOW_REQUIREMENTS.read_text(encoding="utf-8"))["testCommand"], re.IGNORECASE)
 
 
-def _unquoted_mask(text: str) -> list[bool]:
-    """True for each character outside quotes and not backslash-escaped. Single linear pass."""
-    mask = [False] * len(text)
-    quote = ""
-    index = 0
-    while index < len(text):
-        ch = text[index]
-        if quote:
-            if ch == quote:
-                quote = ""
-            elif ch == "\\" and quote == '"':
-                index += 1  # the escaped character inside double quotes stays data
-        elif ch in ("'", '"'):
-            quote = ch
-        elif ch == "\\":
-            index += 1  # the escaped next character is literal
-        else:
-            mask[index] = True
-        index += 1
-    return mask
-
+# D25 blank model: only space, tab and newline are blanks; every other character is a word character.
+_BR6_BLANKS = " \t\n"
 
 # hooks/codex-rollout.mjs COMMENT_BOUNDARY: an unquoted `#` right after one of these (or at the start) opens a comment.
 _BR6_COMMENT_BOUNDARY = frozenset(" \t\n;|&()<>")
@@ -955,11 +987,6 @@ def has_unquoted_background(statement: str) -> bool:
     return False
 
 
-# String.prototype.trim's whitespace set, so a Python statement is trimmed exactly as the Node splitter trims it.
-_JS_TRIM = ("\t\n\x0b\x0c\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007"
-            "\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff")
-
-
 def br6_statement_joins(command: str) -> list[tuple[str, bool]]:
     """(statement, joined by `||`) pairs, mirroring splitBr6StatementJoins in hooks/codex-rollout.mjs (D23).
 
@@ -978,7 +1005,7 @@ def br6_statement_joins(command: str) -> list[tuple[str, bool]]:
 
     def flush(via_or: bool) -> None:
         nonlocal current, pending_or
-        statement = "".join(current).strip(_JS_TRIM)
+        statement = "".join(current).strip(_BR6_BLANKS)
         if statement:
             statements.append((statement, pending_or))
             pending_or = False
@@ -1249,12 +1276,12 @@ def in_safe_br6_grammar(command: str) -> bool:
 
 
 def has_unquoted_pipe(statement: str) -> bool:
-    """An unquoted `|` or `|&`; `||` is not a pipe."""
-    mask = _unquoted_mask(statement)
+    """An unquoted `|` or `|&` outside a comment; `||` is not a pipe."""
+    unquoted, _comment = _br6_scan(statement)
     index = 0
     while index < len(statement):
-        if mask[index] and statement[index] == "|":
-            if index + 1 < len(statement) and statement[index + 1] == "|" and mask[index + 1]:
+        if unquoted[index] and statement[index] == "|":
+            if index + 1 < len(statement) and statement[index + 1] == "|" and unquoted[index + 1]:
                 index += 2
                 continue
             return True
@@ -1263,11 +1290,11 @@ def has_unquoted_pipe(statement: str) -> bool:
 
 
 def _split_unquoted_andand(text: str) -> list[str]:
-    mask = _unquoted_mask(text)
+    unquoted, _comment = _br6_scan(text)
     parts: list[str] = []
     start = index = 0
     while index < len(text) - 1:
-        if mask[index] and mask[index + 1] and text[index:index + 2] == "&&":
+        if unquoted[index] and unquoted[index + 1] and text[index:index + 2] == "&&":
             parts.append(text[start:index])
             start = index + 2
             index += 2
@@ -1277,45 +1304,104 @@ def _split_unquoted_andand(text: str) -> list[str]:
     return parts
 
 
-def _args_before_pipe(text: str) -> list[str]:
-    """Quote-aware arguments (quotes stripped) up to the first unquoted `|`."""
-    args: list[str] = []
-    current: str | None = None
-    quote = ""
-    for ch in text:
-        if quote:
-            if ch == quote:
-                quote = ""
-            else:
-                current = (current or "") + ch
-        elif ch in ("'", '"'):
-            quote = ch
-            current = current or ""
-        elif ch == "|":
+# Inside double quotes a backslash is removed only before these characters (bash quote removal).
+_DOUBLE_QUOTE_ESCAPES = frozenset('$`"\\\n')
+
+
+def _runner_words(text: str, start: int) -> list[tuple[str, bool]]:
+    """(value, unknown) for each argument word of the runner whose pattern match ends at `start` (D25 model (1)).
+
+    Mirrors runnerWords in hooks/codex-rollout.mjs. The whole segment is read once, left to right, so a quote opened
+    before `start` is honored; a word counts when it ends after `start` (a runner match inside an earlier assignment
+    value only adds words). Values follow bash quote and backslash removal. Words end at a blank, at an unquoted,
+    unescaped `<` or `>`, or an `&` directly before `>`; argument words end at the first unquoted `|` or word-start
+    comment at or after `start`. A comment that starts before `start` yields one UNKNOWN word. A word is UNKNOWN when it
+    holds an unquoted or double-quoted `$`, or when its value has no `/` and it holds an unquoted `*`, `?` or `[` or
+    starts with an unquoted `~`. Linear.
+    """
+    unquoted, comment = _br6_scan(text)
+    length = len(text)
+    cut = length
+    for index in range(length):
+        if comment[index] or (unquoted[index] and text[index] == "|" and index >= start):
+            cut = index
             break
-        elif ch.isspace():
-            if current is not None:
-                args.append(current)
-                current = None
+    if cut < start:
+        return [("", True)]  # the runner match lies inside a comment: nothing about its words is known
+    words: list[tuple[str, bool]] = []
+    value: list[str] = []
+    in_word = unknown = pattern = False
+    end = 0
+
+    def push() -> None:
+        nonlocal in_word, unknown, pattern
+        if in_word and end > start:
+            joined = "".join(value)
+            words.append((joined, unknown or (pattern and "/" not in joined)))
+        value.clear()
+        in_word = unknown = pattern = False
+
+    index = 0
+    while index < cut:
+        ch = text[index]  # every character read here is unquoted and unescaped; quotes and escapes are consumed below
+        if ch in _BR6_BLANKS or ch in "<>|" or (ch == "&" and index + 1 < cut and text[index + 1] == ">"
+                                               and unquoted[index + 1]):
+            push()
+            index += 1
+            continue
+        if not in_word:
+            in_word = True
+            pattern = ch == "~"
+        if ch == "\\":
+            if index + 1 < cut and text[index + 1] != "\n":
+                value.append(text[index + 1])
+            index += 2
+        elif ch == "'":
+            close = text.find("'", index + 1, cut)
+            close = cut if close == -1 else close
+            value.append(text[index + 1:close])
+            index = close + 1
+        elif ch == '"':
+            index += 1
+            while index < cut and text[index] != '"':
+                inner = text[index]
+                if inner == "\\" and index + 1 < cut:
+                    if text[index + 1] in _DOUBLE_QUOTE_ESCAPES:
+                        if text[index + 1] != "\n":
+                            value.append(text[index + 1])
+                    else:
+                        value.append(text[index:index + 2])
+                    index += 2
+                    continue
+                unknown = unknown or inner == "$"
+                value.append(inner)
+                index += 1
+            index += 1
         else:
-            current = (current or "") + ch
-    if current is not None:
-        args.append(current)
-    return args
+            unknown = unknown or ch == "$"
+            pattern = pattern or ch in "*?["
+            value.append(ch)
+            index += 1
+        end = min(index, cut)
+    push()
+    return words
 
 
-def is_version_or_help_only(statement: str, test_re: re.Pattern[str]) -> bool:
-    """True only when every `&&` segment holding a runner match passes --version/-V/--help/-h after it.
+def is_version_or_help_only(statement: str, test_re: re.Pattern[str],
+                            is_runner_segment: Callable[[str], Any]) -> bool:
+    """True only when the statement has a runner segment and every runner segment passes a version/help flag.
 
-    Arguments after `--` count (`npm test -- --help`); a statement with no runner segment is False.
+    A `&&` segment is a runner segment only when `is_runner_segment` (isRealRunnerInvocation for that segment alone)
+    accepts it; its argument words start after its first runner-pattern match. An UNKNOWN word counts as a flag, and
+    arguments after `--` count (`npm test -- --help`).
     """
     runner_segments = 0
     for segment in _split_unquoted_andand(statement):
         match = test_re.search(segment)
-        if match is None:
+        if match is None or is_runner_segment(segment) is not True:
             continue
         runner_segments += 1
-        if not VERSION_HELP_FLAGS.intersection(_args_before_pipe(segment[match.end():])):
+        if not any(unknown or value in VERSION_HELP_FLAGS for value, unknown in _runner_words(segment, match.end())):
             return False
     return runner_segments > 0
 
@@ -1349,9 +1435,8 @@ def attributable_test_runs(trace: Trace, test_re: re.Pattern[str]) -> list[Attri
         operands = br6_trailing_or_run(command)
         # isRealRunnerInvocation can only accept an operand the runner regex matches somewhere, so a
         # non-matching operand is decided here without spawning node.
-        if not operands or any(test_re.search(operand) is None or is_version_or_help_only(operand, test_re)
-                               or has_unquoted_pipe(operand) or has_unquoted_background(operand)
-                               for operand in operands):
+        if not operands or any(test_re.search(operand) is None or has_unquoted_pipe(operand)
+                               or has_unquoted_background(operand) for operand in operands):
             continue
         counts = trace.call_event_counts.get(call_id, {})
         if max(counts.get("full", 0), counts.get("streamed", 0)) != 1 or counts.get("outputs", 0) != 1:
@@ -1362,16 +1447,19 @@ def attributable_test_runs(trace: Trace, test_re: re.Pattern[str]) -> list[Attri
         candidates.append((index, call_id, command, operands, exit_code))
     if not candidates:
         return []
-    operands_flat = [operand for candidate in candidates for operand in candidate[3]]
-    classified = run_node_helpers(commands=operands_flat, test_command=test_re.pattern)
+    # One batch classifies every operand and each of its `&&` segments (D25 model (1)); the version/help check runs after.
+    batch = sorted({text for candidate in candidates for operand in candidate[3]
+                    for text in (operand, *_split_unquoted_andand(operand))})
+    classified = run_node_helpers(commands=batch, test_command=test_re.pattern)
     if classified is None:
         if "strict_runner_classifier_unavailable" not in trace.strict_errors:
             trace.strict_errors.append("strict_runner_classifier_unavailable")
         return []  # fail closed: no run is attributable
-    verdicts = iter(classified["real"])
+    is_runner = dict(zip(batch, classified["real"])).get
     runs: list[AttributableRun] = []
     for index, call_id, command, operands, exit_code in candidates:
-        if all([next(verdicts) for _operand in operands]):  # a list, so every operand's verdict is consumed
+        if all(is_runner(operand) is True and not is_version_or_help_only(operand, test_re, is_runner)
+               for operand in operands):
             runs.append(AttributableRun(call_id, command, exit_code, index))
     return runs
 
@@ -1747,15 +1835,20 @@ def copy_fixture(case: dict[str, Any], tmp_root: Path, *, allow_commit: bool = F
     require_link_free_tree(src, "fixture_dir")
     dst = resolve_under(tmp_root, require_slug(case["id"], "case id"), "fixture destination")
     shutil.copytree(src, dst)
+    # A git reachable only through the cwd, a relative PATH entry or a batch file is not used (D25 model (5)).
+    # A missing git raises FileNotFoundError, as the bare-name spawn did.
+    git = _program_on_absolute_path("git")
+    if git is None:
+        raise FileNotFoundError("git is not on an absolute PATH entry")
     steps = [
-        ("init", ["git", "init", "-b", "main"]),
-        ("config-user-email", ["git", "config", "user.email", "eval@example.invalid"]),
-        ("config-user-name", ["git", "config", "user.name", "Agentic SDLC Eval"]),
+        ("init", ["init", "-b", "main"]),
+        ("config-user-email", ["config", "user.email", "eval@example.invalid"]),
+        ("config-user-name", ["config", "user.name", "Agentic SDLC Eval"]),
     ]
     if allow_commit:
-        steps += [("add", ["git", "add", "."]), ("commit", ["git", "commit", "-m", "fixture baseline"])]
+        steps += [("add", ["add", "."]), ("commit", ["commit", "-m", "fixture baseline"])]
     for step, argv in steps:
-        proc = subprocess.run(argv, cwd=dst, capture_output=True, text=True, encoding="utf-8")
+        proc = subprocess.run([git, *argv], cwd=dst, capture_output=True, text=True, encoding="utf-8")
         if proc.returncode != 0:
             # Git stderr is never echoed: it can carry local paths or configuration values.
             raise FixtureGitError(f"fixture_git_failed:{step}")
@@ -1800,7 +1893,7 @@ def run_live_case(case: dict[str, Any], args: argparse.Namespace, tmp_root: Path
     )
     raw_transcript = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
     transcript_path.write_text(redact_text(raw_transcript), encoding="utf-8")
-    return trace_events(load_json_lines(transcript_path), strict=args.strict_evidence), cwd, transcript_path
+    return load_trace(transcript_path, args.strict_evidence), cwd, transcript_path
 
 
 # --- Evidence packets (AC65, AC66, AC67, AC124, AC128).
@@ -1831,9 +1924,12 @@ def _sha256_bytes(data: bytes) -> str:
 
 def repository_commit() -> str:
     """The repository HEAD commit via a fixed argv (no shell, fsmonitor disabled), else a named marker."""
+    git = _program_on_absolute_path("git")  # D25 model (5)
+    if git is None:
+        return NO_GIT_CHECKOUT
     try:
         proc = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", "rev-parse", "--verify", "HEAD^{commit}"],
+            [git, "-c", "core.fsmonitor=false", "rev-parse", "--verify", "HEAD^{commit}"],
             cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
     except OSError:
@@ -1992,6 +2088,54 @@ def _write_text_atomically(target: Path, text: str) -> None:
         raise
 
 
+# D25 model (6): the path segment after a `home` or `Users` directory, also after JSON-escaped separators.
+_HOME_SEGMENT_RE = re.compile(r"(?<![A-Za-z0-9_.-])((?:home|Users)[/\\]+)(?!\*\*\*MASKED)[^/\\\s\"'<>|:;,*]+")
+
+
+def mask_home_paths(text: str) -> str:
+    """Replace each home-directory segment (`/home/<user>`, `C:\\Users\\<user>`, JSON-escaped too) with a marker."""
+    return _HOME_SEGMENT_RE.sub(lambda match: match.group(1) + "***MASKED:home***", text)
+
+
+def redact_transcript_lines(text: str) -> str:
+    """Redact a transcript copy line by line (D25 model (6)).
+
+    Lines that parse as JSON go through one batched structured redaction (which decodes string values and keeps key
+    context) and are re-serialized with ensure_ascii=False. Each run of consecutive other lines goes through the text
+    redactor as one block, so a multi-line private key between them is still masked whole. Any redaction failure
+    raises, and the caller writes nothing.
+    """
+    lines = text.split("\n")
+    parsed: dict[int, Any] = {}
+    for index, line in enumerate(lines):
+        try:
+            parsed[index] = json.loads(line[:-1] if line.endswith("\r") else line)
+        except json.JSONDecodeError:
+            continue
+    clean = redact_json(list(parsed.values())) if parsed else []
+    if not isinstance(clean, list) or len(clean) != len(parsed):
+        raise RuntimeError("structured transcript redaction returned an unexpected shape")
+    for index, value in zip(parsed, clean):
+        lines[index] = json.dumps(value, ensure_ascii=False)
+    out: list[str] = []
+    run: list[str] = []
+
+    def flush() -> None:
+        if run:
+            block = "\n".join(run)
+            out.append(redact_text(block) if block.strip() else block)
+            run.clear()
+
+    for index, line in enumerate(lines):
+        if index in parsed:
+            flush()
+            out.append(line)
+        else:
+            run.append(line)
+    flush()
+    return "\n".join(out)
+
+
 def write_evidence_packet(packet: dict[str, Any], evidence_dir: Path, case_id: str, transcript_text: str, *,
                           fixture_roots: list[Path]) -> None:
     """Validate, redact in memory, then write `<case-id>.transcript.jsonl` and `<case-id>.json` (AC66, AC67).
@@ -2013,7 +2157,8 @@ def write_evidence_packet(packet: dict[str, Any], evidence_dir: Path, case_id: s
         raise ValueError("evidence_packet_exists")
     try:
         clean_packet = redact_json(dict(packet, helper_paths=helper_paths(evidence_root)))
-        clean_transcript = redact_text(transcript_text)
+        clean_transcript = mask_home_paths(redact_transcript_lines(transcript_text))
+        packet_text = mask_home_paths(json.dumps(clean_packet, indent=2, ensure_ascii=False) + "\n")
     except (RuntimeError, OSError, ValueError) as exc:  # redaction fails closed: nothing is written
         raise RuntimeError("evidence_redaction_failed") from exc
     try:
@@ -2021,7 +2166,7 @@ def write_evidence_packet(packet: dict[str, Any], evidence_dir: Path, case_id: s
         transcript_target = resolve_under(evidence_root, f"{case_id}.transcript.jsonl", "evidence transcript")
         packet_target = resolve_under(evidence_root, f"{case_id}.json", "evidence packet")
         _write_text_atomically(transcript_target, clean_transcript)
-        _write_text_atomically(packet_target, json.dumps(clean_packet, indent=2, ensure_ascii=False) + "\n")
+        _write_text_atomically(packet_target, packet_text)
     except OSError as exc:
         raise RuntimeError("evidence_write_failed") from exc
 
@@ -2168,7 +2313,7 @@ def main(argv: list[str] | None = None) -> int:
         tmp_root = Path(td)
         for case in cases:
             if args.transcript:
-                trace = trace_events(load_json_lines(args.transcript), strict=args.strict_evidence)
+                trace = load_trace(args.transcript, args.strict_evidence)
                 cwd = fixture_root if fixture_root is not None else REPO
                 transcript_path = args.transcript
             elif args.live:
