@@ -23,7 +23,7 @@ The supported runtimes are Claude Code and Codex. The historical 2026-09-13 batc
 
 - **Version/changelog consistency**: contradicted by F5 (`README.md:250` read `0.4.2`); the current result is row `current_version_declarations` (AC85).
 - **Public source and artifact scans**: scope was source and archive only, not Git history; the F4 finding is held by row `history_private_path_finding` (AC125).
-- **Source-archive recipe (paragraph at line 60)**: its reviewed-new-file packaging recipe is superseded for the 0.4.3 final archive by commit-tree-only builds (BR13).
+- **Source-archive recipe (the paragraph beginning "The release source excludes private audit writeups"; line 60 at 5801cb9)**: its reviewed-new-file packaging recipe is superseded for the 0.4.3 final archive by commit-tree-only builds (BR13).
 
 Required commands and measurement boundaries are in [Release Readiness](release-readiness.md). Use the existing three-observation threshold; a single successful routing response cannot satisfy it. The original native batch completed ninety routing sessions and both Claude procedure cases, with no automatic retry. All92 CLI invocations are terminal. The routing verdict covers initial selection/delivery, not execution of every focused procedure.
 

@@ -209,12 +209,14 @@ Use this shape in a release note or final publish report. Its keys, allowed valu
 ```text
 version=0.4.3
 scope=Claude Code, Codex
-local_gate=<passed|failed> <date>
-claude_routing_eval=<passed|failed|not-run> <transcript-or-log>
-codex_routing_eval=<passed|failed|not-run> <transcript-or-log>
-claude_pipeline_procedure=<passed|failed|not-run> <transcript-or-log>
-codex_pipeline_procedure=<passed|failed|not-run> <transcript-or-log>
-secret_scan=<clean|blocked> <method>
+local_gate=<passed|failed|blocked|not-run>
+claude_routing_eval=<passed|failed|blocked|not-run>
+codex_routing_eval=<passed|failed|blocked|not-run>
+claude_pipeline_procedure=<passed|failed|blocked|not-run>
+codex_pipeline_procedure=<passed|failed|blocked|not-run>
+secret_scan=<passed|failed|blocked|not-run>
 known_limitations_acknowledged=<yes|no>
 verdict=<publish|do-not-publish>
 ```
+
+Evidence references, such as dates, transcripts, logs and scan methods, belong in the ledger's bound rows, not in this block.

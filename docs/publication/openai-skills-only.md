@@ -10,6 +10,7 @@ This packet prepares an `agentic-sdlc` upload to the OpenAI public plugin direct
 - It has no `.claude-plugin/`, `commands/`, `agents/`, `workflows/`, `docs/` or `tests/` member and no MCP configuration.
 - The OpenAI guide requires that no skill relies on commands or agents ([submit a Claude plugin](https://developers.openai.com/plugins/guides/submit-claude-plugin), observed 2026-09-14).
 - GAP: `agentic-sdlc-pipeline` step 16 (`SKILL.md` and `playbook.md`) tells the agent to run the read-only `git-safety-check` command, which lives in `commands/` and is not in this archive.
+- Owner: the maintainer. Follow-up after 0.4.3: give `agentic-sdlc-pipeline` step 16 a skills-only fallback; until then this path stays GAP.
 - GAP: skills name `agents/` roles (`code-reviewer`, `context-analyst`, `debugger`, `implementation-auditor`, `security-reviewer`, `software-architect`, `spec-plan-author`, `spec-plan-critic`, `test-engineer`) that are not in this archive; there those roles run only through each skill's degraded inline fallback.
 - The OpenAI path stays GAP until pipeline step 16 has a skills-only fallback.
 

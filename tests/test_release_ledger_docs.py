@@ -17,7 +17,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 LEDGER = REPO / "docs" / "release-evidence-0.4.3.md"
 
-# Byte-exact table lines 12 and 19 of docs/release-evidence-0.4.3.md at 5801cb9.
+# Byte-exact table lines 12 and 19 of docs/release-evidence-0.4.3.md at 5801cb9, whose blob is ORIGINAL_LEDGER_BLOB.
+# The test reads the blob, not the commit: a history rewrite keeps the blob id but not the commit id (D25).
+ORIGINAL_LEDGER_BLOB = "92b9c17a5913b1d62dbce4d4ce1a01b81087a0fe"
 ORIGINAL_VERSION_ROW = (
     "| Version/changelog consistency | PASS: all declarations are 0.4.3 and both version/release checks exit zero"
     " | VERSION, README and both plugin manifests/marketplace agree; release check passes |"
@@ -169,6 +171,47 @@ def annotation_violations(text):
         if row_id not in rows:
             violations.append("annotation_target_missing:" + row_id)
     return violations
+
+
+def _paragraph_starts(lines):
+    starts = []
+    for i, line in enumerate(lines):
+        if not line.strip() or line.startswith(("#", "|", "- ", "```")):
+            continue
+        if i == 0 or not lines[i - 1].strip():
+            starts.append(line)
+    return starts
+
+
+def paragraph_citation_violations(text):
+    """Annotations cite ledger paragraphs by their opening words; a line number is valid only at 5801cb9 (QUAL-18)."""
+    lines = text.splitlines()
+    headings = [i for i, line in enumerate(lines) if ANNOTATION_HEADING.match(line)]
+    if not headings:
+        return ["missing_annotation_section"]
+    starts = _paragraph_starts(lines)
+    violations = []
+    for bullet in (line for line in _section(lines, headings[0]) if line.startswith("- ")):
+        if re.search(r"\bline \d+", bullet) and "at 5801cb9" not in bullet:
+            violations.append("line_reference_without_5801cb9")
+        for phrase in re.findall(r'"([^"]+)"', bullet):
+            if not any(start.startswith(phrase) for start in starts):
+                violations.append("quoted_phrase_not_a_paragraph_start:" + phrase)
+    return violations
+
+
+GOOD_CITATION_LEDGER = "\n".join(
+    [
+        "# Release evidence",
+        "",
+        "### Annotations to historical rows (2026-09-15)",
+        "",
+        '- **Source-archive recipe (the paragraph beginning "The release source excludes"; line 60 at 5801cb9)**: superseded.',
+        "",
+        "The release source excludes private audit writeups.",
+        "",
+    ]
+)
 
 
 def decision_block_violations(ledger, version, runtime_adapter):
@@ -432,15 +475,36 @@ class TestLedgerAnnotations(unittest.TestCase):
         self.assertEqual(annotation_violations(_real("docs/release-evidence-0.4.3.md")), [])
 
     def test_original_row_constants_match_5801cb9(self):
+        present = subprocess.run(["git", "cat-file", "-e", ORIGINAL_LEDGER_BLOB], cwd=REPO, capture_output=True)
+        if present.returncode != 0:
+            self.skipTest(
+                "the original 0.4.3 ledger blob 92b9c17 is not in this object store "
+                "(shallow clone, extracted archive, or a history that does not contain it)"
+            )
         proc = subprocess.run(
-            ["git", "show", "5801cb9:docs/release-evidence-0.4.3.md"],
-            cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            ["git", "cat-file", "blob", ORIGINAL_LEDGER_BLOB],
+            cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
         )
-        if proc.returncode != 0:
-            self.skipTest("commit 5801cb9 is not reachable (no Git history, as in an extracted archive or a shallow clone)")
         lines = proc.stdout.splitlines()
         self.assertEqual(lines[11], ORIGINAL_VERSION_ROW)
         self.assertEqual(lines[18], ORIGINAL_SCANS_ROW)
+
+    def test_annotation_cites_paragraphs_by_opening_words(self):
+        self.assertEqual(paragraph_citation_violations(GOOD_CITATION_LEDGER), [])
+        cases = [
+            (
+                "line_reference_without_5801cb9",
+                GOOD_CITATION_LEDGER.replace('(the paragraph beginning "The release source excludes"; line 60 at 5801cb9)', "(paragraph at line 60)"),
+            ),
+            (
+                "quoted_phrase_not_a_paragraph_start:release source excludes",
+                GOOD_CITATION_LEDGER.replace('beginning "The release source excludes"', 'beginning "release source excludes"'),
+            ),
+        ]
+        for name, text in cases:
+            with self.subTest(name=name):
+                self.assertIn(name, paragraph_citation_violations(text))
+        self.assertEqual(paragraph_citation_violations(_real("docs/release-evidence-0.4.3.md")), [])
 
 
 class TestRequiredRows(unittest.TestCase):
@@ -497,7 +561,7 @@ class TestDecisionBlock(unittest.TestCase):
             ("decision_block_missing", build_ledger().replace("```text", "text"), GOOD_ADAPTER, "0.4.3"),
             (
                 "publish_without_inspected_evidence:local_gate",
-                _pass_everything().replace("| static gate | tests/artifacts", "| static gate | tests/artifacts").replace(
+                _pass_everything().replace(
                     "| native live | tests/artifacts/publication/x.json (inspected) |\n| `claude_routing_eval`",
                     "| native live | not recorded (lost) |\n| `claude_routing_eval`",
                 ),
@@ -508,6 +572,31 @@ class TestDecisionBlock(unittest.TestCase):
         for name, text, adapter, version in cases:
             with self.subTest(name=name):
                 self.assertIn(name, decision_block_violations(text, version, adapter))
+
+    def test_release_verdict_template_uses_decision_values(self):
+        lines = _real("docs/release-readiness.md").splitlines()
+        start = lines.index("## Release Verdict Template")
+        fence_start = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == "```text")
+        fence_end = next(i for i in range(fence_start + 1, len(lines)) if lines[i].strip() == "```")
+        pairs = [line.split("=", 1) for line in lines[fence_start + 1 : fence_end] if line.strip()]
+        self.assertEqual(tuple(pair[0] for pair in pairs), DECISION_KEYS)
+        values = {pair[0]: pair[1] for pair in pairs}
+        version = _real("VERSION").strip()
+        self.assertEqual(values["version"], version)
+        self.assertEqual([line for line in lines if line.startswith("version=")], ["version=" + version])
+        self.assertEqual(values["scope"], "Claude Code, Codex")
+
+        def offered(key):
+            # The whole value is one `<a|b|...>` choice; nothing may follow the closing `>`.
+            match = re.fullmatch(r"<([^<>]*)>", values[key])
+            self.assertIsNotNone(match, f"{key}={values[key]}")
+            return match.group(1).split("|")
+
+        for key in STATE_KEYS:
+            with self.subTest(key=key):
+                self.assertEqual(sorted(offered(key)), sorted(STATE_MAP))
+        self.assertEqual(offered("known_limitations_acknowledged"), ["yes", "no"])
+        self.assertEqual(offered("verdict"), ["publish", "do-not-publish"])
 
     def test_real_decision_block_is_bound_to_rows(self):
         version = _real("VERSION").strip()
@@ -586,6 +675,11 @@ class TestOpenAIPacketDependencies(unittest.TestCase):
             _real("docs/publication/openai-skills-only.md"), _skill_texts(), _names("commands"), _names("agents")
         )
         self.assertEqual(violations, [])
+
+    def test_packet_names_skills_only_follow_up_owner(self):
+        lines = _real("docs/publication/openai-skills-only.md").splitlines()
+        owners = [line for line in lines if all(token in line for token in ("Owner:", "maintainer", "step 16"))]
+        self.assertTrue(owners, "the OpenAI packet names no owner for the step 16 skills-only follow-up")
 
 
 if __name__ == "__main__":
