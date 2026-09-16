@@ -55,6 +55,8 @@ BOOL_COLUMNS = (
 TESTS_OUTCOMES = frozenset({"satisfied", "missing"})
 ORDER_OUTCOMES = frozenset({"satisfied", "not-satisfied"})
 ID_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+# D25 word, segment and blank rows lie inside the grammar; test_named_word_segment_and_blank_rows pins them.
+D25_FORGED_PREFIXES = ("edge-forged-word-", "edge-forged-segment-", "edge-forged-blank-")
 
 SPEC_SHAPES = {
     "AC28": ("pytest; echo EXIT=$?",),
@@ -266,7 +268,8 @@ class TestBR6CaseTable(unittest.TestCase):
                 for statement in statements:
                     self.assertIsInstance(statement, str)
                     self.assertTrue(statement, "a statement must be non-empty")
-                    self.assertEqual(statement, statement.strip(), "a statement must be trimmed")
+                    # D25 blank model: only space, tab and newline are blanks, so U+00A0 or U+3000 stays.
+                    self.assertEqual(statement, statement.strip(" \t\n"), "a statement must be trimmed")
                     self.assertFalse(statement.startswith("#"), "comment-only statements are ignored")
 
                 or_run = row["orRun"]
@@ -375,7 +378,8 @@ class TestBR6CaseTable(unittest.TestCase):
     # satisfied, a separator-free construct losing its 5801cb9 default, or a legitimate shape marked outside.
     def test_named_grammar_rows(self):
         rows = {row["id"]: row for row in _load()["rows"]}
-        forged = [i for i in rows if i.startswith("edge-forged-") and not i.startswith("edge-forged-oror-")]
+        forged = [i for i in rows if i.startswith("edge-forged-") and not i.startswith(D25_FORGED_PREFIXES)
+                  and not i.startswith("edge-forged-oror-")]
         self.assertGreaterEqual(len(forged), 40)
         for row_id in forged:
             with self.subTest(id=row_id):
@@ -437,6 +441,58 @@ class TestBR6CaseTable(unittest.TestCase):
             with self.subTest(id=row_id):
                 self.assertIs(rows[row_id]["inSafeGrammar"], True)
                 self.assertIs(rows[row_id]["strictAttributable"], True)
+
+    # Guards (D25): a forged word, segment or blank row inside the grammar marked attributable or default satisfied
+    # after a separator, an inside row losing its attribution, or a blank row whose U+00A0/U+3000 prefix was trimmed.
+    def test_named_word_segment_and_blank_rows(self):
+        rows = {row["id"]: row for row in _load()["rows"]}
+        word = [i for i in rows if i.startswith("edge-forged-word-")]
+        segment = [i for i in rows if i.startswith("edge-forged-segment-")]
+        blank = [i for i in rows if i.startswith("edge-forged-blank-")]
+        self.assertEqual((len(word), len(segment), len(blank)), (15, 3, 4))
+        for row_id in word + segment + ["edge-conservative-word-glob-without-slash"]:
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertIs(row["inSafeGrammar"], True)
+                self.assertIs(row["lastVersionOrHelpOnly"], True)
+                self.assertIs(row["orRunAllRealRunners"], False)
+                self.assertIs(row["strictAttributable"], False)
+                expected = "satisfied" if row_id == "edge-forged-word-escaped-version-single" else "missing"
+                self.assertEqual(row["defaultTests"], expected)
+        for row_id, column in (("edge-forged-blank-nbsp-comment-background", "lastHasBackground"),
+                               ("edge-forged-blank-ideographic-comment-background", "lastHasBackground"),
+                               ("edge-forged-blank-nbsp-comment-pipe", "lastHasPipe"),
+                               ("edge-forged-blank-nbsp-comment-pipe-head", "orRunHeadHasPipeOrBackground")):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertIs(row[column], True)
+                self.assertIs(row["inSafeGrammar"], True)
+                head = column == "orRunHeadHasPipeOrBackground"
+                self.assertEqual(row["defaultTests"], "missing" if head else "satisfied")
+                self.assertIs(row["strictAttributable"], False)
+                self.assertIn(row["command"][0], (chr(0xA0), chr(0x3000)))
+                self.assertEqual(row["statements"][0][0], row["command"][0])
+        pipe_head = rows["edge-forged-blank-nbsp-comment-pipe-head"]
+        self.assertEqual(pipe_head["orRun"], pipe_head["statements"])
+        inside = [i for i in rows if i.startswith(("edge-inside-word-", "edge-inside-segment-"))]
+        self.assertEqual(len(inside), 9)
+        for row_id in inside:
+            with self.subTest(id=row_id):
+                self.assertIs(rows[row_id]["inSafeGrammar"], True)
+                self.assertIs(rows[row_id]["strictAttributable"], True)
+                self.assertEqual(rows[row_id]["strictTests"], "satisfied")
+        self.assertEqual(rows["edge-forged-word-continuation-version"]["statements"], ["pytest", "pytest --version"])
+        for row_id in ("edge-forged-word-escaped-version-oror", "edge-forged-word-redirect-glued-help-oror"):
+            with self.subTest(id=row_id):
+                self.assertEqual(rows[row_id]["orRun"], rows[row_id]["statements"])
+        param = rows["edge-param-simple"]
+        self.assertEqual((param["lastVersionOrHelpOnly"], param["orRunAllRealRunners"], param["defaultTests"],
+                          param["strictAttributable"], param["strictTests"]), (True, False, "missing", False, "missing"))
+        for row_id in ("edge-conservative-substitution-with-separator", "edge-single-statement-substitution",
+                       "edge-forged-hidden-pipe-ansi-c"):
+            with self.subTest(id=row_id):
+                self.assertEqual((rows[row_id]["lastVersionOrHelpOnly"], rows[row_id]["orRunAllRealRunners"]),
+                                 (True, False))
 
     # Guards: a background job (`&`, including after an escaped operator character) marked attributable, or a
     # redirection, `|&`, quoted or commented `&` misread as a background job (D21).

@@ -8,7 +8,10 @@
 // per-message-DECODED carrier value (so a token inside one message is never split by the JSON record
 // envelope), across the whole rollout (user- and assistant-authored carriers alike).
 import { statSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { extractWrittenContent } from './codex-write-signal.mjs';
+// Imports only Node built-ins, so no import cycle arises (D25 model (1)).
+import { isRealRunnerInvocation } from './flow-evidence.mjs';
 
 // Single source of truth for the gate's self-signature. The completion-claim-gate SKILL.md emits this
 // exact literal when it runs; AC17's drift test asserts the two copies stay byte-identical.
@@ -503,6 +506,18 @@ function commentEnd(str, i) {
   return nl === -1 ? str.length : nl;
 }
 
+// D25 blank model: only space, tab and newline are blanks; every other character is a word character.
+const BR6_BLANKS = new Set([' ', '\t', '\n']);
+
+// Trim BR6 blanks from both ends. A linear loop, never an end-anchored regex (quadratic on a long blank run).
+function trimBlanks(s) {
+  let start = 0;
+  let end = s.length;
+  while (start < end && BR6_BLANKS.has(s[start])) start += 1;
+  while (end > start && BR6_BLANKS.has(s[end - 1])) end -= 1;
+  return s.slice(start, end);
+}
+
 // Statements in order, each with `viaOr`: true when an unquoted `||` joins it to the statement before.
 // The join survives the empty lines and comments bash allows after `||` (`echo ok ||\npytest`).
 export function splitBr6StatementJoins(command) {
@@ -513,7 +528,7 @@ export function splitBr6StatementJoins(command) {
   let wordStart = true;
   let pendingOr = false;
   const flush = (viaOr) => {
-    const s = cur.trim();
+    const s = trimBlanks(cur);
     if (s) { statements.push({ text: s, viaOr: pendingOr }); pendingOr = false; } // empty/comment-only ignored
     cur = '';
     if (viaOr) pendingOr = true;
@@ -753,8 +768,9 @@ export function hasUnmodeledShellSyntax(command) {
 }
 
 // Visit every character outside single/double quotes and comments that is not backslash-escaped. A
-// visit that returns false stops the scan.
-function forEachUnquoted(str, visit) {
+// visit that returns false stops the scan. `onComment(i)`, when given, sees the index of each word-start `#`
+// that opens a comment; returning false from it stops the scan too.
+function forEachUnquoted(str, visit, onComment) {
   let q = null;
   let wordStart = true;
   for (let i = 0; i < str.length; i += 1) {
@@ -766,25 +782,14 @@ function forEachUnquoted(str, visit) {
     }
     if (c === '\\') { i += 1; wordStart = false; continue; }
     if (c === "'" || c === '"') { q = c; wordStart = false; continue; }
-    if (c === '#' && wordStart) { i = commentEnd(str, i) - 1; continue; }
+    if (c === '#' && wordStart) {
+      if (onComment && onComment(i) === false) return;
+      i = commentEnd(str, i) - 1;
+      continue;
+    }
     wordStart = COMMENT_BOUNDARY.has(c);
     if (visit(i, c, str[i + 1]) === false) return;
   }
-}
-
-// True when the command holds an unquoted heredoc operator (`<<` or `<<-`, not the `<<<` here-string).
-// Its body lines are data to bash but separate statements to splitBr6Statements, so no exit code of
-// such a command is attributed to its last statement. Disclosed conservative limit: an arithmetic shift
-// such as `$((1<<2))` matches too, which gives a false 'missing', never a false satisfy.
-export function hasUnquotedHeredoc(command) {
-  const str = String(command || '');
-  let heredoc = false;
-  forEachUnquoted(str, (i, c, n) => {
-    if (c !== '<' || n !== '<' || str[i - 1] === '<' || str[i + 2] === '<') return true;
-    heredoc = true;
-    return false;
-  });
-  return heredoc;
 }
 
 export function hasUnquotedPipe(statement) {
@@ -816,20 +821,98 @@ export function hasUnquotedBackground(statement) {
   return amps.some((i) => !operatorAt(i - 1, '&><|') && !operatorAt(i + 1, '&>'));
 }
 
-// Quote-aware argument words after the runner match, up to the first unquoted pipe.
-function runnerArgs(segment, match) {
-  let rest = segment.slice(match.index + match[0].length);
-  forEachUnquoted(rest, (i, c) => {
-    if (c !== '|') return true;
-    rest = rest.slice(0, i);
-    return false;
-  });
-  return shellTokens(rest);
+// Inside double quotes a backslash is removed only before these characters (bash quote removal).
+const DOUBLE_QUOTE_ESCAPES = new Set(['$', '`', '"', '\\', '\n']);
+
+// { value, unknown } for each argument word of the runner whose pattern match ends at `start` (D25 model (1)).
+// scripts/run_procedure_eval.py _runner_words mirrors this pass branch for branch. The whole segment is read
+// once, left to right, so a quote opened before `start` is honored; a word counts when it ends after `start`
+// (a runner match inside an earlier assignment value only adds words). Values follow bash quote and backslash
+// removal. Words end at a blank, at an unquoted, unescaped `<` or `>`, or an `&` directly before `>`; argument
+// words end at the first unquoted `|` or word-start comment at or after `start`. A comment that starts before
+// `start` yields one UNKNOWN word. A word is UNKNOWN when it holds an unquoted or double-quoted `$`, or when its
+// value has no `/` and it holds an unquoted `*`, `?` or `[` or starts with an unquoted `~`. Linear.
+function runnerWords(segment, start) {
+  const str = segment;
+  const unquoted = new Uint8Array(str.length);
+  let cut = str.length;
+  forEachUnquoted(str, (i, c) => {
+    if (c === '|' && i >= start) { cut = i; return false; }
+    unquoted[i] = 1;
+    return true;
+  }, (i) => { cut = i; return false; });
+  if (cut < start) return [{ value: '', unknown: true }]; // the runner match lies inside a comment
+  const words = [];
+  let value = [];
+  let inWord = false;
+  let unknown = false;
+  let pattern = false;
+  let end = 0;
+  const push = () => {
+    if (inWord && end > start) {
+      const joined = value.join('');
+      words.push({ value: joined, unknown: unknown || (pattern && !joined.includes('/')) });
+    }
+    value = [];
+    inWord = false;
+    unknown = false;
+    pattern = false;
+  };
+  let i = 0;
+  while (i < cut) {
+    const c = str[i]; // every character read here is unquoted and unescaped; quotes and escapes are consumed below
+    if (BR6_BLANKS.has(c) || c === '<' || c === '>' || c === '|'
+        || (c === '&' && i + 1 < cut && str[i + 1] === '>' && unquoted[i + 1] === 1)) {
+      push();
+      i += 1;
+      continue;
+    }
+    if (!inWord) {
+      inWord = true;
+      pattern = c === '~';
+    }
+    if (c === '\\') {
+      if (i + 1 < cut && str[i + 1] !== '\n') value.push(str[i + 1]);
+      i += 2;
+    } else if (c === "'") {
+      let close = str.indexOf("'", i + 1);
+      if (close === -1 || close >= cut) close = cut;
+      value.push(str.slice(i + 1, close));
+      i = close + 1;
+    } else if (c === '"') {
+      i += 1;
+      while (i < cut && str[i] !== '"') {
+        const inner = str[i];
+        if (inner === '\\' && i + 1 < cut) {
+          if (DOUBLE_QUOTE_ESCAPES.has(str[i + 1])) {
+            if (str[i + 1] !== '\n') value.push(str[i + 1]);
+          } else {
+            value.push(str.slice(i, i + 2));
+          }
+          i += 2;
+          continue;
+        }
+        if (inner === '$') unknown = true;
+        value.push(inner);
+        i += 1;
+      }
+      i += 1;
+    } else {
+      if (c === '$') unknown = true;
+      if (c === '*' || c === '?' || c === '[') pattern = true;
+      value.push(c);
+      i += 1;
+    }
+    end = Math.min(i, cut);
+  }
+  push();
+  return words;
 }
 
-// True only when every `&&` segment that contains a test-runner match passes a standalone
-// --version, -V, --help or -h argument (arguments after `--` count). A statement with no runner
-// segment is not version/help-only.
+// True only when the statement has a runner segment and every runner segment passes a version/help flag
+// (--version, -V, --help or -h; arguments after `--` count). A `&&` segment is a runner segment only when
+// isRealRunnerInvocation accepts that segment alone; its argument words start after its first runner-pattern
+// match, and an UNKNOWN word counts as a flag (D25 model (1)).
 export function isVersionOrHelpOnly(statement, testRe) {
   if (!testRe) return false;
   const str = String(statement || '');
@@ -845,9 +928,10 @@ export function isVersionOrHelpOnly(statement, testRe) {
     const segment = str.slice(start, end);
     start = end + 2;
     const match = testRe.exec(segment);
-    if (!match) continue;
+    if (!match || !isRealRunnerInvocation(segment, testRe)) continue;
     runnerSegments += 1;
-    if (!runnerArgs(segment, match).some((t) => VERSION_HELP_ARGS.has(t))) return false;
+    const words = runnerWords(segment, match.index + match[0].length);
+    if (!words.some((w) => w.unknown || VERSION_HELP_ARGS.has(w.value))) return false;
   }
   return runnerSegments > 0;
 }
@@ -932,7 +1016,8 @@ export function readRolloutRuns(path) {
 const QUALIFIED_CHOICE = /(?<![A-Za-z0-9_./:-])(superpowers|agentic-sdlc):([a-z0-9]+(?:-[a-z0-9]+)*)(?![A-Za-z0-9_-])/g;
 const HOUSE_CHOICE = /(?<![A-Za-z0-9_./:-])AGENTIC-SDLC(?![A-Za-z0-9_-])/g;
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const INSTALLED_SUPERPOWERS_SKILL = /\/plugins\/cache\/[^/]+\/superpowers\/[^/]+\/skills\/([^/]+)\/SKILL\.md$/;
+// The exact rest of an installed Superpowers skill body path after `<Codex home>/plugins/cache/`.
+const INSTALLED_SUPERPOWERS_REST = /^[^/]+\/superpowers\/[^/]+\/skills\/([^/]+)\/SKILL\.md$/;
 const INJECTED_TAG = /^<([A-Za-z_][A-Za-z0-9_.:-]*)[\s>]/;
 // The heading Codex prepends to an injected instruction-file block: `# <file>.md instructions for <dir>`.
 const INJECTED_INSTRUCTIONS = /^# [A-Za-z0-9_.-]+\.md instructions\b/;
@@ -955,27 +1040,72 @@ function withoutTrailingSlashes(p) {
   return p.slice(0, end);
 }
 
-// BR19 delivery read (D9): only `cat <absolute installed SKILL.md path>` as the last statement counts.
-// Any other form (a command outside the D23 safe shell grammar, pipe, background, `&&`, a `cd` anywhere, a
-// relative path, a `..` segment, a path under the session cwd, a last statement reached through `||`)
-// returns null, which leaves the phase Ambiguous.
-export function deliveryReadSkill(command, cwd) {
-  if (!inSafeBr6Grammar(command)) return null;
+// D25 model (3): a literal path holds only ASCII letters, digits, `_ . - @ + , /`, characters at or above U+0080
+// and an optional drive `X:`, so bash reads it as the same bytes (no expansion, quote, escape or blank).
+const LITERAL_ABSOLUTE_PATH = /^(?:[A-Za-z]:)?\/[A-Za-z0-9_.\-@+,/\u0080-\uFFFF]*$/;
+const WORD_BLANKS = /[ \t\n]+/;
+
+// A literal absolute path whose segments after the root are never empty, `.` or `..`.
+function isCanonicalLiteralPath(p) {
+  if (!LITERAL_ABSOLUTE_PATH.test(p)) return false;
+  const rest = p.slice(p.indexOf('/') + 1);
+  return rest.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
+}
+
+// The Codex home: CODEX_HOME, else <home>/.codex, with backslashes turned into `/` and trailing `/` stripped.
+// Null unless the result is a canonical absolute literal path. No filesystem call.
+export function resolveCodexHome(env = process.env, home = homedir()) {
+  return canonicalHome(env && env.CODEX_HOME ? String(env.CODEX_HOME) : `${home}/.codex`);
+}
+
+function canonicalHome(raw) {
+  if (typeof raw !== 'string') return null;
+  const p = withoutTrailingSlashes(raw.replace(/\\/g, '/'));
+  return isCanonicalLiteralPath(p) ? p : null;
+}
+
+// The cwd with backslashes turned into `/`, and, when absolute, empty and `.` segments dropped and `..` applied.
+function normalizedCwd(cwd) {
+  const s = String(cwd || '').replace(/\\/g, '/');
+  const drive = /^[A-Za-z]:/.test(s) ? s.slice(0, 2) : '';
+  const rest = s.slice(drive.length);
+  if (!rest.startsWith('/')) return withoutTrailingSlashes(s);
+  const kept = [];
+  for (const seg of rest.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') kept.pop();
+    else kept.push(seg);
+  }
+  return `${drive}/${kept.join('/')}`;
+}
+
+// BR19 delivery read (D9, D25 model (3)): the command, read under the D23 safe grammar and the BR6 split, is
+// exactly one statement (empty and comment-only statements ignored) of exactly the two raw words `cat` and a
+// literal, canonical path under `<codexHome>/plugins/cache/` (case-folded when a drive is present) whose rest is
+// exactly `<marketplace>/superpowers/<version>/skills/<skill>/SKILL.md`, and the path lies outside the lexically
+// normalized cwd. Anything else (an earlier `cd`, write or other command, a pipe, background or `&&`, an
+// expansion, glob, quote or backslash, a non-canonical path, another home spelling, a null home) returns null,
+// which leaves the phase Ambiguous.
+export function deliveryReadSkill(command, cwd, codexHome = resolveCodexHome()) {
+  const home = canonicalHome(codexHome); // an explicit home gets the same normalization as a resolved one
+  if (!home || !inSafeBr6Grammar(command)) return null;
   const joined = splitBr6StatementJoins(command);
-  if (!joined.length || joined.some((s) => s.text.startsWith('cd'))) return null;
-  if (joined[joined.length - 1].viaOr) return null; // `true || cat <SKILL.md>` never runs the cat
-  const last = joined[joined.length - 1].text;
-  if (/[|&()`]/.test(last)) return null;
-  const tokens = shellTokens(last);
-  if (tokens.length !== 2 || tokens[0] !== 'cat') return null;
-  const path = tokens[1].replace(/\\/g, '/');
-  const drive = /^[A-Za-z]:\//.test(path);
-  if (!(path.startsWith('/') || drive) || path.split('/').includes('..')) return null;
+  if (joined.length !== 1 || joined[0].viaOr) return null;
+  const words = joined[0].text.split(WORD_BLANKS);
+  if (words.length !== 2 || words[0] !== 'cat') return null;
+  const path = words[1];
+  if (!isCanonicalLiteralPath(path)) return null;
+  const drive = /^[A-Za-z]:/.test(path);
   const fold = (s) => (drive ? s.toLowerCase() : s);
-  const base = withoutTrailingSlashes(String(cwd || '').replace(/\\/g, '/'));
-  if (base === '/' || (base && (fold(path) === fold(base) || fold(path).startsWith(fold(base) + '/')))) return null;
-  const m = INSTALLED_SUPERPOWERS_SKILL.exec(path);
-  return m && SKILL_NAME.test(m[1]) ? m[1] : null;
+  const anchor = `${home}/plugins/cache/`;
+  if (!fold(path).startsWith(fold(anchor))) return null;
+  const m = INSTALLED_SUPERPOWERS_REST.exec(path.slice(anchor.length));
+  if (!m || !SKILL_NAME.test(m[1])) return null;
+  const base = normalizedCwd(cwd);
+  if (base === '/') return null;
+  const prefix = base.endsWith('/') ? base : `${base}/`;
+  if (base && (fold(path) === fold(base) || fold(path).startsWith(fold(prefix)))) return null;
+  return m[1];
 }
 
 function hookAuthored(message) {
@@ -990,7 +1120,8 @@ function isInjectedItem(text) {
   return Boolean(m) && t.endsWith(`</${m[1]}>`);
 }
 
-export function readOwnerSignals(path, cwd) {
+// `codexHome` is resolved once per call (default: the process environment); a null home counts no delivery.
+export function readOwnerSignals(path, cwd, codexHome = resolveCodexHome()) {
   const EMPTY = { readable: false, phase: 'house', skill: null, verificationDelivered: false };
   if (!path || typeof path !== 'string') return EMPTY;
   let raw;
@@ -1046,7 +1177,7 @@ export function readOwnerSignals(path, cwd) {
   for (const [callId, call] of calls) {
     const codes = exits.get(callId);
     if (!codes || codes.size !== 1 || !codes.has(0)) continue;
-    const skill = deliveryReadSkill(call.command, cwd);
+    const skill = deliveryReadSkill(call.command, cwd, codexHome);
     if (skill) deliveries.push({ seq: call.seq, skill });
   }
 

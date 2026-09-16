@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -618,9 +619,16 @@ GIT_STEP_PREFIXES = (
 )
 
 
+def is_git_program(program):
+    """git by bare name or by the absolute path the D25 lookup resolves (`.../git` or `...\\git.exe`)."""
+    return program == "git" or Path(program).name.lower() in ("git", "git.exe")
+
+
 def git_step_of(argv):
+    if not argv or not is_git_program(argv[0]):
+        return None
     for step, prefix in GIT_STEP_PREFIXES:
-        if list(argv[: len(prefix)]) == prefix:
+        if list(argv[1: len(prefix)]) == prefix[1:]:
             return step
     return None
 
@@ -635,7 +643,7 @@ class TestFixtureGitFailure(unittest.TestCase):
             calls.append(list(argv))
             if git_step_of(argv) == failing_step:
                 return subprocess.CompletedProcess(argv, 128, stdout="", stderr="fatal: synthetic failure")
-            if not argv or argv[0] != "git":
+            if not argv or not is_git_program(argv[0]):
                 # Never execute anything but git here: a regression that reaches the model must be
                 # recorded and asserted on, not launch a real (paid) `claude -p` process.
                 return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -776,6 +784,27 @@ class TestFixtureRootReplay(unittest.TestCase):
                     errors = procedure_eval.evaluate_case(case, procedure_eval.Trace(), root, contained_root=root)
                     self.assertIn(f"artifact_escape:{pattern}", errors)
 
+    def test_anchored_glob_pattern_is_a_named_escape(self):  # SEC-10, AC124
+        # Mutation: checking only Path.is_absolute() (a rooted `/Win*` or drive-relative `C:*` glob is not absolute on
+        # Windows, and cwd.glob raises NotImplementedError instead of naming the escape).
+        patterns = ("/Win*/win.ini", "C:*")
+        with tempfile.TemporaryDirectory() as meta_td, tempfile.TemporaryDirectory() as root_td:
+            root = Path(root_td)
+            for pattern in patterns:
+                with self.subTest(pattern=pattern):
+                    case = {"id": "anchor-probe", "prompt": "p", "required_artifacts": [pattern]}
+                    errors = procedure_eval.evaluate_case(case, procedure_eval.Trace(), root, contained_root=root)
+                    self.assertIn(f"artifact_escape:{pattern}", errors)
+                    with self.assertRaises(ValueError):
+                        procedure_eval.artifact_present(pattern, procedure_eval.Trace(), root)
+            eval_set, transcript = write_probe_eval(meta_td, case_id="anchor-probe", artifacts=patterns)
+            proc = run_cli("--eval-set", eval_set, "--transcript", transcript, "--fixture-root", root_td)
+        self.assertNotEqual(proc.returncode, 0, proc.stdout)
+        self.assertNotIn("Traceback", proc.stdout + proc.stderr)
+        if sys.platform == "win32":  # elsewhere load_eval already rejects the absolute `/Win*` pattern by name
+            for pattern in patterns:
+                self.assertIn(f"error=anchor-probe:artifact_escape:{pattern}", proc.stdout.splitlines())
+
     def test_replay_leaves_repository_head_and_status_unchanged(self):
         if not (REPO / ".git").exists():
             self.skipTest("not a git checkout")
@@ -839,6 +868,37 @@ def call_exits(trace):
 
 class TestStrictTrace(unittest.TestCase):
     """AC70, AC68, AC123: ordered results, messages and Codex rollout carriers for strict grading."""
+
+    def test_malformed_line_is_a_named_strict_error(self):  # D25 model (4), QUAL-4
+        # Mutation: skipping malformed or non-object lines silently under --strict-evidence, recording one per line,
+        # or failing the default mode on them.
+        with tempfile.TemporaryDirectory() as td:
+            eval_set = Path(td) / "eval.json"
+            eval_set.write_text(json.dumps({"cases": [{"id": "malformed-probe", "prompt": "p"}]}), encoding="utf-8")
+            text = assistant_text_event("working")
+            transcript = Path(td) / "t.jsonl"
+            transcript.write_bytes(("{not json\r\n" + json.dumps(text) + "\r\n[1]\n\n" + json.dumps(text) + "\n")
+                                   .encode("utf-8"))
+            strict_code, strict_out = run_main(["--eval-set", eval_set, "--transcript", transcript, "--strict-evidence"])
+            default_code, default_out = run_main(["--eval-set", eval_set, "--transcript", transcript])
+            # Valid JSON that is not an object is malformed on its own (no invalid-JSON line to trip the check).
+            for non_object in ("[1]", '"x"'):
+                with self.subTest(line=non_object):
+                    only = Path(td) / "only.jsonl"
+                    only.write_bytes((json.dumps(text) + "\n" + non_object + "\n" + json.dumps(text) + "\n")
+                                     .encode("utf-8"))
+                    code, out = run_main(["--eval-set", eval_set, "--transcript", only, "--strict-evidence"])
+                    self.assertEqual(code, 1, out)
+                    self.assertIn("error=malformed-probe:strict_transcript_malformed_line", out.splitlines())
+                    code, out = run_main(["--eval-set", eval_set, "--transcript", only])
+                    self.assertEqual(code, 0, out)
+                    self.assertIn("case_malformed-probe=passed", out.splitlines())
+        self.assertEqual(strict_code, 1)
+        self.assertEqual(strict_out.splitlines().count("error=malformed-probe:strict_transcript_malformed_line"), 1)
+        self.assertNotIn("{not json", strict_out)
+        self.assertEqual(default_code, 0, default_out)
+        self.assertIn("case_malformed-probe=passed", default_out.splitlines())
+        self.assertIn("case_malformed-probe_tools=0", default_out.splitlines())
 
     def test_claude_tool_result_correlated_by_id_with_error_flag(self):
         trace = procedure_eval.trace_events([
@@ -1045,6 +1105,10 @@ class TestStrictRedGreen(unittest.TestCase):
     def test_attribution_table_matches_shared_cases(self):
         rows = load_br6_rows()
         self.assertTrue(rows)
+        segments = sorted({s for row in rows for s in procedure_eval._split_unquoted_andand(row["statements"][-1])})
+        classified = procedure_eval.run_node_helpers(commands=segments, test_command=TEST_RE.pattern)
+        self.assertIsNotNone(classified, "node classifier unavailable")
+        is_runner = dict(zip(segments, classified["real"])).get
         for row in rows:
             with self.subTest(id=row["id"]):
                 statements = procedure_eval.br6_statements(row["command"])
@@ -1052,12 +1116,47 @@ class TestStrictRedGreen(unittest.TestCase):
                 last = statements[-1]
                 self.assertEqual(procedure_eval.has_unquoted_pipe(last), row["lastHasPipe"])
                 self.assertEqual(procedure_eval.has_unquoted_background(last), row["lastHasBackground"])
-                self.assertEqual(procedure_eval.is_version_or_help_only(last, TEST_RE), row["lastVersionOrHelpOnly"])
+                self.assertEqual(procedure_eval.is_version_or_help_only(last, TEST_RE, is_runner),
+                                 row["lastVersionOrHelpOnly"])
                 self.assertEqual(procedure_eval.in_safe_br6_grammar(row["command"]), row["inSafeGrammar"])
                 self.assertEqual(procedure_eval.br6_trailing_or_run(row["command"]), row["orRun"])
                 runs = procedure_eval.attributable_test_runs(trace_from_carrier(row), TEST_RE)
                 self.assertEqual(bool(runs), row["strictAttributable"])
                 self.assertEqual(any(run.exit == 0 for run in runs), row["strictTests"] == "satisfied")
+
+    # D25 word and segment model (Task 141). `<bs>` stands for one backslash, built with chr(92).
+    VERSION_ONLY_WORDS = (
+        "pytest --vers<bs>ion", "pytest -<bs>V", "pytest <bs>--help", 'pytest --ver""sion',
+        "pytest $V", 'pytest "$V"', "pytest ~-", "pytest --versio?", "pytest -*", "pytest [--]version",
+        "pytest -k test_*",
+        "pytest <bs>| --version", "pytest --version>out.txt", "pytest -h>o", "pytest --version&>x",
+        "pytest --version<>y",
+        "echo pytest && pytest --version", "pytest -V && echo pytest", "true pytest && pytest -V",
+        # A runner match inside an earlier quoted assignment value only adds words; it never swallows them.
+        "X='a pytest' pytest --version", 'X="a pytest" pytest -V',
+    )
+    RUNNER_WORDS = (
+        'pytest "--vers<bs>ion"', "pytest -k '$V'", "pytest tests/*.py", "pytest ~/x", "pytest -k a<bs>|b",
+        'pytest "*"', "pytest <bs>*", "pytest -x", "pytest>out.txt", "pytest -k a<bs>>b", "pytest -k 'a>b'",
+        "pytest -V && pytest", "echo pytest && pytest",
+    )
+
+    def test_runner_words_follow_bash_quote_removal(self):
+        # Mutation: comparing raw words (no quote/backslash removal), splitting only at blanks, treating expansions as
+        # literal text, or counting every segment the runner pattern matches, makes a forged version run attributable.
+        bs = chr(92)
+        version_only = [c.replace("<bs>", bs) for c in self.VERSION_ONLY_WORDS]
+        runner = [c.replace("<bs>", bs) for c in self.RUNNER_WORDS]
+        segments = sorted({s for c in version_only + runner for s in procedure_eval._split_unquoted_andand(c)})
+        classified = procedure_eval.run_node_helpers(commands=segments, test_command=TEST_RE.pattern)
+        self.assertIsNotNone(classified, "node classifier unavailable")
+        is_runner = dict(zip(segments, classified["real"])).get
+        for command, expected in [(c, True) for c in version_only] + [(c, False) for c in runner]:
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE, is_runner), expected)
+        nbsp_pipe = chr(0xA0) + "#x | pytest | tee log.txt"
+        self.assertEqual(procedure_eval.br6_statements(nbsp_pipe), [nbsp_pipe])
+        self.assertIs(procedure_eval.has_unquoted_pipe(nbsp_pipe), True)
 
     def test_safe_grammar_production_lists(self):
         # Mutation: dropping any character or command-word production (each listed construct would be admitted).
@@ -1304,6 +1403,20 @@ class TestStrictCriticalAudit(unittest.TestCase):
     def test_default_mode_has_no_critical_audit_check(self):
         errors = self.evaluate(auditor_result("a1", "overallStatus: PARTIAL\nfinalDecision: block-final"), strict=False)
         self.assertEqual(audit_errors(errors), [])
+
+    def test_raw_line_separator_inside_auditor_result_keeps_the_verdict(self):  # D25 model (4), QUAL-4
+        # Mutation: splitting the transcript with str.splitlines (U+2028 ends a line there, so the auditor record is
+        # dropped and the FAIL verdict vanishes).
+        with tempfile.TemporaryDirectory() as td:
+            eval_set = Path(td) / "eval.json"
+            eval_set.write_text(json.dumps({"cases": [AUDIT_CASE]}), encoding="utf-8")
+            events = auditor_result("a1", "- `overallStatus`: **FAIL**" + chr(0x2028) + "- `finalDecision`: allow-final")
+            transcript = Path(td) / "t.jsonl"
+            transcript.write_bytes("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events).encode("utf-8"))
+            self.assertIn(chr(0x2028).encode("utf-8"), transcript.read_bytes())
+            code, stdout = run_main(["--eval-set", eval_set, "--transcript", transcript, "--strict-evidence"])
+        self.assertEqual(code, 1)
+        self.assertIn("error=audit-probe:strict_critical_audit:overallStatus=FAIL", stdout.splitlines())
 
 
 AUDITOR_PARTIAL = "overallStatus: PARTIAL\nfinalDecision: block-final"
@@ -1586,7 +1699,10 @@ class TestEvidencePacket(unittest.TestCase):
             packet = json.loads(packet_path.read_text(encoding="utf-8"))
             self.assertLessEqual(PACKET_FIELDS, set(packet))
             self.assertEqual((packet["schema_version"], packet["case_id"]), (1, PACKET_CASE))
-            self.assertIn(packet["runtime"], {"claude", "codex", "unknown"})
+            # QUAL-15: the pass transcript is a Claude stream, and its strict replay fails (no attributable GREEN).
+            self.assertEqual(packet["runtime"], "claude")
+            self.assertIn(f"case_{PACKET_CASE}=failed", proc.stdout.splitlines())
+            self.assertEqual(packet["terminal_status"], "failed")
             identity = packet["runtime_payload_identity"]
             self.assertEqual(set(identity), {"definition", "commit", "sha256"})
             self.assertEqual(identity["commit"], packet["git_commit"])
@@ -1776,6 +1892,70 @@ class TestEvidencePacket(unittest.TestCase):
         self.assertTrue(b"***MASKED" in packet_bytes, "packet lacks the masked form")
         self.assertTrue(b"***MASKED" in transcript_bytes, "transcript copy lacks the masked form")
 
+    def test_json_escaped_credential_masked_in_transcript_copy(self):  # D25 model (6), SEC-5
+        # Mutation: redacting the copy as plain text only (the JSON-escaped member evades the text pattern).
+        value = hashlib.sha256(b"d25-synthetic-client-secret").hexdigest()[:32]  # runtime-built, never a literal
+        command = "curl -d '{\"client_secret\": \"" + value + "\"}' https://example.invalid/token"
+        with tempfile.TemporaryDirectory() as td:
+            transcript = write_jsonl(Path(td) / "escaped.jsonl", [full_tool_use("b1", "Bash", {"command": command})])
+            self.assertTrue(value.encode("utf-8") in transcript.read_bytes(), "precondition: the value is on disk")
+            evidence = Path(td) / "ev"
+            strict_replay(evidence, self.copy_fixture_root(td), transcript=transcript)
+            copy_bytes = (evidence / f"{PACKET_CASE}.transcript.jsonl").read_bytes()
+        self.assertFalse(value.encode("utf-8") in copy_bytes, "raw credential persisted in the transcript copy")
+        self.assertTrue(b"***MASKED" in copy_bytes, "transcript copy lacks the masked form")
+        lines = [line for line in copy_bytes.decode("utf-8").split("\n") if line]
+        self.assertTrue(lines, "transcript copy is empty")
+        parsed = []
+        for line in lines:
+            try:
+                parsed.append(isinstance(json.loads(line), dict))
+            except json.JSONDecodeError:
+                parsed.append(False)
+        self.assertTrue(all(parsed), "a transcript copy line no longer parses as a JSON object")
+
+    def test_scalar_json_lines_do_not_split_a_private_key_block(self):  # D25 models (4) and (6)
+        # Mutation: treating any line json.loads accepts (a bare number, true, null) as a structured event, which
+        # splits the PEM run so the body lines after the scalar reach disk, and rewrites the scalar line itself.
+        begin, end = "-----BEGIN " + "RSA PRIVATE KEY-----", "-----END " + "RSA PRIVATE KEY-----"  # runtime-built
+        body = ["MIIEow" + "A" * 40, "12", "true", "QWERTY" + "B" * 40]
+        big = "1" * 64
+        text = "\n".join(['{"type": "x"}', big, begin, *body, end, "null", ""])
+        out = procedure_eval.redact_transcript_lines(text)
+        for line in (body[0], body[3], end):
+            self.assertFalse(line in out, "a private-key block line persisted in the redacted copy")
+        self.assertTrue("***MASKED" in out, "redacted copy lacks the masked form")
+        self.assertEqual(out.split("\n")[:2], ['{"type": "x"}', big])  # the scalar line keeps its bytes
+        self.assertEqual(out.split("\n")[-2:], ["null", ""])
+
+    def test_home_directory_segments_masked_in_packet_and_transcript(self):  # D25 model (6), follow-up b
+        # Mutation: skipping mask_home_paths for the packet or the copy, missing JSON-escaped separators, ending the
+        # segment at a blank (a spaced profile name leaks its tail) or matching `home`/`Users` case-sensitively.
+        user, spaced, folded = "evaluser", "Evan Doe", "lowname"
+        with tempfile.TemporaryDirectory() as td:
+            transcript = write_jsonl(Path(td) / "home.jsonl", [
+                full_tool_use("w1", "Write", {"file_path": "/home/" + user + "/work/docs/agentic-sdlc/specs/x.md",
+                                              "content": "spec\n"}),
+                full_tool_use("b1", "Bash", {"command": "dir C:\\Users\\" + user + "\\repo"}),
+                full_tool_use("b2", "Bash", {"command": "dir C:\\Users\\" + spaced + "\\repo"}),
+                full_tool_use("b3", "Bash", {"command": "ls /home/" + spaced + "/x c:/users/" + folded + "/x"}),
+            ])
+            self.assertTrue(b"C:\\\\Users\\\\" + user.encode() in transcript.read_bytes(), "precondition: escaped path")
+            evidence = Path(td) / "ev"
+            proc = strict_replay(evidence, self.copy_fixture_root(td), transcript=transcript)
+            self.assertIn("unsafe_artifact_path:/home/" + user + "/work/docs/agentic-sdlc/specs/x.md", proc.stdout)
+            packet_bytes = (evidence / f"{PACKET_CASE}.json").read_bytes()
+            copy_bytes = (evidence / f"{PACKET_CASE}.transcript.jsonl").read_bytes()
+        for label, data in (("packet", packet_bytes), ("transcript copy", copy_bytes)):
+            with self.subTest(file=label):
+                for part in (user, "Evan", "Doe", folded):
+                    self.assertFalse(part.encode() in data, f"home user segment {part!r} persisted in the {label}")
+                self.assertTrue(b"***MASKED:home***" in data, f"{label} lacks the masked home segment")
+        self.assertTrue(b"unsafe_artifact_path:/home/***MASKED:home***/work/" in packet_bytes)
+        raw = "C:\\Users\\" + spaced + "\\repo /home/" + spaced + "\tx/y c:/users/" + folded + "/z"
+        self.assertEqual(procedure_eval.mask_home_paths(raw),
+                         "C:\\Users\\***MASKED:home***\\repo /home/***MASKED:home***/y c:/users/***MASKED:home***/z")
+
     def test_live_harness_packet_not_scorable(self):
         case = {"id": "safe-case", "prompt": "probe"}
         with tempfile.TemporaryDirectory() as td:
@@ -1814,6 +1994,92 @@ class TestEvidencePacket(unittest.TestCase):
             self.assertNotEqual(second.returncode, 0)
             self.assertIn(f"error=evidence_packet_exists:{PACKET_CASE}", second.stdout)
             self.assertEqual(packet_path.read_bytes(), original)
+
+
+def plant_fake_program(directory, name):
+    """A fake `name` program in `directory` that never prints JSON; returns (program, sentinel).
+
+    POSIX: a `#!/bin/sh` script that writes the sentinel and exits 1. win32: a copy of whoami.exe named
+    `<name>.exe` (the caller skips when whoami.exe is absent); there the sentinel is never written.
+    """
+    directory = Path(directory)
+    sentinel = directory / f"{name}-ran.txt"
+    if sys.platform == "win32":
+        whoami = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "whoami.exe"
+        if not whoami.is_file():
+            return None, sentinel
+        program = directory / f"{name}.exe"
+        shutil.copyfile(whoami, program)
+    else:
+        program = directory / name
+        program.write_bytes(f"#!/bin/sh\necho ran > '{sentinel}'\nexit 1\n".encode("utf-8"))
+        program.chmod(0o755)
+    return program, sentinel
+
+
+def relative_first_env():
+    """The process environment with `.` first on PATH and NoDefaultCurrentDirectoryInExePath removed."""
+    env = {k: v for k, v in os.environ.items() if k.upper() != "NODEFAULTCURRENTDIRECTORYINEXEPATH"}
+    env["PATH"] = "." + os.pathsep + os.environ.get("PATH", "")
+    return env
+
+
+LOOKUP_PROBE = (
+    "import json, sys; sys.path.insert(0, sys.argv[1]); import scripts.run_procedure_eval as m;"
+    "print(json.dumps(m.run_node_helpers(commands=['pytest'], test_command='pytest') if sys.argv[2] == 'helpers'"
+    " else m._program_on_absolute_path(sys.argv[2])))"
+)
+
+
+class TestProgramLookup(unittest.TestCase):
+    """D25 model (5), SEC-7: node and git start only from an absolute path found in an absolute PATH entry."""
+
+    def planted(self, name):
+        directory = Path(tempfile.mkdtemp(prefix="lookup-"))
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        program, sentinel = plant_fake_program(directory, name)
+        if program is None:
+            self.skipTest("whoami.exe absent: no planted win32 program")
+        return directory, sentinel
+
+    def probe(self, cwd, what):
+        proc = subprocess.run([sys.executable, "-c", LOOKUP_PROBE, str(REPO), what], cwd=cwd,
+                              env=relative_first_env(), capture_output=True, text=True, encoding="utf-8", timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-400:])
+        return json.loads(proc.stdout)
+
+    def test_node_behind_relative_path_entry_is_not_run(self):
+        # Mutation: resolving node with shutil.which (the cwd or a relative PATH entry wins).
+        directory, sentinel = self.planted("node")
+        self.assertEqual(self.probe(directory, "helpers"), {"exits": [], "real": [True]})
+        self.assertFalse(sentinel.exists(), "the planted node ran")
+
+    def test_git_lookup_skips_relative_entries(self):
+        # Mutation: accepting a relative PATH entry (or the cwd) as a git location.
+        directory, sentinel = self.planted("git")
+        git = self.probe(directory, "git")
+        self.assertIsNotNone(git, "no git on an absolute PATH entry")
+        self.assertTrue(os.path.isabs(git), git)
+        self.assertFalse(path_is_within(git, directory), git)
+        self.assertFalse(sentinel.exists())
+
+    @unittest.skipUnless(sys.platform == "win32", "batch files are a win32 lookup concern")
+    def test_batch_file_is_not_a_candidate(self):
+        # Mutation: consulting PATHEXT (a .cmd would run through cmd.exe without a shell being asked for).
+        directory = Path(tempfile.mkdtemp(prefix="lookup-cmd-"))
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        (directory / "node.cmd").write_bytes(b"@echo not-json\r\n")
+        path = str(directory) + os.pathsep + os.environ.get("PATH", "")
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            node = procedure_eval._program_on_absolute_path("node")
+            helpers = procedure_eval.run_node_helpers(commands=["pytest"], test_command="pytest")
+        self.assertIsNotNone(node)
+        self.assertFalse(path_is_within(node, directory), node)
+        self.assertEqual(helpers, {"exits": [], "real": [True]})
+
+
+def path_is_within(path, directory):
+    return os.path.normcase(os.path.abspath(path)).startswith(os.path.normcase(os.path.abspath(directory)) + os.sep)
 
 
 TRANSCRIPTS = REPO / "tests" / "fixtures" / "transcripts"

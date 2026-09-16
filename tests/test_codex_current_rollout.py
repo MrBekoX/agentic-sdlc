@@ -10,6 +10,7 @@ redacted records copied byte-identical from the same capture's rollout.redacted.
 is trimmed; test mutations are synthetic, not native runs.
 """
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -210,6 +211,7 @@ class NativeOwnerCarrierFixtureTests(unittest.TestCase):
 
     # ---- AC55, AC56: synthetic mutations of the native carriers (Task 22) ----
     CWD = "/tmp/codex-lifecycle-workspace"
+    CODEX_HOME = "/tmp/codex-lifecycle-home-wbmmcupv"
     TOKEN = "superpowers:brainstorming"
 
     def owner_phase(self, records):
@@ -218,8 +220,10 @@ class NativeOwnerCarrierFixtureTests(unittest.TestCase):
             path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
             script = ("import {readOwnerSignals} from " + json.dumps((REPO / "hooks/codex-rollout.mjs").as_uri())
                       + "; process.stdout.write(JSON.stringify(readOwnerSignals(process.argv[1], process.argv[2])));")
+            # The capture home of the native fixture (D25 model (3)); the real Codex home is never read.
+            env = {**os.environ, "CODEX_HOME": self.CODEX_HOME}
             result = subprocess.run([NODE, "--input-type=module", "-e", script, str(path), self.CWD],
-                                    capture_output=True, text=True, encoding="utf-8", check=True)
+                                    capture_output=True, text=True, encoding="utf-8", check=True, env=env)
             return json.loads(result.stdout)["phase"]
 
     def named(self):
