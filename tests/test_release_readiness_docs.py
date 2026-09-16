@@ -108,6 +108,28 @@ DATA_HANDLING_FACTS = (
     ("otherwise into the Git `sdd` path (`git rev-parse --git-path sdd`)", "scripts/review_package.py", '"rev-parse", "--git-path", "sdd"'),
     ("or `.sdd` when that Git command fails or prints nothing", "scripts/review_package.py", 'return Path(".sdd")'),
     ("otherwise into a `.handoffs` folder beside the plan file", "scripts/task_brief.py", 'args.out_dir or plan.parent / ".handoffs"'),
+    # Evidence-dir pins cite only 82a22ab text of scripts/run_procedure_eval.py (D25 text contract).
+    ("With `--strict-evidence --evidence-dir <dir>`", "scripts/run_procedure_eval.py", 'parser.add_argument("--evidence-dir"'),
+    ("one redacted `<case-id>.transcript.jsonl`", "scripts/run_procedure_eval.py", 'f"{case_id}.transcript.jsonl"'),
+    ("(`evidence_dir_inside_fixture`)", "scripts/run_procedure_eval.py", '"evidence_dir_inside_fixture"'),
+    ("(`evidence_packet_exists`)", "scripts/run_procedure_eval.py", '"evidence_packet_exists"'),
+)
+
+# Every visible version declaration that `scripts/bump_version.py --check` compares (QUAL-14).
+TESTING_VERSION_DECLARATIONS = (
+    "README `Version` token",
+    "README current-version sentence",
+    "`docs/plugin-readme.md` version line",
+    "`docs/release-readiness.md` publish-gate sentence",
+    "verdict-template `version=` line",
+)
+RUNTIME_ADAPTER_D25_NEEDLES = (
+    "quote and backslash removal",
+    "echo pytest && pytest --version",
+    "pytest $ARGS",
+    "plugins/cache/",
+    "CODEX_HOME",
+    "absolute",
 )
 
 
@@ -318,6 +340,23 @@ class TestReleaseReadinessDocs(unittest.TestCase):
             "reads the content carried in the tool input",
         ):
             self.assertNotIn(claim, lowered, f"unbacked retention or transmission claim: {claim}")
+
+    def test_testing_doc_names_version_declarations(self):
+        text = (REPO / "docs" / "testing.md").read_text(encoding="utf-8")
+        rows = [line for line in text.splitlines() if line.startswith("| `python3 scripts/bump_version.py --check` |")]
+        self.assertEqual(len(rows), 1, "docs/testing.md needs exactly one bump_version.py --check row")
+        for declaration in TESTING_VERSION_DECLARATIONS:
+            with self.subTest(declaration=declaration):
+                self.assertIn(declaration, rows[0])
+
+    def test_runtime_adapter_states_d25_limits(self):
+        text = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
+        section = text.split("### Limits of branch, review-result and strict evidence", 1)[1].split("\n## ", 1)[0]
+        bullets = [line for line in section.splitlines() if line.startswith("- ") and line.rstrip().endswith("(D25, DP37)")]
+        self.assertEqual(len(bullets), 1, "the limits list needs one bullet citing (D25, DP37)")
+        for needle in RUNTIME_ADAPTER_D25_NEEDLES:
+            with self.subTest(needle=needle):
+                self.assertIn(needle, bullets[0])
 
     def test_data_handling_disclosure_is_tracked(self):
         _require_git_checkout(self)
