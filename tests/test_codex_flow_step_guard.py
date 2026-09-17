@@ -1173,8 +1173,9 @@ class TestBR6StatementSplit(unittest.TestCase):
     def test_runner_rule_matches_whole_words(self):
         # D27, the Task 174 lists. Mutation: reading `NAME+=` as a command word, splitting at an escaped separator,
         # ending an assignment value at a Unicode or escaped blank, building the pattern without `^(?:...)$`, dropping
-        # the ASCII word check or adding the `i`/`u` flag to it, dropping BR6_PYTHON_MODULES, or accepting a
-        # redirection word before the command word.
+        # the ASCII word check, dropping BR6_PYTHON_MODULES, or accepting a redirection word before the command word.
+        # Adding the `i`/`u` flag to the ASCII word check is an equivalent mutant here (the `i`-only testCommand
+        # already refuses U+017F); the Python mirror's TestStrictRedGreen kills that mutation.
         from test_procedure_eval import TestStrictRedGreen as lists
         runner, non_runner = list(lists.RUNNER_STATEMENTS), list(lists.NON_RUNNER_STATEMENTS)
         versions = ["pytest --version;", "pytest --version\n", "pytest --help # ;"]

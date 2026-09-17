@@ -573,6 +573,20 @@ class TestBR6CaseTable(unittest.TestCase):
                 self.assertEqual(row["defaultTests"], "satisfied" if row_id in separator_free else "missing")
                 separator = any(s in row["command"] for s in (";", "\n", "||"))
                 self.assertIs(separator, row_id not in separator_free)
+        # D27 column summary: the join rows and the single-command escaped-separator rows are one statement each,
+        # and orRun is the last statement except for the four rows whose command holds an unescaped `||`.
+        one_statement = ids("edge-forged-join-") + ["edge-forged-escaped-separator-" + suffix for suffix in (
+            "semicolon", "semicolon-glued", "pipe", "pipe-args", "npm", "python-m")]
+        self.assertEqual(len(one_statement), 10)
+        oror_rows = {"edge-forged-append-oror", "edge-forged-escaped-separator-oror",
+                     "edge-forged-value-blank-nbsp-oror", "edge-forged-join-comment-oror"}
+        self.assertLessEqual(set(one_statement) | oror_rows, set(forged))
+        for row_id in forged:
+            with self.subTest(id=row_id, check="summary"):
+                if row_id in one_statement:
+                    self.assertEqual(len(rows[row_id]["statements"]), 1)
+                if row_id not in oror_rows:
+                    self.assertEqual(rows[row_id]["orRun"], rows[row_id]["statements"][-1:])
         self.assertEqual(rows["edge-forged-join-comment-oror"]["orRun"], ["echo x"])
         for row_id in ("edge-forged-append-oror", "edge-forged-escaped-separator-oror",
                        "edge-forged-value-blank-nbsp-oror"):
