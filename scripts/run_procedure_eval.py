@@ -1419,15 +1419,17 @@ _BR6_SCRIPT_RUNNERS = frozenset({"make", "npm", "pnpm", "yarn"})
 _BR6_SCRIPT_WORD_RE = re.compile(r"([A-Za-z0-9]+)[.:-][A-Za-z0-9.:_-]+", re.ASCII)
 # DP40 (c): version, help and no-run spellings.
 _BR6_PACKAGE_MANAGERS = frozenset({"npm", "pnpm", "yarn"})
-# Each single-dash cluster pattern excludes its key letter before the key, so a match has one split and a near-miss word
-# (`-hhh...h1`) fails in linear time; `-[A-Za-z]*h[A-Za-z]*` backtracks quadratically on transcript text.
-_BR6_HELP_CLUSTER_RE = re.compile(r"-[A-UW-Za-gi-z]*[Vh][A-Za-z]*", re.ASCII)
+# DP41 (b): a single-dash word (a `-` not followed by `-`) holding the key letter anywhere counts, because jest and
+# vitest act on `h` anywhere in a short-option group (`jest -x1h`). The patterns are used with match (a prefix
+# match): each excludes its key letter before the key, so a match has one split and every word is decided in
+# linear time.
+_BR6_HELP_CLUSTER_RE = re.compile(r"-(?!-)[^Vh]*[Vh]", re.ASCII)
 _BR6_LONG_OPTION_HEAD_RE = re.compile(r"--[A-Za-z]+", re.ASCII)
 _BR6_LONG_VERSION_HELP = ("--version", "--help", "--usage")
-_BR6_VERSION_V_CLUSTER_RE = re.compile(r"-[A-Za-uw-z]*v[A-Za-z]*", re.ASCII)
+_BR6_VERSION_V_CLUSTER_RE = re.compile(r"-(?!-)[^v]*v", re.ASCII)
 # Runners whose documented `-v` means verbose.
 _BR6_VERBOSE_V_RUNNERS = frozenset({"cargo", "go", "nox", "pytest", "tox", "unittest"})
-_BR6_PACKAGE_H_CLUSTER_RE = re.compile(r"-[A-GI-Za-z]*H[A-Za-z]*", re.ASCII)
+_BR6_PACKAGE_H_CLUSTER_RE = re.compile(r"-(?!-)[^H]*H", re.ASCII)
 # Package-manager options that run an existing script and change nothing for a missing one (npm 11.13.0). `--if-present`
 # is deliberately absent: it makes npm skip a missing script and exit 0 without running anything (D28 C1).
 _BR6_PACKAGE_NEUTRAL = frozenset({"-s", "--silent", "-q", "--quiet", "-d", "-dd", "-ddd"})
@@ -1491,10 +1493,10 @@ def is_br6_runner_statement(statement: str, test_re: re.Pattern[str]) -> bool:
 
 
 def _br6_generic_version_or_help_word(word: dict[str, Any]) -> bool:
-    """DP40 (c) 1-3: UNKNOWN, an exact version/help flag, a single-dash cluster holding `V` or `h`, or a long option whose
-    part before `=` is a case-insensitive prefix of --version, --help or --usage."""
+    """DP40 (c) 1-3: UNKNOWN, an exact version/help flag, a single-dash word holding `V` or `h` anywhere (DP41 (b)),
+    or a long option whose part before `=` is a case-insensitive prefix of --version, --help or --usage."""
     value = word["value"]
-    if word["unknown"] or value in VERSION_HELP_FLAGS or _BR6_HELP_CLUSTER_RE.fullmatch(value):
+    if word["unknown"] or value in VERSION_HELP_FLAGS or _BR6_HELP_CLUSTER_RE.match(value):
         return True
     head = value.split("=", 1)[0]
     if not _BR6_LONG_OPTION_HEAD_RE.fullmatch(head):
@@ -1506,9 +1508,10 @@ def _br6_generic_version_or_help_word(word: dict[str, Any]) -> bool:
 def _br6_has_version_or_help_argument(words: list[dict[str, Any]], lead: str) -> bool:
     """DP40 (c): whether one argument word makes a runner command exit without running tests.
 
-    Beyond the generic words, a single-dash cluster holding `v` counts unless `lead` documents `-v` as verbose; for npm,
-    pnpm and yarn a cluster holding `H` counts, and so does any other `-` word before the first `--` that is not on the
-    _BR6_PACKAGE_NEUTRAL allowlist. hasVersionOrHelpArgument in hooks/codex-rollout.mjs mirrors this.
+    Beyond the generic words, a single-dash word holding `v` anywhere counts unless `lead` documents `-v` as verbose;
+    for npm, pnpm and yarn a single-dash word holding `H` anywhere counts, and so does any other `-` word before the
+    first argument word `--` that is not on the _BR6_PACKAGE_NEUTRAL allowlist. hasVersionOrHelpArgument in
+    hooks/codex-rollout.mjs mirrors this.
     """
     package_manager = lead in _BR6_PACKAGE_MANAGERS
     version_v = lead not in _BR6_VERBOSE_V_RUNNERS
@@ -1517,16 +1520,19 @@ def _br6_has_version_or_help_argument(words: list[dict[str, Any]], lead: str) ->
         if _br6_generic_version_or_help_word(word):
             return True
         value = word["value"]
-        if version_v and _BR6_VERSION_V_CLUSTER_RE.fullmatch(value):
+        if version_v and _BR6_VERSION_V_CLUSTER_RE.match(value):
             return True
         if not package_manager:
             continue
+        # DP41 (a): a redirection target spelled `--` (bash consumes it) neither ends the option region nor counts
+        # as an option word; only an argument word spelled `--` ends the region.
         if before_separator and value == "--":
-            before_separator = False
+            if not word["redirect"]:
+                before_separator = False
             continue
         if before_separator and value.startswith("-") and value not in _BR6_PACKAGE_NEUTRAL:
             return True
-        if _BR6_PACKAGE_H_CLUSTER_RE.fullmatch(value):
+        if _BR6_PACKAGE_H_CLUSTER_RE.match(value):
             return True
     return False
 

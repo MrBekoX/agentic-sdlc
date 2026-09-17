@@ -1292,19 +1292,65 @@ class TestStrictRedGreen(unittest.TestCase):
                 self.assertIs(procedure_eval.is_br6_runner_statement(command, TEST_RE), True)
                 self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), expected)
 
-    # A long near-miss cluster word per D28 cluster rule: `h` (help), `v` (version, npm is not a verbose runner) and
-    # `H` (package manager, after `--` so the allowlist rule does not decide first).
+
+    # D29 (DP41) lists, shared with the Node tests in test_codex_flow_step_guard.py and test_codex_current_rollout.py.
+    # Every entry runs a runner. `<bs>` stands for a backslash and `<e9>` for U+00E9.
+    D29_TARGET_SEPARATOR_VERSION_ONLY = (
+        "npm run test:nope >-- --if-present", "npm run test:nope 2>-- --if-present",
+        "npm run test:nope &>-- --if-present", "npm run test:nope >>-- --if-present",
+        "npm run test:nope >|-- --if-present", "npm run test:nope >'--' --if-present",
+        "npm run test:nope >\"--\" --if-present", "npm run test:nope >-- --if-present=true", "npm test >-- '-?'",
+        "npm test 2>-- -x", "pnpm test >-- -x", "yarn test >-- --if-present", "npm run test:unit >-- --if-present",
+    )
+    D29_TARGET_SEPARATOR_NOT_VERSION_ONLY = (
+        "npm test >-- -s", "npm test >--", "npm run test:unit 2>-- -- --coverage", "npm test -- --if-present",
+        "npm run test:unit -- '-?'", "npm test >out.txt -- -x", "pnpm test >-- -- --if-present",
+    )
+    D29_KEY_LETTER_VERSION_ONLY = tuple(c.replace("<bs>", chr(92)).replace("<e9>", chr(0xE9)) for c in (
+        "pytest -h1", "pytest -hx1", "pytest -xh1", "pytest -h_", "pytest -h.", "pytest -h/", "pytest -hhhh1",
+        "pytest -V1", "pytest -h=x", "pytest -h<bs> x", "pytest -h<e9>", "pytest -1h", "pytest -x1h", "pytest -x1V",
+        "pytest -<e9>h", "pytest -kh1", "pytest -pno:cacheprovider", "python -m pytest -xh1", "py -3 -m pytest -h1",
+        "python -m unittest -bh_", "python3 -m unittest -h1", "tox -h1", "jest -x1h", "jest -1h", "jest -b_h",
+        "vitest run -1h", "vitest run -x1h", "vitest -b_h", "npm test -- -h1", "npm test -- -1h", "npm test -- -v1",
+        "npm test -- -x1v", "npm test -- -xH1", "npm test -- -1H", "npm test -H1", "make test -v1", "make test -1v",
+        "jest -v1",
+    ))
+    D29_KEY_LETTER_NOT_VERSION_ONLY = (
+        "pytest -v1", "pytest -x1v", "pytest --h1", "pytest --tb=short", "pytest -rA", "tox -v1", "go test -v1",
+        "jest -x1k", "vitest run -rA", "npm test -- -x1k", "npm test -- --watch", "make test -1k",
+    )
+
+    def test_d29_redirect_target_and_key_letter(self):
+        # Mutations: a redirection target `--` that still ends the package-manager option region (the first list), a
+        # redirection target `--` counted as an option word (`npm test >-- -s`), letters required to the end of the
+        # word, the key letter required in the leading letter run (`jest -x1h`), or the H or v rule without the
+        # any-position change (the third list), or a `--` word matched by the single-dash patterns (the fourth list).
+        cases = ([(c, True) for c in self.D29_TARGET_SEPARATOR_VERSION_ONLY + self.D29_KEY_LETTER_VERSION_ONLY]
+                 + [(c, False) for c in self.D29_TARGET_SEPARATOR_NOT_VERSION_ONLY
+                    + self.D29_KEY_LETTER_NOT_VERSION_ONLY])
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.is_br6_runner_statement(command, TEST_RE), True)
+                self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), expected)
+
+    # A long cluster word per cluster rule: `h` (help), `v` (version, npm is not a verbose runner) and `H` (package
+    # manager, after `--` so the allowlist rule does not decide first). Under DP41 (b) each holds its key letter, so
+    # each counts; the D29_NEAR_MISS_WORDS are long single-dash words without the key letter, so none counts.
     D28_NEAR_MISS_CLUSTERS = tuple(prefix + "-" + letter * 100000 + "1"
                                    for prefix, letter in (("pytest ", "h"), ("npm test -- ", "v"), ("npm test -- ", "H")))
 
+    D29_NEAR_MISS_WORDS = tuple(prefix + "-" + letter * 100000 + "1k"
+                                for prefix, letter in (("pytest ", "x"), ("npm test -- ", "w"), ("npm test -- ", "G")))
+
     def test_d28_cluster_checks_are_linear(self):
-        # Mutation: an ambiguous `-[A-Za-z]*<letter>[A-Za-z]*` cluster pattern backtracks quadratically on these words
-        # (seconds per word), letting rollout-supplied commands push the Stop hook past its timeout.
+        # Mutations: an end-anchored `-[A-Za-z]*<letter>[A-Za-z]*` pattern backtracks quadratically on the D28 words
+        # (seconds per word) and rejects them; a pattern that drops its key letter accepts the D29 words.
         import time
-        for command in self.D28_NEAR_MISS_CLUSTERS:
+        for command, expected in ([(c, True) for c in self.D28_NEAR_MISS_CLUSTERS]
+                                  + [(c, False) for c in self.D29_NEAR_MISS_WORDS]):
             with self.subTest(command=command[:20]):
                 start = time.perf_counter()
-                self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), False)
+                self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), expected)
                 self.assertLess(time.perf_counter() - start, 1.0)
 
     def test_simple_commands_follow_the_grammar(self):

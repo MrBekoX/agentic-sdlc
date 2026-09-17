@@ -943,15 +943,16 @@ const BR6_SCRIPT_RUNNERS = new Set(['make', 'npm', 'pnpm', 'yarn']);
 const BR6_SCRIPT_WORD = /^([A-Za-z0-9]+)[.:-][A-Za-z0-9.:_-]+$/;
 // DP40 (c): version, help and no-run spellings.
 const BR6_PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn']);
-// Each single-dash cluster pattern excludes its key letter before the key, so a match has one split and a near-miss
-// word (`-hhh...h1`) fails in linear time; `-[A-Za-z]*h[A-Za-z]*` backtracks quadratically on rollout text.
-const BR6_HELP_CLUSTER = /^-[A-UW-Za-gi-z]*[Vh][A-Za-z]*$/;
+// DP41 (b): a single-dash word (a `-` not followed by `-`) holding the key letter anywhere counts, because jest and
+// vitest act on `h` anywhere in a short-option group (`jest -x1h`). Each pattern excludes its key letter before the
+// key and has no end anchor, so a match has one split and every word is decided in linear time.
+const BR6_HELP_CLUSTER = /^-(?!-)[^Vh]*[Vh]/;
 const BR6_LONG_OPTION_HEAD = /^--[A-Za-z]+$/;
 const BR6_LONG_VERSION_HELP = ['--version', '--help', '--usage'];
-const BR6_VERSION_V_CLUSTER = /^-[A-Za-uw-z]*v[A-Za-z]*$/;
+const BR6_VERSION_V_CLUSTER = /^-(?!-)[^v]*v/;
 // Runners whose documented `-v` means verbose.
 const BR6_VERBOSE_V_RUNNERS = new Set(['cargo', 'go', 'nox', 'pytest', 'tox', 'unittest']);
-const BR6_PACKAGE_H_CLUSTER = /^-[A-GI-Za-z]*H[A-Za-z]*$/;
+const BR6_PACKAGE_H_CLUSTER = /^-(?!-)[^H]*H/;
 // Package-manager options that run an existing script and change nothing for a missing one (npm 11.13.0).
 // `--if-present` is deliberately absent: it makes npm skip a missing script and exit 0 without running anything
 // (D28 C1).
@@ -1010,8 +1011,8 @@ export function isBr6RunnerStatement(statement, testRe) {
   return parsed.some((s) => s.commands.some((c) => runnerWordCount(c, anchored) > 0));
 }
 
-// DP40 (c) 1-3: UNKNOWN, an exact version/help flag, a single-dash cluster holding `V` or `h`, or a long option
-// whose part before `=` is a case-insensitive prefix of --version, --help or --usage.
+// DP40 (c) 1-3: UNKNOWN, an exact version/help flag, a single-dash word holding `V` or `h` anywhere (DP41 (b)), or a
+// long option whose part before `=` is a case-insensitive prefix of --version, --help or --usage.
 // scripts/run_procedure_eval.py _br6_generic_version_or_help_word mirrors this.
 function isGenericVersionOrHelpWord(w) {
   const v = w.value;
@@ -1024,9 +1025,10 @@ function isGenericVersionOrHelpWord(w) {
 }
 
 // DP40 (c): whether one argument word makes a runner command exit without running tests. Beyond the generic words,
-// a single-dash cluster holding `v` counts unless `lead` documents `-v` as verbose; for npm, pnpm and yarn a cluster
-// holding `H` counts, and so does any other `-` word before the first `--` that is not on the BR6_PACKAGE_NEUTRAL
-// allowlist. scripts/run_procedure_eval.py _br6_has_version_or_help_argument mirrors this.
+// a single-dash word holding `v` anywhere counts unless `lead` documents `-v` as verbose; for npm, pnpm and yarn a
+// single-dash word holding `H` anywhere counts, and so does any other `-` word before the first argument word `--`
+// that is not on the BR6_PACKAGE_NEUTRAL allowlist. scripts/run_procedure_eval.py
+// _br6_has_version_or_help_argument mirrors this.
 function hasVersionOrHelpArgument(args, lead) {
   const packageManager = BR6_PACKAGE_MANAGERS.has(lead);
   const versionV = !BR6_VERBOSE_V_RUNNERS.has(lead);
@@ -1035,7 +1037,12 @@ function hasVersionOrHelpArgument(args, lead) {
     if (isGenericVersionOrHelpWord(w)) return true;
     if (versionV && BR6_VERSION_V_CLUSTER.test(w.value)) return true;
     if (!packageManager) continue;
-    if (beforeSeparator && w.value === '--') { beforeSeparator = false; continue; }
+    // DP41 (a): a redirection target spelled `--` (bash consumes it) neither ends the option region nor counts as
+    // an option word; only an argument word spelled `--` ends the region.
+    if (beforeSeparator && w.value === '--') {
+      if (!w.redirect) beforeSeparator = false;
+      continue;
+    }
     if (beforeSeparator && w.value.startsWith('-') && !BR6_PACKAGE_NEUTRAL.has(w.value)) return true;
     if (BR6_PACKAGE_H_CLUSTER.test(w.value)) return true;
   }

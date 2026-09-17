@@ -63,6 +63,8 @@ D27_FORGED_PREFIXES = ("edge-forged-append-", "edge-forged-escaped-separator-", 
                        "edge-forged-red-python-")
 # D28 launcher, option and script-option forgeries lie inside the grammar too; test_named_d28_rows pins them.
 D28_FORGED_PREFIXES = ("edge-forged-launcher-list-", "edge-forged-option-", "edge-forged-script-option-")
+# D29 redirection-target and key-letter forgeries lie inside the grammar too; test_named_d29_rows pins them.
+D29_FORGED_PREFIXES = ("edge-forged-target-separator-", "edge-forged-key-letter-")
 # R11 (D27 operand rule): the operators of a plain-character command, longest first.
 _PLAIN_OPERATOR = re.compile(r"(\|\||&&|\|&|;|&|\||\n)")
 _WAITING_OPERATORS = frozenset({"&&", "||", "|", "|&"})
@@ -415,7 +417,8 @@ class TestBR6CaseTable(unittest.TestCase):
     def test_named_grammar_rows(self):
         rows = {row["id"]: row for row in _load()["rows"]}
         forged = [i for i in rows if i.startswith("edge-forged-")
-                  and not i.startswith(D25_FORGED_PREFIXES + D27_FORGED_PREFIXES + D28_FORGED_PREFIXES)
+                  and not i.startswith(D25_FORGED_PREFIXES + D27_FORGED_PREFIXES + D28_FORGED_PREFIXES
+                                      + D29_FORGED_PREFIXES)
                   and not i.startswith("edge-forged-oror-")]
         self.assertGreaterEqual(len(forged), 40)
         for row_id in forged:
@@ -551,7 +554,7 @@ class TestBR6CaseTable(unittest.TestCase):
             "edge-forged-value-blank-": 8, "edge-forged-pipeline-mention-": 1, "edge-forged-version-single-": 3,
             "edge-forged-red-": 7, "edge-inside-runner-": 19, "edge-inside-value-": 2, "edge-inside-append-": 1,
             "edge-inside-background-": 1, "edge-conservative-redirect-": 1})
-        self.assertEqual(len(rows), 321)
+        self.assertEqual(len(rows), 354)
 
         forged = [i for i in rows if i.startswith(D27_FORGED_PREFIXES[:-1])]
         self.assertEqual(len(forged), 32)
@@ -717,7 +720,58 @@ class TestBR6CaseTable(unittest.TestCase):
                 self.assertEqual(row["carrier"]["outputSummary"], "1 passed")
                 self.assertEqual((row["defaultTests"], row["strictAttributable"]), ("missing", False))
                 self.assertIs(row["runnerShape5801cb9"], row_id != "edge-conservative-selector-architecture")
-        self.assertEqual(len(rows), 321)
+        self.assertEqual(len(rows), 354)
+
+    # Guards (D29, DP41): a redirection target spelled `--` read as the end of the package-manager option region, a
+    # single-dash word judged to its end or by its leading letter run instead of by any key letter, a redirection
+    # target `--` counted as an option word, or a single-dash word without a key letter read as a version or help
+    # spelling.
+    def test_named_d29_rows(self):
+        rows = {row["id"]: row for row in _load()["rows"]}
+
+        def ids(prefix):
+            return [i for i in rows if i.startswith(prefix)]
+
+        counts = {prefix: len(ids(prefix)) for prefix in (
+            "edge-forged-target-separator-", "edge-forged-key-letter-", "edge-inside-target-separator-",
+            "edge-inside-key-letter-", "edge-conservative-target-separator-", "edge-conservative-key-letter-",
+            "edge-conservative-script-name-")}
+        self.assertEqual(counts, {
+            "edge-forged-target-separator-": 8, "edge-forged-key-letter-": 12, "edge-inside-target-separator-": 2,
+            "edge-inside-key-letter-": 2, "edge-conservative-target-separator-": 1,
+            "edge-conservative-key-letter-": 4, "edge-conservative-script-name-": 4})
+        separator_free = {"edge-forged-target-separator-single", "edge-forged-key-letter-single"}
+        for row_id in ids(D29_FORGED_PREFIXES):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertEqual(row["carrier"], {"callEvents": 1, "outputRecords": 1, "exitCode": 0,
+                                                  "outputSummary": "1 failed"})
+                self.assertEqual(row["specRefs"], ["EDGE-EXIT"])
+                self.assertEqual((row["inSafeGrammar"], row["lastIsRealRunner"], row["lastVersionOrHelpOnly"],
+                                  row["orRunAllRealRunners"], row["strictAttributable"], row["runnerShape5801cb9"]),
+                                 (True, True, True, False, False, True))
+                self.assertEqual(row["defaultTests"], "satisfied" if row_id in separator_free else "missing")
+                separator = any(s in row["command"] for s in (";", "\n", "||"))
+                self.assertIs(separator, row_id not in separator_free)
+        for row_id in ids(("edge-inside-target-separator-", "edge-inside-key-letter-")):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertEqual(row["carrier"]["outputSummary"], "1 passed")
+                self.assertEqual((row["inSafeGrammar"], row["lastIsRealRunner"], row["orRunAllRealRunners"],
+                                  row["lastVersionOrHelpOnly"], row["runnerShape5801cb9"], row["defaultTests"],
+                                  row["strictAttributable"], row["strictTests"]),
+                                 (True, True, True, False, True, "satisfied", True, "satisfied"))
+        for row_id in ids(("edge-conservative-target-separator-", "edge-conservative-key-letter-",
+                           "edge-conservative-script-name-")):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                script_name = row_id.startswith("edge-conservative-script-name-")
+                self.assertEqual(row["carrier"]["outputSummary"], "1 passed")
+                self.assertEqual((row["inSafeGrammar"], row["runnerShape5801cb9"], row["defaultTests"],
+                                  row["strictAttributable"]), (True, True, "missing", False))
+                self.assertEqual((row["lastIsRealRunner"], row["lastVersionOrHelpOnly"]),
+                                 (False, False) if script_name else (True, True))
+        self.assertEqual(len(rows), 354)
 
     # Guards: a background job (`&`, including after an escaped operator character) marked attributable, or a
     # redirection, `|&`, quoted or commented `&` misread as a background job (D21).

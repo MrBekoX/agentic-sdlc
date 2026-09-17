@@ -1397,6 +1397,33 @@ class TestExitAttributionClosure(_Tmp):
             with self.subTest(id=i):
                 self.assertEqual(self.outcome[i], "satisfied")
 
+    # ---- D29 (DP41): redirection-target `--` and key-letter rows in the default derivation ----
+    D29_FORGED_PREFIXES = ("edge-forged-target-separator-", "edge-forged-key-letter-")
+
+    def test_d29_forgeries_with_a_separator_missing_by_default(self):
+        # Mutation: a redirection target `--` that ends the option region, or a single-dash word judged to its end,
+        # turns a row satisfied.
+        ids = [i for i, r in self.rows.items() if i.startswith(self.D29_FORGED_PREFIXES)
+               and any(s in r["command"] for s in (";", "\n", "||"))]
+        self.assertEqual(len(ids), 18)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "missing")
+
+    def test_d29_separator_free_forgeries_keep_5801cb9_default(self):
+        for i in ("edge-forged-target-separator-single", "edge-forged-key-letter-single"):
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    def test_d29_inside_rows_satisfy(self):
+        # Mutation: counting a redirection target `--` as an option word, or reading a single-dash word without a key
+        # letter as a version or help spelling, turns a row missing.
+        ids = [i for i in self.rows if i.startswith(("edge-inside-target-separator-", "edge-inside-key-letter-"))]
+        self.assertEqual(len(ids), 4)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
 
 # ---- AC31, AC41, AC42: opt-in AGENTIC_FLOW_STRICT_EVIDENCE for live Codex evidence (Task 18) ----
 STRICT_ON = {"AGENTIC_FLOW_STRICT_EVIDENCE": "true"}
