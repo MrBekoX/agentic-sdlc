@@ -2105,6 +2105,24 @@ class TestEvidencePacket(unittest.TestCase):
                                  "cd /Users/" + chr(10) + "x && ls /home/" + marker + "/y")
                 self.assertNotIn("evaluser", out)
                 self.assertEqual(procedure_eval.collect_home_identities([jsonl]), ["evaluser"])
+        # An identity that starts with an escape letter: a match right after an odd backslash run sits inside the
+        # escape (`\nate` is a newline and `ate`) and stays; after an escaped backslash pair it is masked.
+        # Mutation: checking only the character before the match leaves `\*` in the source, which no longer parses.
+        source = json.dumps({"command": "cat /home/nate/x", "note": "done" + chr(10) + "ate lunch",
+                             "raw": "x" + chr(92) + "nate y"})
+        for cut in range(len(source) - 1):
+            pieces = [source[:cut], source[cut:cut + 2], source[cut + 2:]]
+            records = self.stream_block(5, "input_json_delta", pieces, {"type": "tool_use", "id": "t", "name": "Bash"})
+            jsonl = "".join(json.dumps(record) + "\n" for record in records)
+            with self.subTest(block="escape-letter identity", cut=cut):
+                out = procedure_eval.mask_home_identities([jsonl])[0]
+                joined = self.joined_block([json.loads(line) for line in out.split("\n") if line], 5)
+                try:
+                    value = json.loads(joined)
+                except json.JSONDecodeError:
+                    self.fail("masking broke a JSON escape in the reassembled block")
+                self.assertEqual(value, {"command": "cat /home/" + marker + "/x",
+                                         "note": "done" + chr(10) + "ate lunch", "raw": "x" + chr(92) + marker + " y"})
 
     def test_masking_keeps_json_escapes_and_prose_controls(self):  # D26 / DP38
         # Mutations: masking the serialized line instead of decoded strings, dropping the generic-name set or the

@@ -2215,13 +2215,23 @@ def _home_identity_patterns(identities: set[str], source: bool) -> list[re.Patte
     return [re.compile(f"(?<!{boundary}){re.escape(forms[key])}(?!{boundary})", re.IGNORECASE) for key in sorted(forms)]
 
 
+def _starts_in_escape(text: str, start: int) -> bool:
+    """True when an odd backslash run ends at `start`: in JSON source the match begins on an escape letter."""
+    position = start
+    while position > 0 and text[position - 1] == "\\":
+        position -= 1
+    return (start - position) % 2 == 1
+
+
 def _home_spans(text: str, patterns: list[re.Pattern[str]], source: bool) -> list[tuple[int, int]]:
     """Merged spans to mask: DP37 (f) segments, slug names in position and every identity occurrence."""
     segment_re = _SOURCE_SEGMENT_RE if source else _HOME_SEGMENT_RE
     spans = [(match.end(1), match.end()) for match in segment_re.finditer(text)]
-    spans += [match.span(1) for match in _HOME_SLUG_NAME_RE.finditer(text)]
+    spans += [match.span(1) for match in _HOME_SLUG_NAME_RE.finditer(text)
+              if not (source and _starts_in_escape(text, match.start()))]
     for pattern in patterns:
-        spans += [match.span() for match in pattern.finditer(text)]
+        spans += [match.span() for match in pattern.finditer(text)
+                  if not (source and _starts_in_escape(text, match.start()))]
     merged: list[tuple[int, int]] = []
     for start, end in sorted(spans):
         if merged and start <= merged[-1][1]:  # overlapping or touching spans become one marker
