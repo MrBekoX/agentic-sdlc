@@ -341,7 +341,7 @@ class BR6SafeGrammarTests(unittest.TestCase):
 
     @staticmethod
     def _d27_commands():
-        # Every table command, the D23 production lists, the four D27 lists and the six D28 lists of
+        # Every table command, the D23 production lists, the four D27 lists, the six D28 lists and the four D29 lists of
         # test_procedure_eval.
         from test_procedure_eval import GRAMMAR_INSIDE, GRAMMAR_OUTSIDE, TestStrictRedGreen as lists
         rows = json.loads(BR6_TABLE.read_text(encoding="utf-8"))["rows"]
@@ -351,6 +351,8 @@ class BR6SafeGrammarTests(unittest.TestCase):
         commands += list(lists.D28_PIPE_NEWLINE_OUTSIDE) + list(lists.D28_PIPE_NEWLINE_INSIDE)
         commands += list(lists.D28_RUNNER_STATEMENTS) + list(lists.D28_NON_RUNNER_STATEMENTS)
         commands += list(lists.D28_VERSION_ONLY) + list(lists.D28_NOT_VERSION_ONLY)
+        commands += list(lists.D29_TARGET_SEPARATOR_VERSION_ONLY) + list(lists.D29_TARGET_SEPARATOR_NOT_VERSION_ONLY)
+        commands += list(lists.D29_KEY_LETTER_VERSION_ONLY) + list(lists.D29_KEY_LETTER_NOT_VERSION_ONLY)
         return list(dict.fromkeys(commands)), rows
 
     def test_simple_commands_match_python_mirror(self):
@@ -391,8 +393,8 @@ class BR6SafeGrammarTests(unittest.TestCase):
         self.assertEqual(mismatches, [], "statements whose Node and Python runner verdicts differ")
 
     def test_cluster_checks_are_linear(self):
-        # Mutation: an ambiguous `-[A-Za-z]*<letter>[A-Za-z]*` cluster pattern backtracks quadratically on these
-        # near-miss words (seconds per word), letting rollout-supplied commands push the Stop hook past its timeout.
+        # Mutations: an end-anchored `-[A-Za-z]*<letter>[A-Za-z]*` pattern backtracks quadratically on the D28 words
+        # (seconds per word) and rejects them; a pattern that drops its key letter accepts the D29 words.
         from test_procedure_eval import TestStrictRedGreen as lists
         script = ("import {isVersionOrHelpOnly} from " + json.dumps(ROLLOUT_URI) + ";"
                   "import {loadRequirements} from " + json.dumps(FLOW_EVIDENCE.as_uri()) + ";"
@@ -400,8 +402,8 @@ class BR6SafeGrammarTests(unittest.TestCase):
                   " const re = new RegExp(loadRequirements().testCommand, 'i');"
                   " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => { const t = performance.now();"
                   " const v = isVersionOrHelpOnly(c, re); return [v, performance.now() - t]; }))); });")
-        got = self.node(script, list(lists.D28_NEAR_MISS_CLUSTERS))
-        self.assertEqual([v for v, _ms in got], [False, False, False])
+        got = self.node(script, list(lists.D28_NEAR_MISS_CLUSTERS) + list(lists.D29_NEAR_MISS_WORDS))
+        self.assertEqual([v for v, _ms in got], [True, True, True, False, False, False])
         slow = [round(ms) for _v, ms in got if ms >= 1000]
         self.assertEqual(slow, [], "near-miss cluster words that took 1 s or more")
 
