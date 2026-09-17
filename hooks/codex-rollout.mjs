@@ -579,8 +579,8 @@ export function trailingOrRun(command) {
 // other code, or the exit status is rewritten, only through a reserved word, a builtin, a shell-variable
 // assignment that needs `[` or `set -x`, or an assignment to an integer-attributed variable (its value is
 // evaluated as arithmetic, which can write BASH_CMDS); a builtin a later bash adds is read as an external
-// program (a disclosed limit), and how a name resolves outside the command text (PATH, profile functions)
-// is not seen.
+// program (a disclosed limit), and how a name resolves outside the command text (PATH, EXECIGNORE, profile
+// functions) is not seen.
 const BR6_RESERVED_WORDS = new Set([
   '!', '[[', ']]', '{', '}', 'case', 'coproc', 'do', 'done', 'elif', 'else', 'esac', 'fi', 'for', 'function', 'if',
   'in', 'select', 'then', 'time', 'until', 'while',
@@ -620,7 +620,8 @@ const GRAMMAR_SET_WORDS = new Set(['errexit', 'nounset', 'pipefail']);
 // `)`, `{`, `}`, a backtick, `[[`, `<<`, `<(` and `>(`. Operand rule (DP39 (2)): a `;`, `&`, `&&`, `||`, `|` or
 // `|&` after a simple command with no assignment, word or redirection, or an `&&`, `||`, `|` or `|&` still waiting
 // for a word at the end (newlines and comments do not end the wait), is outside; bash rejects both before it runs
-// anything.
+// anything. A newline while a `|` or `|&` still waits for a word is outside too, because bash joins the next line
+// into the pipeline (DP40 (a)).
 // Inside, the result lists the statements of splitBr6StatementJoins, in order, as {viaOr, commands}; empty and
 // comment-only statements are dropped and the `||` join carries over them. Each simple command is {assignments: the
 // raw leading NAME=/NAME+= words, words: [{value, unknown, redirect}] for every other word, op: the operator that
@@ -639,6 +640,7 @@ export function br6SimpleCommands(command) {
   let redirectPending = false; // an operator was read and its target word has not started
   let targetWord = false;      // the current word is a redirection target
   let waiting = false;         // an `&&`, `||`, `|` or `|&` still waits for a word (operand rule)
+  let pipeWaiting = false;     // a `|` or `|&` still waits for a word (DP40 (a))
   const statements = [];
   let commands = [];
   let current = { assignments: [], words: [], op: '' };
@@ -709,7 +711,9 @@ export function br6SimpleCommands(command) {
       if (op !== '\n' && !(current.assignments.length || current.words.length)) {
         return null; // an operator after an empty simple command (operand rule)
       }
+      if (op === '\n' && pipeWaiting) return null; // bash joins the next line into the pipeline (DP40 (a))
       waiting = op === '&&' || op === '||' || op === '|' || op === '|&' || (waiting && op === '\n');
+      pipeWaiting = op === '|' || op === '|&';
       if (op === ';' || op === '\n' || op === '||') {
         endSimpleCommand('');
         endStatement(op === '||');
@@ -745,6 +749,7 @@ export function br6SimpleCommands(command) {
       if (c === '\\' && n === '\n') { i += 2; continue; } // a continuation keeps the word-start state
       inWord = true;
       waiting = false;
+      pipeWaiting = false;
       word = [];
       targetWord = redirectPending;
       redirectPending = false;
@@ -930,15 +935,37 @@ function wordValue(raw) {
 const BR6_RUNNER_MAX_WORDS = 3;
 const BR6_RUNNER_WORD = /^[A-Za-z0-9]+$/;
 const BR6_PYTHON_WORD = /^(?:python[0-9.]*|py)$/;
-const BR6_PYTHON_VERSION = /^-[0-9.]+$/;
+// DP40 (b): only the `py` launcher takes a selector word, and only -2, -3 or -3.<digits> select a runtime; -0 lists
+// the runtimes and exits 0, other digit words make the launcher or Python exit nonzero without running tests.
+const BR6_PY_SELECTOR = /^-[23](?:\.[0-9]+)?$/;
+// DP40 (d): a script-name runner word (`npm run test:unit`, `pnpm test:e2e`, `yarn test:unit`, `make test-unit`).
+const BR6_SCRIPT_RUNNERS = new Set(['make', 'npm', 'pnpm', 'yarn']);
+const BR6_SCRIPT_WORD = /^([A-Za-z0-9]+)[.:-][A-Za-z0-9.:_-]+$/;
+// DP40 (c): version, help and no-run spellings.
+const BR6_PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn']);
+// Each single-dash cluster pattern excludes its key letter before the key, so a match has one split and a near-miss
+// word (`-hhh...h1`) fails in linear time; `-[A-Za-z]*h[A-Za-z]*` backtracks quadratically on rollout text.
+const BR6_HELP_CLUSTER = /^-[A-UW-Za-gi-z]*[Vh][A-Za-z]*$/;
+const BR6_LONG_OPTION_HEAD = /^--[A-Za-z]+$/;
+const BR6_LONG_VERSION_HELP = ['--version', '--help', '--usage'];
+const BR6_VERSION_V_CLUSTER = /^-[A-Za-uw-z]*v[A-Za-z]*$/;
+// Runners whose documented `-v` means verbose.
+const BR6_VERBOSE_V_RUNNERS = new Set(['cargo', 'go', 'nox', 'pytest', 'tox', 'unittest']);
+const BR6_PACKAGE_H_CLUSTER = /^-[A-GI-Za-z]*H[A-Za-z]*$/;
+// Package-manager options that run an existing script and change nothing for a missing one (npm 11.13.0).
+// `--if-present` is deliberately absent: it makes npm skip a missing script and exit 0 without running anything
+// (D28 C1).
+const BR6_PACKAGE_NEUTRAL = new Set(['-s', '--silent', '-q', '--quiet', '-d', '-dd', '-ddd']);
 // `python -m <module>` runs tests only for these modules; any other module exits 1 (`No module named ...`) unrun.
 const BR6_PYTHON_MODULES = new Set(['pytest', 'unittest', 'tox', 'nox']);
 
 // How many leading words of a simple command name a test runner (DP39 (3)); 0 when it runs none. Only the words
 // before the first redirection word count, and a redirection word before the first word gives 0. Generic form: the
 // smallest k (1..BR6_RUNNER_MAX_WORDS) whose first k words are known, fully ASCII letters and digits, and whose
-// single-space join the anchored pattern matches. Python form: python[0-9.]* or py, an optional -<version> word,
-// exactly -m, and a known module in BR6_PYTHON_MODULES that the anchored pattern matches.
+// single-space join the anchored pattern matches; word k (k >= 2) may instead be a script name (`test:unit`,
+// `test-ci`, `test.x`) of make, npm (k === 3 only), pnpm or yarn whose `test` part completes the match (DP40 (d)).
+// Python form: python[0-9.]* or py, a -2/-3/-3.<digits> selector word after `py` only (DP40 (b)), exactly -m, and a
+// known module in BR6_PYTHON_MODULES that the anchored pattern matches.
 // scripts/run_procedure_eval.py _br6_runner_word_count mirrors this.
 function runnerWordCount(simpleCommand, anchored) {
   const { words } = simpleCommand;
@@ -950,7 +977,7 @@ function runnerWordCount(simpleCommand, anchored) {
   }
   if (BR6_PYTHON_WORD.test(plain[0].value)) {
     let k = 1;
-    if (k < plain.length && BR6_PYTHON_VERSION.test(plain[k].value)) k += 1;
+    if (plain[0].value === 'py' && k < plain.length && BR6_PY_SELECTOR.test(plain[k].value)) k += 1;
     if (k + 1 < plain.length && plain[k].value === '-m') {
       const module = plain[k + 1];
       if (!module.unknown && BR6_PYTHON_MODULES.has(module.value) && anchored.test(module.value)) return k + 2;
@@ -959,7 +986,16 @@ function runnerWordCount(simpleCommand, anchored) {
   }
   for (let k = 1; k <= Math.min(BR6_RUNNER_MAX_WORDS, plain.length); k += 1) {
     const w = plain[k - 1];
-    if (w.unknown || !BR6_RUNNER_WORD.test(w.value)) return 0;
+    if (w.unknown) return 0;
+    if (!BR6_RUNNER_WORD.test(w.value)) {
+      // DP40 (d): word k may still be a script name whose part before the first `.`, `:` or `-` is `test`.
+      const m = BR6_SCRIPT_WORD.exec(w.value);
+      if (k < 2 || !m || m[1].toLowerCase() !== 'test') return 0;
+      const lead = plain[0].value.toLowerCase(); // plain[0] passed the ASCII word check
+      if (BR6_SCRIPT_RUNNERS.has(lead) && (lead !== 'npm' || k === 3)
+        && anchored.test(plain.slice(0, k - 1).map((x) => x.value).concat([m[1]]).join(' '))) return k;
+      return 0;
+    }
     if (anchored.test(plain.slice(0, k).map((x) => x.value).join(' '))) return k;
   }
   return 0;
@@ -974,10 +1010,43 @@ export function isBr6RunnerStatement(statement, testRe) {
   return parsed.some((s) => s.commands.some((c) => runnerWordCount(c, anchored) > 0));
 }
 
-// True only when the statement runs a runner and every simple command that runs one is version/help-only (DP39 (4)):
-// one of its argument words (every word after the runner words, redirection words included) is UNKNOWN or is
-// --version, -V, --help or -h; arguments after `--` count (`npm test -- --help`). A statement outside the grammar
-// is neither. scripts/run_procedure_eval.py is_version_or_help_only mirrors this.
+// DP40 (c) 1-3: UNKNOWN, an exact version/help flag, a single-dash cluster holding `V` or `h`, or a long option
+// whose part before `=` is a case-insensitive prefix of --version, --help or --usage.
+// scripts/run_procedure_eval.py _br6_generic_version_or_help_word mirrors this.
+function isGenericVersionOrHelpWord(w) {
+  const v = w.value;
+  if (w.unknown || VERSION_HELP_ARGS.has(v) || BR6_HELP_CLUSTER.test(v)) return true;
+  const eq = v.indexOf('=');
+  const head = eq === -1 ? v : v.slice(0, eq);
+  if (!BR6_LONG_OPTION_HEAD.test(head)) return false;
+  const low = head.toLowerCase(); // ASCII only: the head passed the ASCII pattern
+  return BR6_LONG_VERSION_HELP.some((o) => o.startsWith(low));
+}
+
+// DP40 (c): whether one argument word makes a runner command exit without running tests. Beyond the generic words,
+// a single-dash cluster holding `v` counts unless `lead` documents `-v` as verbose; for npm, pnpm and yarn a cluster
+// holding `H` counts, and so does any other `-` word before the first `--` that is not on the BR6_PACKAGE_NEUTRAL
+// allowlist. scripts/run_procedure_eval.py _br6_has_version_or_help_argument mirrors this.
+function hasVersionOrHelpArgument(args, lead) {
+  const packageManager = BR6_PACKAGE_MANAGERS.has(lead);
+  const versionV = !BR6_VERBOSE_V_RUNNERS.has(lead);
+  let beforeSeparator = true;
+  for (const w of args) {
+    if (isGenericVersionOrHelpWord(w)) return true;
+    if (versionV && BR6_VERSION_V_CLUSTER.test(w.value)) return true;
+    if (!packageManager) continue;
+    if (beforeSeparator && w.value === '--') { beforeSeparator = false; continue; }
+    if (beforeSeparator && w.value.startsWith('-') && !BR6_PACKAGE_NEUTRAL.has(w.value)) return true;
+    if (BR6_PACKAGE_H_CLUSTER.test(w.value)) return true;
+  }
+  return false;
+}
+
+// True only when the statement runs a runner and every simple command that runs one is version/help-only (DP39 (4),
+// DP40 (c)): one of its argument words (every word after the runner words, redirection words included) passes
+// hasVersionOrHelpArgument for the command's lead word (the module word of the Python form, else the first word);
+// arguments after `--` count (`npm test -- --help`). A statement outside the grammar is neither.
+// scripts/run_procedure_eval.py is_version_or_help_only mirrors this.
 export function isVersionOrHelpOnly(statement, testRe) {
   if (!testRe) return false;
   const parsed = br6SimpleCommands(statement);
@@ -989,7 +1058,10 @@ export function isVersionOrHelpOnly(statement, testRe) {
       const count = runnerWordCount(c, anchored);
       if (count === 0) continue;
       runners += 1;
-      if (!c.words.slice(count).some((w) => w.unknown || VERSION_HELP_ARGS.has(w.value))) return false;
+      // Both words passed an ASCII pattern in runnerWordCount, so toLowerCase folds ASCII only.
+      const first = c.words[0].value;
+      const lead = (BR6_PYTHON_WORD.test(first) ? c.words[count - 1].value : first).toLowerCase();
+      if (!hasVersionOrHelpArgument(c.words.slice(count), lead)) return false;
     }
   }
   return runners > 0;

@@ -61,6 +61,8 @@ D25_FORGED_PREFIXES = ("edge-forged-word-", "edge-forged-segment-", "edge-forged
 D27_FORGED_PREFIXES = ("edge-forged-append-", "edge-forged-escaped-separator-", "edge-forged-join-",
                        "edge-forged-value-blank-", "edge-forged-pipeline-mention-", "edge-forged-version-single-",
                        "edge-forged-red-python-")
+# D28 launcher, option and script-option forgeries lie inside the grammar too; test_named_d28_rows pins them.
+D28_FORGED_PREFIXES = ("edge-forged-launcher-list-", "edge-forged-option-", "edge-forged-script-option-")
 # R11 (D27 operand rule): the operators of a plain-character command, longest first.
 _PLAIN_OPERATOR = re.compile(r"(\|\||&&|\|&|;|&|\||\n)")
 _WAITING_OPERATORS = frozenset({"&&", "||", "|", "|&"})
@@ -74,14 +76,18 @@ def _plain_well_formed(command):
     """
     pieces = _PLAIN_OPERATOR.split(command)
     pending = False
+    pipe_pending = False
     for index in range(1, len(pieces), 2):
         before, operator = pieces[index - 1], pieces[index]
         if before.strip(" \t"):
-            pending = False
+            pending = pipe_pending = False
         elif operator != "\n":
             return False
+        elif pipe_pending:
+            return False  # D28: a newline while a `|` or `|&` waits
         if operator in _WAITING_OPERATORS:
             pending = True
+            pipe_pending = operator in ("|", "|&")
     if pieces[-1].strip(" \t"):
         pending = False
     return not pending
@@ -409,7 +415,7 @@ class TestBR6CaseTable(unittest.TestCase):
     def test_named_grammar_rows(self):
         rows = {row["id"]: row for row in _load()["rows"]}
         forged = [i for i in rows if i.startswith("edge-forged-")
-                  and not i.startswith(D25_FORGED_PREFIXES + D27_FORGED_PREFIXES)
+                  and not i.startswith(D25_FORGED_PREFIXES + D27_FORGED_PREFIXES + D28_FORGED_PREFIXES)
                   and not i.startswith("edge-forged-oror-")]
         self.assertGreaterEqual(len(forged), 40)
         for row_id in forged:
@@ -545,7 +551,7 @@ class TestBR6CaseTable(unittest.TestCase):
             "edge-forged-value-blank-": 8, "edge-forged-pipeline-mention-": 1, "edge-forged-version-single-": 3,
             "edge-forged-red-": 7, "edge-inside-runner-": 19, "edge-inside-value-": 2, "edge-inside-append-": 1,
             "edge-inside-background-": 1, "edge-conservative-redirect-": 1})
-        self.assertEqual(len(rows), 256)
+        self.assertEqual(len(rows), 321)
 
         forged = [i for i in rows if i.startswith(D27_FORGED_PREFIXES[:-1])]
         self.assertEqual(len(forged), 32)
@@ -640,6 +646,78 @@ class TestBR6CaseTable(unittest.TestCase):
         for row_id in forged + inside + ["edge-conservative-redirect-before-runner"]:
             with self.subTest(id=row_id):
                 self.assertEqual(set(rows[row_id]["baseline5801cb9"].values()), {"satisfied"})
+
+    # Guards (D28, DP40): a newline after a waiting `|` read as a statement end, a `py -0` list or a Python-word
+    # selector read as a runner, a version, help or skip-if-missing spelling read as a test run, or a script-name
+    # runner (`npm run test:unit`) rejected.
+    def test_named_d28_rows(self):
+        rows = {row["id"]: row for row in _load()["rows"]}
+
+        def ids(prefix):
+            return [i for i in rows if i.startswith(prefix)]
+
+        counts = {prefix: len(ids(prefix)) for prefix in (
+            "edge-forged-pipe-newline-", "edge-forged-launcher-list-", "edge-forged-option-",
+            "edge-forged-script-option-", "edge-red-", "edge-inside-join-", "edge-inside-selector-",
+            "edge-inside-option-", "edge-inside-script-", "edge-conservative-selector-",
+            "edge-conservative-pipe-newline-", "edge-conservative-option-")}
+        self.assertEqual(counts, {
+            "edge-forged-pipe-newline-": 5, "edge-forged-launcher-list-": 3, "edge-forged-option-": 22,
+            "edge-forged-script-option-": 3, "edge-red-": 6, "edge-inside-join-": 1, "edge-inside-selector-": 3,
+            "edge-inside-option-": 5, "edge-inside-script-": 10, "edge-conservative-selector-": 1,
+            "edge-conservative-pipe-newline-": 1, "edge-conservative-option-": 5})
+        separator_free = {"edge-forged-launcher-list-single", "edge-forged-option-pytest-cluster-single",
+                          "edge-forged-option-npm-single"}
+        forged = ids("edge-forged-pipe-newline-") + ids(D28_FORGED_PREFIXES)
+        for row_id in forged:
+            with self.subTest(id=row_id, check="carrier"):
+                self.assertEqual(rows[row_id]["carrier"], {"callEvents": 1, "outputRecords": 1, "exitCode": 0,
+                                                           "outputSummary": "1 failed"})
+                self.assertEqual(rows[row_id]["specRefs"], ["EDGE-EXIT"])
+        for row_id in ids("edge-forged-pipe-newline-"):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertEqual((row["inSafeGrammar"], row["defaultTests"], row["strictAttributable"]),
+                                 (False, "missing", False))
+                self.assertEqual(len(row["statements"]), 3)
+                self.assertEqual((row["lastIsRealRunner"], row["orRunAllRealRunners"]), (True, True))
+        for row_id in ids(D28_FORGED_PREFIXES):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertIs(row["inSafeGrammar"], True)
+                self.assertIs(row["strictAttributable"], False)
+                self.assertIs(row["orRunAllRealRunners"], False)
+                self.assertEqual(row["defaultTests"], "satisfied" if row_id in separator_free else "missing")
+                separator = any(s in row["command"] for s in (";", "\n", "||"))
+                self.assertIs(separator, row_id not in separator_free)
+                launcher = row_id.startswith("edge-forged-launcher-list-")
+                self.assertEqual((row["lastIsRealRunner"], row["lastVersionOrHelpOnly"]),
+                                 (False, False) if launcher else (True, True))
+        for row_id in ids("edge-red-"):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertEqual(row["carrier"]["exitCode"], 1)
+                self.assertTrue(row["carrier"]["outputSummary"].startswith(("Unknown option: -", "Unknown command: ")))
+                self.assertEqual((row["inSafeGrammar"], row["lastIsRealRunner"], row["strictAttributable"],
+                                  row["defaultTests"]), (True, False, False, "missing"))
+                self.assertEqual(row["baseline5801cb9"]["codexStopTests"], "missing")
+        for row_id in ids(("edge-inside-join-", "edge-inside-selector-", "edge-inside-option-",
+                           "edge-inside-script-")):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertEqual(row["carrier"]["outputSummary"], "1 passed")
+                self.assertEqual((row["inSafeGrammar"], row["lastIsRealRunner"], row["orRunAllRealRunners"],
+                                  row["lastVersionOrHelpOnly"], row["runnerShape5801cb9"], row["defaultTests"],
+                                  row["strictAttributable"], row["strictTests"]),
+                                 (True, True, True, False, True, "satisfied", True, "satisfied"))
+        for row_id in ids(("edge-conservative-selector-", "edge-conservative-pipe-newline-",
+                           "edge-conservative-option-")):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertEqual(row["carrier"]["outputSummary"], "1 passed")
+                self.assertEqual((row["defaultTests"], row["strictAttributable"]), ("missing", False))
+                self.assertIs(row["runnerShape5801cb9"], row_id != "edge-conservative-selector-architecture")
+        self.assertEqual(len(rows), 321)
 
     # Guards: a background job (`&`, including after an escaped operator character) marked attributable, or a
     # redirection, `|&`, quoted or commented `&` misread as a background job (D21).

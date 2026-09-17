@@ -341,12 +341,16 @@ class BR6SafeGrammarTests(unittest.TestCase):
 
     @staticmethod
     def _d27_commands():
-        # Every table command, the D23 production lists and the four D27 lists of test_procedure_eval.
+        # Every table command, the D23 production lists, the four D27 lists and the six D28 lists of
+        # test_procedure_eval.
         from test_procedure_eval import GRAMMAR_INSIDE, GRAMMAR_OUTSIDE, TestStrictRedGreen as lists
         rows = json.loads(BR6_TABLE.read_text(encoding="utf-8"))["rows"]
         commands = [r["command"] for r in rows] + list(GRAMMAR_INSIDE) + list(GRAMMAR_OUTSIDE)
         commands += list(lists.RUNNER_STATEMENTS) + list(lists.NON_RUNNER_STATEMENTS)
         commands += list(lists.OPERAND_OUTSIDE) + list(lists.OPERAND_INSIDE)
+        commands += list(lists.D28_PIPE_NEWLINE_OUTSIDE) + list(lists.D28_PIPE_NEWLINE_INSIDE)
+        commands += list(lists.D28_RUNNER_STATEMENTS) + list(lists.D28_NON_RUNNER_STATEMENTS)
+        commands += list(lists.D28_VERSION_ONLY) + list(lists.D28_NOT_VERSION_ONLY)
         return list(dict.fromkeys(commands)), rows
 
     def test_simple_commands_match_python_mirror(self):
@@ -385,6 +389,21 @@ class BR6SafeGrammarTests(unittest.TestCase):
                       if values != [procedure_eval.is_br6_runner_statement(t, TEST_RE),
                                     procedure_eval.is_version_or_help_only(t, TEST_RE)]]
         self.assertEqual(mismatches, [], "statements whose Node and Python runner verdicts differ")
+
+    def test_cluster_checks_are_linear(self):
+        # Mutation: an ambiguous `-[A-Za-z]*<letter>[A-Za-z]*` cluster pattern backtracks quadratically on these
+        # near-miss words (seconds per word), letting rollout-supplied commands push the Stop hook past its timeout.
+        from test_procedure_eval import TestStrictRedGreen as lists
+        script = ("import {isVersionOrHelpOnly} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "import {loadRequirements} from " + json.dumps(FLOW_EVIDENCE.as_uri()) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () => {"
+                  " const re = new RegExp(loadRequirements().testCommand, 'i');"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => { const t = performance.now();"
+                  " const v = isVersionOrHelpOnly(c, re); return [v, performance.now() - t]; }))); });")
+        got = self.node(script, list(lists.D28_NEAR_MISS_CLUSTERS))
+        self.assertEqual([v for v, _ms in got], [False, False, False])
+        slow = [round(ms) for _v, ms in got if ms >= 1000]
+        self.assertEqual(slow, [], "near-miss cluster words that took 1 s or more")
 
     def test_grammar_production_lists(self):
         # The same 129 commands test_procedure_eval.TestStrictRedGreen.test_safe_grammar_production_lists checks in Python.
