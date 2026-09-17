@@ -1103,12 +1103,9 @@ class TestStrictRedGreen(unittest.TestCase):
     """AC69, AC123: attributable RED-before-GREEN runs, judged by the shared BR6 table's strict column."""
 
     def test_attribution_table_matches_shared_cases(self):
+        # D27: runner identification is the grammar-derived rule, so no node process classifies anything here.
         rows = load_br6_rows()
         self.assertTrue(rows)
-        segments = sorted({s for row in rows for s in procedure_eval._split_unquoted_andand(row["statements"][-1])})
-        classified = procedure_eval.run_node_helpers(commands=segments, test_command=TEST_RE.pattern)
-        self.assertIsNotNone(classified, "node classifier unavailable")
-        is_runner = dict(zip(segments, classified["real"])).get
         for row in rows:
             with self.subTest(id=row["id"]):
                 statements = procedure_eval.br6_statements(row["command"])
@@ -1116,10 +1113,13 @@ class TestStrictRedGreen(unittest.TestCase):
                 last = statements[-1]
                 self.assertEqual(procedure_eval.has_unquoted_pipe(last), row["lastHasPipe"])
                 self.assertEqual(procedure_eval.has_unquoted_background(last), row["lastHasBackground"])
-                self.assertEqual(procedure_eval.is_version_or_help_only(last, TEST_RE, is_runner),
-                                 row["lastVersionOrHelpOnly"])
+                self.assertEqual(procedure_eval.is_br6_runner_statement(last, TEST_RE), row["lastIsRealRunner"])
+                self.assertEqual(procedure_eval.is_version_or_help_only(last, TEST_RE), row["lastVersionOrHelpOnly"])
                 self.assertEqual(procedure_eval.in_safe_br6_grammar(row["command"]), row["inSafeGrammar"])
                 self.assertEqual(procedure_eval.br6_trailing_or_run(row["command"]), row["orRun"])
+                self.assertEqual(all(procedure_eval.is_br6_runner_statement(s, TEST_RE)
+                                     and not procedure_eval.is_version_or_help_only(s, TEST_RE) for s in row["orRun"]),
+                                 row["orRunAllRealRunners"])
                 runs = procedure_eval.attributable_test_runs(trace_from_carrier(row), TEST_RE)
                 self.assertEqual(bool(runs), row["strictAttributable"])
                 self.assertEqual(any(run.exit == 0 for run in runs), row["strictTests"] == "satisfied")
@@ -1147,16 +1147,141 @@ class TestStrictRedGreen(unittest.TestCase):
         bs = chr(92)
         version_only = [c.replace("<bs>", bs) for c in self.VERSION_ONLY_WORDS]
         runner = [c.replace("<bs>", bs) for c in self.RUNNER_WORDS]
-        segments = sorted({s for c in version_only + runner for s in procedure_eval._split_unquoted_andand(c)})
-        classified = procedure_eval.run_node_helpers(commands=segments, test_command=TEST_RE.pattern)
-        self.assertIsNotNone(classified, "node classifier unavailable")
-        is_runner = dict(zip(segments, classified["real"])).get
         for command, expected in [(c, True) for c in version_only] + [(c, False) for c in runner]:
             with self.subTest(command=command):
-                self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE, is_runner), expected)
+                self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), expected)
         nbsp_pipe = chr(0xA0) + "#x | pytest | tee log.txt"
         self.assertEqual(procedure_eval.br6_statements(nbsp_pipe), [nbsp_pipe])
         self.assertIs(procedure_eval.has_unquoted_pipe(nbsp_pipe), True)
+
+    # D27 (DP39) lists, shared with the Node tests in test_codex_flow_step_guard.py and test_codex_current_rollout.py.
+    # `<bs>`, `<nl>` and `<tab>` stand for a backslash, a newline and a tab; the Unicode blanks are built with chr().
+    RUNNER_STATEMENTS = tuple(c.replace("<bs>", chr(92)).replace("<nl>", chr(10)) for c in (
+        "pytest", "PYTEST -q", "X=a pytest", "A+=1 pytest", "X=a<bs> b pytest", "X=$V pytest", "npm test",
+        "npm run test -- --ci", "pnpm run test", "go test ./...", "cargo test", "python -m pytest",
+        "python3.11 -m pytest", "py -3 -m pytest", "python -m unittest", "python3 -m tox", "py -m nox", "tox",
+        "echo x | pytest", "echo x & pytest", "pytest > out.txt 2>&1", "pyt<bs><nl>est -q",
+    ))
+    NON_RUNNER_STATEMENTS = tuple(c.replace("<bs>", chr(92)).replace("<nl>", chr(10)).replace("<tab>", chr(9)) for c in (
+        "pytest+=1", "tox+=x", "A=1 pytest+=1", "X=a<bs> pytest",
+        "X=a" + chr(0xA0) + "pytest", "X=a" + chr(0x3000) + "pytest", "X=a" + chr(0x2028) + "pytest",
+        "X=a" + chr(0xFEFF) + "pytest", "X=a<bs><tab>pytest", "echo <bs>; pytest", "echo <bs>| pytest", "echo pytest",
+        "echo x #; pytest", "echo ok <bs><nl>pytest", "X=1<bs><nl>pytest", "2>/dev/null pytest", "pytest.exe",
+        "pytest-3 -q", "pytest" + chr(0xA0) + "-q", "npm test+=1", "npm run", "python -m pytest.main",
+        "Python -m pytest", "python -m jest", "python -m vitest", "python -m PYTEST", "pyte" + chr(0x17F) + "t",
+        "python -m pyte" + chr(0x17F) + "t",
+    ))
+    OPERAND_OUTSIDE = tuple(c.replace("<nl>", chr(10)) for c in (
+        "pytest ||", "pytest &&", "pytest |", "pytest |&", "; pytest", "& pytest", "pytest;;", "pytest; && pytest",
+        "true;;<nl>pytest", "pytest &&<nl>", "pytest ||<nl># done", "pytest<nl>;", "pytest &;",
+    ))
+    OPERAND_INSIDE = tuple(c.replace("<nl>", chr(10)) for c in (
+        "pytest;", "pytest &", "pytest ; ", "pytest<nl><nl>", "echo ok &&<nl>pytest", "pytest ||<nl><nl>pytest",
+        "> out.txt; pytest", "pytest # ; &&",
+    ))
+
+    def test_runner_rule_matches_whole_words(self):
+        # Mutations: reading `NAME+=` as a command word, splitting at an escaped `;` or `|`, ending an assignment value
+        # at a Unicode or escaped blank, matching with search/match instead of fullmatch (pytest-3, pytest.exe),
+        # dropping the ASCII word check or compiling it with re.IGNORECASE (U+017F), dropping the python -m module set,
+        # or accepting a redirection word before the command word, each turns a NON_RUNNER entry into a runner.
+        for command, expected in ([(c, True) for c in self.RUNNER_STATEMENTS]
+                                  + [(c, False) for c in self.NON_RUNNER_STATEMENTS]):
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.is_br6_runner_statement(command, TEST_RE), expected)
+        for command in ("pytest --version;", "pytest --version\n", "pytest --help # ;"):
+            with self.subTest(version=command):
+                self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), True)
+        # The bound is the longest testCommand alternative in words; an optional group counts at its maximum.
+        source = json.loads((REPO / "hooks" / "flow-requirements.json").read_text(encoding="utf-8"))["testCommand"]
+        self.assertTrue(source.startswith("\\b(") and source.endswith(")\\b"), source)
+        body = source[3:-3]
+        alternatives, depth, current, index = [], 0, "", 0
+        while index < len(body):
+            ch = body[index]
+            if ch == "\\":
+                current += body[index:index + 2]
+                index += 2
+                continue
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            if ch == "|" and depth == 0:
+                alternatives.append(current)
+                current = ""
+            else:
+                current += ch
+            index += 1
+        alternatives.append(current)
+        self.assertEqual(procedure_eval.BR6_RUNNER_MAX_WORDS, max(a.count("\\s+") + 1 for a in alternatives))
+        for command in ("npm run test", "pnpm run test", "gradle test", "mvn test", "make test", "yarn test", "go test",
+                        "cargo test"):
+            with self.subTest(pattern=command):
+                self.assertIsNotNone(TEST_RE.fullmatch(command))
+
+    def test_operand_rule_puts_syntax_errors_outside(self):
+        # Mutation: dropping either half of the operand rule (an operator after an empty simple command, or an
+        # operator still waiting for a word at the end) admits a bash syntax error that runs nothing.
+        for command, expected in ([(c, False) for c in self.OPERAND_OUTSIDE]
+                                  + [(c, True) for c in self.OPERAND_INSIDE]):
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.in_safe_br6_grammar(command), expected)
+
+    def test_simple_commands_follow_the_grammar(self):
+        # Mutation: ending an assignment at an escaped blank, splitting a word at an escaped separator, reading
+        # `NAME+=` as a word, dropping the redirection marks, or keeping a backslash-newline in a word.
+        bs, nl = chr(92), chr(10)
+
+        def word(value, unknown=False, redirect=False):
+            return {"value": value, "unknown": unknown, "redirect": redirect}
+
+        def command(assignments, words, op=""):
+            return {"assignments": assignments, "words": words, "op": op}
+
+        cases = {
+            "X=a" + bs + " pytest": [{"via_or": False, "commands": [command(["X=a" + bs + " pytest"], [])]}],
+            "echo " + bs + "; pytest": [{"via_or": False, "commands": [
+                command([], [word("echo"), word(";"), word("pytest")])]}],
+            "pytest+=1": [{"via_or": False, "commands": [command(["pytest+=1"], [])]}],
+            "pytest 2>o --version && echo ok | tee l &": [{"via_or": False, "commands": [
+                command([], [word("pytest"), word("2", redirect=True), word("o", redirect=True), word("--version")],
+                        "&&"),
+                command([], [word("echo"), word("ok")], "|"),
+                command([], [word("tee"), word("l")], "&")]}],
+            "pytest; X=1" + bs + nl + "pytest": [
+                {"via_or": False, "commands": [command([], [word("pytest")])]},
+                {"via_or": False, "commands": [command(["X=1pytest"], [])]}],
+            "A=1 B+=x" + bs + " y pytest -k 'a b' \"$K\"": [{"via_or": False, "commands": [
+                command(["A=1", "B+=x" + bs + " y"],
+                        [word("pytest"), word("-k"), word("a b"), word("$K", unknown=True)])]}],
+            "true ||" + nl + "# c" + nl + "pytest": [
+                {"via_or": False, "commands": [command([], [word("true")])]},
+                {"via_or": True, "commands": [command([], [word("pytest")])]}],
+            "pytest ||": None,
+        }
+        for text, expected in cases.items():
+            with self.subTest(command=text):
+                self.assertEqual(procedure_eval.br6_simple_commands(text), expected)
+
+    def test_strict_attribution_needs_no_node(self):
+        # Mutation: classifying through node drops every run (and records strict_runner_classifier_unavailable)
+        # when node cannot be found.
+        script = (
+            "import json, sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import scripts.run_procedure_eval as pe\n"
+            "verdicts, errors = [], []\n"
+            "for events in json.load(sys.stdin):\n"
+            "    trace = pe.trace_events(events)\n"
+            "    verdicts.append(bool(pe.attributable_test_runs(trace, pe.load_test_re())))\n"
+            "    errors += trace.strict_errors\n"
+            "print(json.dumps([verdicts, errors]))\n"
+        )
+        batches = [claude_run("t1", command, False, "1 failed") for command in ("pytest", "pytest; pytest+=1")]
+        with tempfile.TemporaryDirectory() as empty:
+            env = dict(os.environ, PATH=empty)
+            proc = subprocess.run([sys.executable, "-c", script, str(REPO)], input=json.dumps(batches),
+                                  capture_output=True, text=True, encoding="utf-8", cwd=empty, env=env, timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout), [[True, False], []])
 
     def test_safe_grammar_production_lists(self):
         # Mutation: dropping any character or command-word production (each listed construct would be admitted).

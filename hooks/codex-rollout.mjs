@@ -10,8 +10,6 @@
 import { statSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { extractWrittenContent } from './codex-write-signal.mjs';
-// Imports only Node built-ins, so no import cycle arises (D25 model (1)).
-import { isRealRunnerInvocation } from './flow-evidence.mjs';
 
 // Single source of truth for the gate's self-signature. The completion-claim-gate SKILL.md emits this
 // exact literal when it runs; AC17's drift test asserts the two copies stay byte-identical.
@@ -619,9 +617,16 @@ const GRAMMAR_SET_WORDS = new Set(['errexit', 'nounset', 'pipefail']);
 // argument is a literal `NAME=`/`NAME+=` assignment or a plain word of letters, digits, `_` and `-`, so
 // no expansion, quote or glob can build the assigned name. A word of only
 // digits directly before `<` or `>` is that redirection's file descriptor in any position. Always outside: `(`,
-// `)`, `{`, `}`, a backtick, `[[`, `<<`, `<(` and `>(`.
-// scripts/run_procedure_eval.py in_safe_br6_grammar mirrors this pass branch for branch.
-export function inSafeBr6Grammar(command) {
+// `)`, `{`, `}`, a backtick, `[[`, `<<`, `<(` and `>(`. Operand rule (DP39 (2)): a `;`, `&`, `&&`, `||`, `|` or
+// `|&` after a simple command with no assignment, word or redirection, or an `&&`, `||`, `|` or `|&` still waiting
+// for a word at the end (newlines and comments do not end the wait), is outside; bash rejects both before it runs
+// anything.
+// Inside, the result lists the statements of splitBr6StatementJoins, in order, as {viaOr, commands}; empty and
+// comment-only statements are dropped and the `||` join carries over them. Each simple command is {assignments: the
+// raw leading NAME=/NAME+= words, words: [{value, unknown, redirect}] for every other word, op: the operator that
+// ended it inside its statement ('', '&&', '|', '|&' or '&')} (DP39 (1)); outside, the result is null.
+// scripts/run_procedure_eval.py br6_simple_commands mirrors this pass branch for branch.
+export function br6SimpleCommands(command) {
   const str = String(command || '');
   const length = str.length;
   let word = [];
@@ -633,55 +638,95 @@ export function inSafeBr6Grammar(command) {
   let exportCommand = false;
   let redirectPending = false; // an operator was read and its target word has not started
   let targetWord = false;      // the current word is a redirection target
+  let waiting = false;         // an `&&`, `||`, `|` or `|&` still waits for a word (operand rule)
+  const statements = [];
+  let commands = [];
+  let current = { assignments: [], words: [], op: '' };
+  let pendingOr = false;
+  const record = (raw, redirect) => {
+    const { value, unknown } = wordValue(raw);
+    current.words.push({ value, unknown, redirect });
+  };
   const finishWord = (next) => {
     if (!inWord) return true;
     inWord = false;
     const raw = word.join('');
-    if (targetWord) { targetWord = false; return true; }
-    if ((next === '<' || next === '>') && GRAMMAR_DIGITS.test(raw)) return true; // the redirection's fd
+    if (targetWord) { targetWord = false; record(raw, true); return true; }
+    if ((next === '<' || next === '>') && GRAMMAR_DIGITS.test(raw)) { record(raw, true); return true; } // the fd
     const assignment = GRAMMAR_ASSIGNMENT.exec(raw);
     if (!commandSeen) {
-      if (assignment) return !BR6_INTEGER_VARIABLES.has(assignment[1]);
+      if (assignment) {
+        current.assignments.push(raw);
+        return !BR6_INTEGER_VARIABLES.has(assignment[1]);
+      }
       commandSeen = true;
       if (!GRAMMAR_COMMAND_WORD.test(raw)) return false;
       if (BR6_RESERVED_WORDS.has(raw) || (BR6_BASH_BUILTINS.has(raw) && !BR6_SAFE_BUILTINS.has(raw))) return false;
       safeBuiltin = BR6_SAFE_BUILTINS.has(raw);
       setCommand = raw === 'set';
       exportCommand = raw === 'export';
+      record(raw, false);
       return true;
     }
+    record(raw, false);
     if (exportCommand) return assignment ? !BR6_INTEGER_VARIABLES.has(assignment[1]) : GRAMMAR_PLAIN_ARGUMENT.test(raw);
     return !setCommand || GRAMMAR_SET_OPTION.test(raw) || GRAMMAR_SET_WORDS.has(raw);
+  };
+  const endSimpleCommand = (op) => {
+    commandSeen = false;
+    safeBuiltin = false;
+    setCommand = false;
+    exportCommand = false;
+    current.op = op;
+    if (current.assignments.length || current.words.length) commands.push(current);
+    current = { assignments: [], words: [], op: '' };
+  };
+  const endStatement = (viaOr) => {
+    if (commands.length) {
+      statements.push({ viaOr: pendingOr, commands });
+      pendingOr = false;
+    }
+    commands = [];
+    if (viaOr) pendingOr = true;
   };
   let i = 0;
   while (i < length) {
     const c = str[i];
     const n = i + 1 < length ? str[i + 1] : '';
-    if (c === '[' && safeBuiltin) return false;
+    if (c === '[' && safeBuiltin) return null;
     if (c === ' ' || c === '\t') {
-      if (!finishWord(c)) return false;
+      if (!finishWord(c)) return null;
       wordStart = true;
       i += 1;
       continue;
     }
     if ((c === ';' || c === '\n' || c === '|' || c === '&') && !(c === '&' && n === '>')) {
-      if (!finishWord(c) || redirectPending) return false;
-      i += (c === '|' && (n === '|' || n === '&')) || (c === '&' && n === '&') ? 2 : 1;
-      commandSeen = false;
-      safeBuiltin = false;
-      setCommand = false;
-      exportCommand = false;
+      if (!finishWord(c) || redirectPending) return null;
+      let op = c;
+      if (c === '|' && (n === '|' || n === '&')) op = c + n;
+      else if (c === '&' && n === '&') op = '&&';
+      i += op.length;
+      if (op !== '\n' && !(current.assignments.length || current.words.length)) {
+        return null; // an operator after an empty simple command (operand rule)
+      }
+      waiting = op === '&&' || op === '||' || op === '|' || op === '|&' || (waiting && op === '\n');
+      if (op === ';' || op === '\n' || op === '||') {
+        endSimpleCommand('');
+        endStatement(op === '||');
+      } else {
+        endSimpleCommand(op);
+      }
       wordStart = true;
       continue;
     }
     if (c === '<' || c === '>' || c === '&') { // `&` here is `&>` or `&>>`
-      if (!finishWord(c) || redirectPending) return false;
+      if (!finishWord(c) || redirectPending) return null;
       if (c === '&') i += str.startsWith('&>>', i) ? 3 : 2;
       else if (c === '<') {
-        if (n === '<' || n === '(') return false;
+        if (n === '<' || n === '(') return null;
         i += n === '>' || n === '&' ? 2 : 1;
       } else {
-        if (n === '(') return false;
+        if (n === '(') return null;
         i += n === '>' || n === '|' || n === '&' ? 2 : 1;
       }
       redirectPending = true;
@@ -689,71 +734,80 @@ export function inSafeBr6Grammar(command) {
       continue;
     }
     const code = str.charCodeAt(i);
-    if (c === '(' || c === ')' || c === '{' || c === '}' || c === '`' || code < 32 || code === 127) return false;
+    if (c === '(' || c === ')' || c === '{' || c === '}' || c === '`' || code < 32 || code === 127) return null;
     if (!inWord) {
       if (c === '#' && wordStart) {
-        if (redirectPending) return false;
+        if (redirectPending) return null;
         const nl = str.indexOf('\n', i);
         i = nl === -1 ? length : nl;
         continue;
       }
       if (c === '\\' && n === '\n') { i += 2; continue; } // a continuation keeps the word-start state
       inWord = true;
+      waiting = false;
       word = [];
       targetWord = redirectPending;
       redirectPending = false;
     }
     if (c === '$') {
-      if (!n || !GRAMMAR_PARAMETER_CHARS.has(n)) return false;
+      if (!n || !GRAMMAR_PARAMETER_CHARS.has(n)) return null;
       word.push(str.slice(i, i + 2));
       i += 2;
     } else if (c === '\\') {
       if (n === '\n') { i += 2; continue; } // removed from the word, as bash removes it
-      if (!n || (safeBuiltin && n === '[')) return false;
+      if (!n || (safeBuiltin && n === '[')) return null;
       word.push(str.slice(i, i + 2));
       i += 2;
     } else if (c === "'") {
       const end = str.indexOf("'", i + 1);
-      if (end === -1 || (safeBuiltin && str.slice(i, end).includes('['))) return false;
+      if (end === -1 || (safeBuiltin && str.slice(i, end).includes('['))) return null;
       word.push(str.slice(i, end + 1));
       i = end + 1;
     } else if (c === '"') {
       let scan = i + 1;
       for (;;) {
-        if (scan >= length) return false; // unterminated
+        if (scan >= length) return null; // unterminated
         const inner = str[scan];
         if (inner === '"') break;
         if (inner === '\\') {
-          if (scan + 1 >= length || (safeBuiltin && str[scan + 1] === '[')) return false;
+          if (scan + 1 >= length || (safeBuiltin && str[scan + 1] === '[')) return null;
           scan += 2;
           continue;
         }
         if (inner === '$') {
           const following = scan + 1 < length ? str[scan + 1] : '';
-          if (!following || !GRAMMAR_PARAMETER_CHARS.has(following)) return false;
+          if (!following || !GRAMMAR_PARAMETER_CHARS.has(following)) return null;
           scan += 2;
           continue;
         }
         const innerCode = str.charCodeAt(scan);
-        if (inner === '`' || (innerCode < 32 && inner !== '\t' && inner !== '\n') || innerCode === 127) return false;
-        if (safeBuiltin && inner === '[') return false;
+        if (inner === '`' || (innerCode < 32 && inner !== '\t' && inner !== '\n') || innerCode === 127) return null;
+        if (safeBuiltin && inner === '[') return null;
         scan += 1;
       }
       word.push(str.slice(i, scan + 1));
       i = scan + 1;
     } else if (c === '[') {
-      if (n === '[') return false;
+      if (n === '[') return null;
       word.push(c);
       i += 1;
     } else if (c === '#' || GRAMMAR_WORD_CHARS.has(c) || code >= 0x80) {
       word.push(c);
       i += 1;
     } else {
-      return false;
+      return null;
     }
     wordStart = false;
   }
-  return finishWord('') && !redirectPending;
+  if (!finishWord('') || redirectPending || waiting) return null;
+  endSimpleCommand('');
+  endStatement(false);
+  return statements;
+}
+
+// True only when the command lies inside the D23 safe grammar with the DP39 operand rule.
+export function inSafeBr6Grammar(command) {
+  return br6SimpleCommands(command) !== null;
 }
 
 // True when the command holds a `;`, newline or `||` (so bash could form a second BR6 statement) and lies
@@ -824,70 +878,33 @@ export function hasUnquotedBackground(statement) {
 // Inside double quotes a backslash is removed only before these characters (bash quote removal).
 const DOUBLE_QUOTE_ESCAPES = new Set(['$', '`', '"', '\\', '\n']);
 
-// { value, unknown } for each argument word of the runner whose pattern match ends at `start` (D25 model (1)).
-// scripts/run_procedure_eval.py _runner_words mirrors this pass branch for branch. The whole segment is read
-// once, left to right, so a quote opened before `start` is honored; a word counts when it ends after `start`
-// (a runner match inside an earlier assignment value only adds words). Values follow bash quote and backslash
-// removal. Words end at a blank, at an unquoted, unescaped `<` or `>`, or an `&` directly before `>`; argument
-// words end at the first unquoted `|` or word-start comment at or after `start`. A comment that starts before
-// `start` yields one UNKNOWN word. A word is UNKNOWN when it holds an unquoted or double-quoted `$`, or when its
-// value has no `/` and it holds an unquoted `*`, `?` or `[` or starts with an unquoted `~`. Linear.
-function runnerWords(segment, start) {
-  const str = segment;
-  const unquoted = new Uint8Array(str.length);
-  let cut = str.length;
-  forEachUnquoted(str, (i, c) => {
-    if (c === '|' && i >= start) { cut = i; return false; }
-    unquoted[i] = 1;
-    return true;
-  }, (i) => { cut = i; return false; });
-  if (cut < start) return [{ value: '', unknown: true }]; // the runner match lies inside a comment
-  const words = [];
-  let value = [];
-  let inWord = false;
+// { value, unknown } of one raw grammar word after bash quote and backslash removal (DP37 (a)). A word is UNKNOWN
+// when it holds an unquoted or double-quoted `$`, or when its value has no `/` and it holds an unquoted `*`, `?` or
+// `[` or starts with an unquoted `~`. The raw word already lies inside the grammar, so every quote it opens is
+// closed. Linear. scripts/run_procedure_eval.py _br6_word_value mirrors this.
+function wordValue(raw) {
+  const value = [];
   let unknown = false;
-  let pattern = false;
-  let end = 0;
-  const push = () => {
-    if (inWord && end > start) {
-      const joined = value.join('');
-      words.push({ value: joined, unknown: unknown || (pattern && !joined.includes('/')) });
-    }
-    value = [];
-    inWord = false;
-    unknown = false;
-    pattern = false;
-  };
+  let pattern = raw.startsWith('~');
   let i = 0;
-  while (i < cut) {
-    const c = str[i]; // every character read here is unquoted and unescaped; quotes and escapes are consumed below
-    if (BR6_BLANKS.has(c) || c === '<' || c === '>' || c === '|'
-        || (c === '&' && i + 1 < cut && str[i + 1] === '>' && unquoted[i + 1] === 1)) {
-      push();
-      i += 1;
-      continue;
-    }
-    if (!inWord) {
-      inWord = true;
-      pattern = c === '~';
-    }
+  while (i < raw.length) {
+    const c = raw[i];
     if (c === '\\') {
-      if (i + 1 < cut && str[i + 1] !== '\n') value.push(str[i + 1]);
+      if (i + 1 < raw.length && raw[i + 1] !== '\n') value.push(raw[i + 1]);
       i += 2;
     } else if (c === "'") {
-      let close = str.indexOf("'", i + 1);
-      if (close === -1 || close >= cut) close = cut;
-      value.push(str.slice(i + 1, close));
-      i = close + 1;
+      const end = raw.indexOf("'", i + 1);
+      value.push(raw.slice(i + 1, end));
+      i = end + 1;
     } else if (c === '"') {
       i += 1;
-      while (i < cut && str[i] !== '"') {
-        const inner = str[i];
-        if (inner === '\\' && i + 1 < cut) {
-          if (DOUBLE_QUOTE_ESCAPES.has(str[i + 1])) {
-            if (str[i + 1] !== '\n') value.push(str[i + 1]);
+      while (raw[i] !== '"') {
+        const inner = raw[i];
+        if (inner === '\\') {
+          if (DOUBLE_QUOTE_ESCAPES.has(raw[i + 1])) {
+            if (raw[i + 1] !== '\n') value.push(raw[i + 1]);
           } else {
-            value.push(str.slice(i, i + 2));
+            value.push(raw.slice(i, i + 2));
           }
           i += 2;
           continue;
@@ -903,37 +920,79 @@ function runnerWords(segment, start) {
       value.push(c);
       i += 1;
     }
-    end = Math.min(i, cut);
   }
-  push();
-  return words;
+  const joined = value.join('');
+  return { value: joined, unknown: unknown || (pattern && !joined.includes('/')) };
 }
 
-// True only when the statement has a runner segment and every runner segment passes a version/help flag
-// (--version, -V, --help or -h; arguments after `--` count). A `&&` segment is a runner segment only when
-// isRealRunnerInvocation accepts that segment alone; its argument words start after its first runner-pattern
-// match, and an UNKNOWN word counts as a flag (D25 model (1)).
+// DP39 (3) runner rule. BR6_RUNNER_MAX_WORDS is the longest testCommand alternative in words (an optional group
+// counts at its maximum). The word patterns carry neither the `i` nor the `u` flag, so they never fold case.
+const BR6_RUNNER_MAX_WORDS = 3;
+const BR6_RUNNER_WORD = /^[A-Za-z0-9]+$/;
+const BR6_PYTHON_WORD = /^(?:python[0-9.]*|py)$/;
+const BR6_PYTHON_VERSION = /^-[0-9.]+$/;
+// `python -m <module>` runs tests only for these modules; any other module exits 1 (`No module named ...`) unrun.
+const BR6_PYTHON_MODULES = new Set(['pytest', 'unittest', 'tox', 'nox']);
+
+// How many leading words of a simple command name a test runner (DP39 (3)); 0 when it runs none. Only the words
+// before the first redirection word count, and a redirection word before the first word gives 0. Generic form: the
+// smallest k (1..BR6_RUNNER_MAX_WORDS) whose first k words are known, fully ASCII letters and digits, and whose
+// single-space join the anchored pattern matches. Python form: python[0-9.]* or py, an optional -<version> word,
+// exactly -m, and a known module in BR6_PYTHON_MODULES that the anchored pattern matches.
+// scripts/run_procedure_eval.py _br6_runner_word_count mirrors this.
+function runnerWordCount(simpleCommand, anchored) {
+  const { words } = simpleCommand;
+  if (!words.length || words[0].redirect) return 0;
+  const plain = [];
+  for (const w of words) {
+    if (w.redirect) break;
+    plain.push(w);
+  }
+  if (BR6_PYTHON_WORD.test(plain[0].value)) {
+    let k = 1;
+    if (k < plain.length && BR6_PYTHON_VERSION.test(plain[k].value)) k += 1;
+    if (k + 1 < plain.length && plain[k].value === '-m') {
+      const module = plain[k + 1];
+      if (!module.unknown && BR6_PYTHON_MODULES.has(module.value) && anchored.test(module.value)) return k + 2;
+    }
+    return 0;
+  }
+  for (let k = 1; k <= Math.min(BR6_RUNNER_MAX_WORDS, plain.length); k += 1) {
+    const w = plain[k - 1];
+    if (w.unknown || !BR6_RUNNER_WORD.test(w.value)) return 0;
+    if (anchored.test(plain.slice(0, k).map((x) => x.value).join(' '))) return k;
+  }
+  return 0;
+}
+
+// True when the statement text lies inside the grammar and one of its simple commands runs a test runner (DP39).
+export function isBr6RunnerStatement(statement, testRe) {
+  if (!testRe) return false;
+  const parsed = br6SimpleCommands(statement);
+  if (parsed === null) return false;
+  const anchored = new RegExp('^(?:' + testRe.source + ')$', testRe.flags.replace(/[gy]/g, '')); // whole-string match
+  return parsed.some((s) => s.commands.some((c) => runnerWordCount(c, anchored) > 0));
+}
+
+// True only when the statement runs a runner and every simple command that runs one is version/help-only (DP39 (4)):
+// one of its argument words (every word after the runner words, redirection words included) is UNKNOWN or is
+// --version, -V, --help or -h; arguments after `--` count (`npm test -- --help`). A statement outside the grammar
+// is neither. scripts/run_procedure_eval.py is_version_or_help_only mirrors this.
 export function isVersionOrHelpOnly(statement, testRe) {
   if (!testRe) return false;
-  const str = String(statement || '');
-  const cuts = [];
-  let skip = -1;
-  forEachUnquoted(str, (i, c, n) => {
-    if (i !== skip && c === '&' && n === '&') { cuts.push(i); skip = i + 1; }
-    return true;
-  });
-  let runnerSegments = 0;
-  let start = 0;
-  for (const end of [...cuts, str.length]) {
-    const segment = str.slice(start, end);
-    start = end + 2;
-    const match = testRe.exec(segment);
-    if (!match || !isRealRunnerInvocation(segment, testRe)) continue;
-    runnerSegments += 1;
-    const words = runnerWords(segment, match.index + match[0].length);
-    if (!words.some((w) => w.unknown || VERSION_HELP_ARGS.has(w.value))) return false;
+  const parsed = br6SimpleCommands(statement);
+  if (parsed === null) return false;
+  const anchored = new RegExp('^(?:' + testRe.source + ')$', testRe.flags.replace(/[gy]/g, '')); // whole-string match
+  let runners = 0;
+  for (const s of parsed) {
+    for (const c of s.commands) {
+      const count = runnerWordCount(c, anchored);
+      if (count === 0) continue;
+      runners += 1;
+      if (!c.words.slice(count).some((w) => w.unknown || VERSION_HELP_ARGS.has(w.value))) return false;
+    }
   }
-  return runnerSegments > 0;
+  return runners > 0;
 }
 
 // Ordered per-call run records for strict evaluation (AC44). An independent scan with the same

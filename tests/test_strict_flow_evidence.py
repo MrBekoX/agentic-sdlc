@@ -381,6 +381,28 @@ class TestStrictFlowEvidenceCli(unittest.TestCase):
         rc, _, values, _ = self._run(self._write(control + [_final(NO_CLAIM)]), cwd)
         self.assertEqual((values.get("strict_evidence"), rc), ("green", 0))
 
+    def test_lexical_forged_runs_are_never_green(self):  # D27 (DP39)
+        # Mutation: identifying the runner with the 5801cb9 text check (NAME+=, an escaped separator or an escaped
+        # blank in an assignment value reads as a runner run), dropping the operand rule (a syntax error that runs
+        # nothing counts as RED), or dropping the python -m module set (python -m jest counts as RED).
+        cwd = self._tree()
+        bs = chr(92)
+        red = _exec_pair("call_red001", "pytest", 1, "1 failed")
+        for command in ("pytest; pytest+=1", "echo " + bs + "; pytest", "pytest; X=a" + bs + " pytest"):
+            with self.subTest(forged_green=command):
+                records = SPEC_WRITE + PLAN_WRITE + SRC_WRITE + red + _exec_pair("call_l0001", command, 0, "1 failed")
+                rc, _, values, _ = self._run(self._write(records + [_final(NO_CLAIM)]), cwd)
+                self.assertEqual((values.get("strict_evidence"), values.get("strict_completion"), rc), ("partial", "n/a", 1))
+        green = _exec_pair("call_green1", "pytest", 0, "1 passed")
+        for command, code in (("pytest ||", 2), ("python -m jest", 1)):
+            with self.subTest(forged_red=command):
+                records = SPEC_WRITE + PLAN_WRITE + SRC_WRITE + _exec_pair("call_l0002", command, code, "x") + green
+                rc, _, values, _ = self._run(self._write(records + [_final(NO_CLAIM)]), cwd)
+                self.assertEqual((values.get("strict_evidence"), rc), ("partial", 1))
+        control = SPEC_WRITE + PLAN_WRITE + SRC_WRITE + red + _exec_pair("call_l0003", "pytest; X=a pytest", 0, "1 passed")
+        rc, _, values, _ = self._run(self._write(control + [_final(NO_CLAIM)]), cwd)
+        self.assertEqual((values.get("strict_evidence"), rc), ("green", 0))
+
     def test_output_is_three_lines_without_input_bytes(self):
         cwd = self._tree(name="SENTINELCWDXYZ")
         rollout = self._write(_records("verified-green"), name="SENTINELROLLOUTXYZ.jsonl")

@@ -914,9 +914,10 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
 
 
 # --- BR6 strict attribution (matches the strict column of tests/fixtures/transcripts/br6-attribution-cases.json).
-# Statement splitting and version/help detection are Python here and JS in slice B; the shared table and the
-# parity test keep them in step. The "real runner invocation" decision is NOT re-implemented: it is the
-# exported isRealRunnerInvocation from hooks/flow-evidence.mjs, called through run_node_helpers.
+# Statement splitting, runner identification and version/help detection are Python here and JS in
+# hooks/codex-rollout.mjs; the shared table and the parity test keep them in step. Runner identification is the
+# grammar-derived rule (D27, DP39): the first words of a simple command of the safe-grammar parse, mirrored branch
+# for branch by isBr6RunnerStatement, so no node process is needed.
 FLOW_REQUIREMENTS = REPO / "hooks" / "flow-requirements.json"
 VERSION_HELP_FLAGS = frozenset({"--version", "-V", "--help", "-h"})
 
@@ -1105,8 +1106,8 @@ _GRAMMAR_SET_OPTION_RE = re.compile(r"[-+][euo]+")
 _GRAMMAR_SET_WORDS = frozenset({"errexit", "nounset", "pipefail"})
 
 
-def in_safe_br6_grammar(command: str) -> bool:
-    """True only when every character and every simple command of `command` lies inside the D23 safe grammar.
+def br6_simple_commands(command: str) -> list[dict[str, Any]] | None:
+    """The statements and simple commands of `command` (DP39 (1)), or None when it lies outside the D23 safe grammar.
 
     One linear left-to-right pass: unquoted words, single quotes, double quotes without substitution, `$NAME`-style
     parameters, backslash pairs and continuations, word-start comments, the separators `;`, newline, `||`, `&&`, `|`,
@@ -1115,7 +1116,15 @@ def in_safe_br6_grammar(command: str) -> bool:
     errexit/nounset/pipefail forms; no assignment word names one of BR6_INTEGER_VARIABLES; and each `export` argument is a
     literal `NAME=`/`NAME+=` assignment or a plain word of letters, digits, `_` and `-`, so no expansion, quote or glob
     can build the assigned name. A word of only digits directly before `<` or `>` is that
-    redirection's file descriptor in any position. Anything else is outside.
+    redirection's file descriptor in any position. Operand rule (DP39 (2)): a `;`, `&`, `&&`, `||`, `|` or `|&` after a
+    simple command with no assignment, word or redirection, or an `&&`, `||`, `|` or `|&` still waiting for a word at the
+    end (newlines and comments do not end the wait), is outside. Anything else is outside.
+
+    Inside, the result lists the statements of br6_statement_joins, in order, as {"via_or", "commands"}; empty and
+    comment-only statements are dropped and the `||` join carries over them. Each simple command is {"assignments": the
+    raw leading NAME=/NAME+= words, "words": [{"value", "unknown", "redirect"}] for every other word, "op": the operator
+    that ended it inside its statement ("", "&&", "|", "|&" or "&")}. hooks/codex-rollout.mjs br6SimpleCommands mirrors
+    this pass branch for branch.
     """
     text = str(command or "")
     length = len(text)
@@ -1128,6 +1137,15 @@ def in_safe_br6_grammar(command: str) -> bool:
     export_command = False
     redirect_pending = False  # an operator was read and its target word has not started
     target_word = False       # the current word is a redirection target
+    waiting = False           # an `&&`, `||`, `|` or `|&` still waits for a word (operand rule)
+    statements: list[dict[str, Any]] = []
+    commands: list[dict[str, Any]] = []
+    current: dict[str, Any] = {"assignments": [], "words": [], "op": ""}
+    pending_or = False
+
+    def record(raw: str, redirect: bool) -> None:
+        value, unknown = _br6_word_value(raw)
+        current["words"].append({"value": value, "unknown": unknown, "redirect": redirect})
 
     def finish_word(next_char: str) -> bool:
         nonlocal in_word, command_seen, safe_builtin, set_command, export_command, target_word
@@ -1137,12 +1155,15 @@ def in_safe_br6_grammar(command: str) -> bool:
         raw = "".join(word)
         if target_word:
             target_word = False
+            record(raw, True)
             return True
         if next_char in ("<", ">") and raw and all(c in "0123456789" for c in raw):
+            record(raw, True)
             return True  # the file descriptor of the redirection that follows
         assignment = _GRAMMAR_ASSIGNMENT_RE.match(raw)
         if not command_seen:
             if assignment:
+                current["assignments"].append(raw)
                 return assignment.group(1) not in BR6_INTEGER_VARIABLES
             command_seen = True
             if not all(c in _GRAMMAR_COMMAND_WORD_CHARS or ord(c) >= 0x80 for c in raw):
@@ -1152,59 +1173,87 @@ def in_safe_br6_grammar(command: str) -> bool:
             safe_builtin = raw in BR6_SAFE_BUILTINS
             set_command = raw == "set"
             export_command = raw == "export"
+            record(raw, False)
             return True
+        record(raw, False)
         if export_command:
             if assignment:
                 return assignment.group(1) not in BR6_INTEGER_VARIABLES
             return bool(_GRAMMAR_PLAIN_ARGUMENT_RE.fullmatch(raw))
         return not set_command or bool(_GRAMMAR_SET_OPTION_RE.fullmatch(raw)) or raw in _GRAMMAR_SET_WORDS
 
-    def end_simple_command() -> None:
-        nonlocal command_seen, safe_builtin, set_command, export_command
+    def end_simple_command(op: str) -> None:
+        nonlocal command_seen, safe_builtin, set_command, export_command, current
         command_seen = safe_builtin = set_command = export_command = False
+        current["op"] = op
+        if current["assignments"] or current["words"]:
+            commands.append(current)
+        current = {"assignments": [], "words": [], "op": ""}
+
+    def end_statement(via_or: bool) -> None:
+        nonlocal commands, pending_or
+        if commands:
+            statements.append({"via_or": pending_or, "commands": commands})
+            pending_or = False
+        commands = []
+        if via_or:
+            pending_or = True
 
     index = 0
     while index < length:
         ch = text[index]
         nxt = text[index + 1] if index + 1 < length else ""
         if ch == "[" and safe_builtin:
-            return False
+            return None
         if ch in (" ", "\t"):
             if not finish_word(ch):
-                return False
+                return None
             word_start = True
             index += 1
             continue
         if ch in (";", "\n", "|", "&") and not (ch == "&" and nxt == ">"):
             if not finish_word(ch) or redirect_pending:
-                return False
-            index += 2 if (ch == "|" and nxt in ("|", "&")) or (ch == "&" and nxt == "&") else 1
-            end_simple_command()
+                return None
+            if ch == "|" and nxt in ("|", "&"):
+                op = ch + nxt
+            elif ch == "&" and nxt == "&":
+                op = "&&"
+            else:
+                op = ch
+            index += len(op)
+            if op != "\n" and not (current["assignments"] or current["words"]):
+                return None  # an operator after an empty simple command (operand rule)
+            waiting = op in ("&&", "||", "|", "|&") or (waiting and op == "\n")
+            if op in (";", "\n", "||"):
+                end_simple_command("")
+                end_statement(op == "||")
+            else:
+                end_simple_command(op)
             word_start = True
             continue
         if ch in ("<", ">") or ch == "&":  # `&` here is `&>` or `&>>`
             if not finish_word(ch) or redirect_pending:
-                return False
+                return None
             if ch == "&":
                 index += 3 if text.startswith("&>>", index) else 2
             elif ch == "<":
                 if nxt in ("<", "("):
-                    return False
+                    return None
                 index += 2 if nxt in (">", "&") else 1
             else:
                 if nxt == "(":
-                    return False
+                    return None
                 index += 2 if nxt in (">", "|", "&") else 1
             redirect_pending = True
             word_start = True
             continue
         code = ord(ch)
         if ch in ("(", ")", "{", "}", "`") or code < 32 or code == 127:
-            return False
+            return None
         if not in_word:
             if ch == "#" and word_start:
                 if redirect_pending:
-                    return False
+                    return None
                 newline = text.find("\n", index)
                 index = length if newline == -1 else newline
                 continue
@@ -1212,12 +1261,13 @@ def in_safe_br6_grammar(command: str) -> bool:
                 index += 2  # a continuation keeps the word-start state
                 continue
             in_word = True
+            waiting = False
             word = []
             target_word = redirect_pending
             redirect_pending = False
         if ch == "$":
             if nxt not in _GRAMMAR_PARAMETER_CHARS or not nxt:
-                return False
+                return None
             word.append(text[index:index + 2])
             index += 2
         elif ch == "\\":
@@ -1225,54 +1275,64 @@ def in_safe_br6_grammar(command: str) -> bool:
                 index += 2  # removed from the word, as bash removes it
                 continue
             if not nxt or (safe_builtin and nxt == "["):
-                return False
+                return None
             word.append(text[index:index + 2])
             index += 2
         elif ch == "'":
             end = text.find("'", index + 1)
             if end == -1 or (safe_builtin and "[" in text[index:end]):
-                return False
+                return None
             word.append(text[index:end + 1])
             index = end + 1
         elif ch == '"':
             scan = index + 1
             while True:
                 if scan >= length:
-                    return False  # unterminated
+                    return None  # unterminated
                 inner = text[scan]
                 if inner == '"':
                     break
                 if inner == "\\":
                     if scan + 1 >= length or (safe_builtin and text[scan + 1] == "["):
-                        return False
+                        return None
                     scan += 2
                     continue
                 if inner == "$":
                     following = text[scan + 1] if scan + 1 < length else ""
                     if not following or following not in _GRAMMAR_PARAMETER_CHARS:
-                        return False
+                        return None
                     scan += 2
                     continue
                 inner_code = ord(inner)
                 if inner == "`" or (inner_code < 32 and inner not in "\t\n") or inner_code == 127:
-                    return False
+                    return None
                 if safe_builtin and inner == "[":
-                    return False
+                    return None
                 scan += 1
             word.append(text[index:scan + 1])
             index = scan + 1
         elif ch == "[":
             if nxt == "[":
-                return False
+                return None
             word.append(ch)
             index += 1
         elif ch == "#" or ch in _GRAMMAR_WORD_CHARS or code >= 0x80:
             word.append(ch)
             index += 1
         else:
-            return False
+            return None
         word_start = False
-    return finish_word("") and not redirect_pending
+    if not finish_word("") or redirect_pending or waiting:
+        return None
+    end_simple_command("")
+    end_statement(False)
+    return statements
+
+
+def in_safe_br6_grammar(command: str) -> bool:
+    """True only when every character and every simple command of `command` lies inside the D23 safe grammar with the
+    DP39 operand rule (br6_simple_commands parses it)."""
+    return br6_simple_commands(command) is not None
 
 
 def has_unquoted_pipe(statement: str) -> bool:
@@ -1289,88 +1349,42 @@ def has_unquoted_pipe(statement: str) -> bool:
     return False
 
 
-def _split_unquoted_andand(text: str) -> list[str]:
-    unquoted, _comment = _br6_scan(text)
-    parts: list[str] = []
-    start = index = 0
-    while index < len(text) - 1:
-        if unquoted[index] and unquoted[index + 1] and text[index:index + 2] == "&&":
-            parts.append(text[start:index])
-            start = index + 2
-            index += 2
-            continue
-        index += 1
-    parts.append(text[start:])
-    return parts
-
-
 # Inside double quotes a backslash is removed only before these characters (bash quote removal).
 _DOUBLE_QUOTE_ESCAPES = frozenset('$`"\\\n')
 
 
-def _runner_words(text: str, start: int) -> list[tuple[str, bool]]:
-    """(value, unknown) for each argument word of the runner whose pattern match ends at `start` (D25 model (1)).
+def _br6_word_value(raw: str) -> tuple[str, bool]:
+    """(value, unknown) of one raw grammar word after bash quote and backslash removal (DP37 (a)).
 
-    Mirrors runnerWords in hooks/codex-rollout.mjs. The whole segment is read once, left to right, so a quote opened
-    before `start` is honored; a word counts when it ends after `start` (a runner match inside an earlier assignment
-    value only adds words). Values follow bash quote and backslash removal. Words end at a blank, at an unquoted,
-    unescaped `<` or `>`, or an `&` directly before `>`; argument words end at the first unquoted `|` or word-start
-    comment at or after `start`. A comment that starts before `start` yields one UNKNOWN word. A word is UNKNOWN when it
-    holds an unquoted or double-quoted `$`, or when its value has no `/` and it holds an unquoted `*`, `?` or `[` or
-    starts with an unquoted `~`. Linear.
+    A word is UNKNOWN when it holds an unquoted or double-quoted `$`, or when its value has no `/` and it holds an
+    unquoted `*`, `?` or `[` or starts with an unquoted `~`. The raw word already lies inside the grammar, so every quote
+    it opens is closed. Linear. wordValue in hooks/codex-rollout.mjs mirrors this.
     """
-    unquoted, comment = _br6_scan(text)
-    length = len(text)
-    cut = length
-    for index in range(length):
-        if comment[index] or (unquoted[index] and text[index] == "|" and index >= start):
-            cut = index
-            break
-    if cut < start:
-        return [("", True)]  # the runner match lies inside a comment: nothing about its words is known
-    words: list[tuple[str, bool]] = []
     value: list[str] = []
-    in_word = unknown = pattern = False
-    end = 0
-
-    def push() -> None:
-        nonlocal in_word, unknown, pattern
-        if in_word and end > start:
-            joined = "".join(value)
-            words.append((joined, unknown or (pattern and "/" not in joined)))
-        value.clear()
-        in_word = unknown = pattern = False
-
+    unknown = False
+    pattern = raw.startswith("~")
+    length = len(raw)
     index = 0
-    while index < cut:
-        ch = text[index]  # every character read here is unquoted and unescaped; quotes and escapes are consumed below
-        if ch in _BR6_BLANKS or ch in "<>|" or (ch == "&" and index + 1 < cut and text[index + 1] == ">"
-                                               and unquoted[index + 1]):
-            push()
-            index += 1
-            continue
-        if not in_word:
-            in_word = True
-            pattern = ch == "~"
+    while index < length:
+        ch = raw[index]
         if ch == "\\":
-            if index + 1 < cut and text[index + 1] != "\n":
-                value.append(text[index + 1])
+            if index + 1 < length and raw[index + 1] != "\n":
+                value.append(raw[index + 1])
             index += 2
         elif ch == "'":
-            close = text.find("'", index + 1, cut)
-            close = cut if close == -1 else close
-            value.append(text[index + 1:close])
-            index = close + 1
+            end = raw.index("'", index + 1)
+            value.append(raw[index + 1:end])
+            index = end + 1
         elif ch == '"':
             index += 1
-            while index < cut and text[index] != '"':
-                inner = text[index]
-                if inner == "\\" and index + 1 < cut:
-                    if text[index + 1] in _DOUBLE_QUOTE_ESCAPES:
-                        if text[index + 1] != "\n":
-                            value.append(text[index + 1])
+            while raw[index] != '"':
+                inner = raw[index]
+                if inner == "\\":
+                    if raw[index + 1] in _DOUBLE_QUOTE_ESCAPES:
+                        if raw[index + 1] != "\n":
+                            value.append(raw[index + 1])
                     else:
-                        value.append(text[index:index + 2])
+                        value.append(raw[index:index + 2])
                     index += 2
                     continue
                 unknown = unknown or inner == "$"
@@ -1382,28 +1396,83 @@ def _runner_words(text: str, start: int) -> list[tuple[str, bool]]:
             pattern = pattern or ch in "*?["
             value.append(ch)
             index += 1
-        end = min(index, cut)
-    push()
-    return words
+    joined = "".join(value)
+    return joined, unknown or (pattern and "/" not in joined)
 
 
-def is_version_or_help_only(statement: str, test_re: re.Pattern[str],
-                            is_runner_segment: Callable[[str], Any]) -> bool:
-    """True only when the statement has a runner segment and every runner segment passes a version/help flag.
+# DP39 (3) runner rule. BR6_RUNNER_MAX_WORDS is the longest testCommand alternative in words (an optional group counts at
+# its maximum). The word patterns never fold case: with re.IGNORECASE, `[A-Za-z0-9]` would also accept U+017F.
+BR6_RUNNER_MAX_WORDS = 3
+_BR6_RUNNER_WORD_RE = re.compile(r"[A-Za-z0-9]+", re.ASCII)
+_BR6_PYTHON_WORD_RE = re.compile(r"python[0-9.]*|py", re.ASCII)
+_BR6_PYTHON_VERSION_RE = re.compile(r"-[0-9.]+", re.ASCII)
+# `python -m <module>` runs tests only for these modules; any other module exits 1 (`No module named ...`) unrun.
+_BR6_PYTHON_MODULES = frozenset({"pytest", "unittest", "tox", "nox"})
 
-    A `&&` segment is a runner segment only when `is_runner_segment` (isRealRunnerInvocation for that segment alone)
-    accepts it; its argument words start after its first runner-pattern match. An UNKNOWN word counts as a flag, and
-    arguments after `--` count (`npm test -- --help`).
+
+def _br6_runner_word_count(command: dict[str, Any], test_re: re.Pattern[str]) -> int:
+    """How many leading words of a simple command name a test runner (DP39 (3)); 0 when it runs none.
+
+    Only the words before the first redirection word count, and a redirection word before the first word gives 0.
+    Generic form: the smallest k (1..BR6_RUNNER_MAX_WORDS) whose first k words are known, fully ASCII letters and digits,
+    and whose single-space join the testCommand pattern matches in full. Python form: python[0-9.]* or py, an optional
+    -<version> word, exactly -m, and a known module in _BR6_PYTHON_MODULES that the pattern matches in full.
+    runnerWordCount in hooks/codex-rollout.mjs mirrors this.
     """
-    runner_segments = 0
-    for segment in _split_unquoted_andand(statement):
-        match = test_re.search(segment)
-        if match is None or is_runner_segment(segment) is not True:
-            continue
-        runner_segments += 1
-        if not any(unknown or value in VERSION_HELP_FLAGS for value, unknown in _runner_words(segment, match.end())):
-            return False
-    return runner_segments > 0
+    words = command["words"]
+    if not words or words[0]["redirect"]:
+        return 0
+    plain = []
+    for word in words:
+        if word["redirect"]:
+            break
+        plain.append(word)
+    if _BR6_PYTHON_WORD_RE.fullmatch(plain[0]["value"]):
+        k = 1
+        if k < len(plain) and _BR6_PYTHON_VERSION_RE.fullmatch(plain[k]["value"]):
+            k += 1
+        if k + 1 < len(plain) and plain[k]["value"] == "-m":
+            module = plain[k + 1]
+            if (not module["unknown"] and module["value"] in _BR6_PYTHON_MODULES
+                    and test_re.fullmatch(module["value"])):
+                return k + 2
+        return 0
+    for k in range(1, min(BR6_RUNNER_MAX_WORDS, len(plain)) + 1):
+        word = plain[k - 1]
+        if word["unknown"] or not _BR6_RUNNER_WORD_RE.fullmatch(word["value"]):
+            return 0
+        if test_re.fullmatch(" ".join(w["value"] for w in plain[:k])):
+            return k
+    return 0
+
+
+def is_br6_runner_statement(statement: str, test_re: re.Pattern[str]) -> bool:
+    """True when the statement text lies inside the grammar and one of its simple commands runs a test runner (DP39)."""
+    parsed = br6_simple_commands(statement)
+    return parsed is not None and any(_br6_runner_word_count(command, test_re) > 0
+                                      for parsed_statement in parsed for command in parsed_statement["commands"])
+
+
+def is_version_or_help_only(statement: str, test_re: re.Pattern[str]) -> bool:
+    """True only when the statement runs a runner and every simple command that runs one is version/help-only (DP39 (4)).
+
+    Such a command is version/help-only when one of its argument words (every word after the runner words, redirection
+    words included) is UNKNOWN or is --version, -V, --help or -h; arguments after `--` count (`npm test -- --help`). A
+    statement outside the grammar is neither. isVersionOrHelpOnly in hooks/codex-rollout.mjs mirrors this.
+    """
+    parsed = br6_simple_commands(statement)
+    if parsed is None:
+        return False
+    runners = 0
+    for parsed_statement in parsed:
+        for command in parsed_statement["commands"]:
+            count = _br6_runner_word_count(command, test_re)
+            if count == 0:
+                continue
+            runners += 1
+            if not any(word["unknown"] or word["value"] in VERSION_HELP_FLAGS for word in command["words"][count:]):
+                return False
+    return runners > 0
 
 
 @dataclass(frozen=True)
@@ -1417,26 +1486,26 @@ class AttributableRun:
 def attributable_test_runs(trace: Trace, test_re: re.Pattern[str]) -> list[AttributableRun]:
     """BR6 strictAttributable runs in timeline order.
 
-    A run needs: a command inside the D23 safe grammar; a trailing `||` run whose every operand is a real runner that is
-    not version/help-only and has no pipe or background `&`; exactly one call event and exactly one output record for
-    its call id; and a numeric exit (Claude: 1 if is_error else 0; Codex exec: the completed exit_code; rollout: the
-    parsed exit).
+    A run needs: a command inside the D23 safe grammar (with the DP39 operand rule); a trailing `||` run whose every
+    operand runs a test runner under the DP39 runner rule, is not version/help-only and has no pipe or background `&`;
+    exactly one call event and exactly one output record for its call id; and a numeric exit (Claude: 1 if is_error else
+    0; Codex exec: the completed exit_code; rollout: the parsed exit).
     """
     first_result: dict[str, dict[str, Any]] = {}
     for record in trace.timeline:
         if record["kind"] == "tool_result" and record.get("id"):
             first_result.setdefault(record["id"], record)
-    candidates: list[tuple[int, str, str, list[str], int]] = []
+    runs: list[AttributableRun] = []
     for index, record in enumerate(trace.timeline):
         call_id = record.get("id")
         command = record.get("input", {}).get("command") if record["kind"] == "tool_call" else None
         if not call_id or not isinstance(command, str) or not in_safe_br6_grammar(command):
             continue
         operands = br6_trailing_or_run(command)
-        # isRealRunnerInvocation can only accept an operand the runner regex matches somewhere, so a
-        # non-matching operand is decided here without spawning node.
-        if not operands or any(test_re.search(operand) is None or has_unquoted_pipe(operand)
-                               or has_unquoted_background(operand) for operand in operands):
+        if not operands or not all(is_br6_runner_statement(operand, test_re)
+                                   and not is_version_or_help_only(operand, test_re)
+                                   and not has_unquoted_pipe(operand) and not has_unquoted_background(operand)
+                                   for operand in operands):
             continue
         counts = trace.call_event_counts.get(call_id, {})
         if max(counts.get("full", 0), counts.get("streamed", 0)) != 1 or counts.get("outputs", 0) != 1:
@@ -1444,23 +1513,7 @@ def attributable_test_runs(trace: Trace, test_re: re.Pattern[str]) -> list[Attri
         exit_code = first_result.get(call_id, {}).get("exit")
         if type(exit_code) is not int:
             continue
-        candidates.append((index, call_id, command, operands, exit_code))
-    if not candidates:
-        return []
-    # One batch classifies every operand and each of its `&&` segments (D25 model (1)); the version/help check runs after.
-    batch = sorted({text for candidate in candidates for operand in candidate[3]
-                    for text in (operand, *_split_unquoted_andand(operand))})
-    classified = run_node_helpers(commands=batch, test_command=test_re.pattern)
-    if classified is None:
-        if "strict_runner_classifier_unavailable" not in trace.strict_errors:
-            trace.strict_errors.append("strict_runner_classifier_unavailable")
-        return []  # fail closed: no run is attributable
-    is_runner = dict(zip(batch, classified["real"])).get
-    runs: list[AttributableRun] = []
-    for index, call_id, command, operands, exit_code in candidates:
-        if all(is_runner(operand) is True and not is_version_or_help_only(operand, test_re, is_runner)
-               for operand in operands):
-            runs.append(AttributableRun(call_id, command, exit_code, index))
+        runs.append(AttributableRun(call_id, command, exit_code, index))
     return runs
 
 

@@ -297,16 +297,19 @@ def _br6_rows():
 def _br6_eval(commands):
     """Evaluate the BR6 helpers for a list of commands in ONE node process.
 
-    Per command: splitBr6Statements, lastStatement, the version/help and pipe flags and
-    isRealRunnerInvocation, for the last statement and for the whole command. The list travels as
-    one JSON argument, so a large input takes the _node_argv_or_stdin stdin path."""
+    Per command: splitBr6Statements, lastStatement, the version/help and pipe flags and the
+    grammar-derived runner rule (isBr6RunnerStatement, D27) for the last statement and for the whole
+    command, the grammar verdict, and the 5801cb9 text check (isRealRunnerInvocation) of the whole
+    command. The list travels as one JSON argument, so a large input takes the _node_argv_or_stdin
+    stdin path."""
     script = (
         "const r = await import(%s); const f = await import(%s);"
         "const re = new RegExp(f.loadRequirements().testCommand, 'i');"
         "const out = JSON.parse(process.argv[1]).map((c) => { const last = r.lastStatement(c); return {"
         "statements: r.splitBr6Statements(c), last,"
         "lastVersionOrHelpOnly: r.isVersionOrHelpOnly(last, re), lastHasPipe: r.hasUnquotedPipe(last),"
-        "lastIsRealRunner: f.isRealRunnerInvocation(last, re), runnerShape: f.isRealRunnerInvocation(c, re),"
+        "lastIsRealRunner: r.isBr6RunnerStatement(last, re), runnerShape: f.isRealRunnerInvocation(c, re),"
+        "runsRunner: r.isBr6RunnerStatement(c, re), inGrammar: r.inSafeBr6Grammar(c),"
         "versionOrHelpOnly: r.isVersionOrHelpOnly(c, re), hasPipe: r.hasUnquotedPipe(c)}; });"
         "process.stdout.write(JSON.stringify(out));"
         % (json.dumps(ROLLOUT.as_uri()), json.dumps(FLOW_EVID.as_uri())))
@@ -1167,8 +1170,41 @@ class TestBR6StatementSplit(unittest.TestCase):
         self.assertEqual(json.loads(_node(script, "[]")), [False, "function"])
         self.assertNotIn("hasUnquotedHeredoc", ROLLOUT.read_text(encoding="utf-8"))
 
+    def test_runner_rule_matches_whole_words(self):
+        # D27, the Task 174 lists. Mutation: reading `NAME+=` as a command word, splitting at an escaped separator,
+        # ending an assignment value at a Unicode or escaped blank, building the pattern without `^(?:...)$`, dropping
+        # the ASCII word check, dropping BR6_PYTHON_MODULES, or accepting a redirection word before the command word.
+        # Adding the `i`/`u` flag to the ASCII word check is an equivalent mutant here (the `i`-only testCommand
+        # already refuses U+017F); the Python mirror's TestStrictRedGreen kills that mutation.
+        from test_procedure_eval import TestStrictRedGreen as lists
+        runner, non_runner = list(lists.RUNNER_STATEMENTS), list(lists.NON_RUNNER_STATEMENTS)
+        versions = ["pytest --version;", "pytest --version\n", "pytest --help # ;"]
+        got = _br6_eval(runner + non_runner + versions)
+        for command, result in zip(runner + non_runner, got):
+            with self.subTest(command=command):
+                self.assertIs(result["runsRunner"], command in runner)
+        for command, result in zip(versions, got[len(runner) + len(non_runner):]):
+            with self.subTest(version=command):
+                self.assertIs(result["versionOrHelpOnly"], True)
+
+    def test_operand_rule_puts_syntax_errors_outside(self):
+        # D27. Mutation: dropping either half of the operand rule admits a bash syntax error that runs nothing.
+        from test_procedure_eval import TestStrictRedGreen as lists
+        outside, inside = list(lists.OPERAND_OUTSIDE), list(lists.OPERAND_INSIDE)
+        for command, result in zip(outside + inside, _br6_eval(outside + inside)):
+            with self.subTest(command=command):
+                self.assertIs(result["inGrammar"], command in inside)
+
+    def test_runner_rule_does_not_import_the_5801cb9_helper(self):
+        # D27: runner identification no longer goes through the 5801cb9 text helper in the rollout module, and the
+        # Codex flow evidence imports the grammar-derived rule.
+        self.assertNotIn("from './flow-evidence.mjs'", ROLLOUT.read_text(encoding="utf-8"))
+        imports = EVID.read_text(encoding="utf-8").split("from './codex-rollout.mjs'")[0]
+        self.assertRegex(imports, r"\bisBr6RunnerStatement\b")
+
     def test_rollout_module_imports_without_cycle(self):
-        # The rollout module now imports hooks/flow-evidence.mjs; loading it alone in a fresh process must succeed.
+        # The rollout module no longer imports hooks/flow-evidence.mjs (D27); loading it alone in a fresh process must
+        # still succeed.
         node = shutil.which("node")
         self.assertIsNotNone(node, "node binary missing")
         script = "import(%s).then((m) => process.stdout.write(typeof m.deliveryReadSkill))" % json.dumps(
@@ -1269,6 +1305,41 @@ class TestExitAttributionClosure(_Tmp):
 
     def test_bash_c_wrapper_not_newly_satisfied(self):
         self.assertEqual(self.outcome["edge-bash-c-wrapper"], "missing")
+
+    # ---- D27: grammar-derived runner identification in the default derivation ----
+    D27_FORGED_PREFIXES = ("edge-forged-append-", "edge-forged-escaped-separator-", "edge-forged-join-",
+                           "edge-forged-value-blank-", "edge-forged-pipeline-mention-", "edge-forged-version-single-")
+
+    def _d27_forged(self, with_separator):
+        ids = [i for i, r in self.rows.items() if i.startswith(self.D27_FORGED_PREFIXES)
+               and any(s in r["command"] for s in (";", "\n", "||")) is with_separator]
+        return ids
+
+    def test_d27_forgeries_with_a_separator_missing_by_default(self):
+        # Mutation: keeping isRealRunnerInvocation in attributable, keeping the unconditional single-statement
+        # shortcut, or testing only isBr6RunnerStatement in step 4 (the version-single rows).
+        ids = self._d27_forged(True)
+        self.assertEqual(len(ids), 26)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "missing")
+
+    def test_d27_separator_free_forgeries_keep_5801cb9_default(self):
+        # Mutation: dropping the explicit separator-free step (these rows would turn missing).
+        ids = self._d27_forged(False)
+        self.assertEqual(len(ids), 6)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    def test_d27_grammar_runner_shapes_satisfy(self):
+        # Mutation: reading an assignment prefix, an escaped blank in a value or a background head as no runner run.
+        ids = [i for i in self.rows if i.startswith(("edge-inside-runner-", "edge-inside-value-", "edge-inside-append-",
+                                                     "edge-inside-background-"))]
+        self.assertEqual(len(ids), 23)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
 
 
 # ---- AC31, AC41, AC42: opt-in AGENTIC_FLOW_STRICT_EVIDENCE for live Codex evidence (Task 18) ----
