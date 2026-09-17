@@ -65,6 +65,10 @@ D27_FORGED_PREFIXES = ("edge-forged-append-", "edge-forged-escaped-separator-", 
 D28_FORGED_PREFIXES = ("edge-forged-launcher-list-", "edge-forged-option-", "edge-forged-script-option-")
 # D29 redirection-target and key-letter forgeries lie inside the grammar too; test_named_d29_rows pins them.
 D29_FORGED_PREFIXES = ("edge-forged-target-separator-", "edge-forged-key-letter-")
+# D30 dash-word forgeries were verified with real jest 29.7.0 and vitest 2.1.9, which the bash probe does not model;
+# their prefix is not `edge-forged-`, so the probe skips them. They lie inside the grammar; test_named_d30_rows pins
+# them.
+D30_REAL_FORGED_PREFIX = "edge-real-forged-dash-word-"
 # R11 (D27 operand rule): the operators of a plain-character command, longest first.
 _PLAIN_OPERATOR = re.compile(r"(\|\||&&|\|&|;|&|\||\n)")
 _WAITING_OPERATORS = frozenset({"&&", "||", "|", "|&"})
@@ -516,11 +520,15 @@ class TestBR6CaseTable(unittest.TestCase):
         self.assertEqual(pipe_head["orRun"], pipe_head["statements"])
         inside = [i for i in rows if i.startswith(("edge-inside-word-", "edge-inside-segment-"))]
         self.assertEqual(len(inside), 9)
+        # D30 (DP42 (a)): the kept backslash leaves the letter run `vers`, a prefix of version, so this row is a
+        # conservative false missing (real pytest 8.3.3 exits 4 for the word); TestStrictRedGreen.RUNNER_WORDS keeps
+        # pinning the double-quoted backslash itself.
+        flipped = "edge-inside-word-double-quoted-backslash"
         for row_id in inside:
             with self.subTest(id=row_id):
                 self.assertIs(rows[row_id]["inSafeGrammar"], True)
-                self.assertIs(rows[row_id]["strictAttributable"], True)
-                self.assertEqual(rows[row_id]["strictTests"], "satisfied")
+                self.assertIs(rows[row_id]["strictAttributable"], row_id != flipped)
+                self.assertEqual(rows[row_id]["strictTests"], "missing" if row_id == flipped else "satisfied")
         self.assertEqual(rows["edge-forged-word-continuation-version"]["statements"], ["pytest", "pytest --version"])
         for row_id in ("edge-forged-word-escaped-version-oror", "edge-forged-word-redirect-glued-help-oror"):
             with self.subTest(id=row_id):
@@ -554,7 +562,7 @@ class TestBR6CaseTable(unittest.TestCase):
             "edge-forged-value-blank-": 8, "edge-forged-pipeline-mention-": 1, "edge-forged-version-single-": 3,
             "edge-forged-red-": 7, "edge-inside-runner-": 19, "edge-inside-value-": 2, "edge-inside-append-": 1,
             "edge-inside-background-": 1, "edge-conservative-redirect-": 1})
-        self.assertEqual(len(rows), 354)
+        self.assertEqual(len(rows), 379)
 
         forged = [i for i in rows if i.startswith(D27_FORGED_PREFIXES[:-1])]
         self.assertEqual(len(forged), 32)
@@ -720,7 +728,7 @@ class TestBR6CaseTable(unittest.TestCase):
                 self.assertEqual(row["carrier"]["outputSummary"], "1 passed")
                 self.assertEqual((row["defaultTests"], row["strictAttributable"]), ("missing", False))
                 self.assertIs(row["runnerShape5801cb9"], row_id != "edge-conservative-selector-architecture")
-        self.assertEqual(len(rows), 354)
+        self.assertEqual(len(rows), 379)
 
     # Guards (D29, DP41): a redirection target spelled `--` read as the end of the package-manager option region, a
     # single-dash word judged to its end or by its leading letter run instead of by any key letter, a redirection
@@ -783,7 +791,61 @@ class TestBR6CaseTable(unittest.TestCase):
                                   row["strictAttributable"]), (True, True, "missing", False))
                 self.assertEqual((row["lastIsRealRunner"], row["lastVersionOrHelpOnly"]),
                                  (False, False) if script_name else (True, True))
-        self.assertEqual(len(rows), 354)
+        self.assertEqual(len(rows), 379)
+
+    # Guards (D30, DP42): a two-dash word judged by its whole part before `=` or with letters required to the end
+    # (`--help.x`, `--HELP-`), a word with three or more leading dashes left out or read as a short-option group
+    # (`---help`, `---version`, `---xh`), or a two-dash word without a leading letter-run prefix (`--.h`,
+    # `--no-help`) read as a version or help spelling.
+    def test_named_d30_rows(self):
+        rows = {row["id"]: row for row in _load()["rows"]}
+
+        def ids(prefix):
+            return [i for i in rows if i.startswith(prefix)]
+
+        counts = {prefix: len(ids(prefix)) for prefix in (
+            D30_REAL_FORGED_PREFIX, "edge-inside-dash-word-", "edge-conservative-dash-word-")}
+        self.assertEqual(counts, {D30_REAL_FORGED_PREFIX: 16, "edge-inside-dash-word-": 4,
+                                  "edge-conservative-dash-word-": 5})
+        single, oror = D30_REAL_FORGED_PREFIX + "single", D30_REAL_FORGED_PREFIX + "oror"
+        d30 = ids(tuple(counts))
+        self.assertEqual(len(d30), 25)
+        for row_id in d30:
+            with self.subTest(id=row_id, check="column summary"):
+                row = rows[row_id]
+                carrier = row["carrier"]
+                self.assertEqual((carrier["callEvents"], carrier["outputRecords"], carrier["exitCode"]), (1, 1, 0))
+                self.assertEqual(row["specRefs"], ["EDGE-EXIT"])
+                self.assertEqual(set(row["baseline5801cb9"].values()), {"satisfied"})
+                self.assertEqual((row["inSafeGrammar"], row["lastIsRealRunner"], row["runnerShape5801cb9"]),
+                                 (True, True, True))
+                self.assertEqual(len(row["statements"]), 1 if row_id == single else 2)
+                self.assertEqual(row["orRun"], row["statements"] if row_id == oror else row["statements"][-1:])
+                separator = any(s in row["command"] for s in (";", "\n", "||"))
+                self.assertIs(separator, row_id != single)
+        for row_id in ids(D30_REAL_FORGED_PREFIX):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertEqual(row["carrier"]["outputSummary"], "1 failed")
+                self.assertTrue(row["statements"][-1].startswith(("jest -", "vitest run -", "npm test -- -")))
+                self.assertEqual((row["lastVersionOrHelpOnly"], row["orRunAllRealRunners"], row["strictAttributable"],
+                                  row["strictTests"]), (True, False, False, "missing"))
+                self.assertEqual(row["defaultTests"], "satisfied" if row_id == single else "missing")
+        for row_id in ids("edge-inside-dash-word-"):
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertEqual(row["carrier"]["outputSummary"], "1 passed")
+                self.assertEqual((row["lastVersionOrHelpOnly"], row["orRunAllRealRunners"], row["defaultTests"],
+                                  row["strictAttributable"], row["strictTests"]),
+                                 (False, True, "satisfied", True, "satisfied"))
+        for row_id in ids("edge-conservative-dash-word-") + ["edge-inside-word-double-quoted-backslash"]:
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertEqual(row["carrier"]["outputSummary"], "1 passed")
+                self.assertEqual((row["lastVersionOrHelpOnly"], row["orRunAllRealRunners"], row["defaultTests"],
+                                  row["strictAttributable"], row["strictTests"]),
+                                 (True, False, "missing", False, "missing"))
+        self.assertEqual(len(rows), 379)
 
     # Guards: a background job (`&`, including after an escaped operator character) marked attributable, or a
     # redirection, `|&`, quoted or commented `&` misread as a background job (D21).

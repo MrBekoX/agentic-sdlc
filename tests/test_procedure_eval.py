@@ -1136,7 +1136,7 @@ class TestStrictRedGreen(unittest.TestCase):
         "X='a pytest' pytest --version", 'X="a pytest" pytest -V',
     )
     RUNNER_WORDS = (
-        'pytest "--vers<bs>ion"', "pytest -k '$V'", "pytest tests/*.py", "pytest ~/x", "pytest -k a<bs>|b",
+        'pytest "--<bs>version"', "pytest -k '$V'", "pytest tests/*.py", "pytest ~/x", "pytest -k a<bs>|b",
         'pytest "*"', "pytest <bs>*", "pytest -x", "pytest>out.txt", "pytest -k a<bs>>b", "pytest -k 'a>b'",
         "pytest -V && pytest", "echo pytest && pytest",
     )
@@ -1316,7 +1316,7 @@ class TestStrictRedGreen(unittest.TestCase):
         "jest -v1",
     ))
     D29_KEY_LETTER_NOT_VERSION_ONLY = (
-        "pytest -v1", "pytest -x1v", "pytest --h1", "pytest --tb=short", "pytest -rA", "tox -v1", "go test -v1",
+        "pytest -v1", "pytest -x1v", "pytest --tb=short", "pytest -rA", "tox -v1", "go test -v1",
         "jest -x1k", "vitest run -rA", "npm test -- -x1k", "npm test -- --watch", "make test -1k",
     )
 
@@ -1333,6 +1333,39 @@ class TestStrictRedGreen(unittest.TestCase):
                 self.assertIs(procedure_eval.is_br6_runner_statement(command, TEST_RE), True)
                 self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), expected)
 
+    # D30 (DP42) lists, shared with the Node tests in test_codex_current_rollout.py. Every entry runs a runner.
+    # `<bs>` stands for a backslash and `<e9>` for U+00E9. DP42 (a) moved `pytest --h1` here from
+    # D29_KEY_LETTER_NOT_VERSION_ONLY (real pytest 8.3.3 exits 4 for it).
+    D30_DASH_WORD_VERSION_ONLY = tuple(c.replace("<bs>", chr(92)) for c in (
+        "jest ---h", "jest ---help", "jest ---version", "jest ---xh", "jest ---=h", "jest ---.h", "jest ----h",
+        "jest ---HELP", "jest ---v", "jest ---", "vitest run ---h", "vitest run ---help", "vitest run ---xh",
+        "vitest ---v", "npm test -- ---h", "pytest ---h", "python -m unittest ---help", "tox ---x",
+        "jest --help.x", "jest --help.", "jest --help.0", "jest --help.x=1", "jest --h.x", "jest --version.",
+        "jest --version-", "jest --version.x", "jest --HELP-", "jest --help-", "jest --hel.x", "jest --usage.x",
+        "jest --ver.x", "jest --h1", "vitest run --help.x", "vitest --version.x", "npm test -- --help.x",
+        "pnpm test -- --HELP-", "make test --help.x", "pytest --help.x", "pytest --h1", 'pytest "--vers<bs>ion"',
+        "python -m pytest --version-", "go test --usage.x",
+    ))
+    D30_DASH_WORD_NOT_VERSION_ONLY = tuple(c.replace("<bs>", chr(92)).replace("<e9>", chr(0xE9)) for c in (
+        "jest --verbose", "jest --no-help", "jest --update-snapshot", "jest --coverage", "jest --1help", "jest --.h",
+        "jest --_h", "jest --x-help", "jest --hx", "jest --helpx", "jest --=h", "jest --", "jest --<e9>help",
+        "vitest run --no-help", "vitest run --update", "pytest --verbose", "pytest --tb=short",
+        'pytest "--<bs>version"', "npm test -- --.h", "npm test -- --no-help", "npm test -- --update-snapshot",
+        "npm test -- --1help", "go test --verbose", "make test --no-help",
+    ))
+
+    def test_d30_dash_word_shapes(self):
+        # Mutations: leaving out the three-dash rule (`jest ---help`), reading a three-dash word as a short-option group
+        # (`jest ---version`) or like a two-dash word (`jest ---xh`), requiring letters up to `=` or the end or taking the
+        # whole part before `=` (`jest --help.x`), not lowercasing the run (`jest --HELP-`), or taking a letter run that
+        # does not start directly after `--` (`jest --1help`, `jest --.h`).
+        cases = ([(c, True) for c in self.D30_DASH_WORD_VERSION_ONLY]
+                 + [(c, False) for c in self.D30_DASH_WORD_NOT_VERSION_ONLY])
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.is_br6_runner_statement(command, TEST_RE), True)
+                self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), expected)
+
     # A long cluster word per cluster rule: `h` (help), `v` (version, npm is not a verbose runner) and `H` (package
     # manager, after `--` so the allowlist rule does not decide first). Under DP41 (b) each holds its key letter, so
     # each counts; the D29_NEAR_MISS_WORDS are long single-dash words without the key letter, so none counts.
@@ -1342,12 +1375,18 @@ class TestStrictRedGreen(unittest.TestCase):
     D29_NEAR_MISS_WORDS = tuple(prefix + "-" + letter * 100000 + "1k"
                                 for prefix, letter in (("pytest ", "x"), ("npm test -- ", "w"), ("npm test -- ", "G")))
 
+    # D30 long words: a two-dash word whose long letter run is not a prefix, a prefix run with a long non-letter tail,
+    # and a word of many leading dashes.
+    D30_LONG_WORDS = ("jest --" + "help" * 25000 + ".x", "jest --h" + "." * 100000, "jest " + "-" * 100000 + "h")
+
     def test_d28_cluster_checks_are_linear(self):
         # Mutations: an end-anchored `-[A-Za-z]*<letter>[A-Za-z]*` pattern backtracks quadratically on the D28 words
-        # (seconds per word) and rejects them; a pattern that drops its key letter accepts the D29 words.
+        # (seconds per word) and rejects them; a pattern that drops its key letter accepts the D29 words; a long rule
+        # that needs letters to the end rejects the second D30 word.
         import time
         for command, expected in ([(c, True) for c in self.D28_NEAR_MISS_CLUSTERS]
-                                  + [(c, False) for c in self.D29_NEAR_MISS_WORDS]):
+                                  + [(c, False) for c in self.D29_NEAR_MISS_WORDS]
+                                  + list(zip(self.D30_LONG_WORDS, (False, True, True)))):
             with self.subTest(command=command[:20]):
                 start = time.perf_counter()
                 self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), expected)
