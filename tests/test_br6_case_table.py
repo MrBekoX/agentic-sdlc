@@ -741,6 +741,18 @@ class TestBR6CaseTable(unittest.TestCase):
             "edge-inside-key-letter-": 2, "edge-conservative-target-separator-": 1,
             "edge-conservative-key-letter-": 4, "edge-conservative-script-name-": 4})
         separator_free = {"edge-forged-target-separator-single", "edge-forged-key-letter-single"}
+        d29 = ids(tuple(counts))
+        self.assertEqual(len(d29), 33)
+        for row_id in d29:
+            with self.subTest(id=row_id, check="column summary"):
+                row = rows[row_id]
+                self.assertEqual((row["carrier"]["callEvents"], row["carrier"]["outputRecords"]), (1, 1))
+                self.assertEqual(row["specRefs"], ["EDGE-EXIT"])
+                self.assertEqual(set(row["baseline5801cb9"].values()), {"satisfied"})
+                self.assertEqual(len(row["statements"]), 1 if row_id in separator_free else 2)
+                oror = row_id == "edge-forged-key-letter-oror"
+                self.assertEqual(row["orRun"], row["statements"] if oror else row["statements"][-1:])
+                self.assertEqual(len(row["orRun"]), 2 if oror else 1)
         for row_id in ids(D29_FORGED_PREFIXES):
             with self.subTest(id=row_id):
                 row = rows[row_id]
