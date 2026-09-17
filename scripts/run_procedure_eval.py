@@ -1424,7 +1424,11 @@ _BR6_PACKAGE_MANAGERS = frozenset({"npm", "pnpm", "yarn"})
 # match): each excludes its key letter before the key, so a match has one split and every word is decided in
 # linear time.
 _BR6_HELP_CLUSTER_RE = re.compile(r"-(?!-)[^Vh]*[Vh]", re.ASCII)
-_BR6_LONG_OPTION_HEAD_RE = re.compile(r"--[A-Za-z]+", re.ASCII)
+# DP42 (a): a two-dash word counts when the maximal ASCII-letter run directly after `--`, lowercased, is a prefix of
+# version, help or usage (`--help.x`, `--help-`, `--h.x`), because yargs (jest) and cac (vitest) read dot-notation
+# and camel-case tails as help or version; a word with three or more leading dashes always counts. Used with match
+# (a prefix match), so every word is decided in linear time.
+_BR6_LONG_OPTION_HEAD_RE = re.compile(r"--([A-Za-z]+)", re.ASCII)
 _BR6_LONG_VERSION_HELP = ("--version", "--help", "--usage")
 _BR6_VERSION_V_CLUSTER_RE = re.compile(r"-(?!-)[^v]*v", re.ASCII)
 # Runners whose documented `-v` means verbose.
@@ -1493,15 +1497,18 @@ def is_br6_runner_statement(statement: str, test_re: re.Pattern[str]) -> bool:
 
 
 def _br6_generic_version_or_help_word(word: dict[str, Any]) -> bool:
-    """DP40 (c) 1-3: UNKNOWN, an exact version/help flag, a single-dash word holding `V` or `h` anywhere (DP41 (b)),
-    or a long option whose part before `=` is a case-insensitive prefix of --version, --help or --usage."""
+    """DP40 (c) 1-3 and DP42 (a): UNKNOWN, an exact version/help flag, a single-dash word holding `V` or `h` anywhere
+    (DP41 (b)), a word with three or more leading dashes, or a two-dash word whose leading ASCII-letter run is a
+    case-insensitive prefix of version, help or usage (`--hel`, `--help=x`, `--help.x`, `--HELP-`)."""
     value = word["value"]
     if word["unknown"] or value in VERSION_HELP_FLAGS or _BR6_HELP_CLUSTER_RE.match(value):
         return True
-    head = value.split("=", 1)[0]
-    if not _BR6_LONG_OPTION_HEAD_RE.fullmatch(head):
+    if value.startswith("---"):
+        return True
+    match = _BR6_LONG_OPTION_HEAD_RE.match(value)
+    if match is None:
         return False
-    low = head.lower()  # ASCII only: the head passed the ASCII pattern
+    low = "--" + match.group(1).lower()  # ASCII only: the run passed the ASCII pattern
     return any(option.startswith(low) for option in _BR6_LONG_VERSION_HELP)
 
 

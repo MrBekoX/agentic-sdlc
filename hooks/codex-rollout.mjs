@@ -947,7 +947,14 @@ const BR6_PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn']);
 // vitest act on `h` anywhere in a short-option group (`jest -x1h`). Each pattern excludes its key letter before the
 // key and has no end anchor, so a match has one split and every word is decided in linear time.
 const BR6_HELP_CLUSTER = /^-(?!-)[^Vh]*[Vh]/;
-const BR6_LONG_OPTION_HEAD = /^--[A-Za-z]+$/;
+// DP42 (a): a word is read by its leading dashes. One dash: BR6_HELP_CLUSTER (DP41 (b)). Two dashes: the maximal
+// ASCII-letter run directly after `--` counts when, lowercased, it is a prefix of version, help or usage
+// (`--help.x`, `--help-`, `--h.x`; not `--verbose`, `--no-help` or `--1help`), because yargs (jest) and cac
+// (vitest) read dot-notation and camel-case tails as help or version. Three or more dashes always count
+// (`jest ---help`, `vitest run ---xh`). The pattern carries no flags: `i` or `u` would change matching, and `g` or
+// `y` would make this module-level regex stateful through `lastIndex`, because the code below calls `.exec` instead
+// of `.test`. The pattern has no end anchor, so every word is decided in linear time.
+const BR6_LONG_OPTION_HEAD = /^--([A-Za-z]+)/;
 const BR6_LONG_VERSION_HELP = ['--version', '--help', '--usage'];
 const BR6_VERSION_V_CLUSTER = /^-(?!-)[^v]*v/;
 // Runners whose documented `-v` means verbose.
@@ -1011,16 +1018,17 @@ export function isBr6RunnerStatement(statement, testRe) {
   return parsed.some((s) => s.commands.some((c) => runnerWordCount(c, anchored) > 0));
 }
 
-// DP40 (c) 1-3: UNKNOWN, an exact version/help flag, a single-dash word holding `V` or `h` anywhere (DP41 (b)), or a
-// long option whose part before `=` is a case-insensitive prefix of --version, --help or --usage.
+// DP40 (c) 1-3 and DP42 (a): UNKNOWN, an exact version/help flag, a single-dash word holding `V` or `h` anywhere
+// (DP41 (b)), a word with three or more leading dashes, or a two-dash word whose leading ASCII-letter run is a
+// case-insensitive prefix of version, help or usage (`--hel`, `--help=x`, `--help.x`, `--HELP-`).
 // scripts/run_procedure_eval.py _br6_generic_version_or_help_word mirrors this.
 function isGenericVersionOrHelpWord(w) {
   const v = w.value;
   if (w.unknown || VERSION_HELP_ARGS.has(v) || BR6_HELP_CLUSTER.test(v)) return true;
-  const eq = v.indexOf('=');
-  const head = eq === -1 ? v : v.slice(0, eq);
-  if (!BR6_LONG_OPTION_HEAD.test(head)) return false;
-  const low = head.toLowerCase(); // ASCII only: the head passed the ASCII pattern
+  if (v.startsWith('---')) return true;
+  const m = BR6_LONG_OPTION_HEAD.exec(v);
+  if (m === null) return false;
+  const low = '--' + m[1].toLowerCase(); // ASCII only: the run passed the ASCII pattern
   return BR6_LONG_VERSION_HELP.some((o) => o.startsWith(low));
 }
 

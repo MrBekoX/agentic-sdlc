@@ -1424,6 +1424,31 @@ class TestExitAttributionClosure(_Tmp):
             with self.subTest(id=i):
                 self.assertEqual(self.outcome[i], "satisfied")
 
+    # ---- D30 (DP42): dash-word rows in the default derivation ----
+    D30_REAL_FORGED_PREFIX = "edge-real-forged-dash-word-"
+
+    def test_d30_forgeries_with_a_separator_missing_by_default(self):
+        # Mutation: a two-dash word judged by its whole part before `=`, or a three-dash word left out, turns a row
+        # satisfied.
+        ids = [i for i, r in self.rows.items() if i.startswith(self.D30_REAL_FORGED_PREFIX)
+               and any(s in r["command"] for s in (";", "\n", "||"))]
+        self.assertEqual(len(ids), 15)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "missing")
+
+    def test_d30_separator_free_forgery_keeps_5801cb9_default(self):
+        self.assertEqual(self.outcome[self.D30_REAL_FORGED_PREFIX + "single"], "satisfied")
+
+    def test_d30_inside_rows_satisfy(self):
+        # Mutation: reading a two-dash word without a leading letter-run prefix (`--.h`, `--no-help`) as a version or
+        # help spelling turns a row missing.
+        ids = [i for i in self.rows if i.startswith("edge-inside-dash-word-")]
+        self.assertEqual(len(ids), 4)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
 
 # ---- AC31, AC41, AC42: opt-in AGENTIC_FLOW_STRICT_EVIDENCE for live Codex evidence (Task 18) ----
 STRICT_ON = {"AGENTIC_FLOW_STRICT_EVIDENCE": "true"}

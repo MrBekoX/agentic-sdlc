@@ -6716,19 +6716,19 @@
         "pytest \"--vers\\ion\""
       ],
       "lastIsRealRunner": true,
-      "lastVersionOrHelpOnly": false,
+      "lastVersionOrHelpOnly": true,
       "lastHasPipe": false,
       "lastHasBackground": false,
       "inSafeGrammar": true,
       "orRun": [
         "pytest \"--vers\\ion\""
       ],
-      "orRunAllRealRunners": true,
+      "orRunAllRealRunners": false,
       "orRunHeadHasPipeOrBackground": false,
       "runnerShape5801cb9": true,
-      "defaultTests": "satisfied",
-      "strictAttributable": true,
-      "strictTests": "satisfied",
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
       "baseline5801cb9": {
         "claudeStopTests": "satisfied",
         "codexOrderGuard": "satisfied",
@@ -12815,6 +12815,906 @@
       "inSafeGrammar": true,
       "orRun": [
         "npm run test:"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-vitest-triple",
+      "command": "true; vitest run ---h",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "vitest run ---h"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "vitest run ---h"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-vitest-triple-help",
+      "command": "true; vitest run ---help",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "vitest run ---help"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "vitest run ---help"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-vitest-triple-cluster",
+      "command": "true; vitest run ---xh",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "vitest run ---xh"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "vitest run ---xh"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-vitest-quadruple",
+      "command": "true; vitest run ----h",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "vitest run ----h"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "vitest run ----h"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-jest-triple-help",
+      "command": "true; jest ---help",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "jest ---help"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "jest ---help"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-jest-triple-version",
+      "command": "true; jest ---version",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "jest ---version"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "jest ---version"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-jest-triple-upper",
+      "command": "true; jest ---HELP",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "jest ---HELP"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "jest ---HELP"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-jest-help-dot",
+      "command": "true; jest --help.x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "jest --help.x"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "jest --help.x"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-jest-help-dash",
+      "command": "true; jest --help-",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "jest --help-"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "jest --help-"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-jest-version-dot",
+      "command": "true; jest --version.x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "jest --version.x"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "jest --version.x"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-jest-short-dot",
+      "command": "true; jest --h.x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "jest --h.x"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "jest --h.x"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-jest-upper-dash",
+      "command": "true; jest --HELP-",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "jest --HELP-"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "jest --HELP-"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-vitest-help-dot",
+      "command": "true; vitest run --help.x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "vitest run --help.x"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "vitest run --help.x"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-npm-help-dot",
+      "command": "true; npm test -- --help.x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "true",
+        "npm test -- --help.x"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "npm test -- --help.x"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-oror",
+      "command": "pytest || jest --help.x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "pytest",
+        "jest --help.x"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest",
+        "jest --help.x"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-real-forged-dash-word-single",
+      "command": "jest --help.x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 failed"
+      },
+      "statements": [
+        "jest --help.x"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "jest --help.x"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-dash-word-no-letter-run",
+      "command": "true; npm test -- --.h",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "true",
+        "npm test -- --.h"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "npm test -- --.h"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-dash-word-negated",
+      "command": "true; npm test -- --no-help",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "true",
+        "npm test -- --no-help"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "npm test -- --no-help"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-dash-word-other-prefix",
+      "command": "true; npm test -- --update-snapshot",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "true",
+        "npm test -- --update-snapshot"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "npm test -- --update-snapshot"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-inside-dash-word-verbose",
+      "command": "true; pytest --verbose",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "true",
+        "pytest --verbose"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": false,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest --verbose"
+      ],
+      "orRunAllRealRunners": true,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "satisfied",
+      "strictAttributable": true,
+      "strictTests": "satisfied",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-conservative-dash-word-triple-runs",
+      "command": "true; npm test -- ---h",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "true",
+        "npm test -- ---h"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "npm test -- ---h"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-conservative-dash-word-prefix-tail-runs",
+      "command": "true; npm test -- --hel.x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "true",
+        "npm test -- --hel.x"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "npm test -- --hel.x"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-conservative-dash-word-pytest-triple",
+      "command": "true; pytest ---h",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "true",
+        "pytest ---h"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest ---h"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-conservative-dash-word-pytest-tail",
+      "command": "true; pytest --help.x",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "true",
+        "pytest --help.x"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest --help.x"
+      ],
+      "orRunAllRealRunners": false,
+      "orRunHeadHasPipeOrBackground": false,
+      "runnerShape5801cb9": true,
+      "defaultTests": "missing",
+      "strictAttributable": false,
+      "strictTests": "missing",
+      "baseline5801cb9": {
+        "claudeStopTests": "satisfied",
+        "codexOrderGuard": "satisfied",
+        "codexStopTests": "satisfied"
+      }
+    },
+    {
+      "id": "edge-conservative-dash-word-pytest-letter-digit",
+      "command": "true; pytest --h1",
+      "specRefs": [
+        "EDGE-EXIT"
+      ],
+      "carrier": {
+        "callEvents": 1,
+        "outputRecords": 1,
+        "exitCode": 0,
+        "outputSummary": "1 passed"
+      },
+      "statements": [
+        "true",
+        "pytest --h1"
+      ],
+      "lastIsRealRunner": true,
+      "lastVersionOrHelpOnly": true,
+      "lastHasPipe": false,
+      "lastHasBackground": false,
+      "inSafeGrammar": true,
+      "orRun": [
+        "pytest --h1"
       ],
       "orRunAllRealRunners": false,
       "orRunHeadHasPipeOrBackground": false,
