@@ -951,7 +951,9 @@ const BR6_HELP_CLUSTER = /^-(?!-)[^Vh]*[Vh]/;
 // ASCII-letter run directly after `--` counts when, lowercased, it is a prefix of version, help or usage
 // (`--help.x`, `--help-`, `--h.x`; not `--verbose`, `--no-help` or `--1help`), because yargs (jest) and cac
 // (vitest) read dot-notation and camel-case tails as help or version. Three or more dashes always count
-// (`jest ---help`, `vitest run ---xh`). The pattern has no end anchor, so every word is decided in linear time.
+// (`jest ---help`, `vitest run ---xh`). The pattern carries no flags: `i` or `u` would change matching, and `g` or
+// `y` would make this module-level regex stateful through `lastIndex`, because the code below calls `.exec` instead
+// of `.test`. The pattern has no end anchor, so every word is decided in linear time.
 const BR6_LONG_OPTION_HEAD = /^--([A-Za-z]+)/;
 const BR6_LONG_VERSION_HELP = ['--version', '--help', '--usage'];
 const BR6_VERSION_V_CLUSTER = /^-(?!-)[^v]*v/;
