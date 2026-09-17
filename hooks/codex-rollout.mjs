@@ -943,13 +943,15 @@ const BR6_SCRIPT_RUNNERS = new Set(['make', 'npm', 'pnpm', 'yarn']);
 const BR6_SCRIPT_WORD = /^([A-Za-z0-9]+)[.:-][A-Za-z0-9.:_-]+$/;
 // DP40 (c): version, help and no-run spellings.
 const BR6_PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn']);
-const BR6_HELP_CLUSTER = /^-[A-Za-z]*[Vh][A-Za-z]*$/;
+// Each single-dash cluster pattern excludes its key letter before the key, so a match has one split and a near-miss
+// word (`-hhh...h1`) fails in linear time; `-[A-Za-z]*h[A-Za-z]*` backtracks quadratically on rollout text.
+const BR6_HELP_CLUSTER = /^-[A-UW-Za-gi-z]*[Vh][A-Za-z]*$/;
 const BR6_LONG_OPTION_HEAD = /^--[A-Za-z]+$/;
 const BR6_LONG_VERSION_HELP = ['--version', '--help', '--usage'];
-const BR6_VERSION_V_CLUSTER = /^-[A-Za-z]*v[A-Za-z]*$/;
+const BR6_VERSION_V_CLUSTER = /^-[A-Za-uw-z]*v[A-Za-z]*$/;
 // Runners whose documented `-v` means verbose.
 const BR6_VERBOSE_V_RUNNERS = new Set(['cargo', 'go', 'nox', 'pytest', 'tox', 'unittest']);
-const BR6_PACKAGE_H_CLUSTER = /^-[A-Za-z]*H[A-Za-z]*$/;
+const BR6_PACKAGE_H_CLUSTER = /^-[A-GI-Za-z]*H[A-Za-z]*$/;
 // Package-manager options that run an existing script and change nothing for a missing one (npm 11.13.0).
 // `--if-present` is deliberately absent: it makes npm skip a missing script and exit 0 without running anything
 // (D28 C1).

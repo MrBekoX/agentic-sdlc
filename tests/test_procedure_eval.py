@@ -1292,6 +1292,21 @@ class TestStrictRedGreen(unittest.TestCase):
                 self.assertIs(procedure_eval.is_br6_runner_statement(command, TEST_RE), True)
                 self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), expected)
 
+    # A long near-miss cluster word per D28 cluster rule: `h` (help), `v` (version, npm is not a verbose runner) and
+    # `H` (package manager, after `--` so the allowlist rule does not decide first).
+    D28_NEAR_MISS_CLUSTERS = tuple(prefix + "-" + letter * 100000 + "1"
+                                   for prefix, letter in (("pytest ", "h"), ("npm test -- ", "v"), ("npm test -- ", "H")))
+
+    def test_d28_cluster_checks_are_linear(self):
+        # Mutation: an ambiguous `-[A-Za-z]*<letter>[A-Za-z]*` cluster pattern backtracks quadratically on these words
+        # (seconds per word), letting rollout-supplied commands push the Stop hook past its timeout.
+        import time
+        for command in self.D28_NEAR_MISS_CLUSTERS:
+            with self.subTest(command=command[:20]):
+                start = time.perf_counter()
+                self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), False)
+                self.assertLess(time.perf_counter() - start, 1.0)
+
     def test_simple_commands_follow_the_grammar(self):
         # Mutation: ending an assignment at an escaped blank, splitting a word at an escaped separator, reading
         # `NAME+=` as a word, dropping the redirection marks, or keeping a backslash-newline in a word.

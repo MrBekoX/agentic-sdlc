@@ -1419,13 +1419,15 @@ _BR6_SCRIPT_RUNNERS = frozenset({"make", "npm", "pnpm", "yarn"})
 _BR6_SCRIPT_WORD_RE = re.compile(r"([A-Za-z0-9]+)[.:-][A-Za-z0-9.:_-]+", re.ASCII)
 # DP40 (c): version, help and no-run spellings.
 _BR6_PACKAGE_MANAGERS = frozenset({"npm", "pnpm", "yarn"})
-_BR6_HELP_CLUSTER_RE = re.compile(r"-[A-Za-z]*[Vh][A-Za-z]*", re.ASCII)
+# Each single-dash cluster pattern excludes its key letter before the key, so a match has one split and a near-miss word
+# (`-hhh...h1`) fails in linear time; `-[A-Za-z]*h[A-Za-z]*` backtracks quadratically on transcript text.
+_BR6_HELP_CLUSTER_RE = re.compile(r"-[A-UW-Za-gi-z]*[Vh][A-Za-z]*", re.ASCII)
 _BR6_LONG_OPTION_HEAD_RE = re.compile(r"--[A-Za-z]+", re.ASCII)
 _BR6_LONG_VERSION_HELP = ("--version", "--help", "--usage")
-_BR6_VERSION_V_CLUSTER_RE = re.compile(r"-[A-Za-z]*v[A-Za-z]*", re.ASCII)
+_BR6_VERSION_V_CLUSTER_RE = re.compile(r"-[A-Za-uw-z]*v[A-Za-z]*", re.ASCII)
 # Runners whose documented `-v` means verbose.
 _BR6_VERBOSE_V_RUNNERS = frozenset({"cargo", "go", "nox", "pytest", "tox", "unittest"})
-_BR6_PACKAGE_H_CLUSTER_RE = re.compile(r"-[A-Za-z]*H[A-Za-z]*", re.ASCII)
+_BR6_PACKAGE_H_CLUSTER_RE = re.compile(r"-[A-GI-Za-z]*H[A-Za-z]*", re.ASCII)
 # Package-manager options that run an existing script and change nothing for a missing one (npm 11.13.0). `--if-present`
 # is deliberately absent: it makes npm skip a missing script and exit 0 without running anything (D28 C1).
 _BR6_PACKAGE_NEUTRAL = frozenset({"-s", "--silent", "-q", "--quiet", "-d", "-dd", "-ddd"})
