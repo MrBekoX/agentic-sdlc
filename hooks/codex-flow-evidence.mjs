@@ -17,8 +17,8 @@ import { dirname, join } from 'node:path';
 import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation, resolveBranchState } from './flow-evidence.mjs';
 import {
   readRolloutSignals, readRolloutRuns, splitBr6Statements, trailingOrRun, isVersionOrHelpOnly, hasUnquotedPipe,
-  hasUnquotedBackground, inSafeBr6Grammar, hasUnmodeledShellSyntax, readRollout, readOwnerSignals,
-  COMPLETION_CLAIM, COMPLETION_NEGATED,
+  hasUnquotedBackground, inSafeBr6Grammar, hasUnmodeledShellSyntax, isBr6RunnerStatement, readRollout,
+  readOwnerSignals, COMPLETION_CLAIM, COMPLETION_NEGATED,
 } from './codex-rollout.mjs';
 
 export const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
@@ -31,15 +31,16 @@ export function strictFlag() {
 }
 
 // The shared BR6 table's strictAttributable rule (D3), a cross-slice contract: exactly one call event
-// and one output record, a numeric exit code, a command inside the D23 safe shell grammar, and a trailing
-// `||` run (a single last statement without `||`) whose EVERY operand is a real runner, not
-// version/help-only, not piped and not a background job (D21, D23). Accepts a readRolloutRuns record directly.
+// and one output record, a numeric exit code, a command inside the D23 safe shell grammar (with the DP39
+// operand rule), and a trailing `||` run (a single last statement without `||`) whose EVERY operand runs a
+// test runner under the grammar-derived DP39 runner rule (isBr6RunnerStatement), is not version/help-only, not
+// piped and not a background job (D21, D23, D27). Accepts a readRolloutRuns record directly.
 export function isStrictlyAttributable({ command, callEvents, outputRecords, exitCode }, re) {
   if (callEvents !== 1 || outputRecords !== 1 || typeof exitCode !== 'number') return false;
   if (!inSafeBr6Grammar(command)) return false;
   const run = trailingOrRun(command);
   return run.length > 0
-    && run.every((s) => isRealRunnerInvocation(s, re) && !isVersionOrHelpOnly(s, re) && !hasUnquotedPipe(s)
+    && run.every((s) => isBr6RunnerStatement(s, re) && !isVersionOrHelpOnly(s, re) && !hasUnquotedPipe(s)
       && !hasUnquotedBackground(s));
 }
 
@@ -211,19 +212,26 @@ function stepMissing(step, workId, signals, req, cwd, runs) {
 }
 
 // BR6: a correlated exit code belongs to the command's LAST statement (split on unquoted `;`, newline
-// and `||`), so `pytest; echo EXIT=$?` no longer lends echo's exit 0 to pytest. Attributable when no
-// exit code was correlated (fail-open, as at 5801cb9); not attributable when the command holds `;`,
-// newline or `||` and lies outside the D23 safe shell grammar (checked before the single-statement
-// shortcut, because a hidden separator can collapse the split); attributable when the command is a single
-// statement (the 5801cb9 outcome, which a separator-free command always is); otherwise only when every
-// operand of the trailing `||` run is a real runner that is not version/help-only and every operand except
-// the last has no pipe or background `&` (a head operand's own exit decides whether the runner after it runs).
+// and `||`), so `pytest; echo EXIT=$?` no longer lends echo's exit 0 to pytest. In order (DP39):
+//   1. no correlated exit code: attributable (fail-open, as at 5801cb9);
+//   2. no `;`, newline or `||` in the command: attributable (the 5801cb9 outcome, kept explicitly);
+//   3. outside the D23 safe shell grammar: not attributable (checked before the single-statement step,
+//      because a hidden separator can collapse the split);
+//   4. at most one statement: attributable only when it runs a runner under the grammar-derived DP39 rule
+//      and is not version/help-only (so `echo \; pytest` and `pytest --version;` are not);
+//   5. otherwise only when every operand of the trailing `||` run runs a runner under that rule and is not
+//      version/help-only, and every operand except the last has no pipe or background `&` (a head
+//      operand's own exit decides whether the runner after it runs).
 function attributable(r, re) {
   if (typeof r.exitCode !== 'number') return true;
-  if (hasUnmodeledShellSyntax(r.command)) return false;
-  if (splitBr6Statements(r.command).length <= 1) return true;
-  const run = trailingOrRun(r.command);
-  return run.every((s, i) => isRealRunnerInvocation(s, re) && !isVersionOrHelpOnly(s, re)
+  const command = String(r.command || '');
+  if (!(command.includes(';') || command.includes('\n') || command.includes('||'))) return true;
+  if (hasUnmodeledShellSyntax(command)) return false;
+  if (splitBr6Statements(command).length <= 1) {
+    return isBr6RunnerStatement(command, re) && !isVersionOrHelpOnly(command, re);
+  }
+  const run = trailingOrRun(command);
+  return run.every((s, i) => isBr6RunnerStatement(s, re) && !isVersionOrHelpOnly(s, re)
     && (i === run.length - 1 || (!hasUnquotedPipe(s) && !hasUnquotedBackground(s))));
 }
 

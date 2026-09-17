@@ -57,6 +57,34 @@ ORDER_OUTCOMES = frozenset({"satisfied", "not-satisfied"})
 ID_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 # D25 word, segment and blank rows lie inside the grammar; test_named_word_segment_and_blank_rows pins them.
 D25_FORGED_PREFIXES = ("edge-forged-word-", "edge-forged-segment-", "edge-forged-blank-")
+# D27 runner-rule forgeries lie inside the grammar too; test_named_d27_rows pins them.
+D27_FORGED_PREFIXES = ("edge-forged-append-", "edge-forged-escaped-separator-", "edge-forged-join-",
+                       "edge-forged-value-blank-", "edge-forged-pipeline-mention-", "edge-forged-version-single-",
+                       "edge-forged-red-python-")
+# R11 (D27 operand rule): the operators of a plain-character command, longest first.
+_PLAIN_OPERATOR = re.compile(r"(\|\||&&|\|&|;|&|\||\n)")
+_WAITING_OPERATORS = frozenset({"&&", "||", "|", "|&"})
+
+
+def _plain_well_formed(command):
+    """True when every operator of a plain-character command has its operands (checked apart from both implementations).
+
+    An operator other than newline right after a piece of only spaces and tabs has no left operand; an `&&`, `||`, `|`
+    or `|&` still waiting for a non-blank piece at the end has no right operand.
+    """
+    pieces = _PLAIN_OPERATOR.split(command)
+    pending = False
+    for index in range(1, len(pieces), 2):
+        before, operator = pieces[index - 1], pieces[index]
+        if before.strip(" \t"):
+            pending = False
+        elif operator != "\n":
+            return False
+        if operator in _WAITING_OPERATORS:
+            pending = True
+    if pieces[-1].strip(" \t"):
+        pending = False
+    return not pending
 
 SPEC_SHAPES = {
     "AC28": ("pytest; echo EXIT=$?",),
@@ -339,7 +367,8 @@ class TestBR6CaseTable(unittest.TestCase):
                 attributed = (exit_code is None
                               or not has_separator
                               or (row["inSafeGrammar"]
-                                  and (len(row["statements"]) <= 1
+                                  and ((len(row["statements"]) <= 1 and row["lastIsRealRunner"]
+                                        and not row["lastVersionOrHelpOnly"])
                                        or (row["orRunAllRealRunners"] and not row["orRunHeadHasPipeOrBackground"]))))
                 self.assertEqual(row["defaultTests"] == "satisfied",
                                  bool(baseline["codexStopTests"] == "satisfied" and attributed),
@@ -372,13 +401,15 @@ class TestBR6CaseTable(unittest.TestCase):
                 words = set(re.split(r"[ \t\n;|&]+", command))
                 integer_assignment = any(R10_INTEGER_ASSIGNMENT.match(word) for word in words)
                 if plain_chars and no_controls and not (words & R10_EXCLUDED_WORDS) and not integer_assignment:
-                    self.assertTrue(row["inSafeGrammar"], "R10 plain words and characters lie inside the grammar")
+                    self.assertIs(row["inSafeGrammar"], _plain_well_formed(command),
+                                  "R10/R11 plain words lie inside the grammar exactly when every operator has operands")
 
     # Guards: a construct row (outside the D23 grammar) marked attributable, a trailing `||` forgery marked default
     # satisfied, a separator-free construct losing its 5801cb9 default, or a legitimate shape marked outside.
     def test_named_grammar_rows(self):
         rows = {row["id"]: row for row in _load()["rows"]}
-        forged = [i for i in rows if i.startswith("edge-forged-") and not i.startswith(D25_FORGED_PREFIXES)
+        forged = [i for i in rows if i.startswith("edge-forged-")
+                  and not i.startswith(D25_FORGED_PREFIXES + D27_FORGED_PREFIXES)
                   and not i.startswith("edge-forged-oror-")]
         self.assertGreaterEqual(len(forged), 40)
         for row_id in forged:
@@ -491,8 +522,110 @@ class TestBR6CaseTable(unittest.TestCase):
         for row_id in ("edge-conservative-substitution-with-separator", "edge-single-statement-substitution",
                        "edge-forged-hidden-pipe-ansi-c"):
             with self.subTest(id=row_id):
+                # D27: a statement outside the grammar runs no runner, so it is not version-only either.
                 self.assertEqual((rows[row_id]["lastVersionOrHelpOnly"], rows[row_id]["orRunAllRealRunners"]),
-                                 (True, False))
+                                 (False, False))
+
+    # Guards (D27): a runner-rule forgery (NAME+=, escaped separator, joined line, blank inside an assignment value,
+    # mention before a pipe, single-statement version run) marked attributable or default satisfied after a separator,
+    # a syntax-error or non-runner-module RED marked attributable, or a bash-proven inside row losing its attribution.
+    def test_named_d27_rows(self):
+        rows = {row["id"]: row for row in _load()["rows"]}
+
+        def ids(prefix):
+            return [i for i in rows if i.startswith(prefix)]
+
+        counts = {prefix: len(ids(prefix)) for prefix in (
+            "edge-forged-append-", "edge-forged-escaped-separator-", "edge-forged-join-", "edge-forged-value-blank-",
+            "edge-forged-pipeline-mention-", "edge-forged-version-single-", "edge-forged-red-",
+            "edge-inside-runner-", "edge-inside-value-", "edge-inside-append-", "edge-inside-background-",
+            "edge-conservative-redirect-")}
+        self.assertEqual(counts, {
+            "edge-forged-append-": 7, "edge-forged-escaped-separator-": 9, "edge-forged-join-": 4,
+            "edge-forged-value-blank-": 8, "edge-forged-pipeline-mention-": 1, "edge-forged-version-single-": 3,
+            "edge-forged-red-": 7, "edge-inside-runner-": 19, "edge-inside-value-": 2, "edge-inside-append-": 1,
+            "edge-inside-background-": 1, "edge-conservative-redirect-": 1})
+        self.assertEqual(len(rows), 256)
+
+        forged = [i for i in rows if i.startswith(D27_FORGED_PREFIXES[:-1])]
+        self.assertEqual(len(forged), 32)
+        separator_free = {"edge-forged-append-single", "edge-forged-append-prefixed-single",
+                          "edge-forged-escaped-separator-pipe", "edge-forged-escaped-separator-pipe-args",
+                          "edge-forged-value-blank-escaped-space-single", "edge-forged-value-blank-nbsp-single"}
+        version_single = set(ids("edge-forged-version-single-"))
+        for row_id in forged:
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                self.assertEqual(row["carrier"], {"callEvents": 1, "outputRecords": 1, "exitCode": 0,
+                                                  "outputSummary": "1 failed"})
+                self.assertEqual(row["specRefs"], ["EDGE-EXIT"])
+                self.assertIs(row["inSafeGrammar"], True)
+                self.assertIs(row["runnerShape5801cb9"], True)
+                self.assertIs(row["strictAttributable"], False)
+                self.assertIs(row["orRunAllRealRunners"], False)
+                self.assertIs(row["orRunHeadHasPipeOrBackground"], False)
+                runs = row_id == "edge-forged-pipeline-mention-version" or row_id in version_single
+                self.assertIs(row["lastIsRealRunner"], runs)
+                self.assertIs(row["lastVersionOrHelpOnly"], runs)
+                self.assertIs(row["lastHasPipe"], row_id == "edge-forged-pipeline-mention-version")
+                if row_id in version_single:
+                    self.assertEqual(len(row["statements"]), 1)
+                self.assertEqual(row["defaultTests"], "satisfied" if row_id in separator_free else "missing")
+                separator = any(s in row["command"] for s in (";", "\n", "||"))
+                self.assertIs(separator, row_id not in separator_free)
+        self.assertEqual(rows["edge-forged-join-comment-oror"]["orRun"], ["echo x"])
+        for row_id in ("edge-forged-append-oror", "edge-forged-escaped-separator-oror",
+                       "edge-forged-value-blank-nbsp-oror"):
+            with self.subTest(id=row_id):
+                self.assertEqual(rows[row_id]["orRun"], rows[row_id]["statements"])
+
+        red = ids("edge-forged-red-")
+        syntax_error = [i for i in red if i != "edge-forged-red-python-module"]
+        self.assertEqual(len(syntax_error), 6)
+        for row_id in red:
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                module = row_id == "edge-forged-red-python-module"
+                self.assertEqual(row["carrier"]["exitCode"], 1)
+                self.assertEqual(row["carrier"]["outputSummary"], "No module named jest" if module else "syntax error")
+                self.assertIs(row["strictAttributable"], False)
+                self.assertEqual(row["defaultTests"], "missing")
+                self.assertIs(row["runnerShape5801cb9"], True)
+                self.assertIs(row["inSafeGrammar"], module)
+                runs = not module and row["statements"][-1] == "pytest"
+                self.assertIs(row["lastIsRealRunner"], runs)
+                self.assertIs(row["orRunAllRealRunners"], runs)
+                self.assertEqual(row["baseline5801cb9"], {"claudeStopTests": "satisfied", "codexOrderGuard": "satisfied",
+                                                          "codexStopTests": "missing"})
+        self.assertEqual(rows["edge-forged-red-trailing-oror"]["statements"], ["pytest"])
+        self.assertEqual(rows["edge-forged-red-leading-semicolon"]["statements"], ["pytest"])
+        self.assertEqual(rows["edge-forged-red-trailing-andand"]["statements"], ["pytest &&"])
+        self.assertEqual(rows["edge-forged-red-trailing-andand-newline"]["statements"], ["pytest &&"])
+        self.assertEqual(rows["edge-forged-red-empty-andand-operand"]["statements"], ["pytest", "&& pytest"])
+        self.assertEqual(rows["edge-forged-red-double-semicolon"]["statements"], ["true", "pytest"])
+
+        inside = [i for i in rows if i.startswith(("edge-inside-runner-", "edge-inside-value-", "edge-inside-append-",
+                                                   "edge-inside-background-"))]
+        self.assertEqual(len(inside), 23)
+        for row_id in inside:
+            with self.subTest(id=row_id):
+                row = rows[row_id]
+                background = row_id == "edge-inside-background-head-runner"
+                self.assertEqual(row["carrier"]["exitCode"], 0)
+                for column in ("inSafeGrammar", "lastIsRealRunner", "orRunAllRealRunners", "runnerShape5801cb9"):
+                    self.assertIs(row[column], True, column)
+                self.assertEqual(row["defaultTests"], "satisfied")
+                self.assertIs(row["lastHasBackground"], background)
+                self.assertIs(row["strictAttributable"], not background)
+                self.assertEqual(row["strictTests"], "missing" if background else "satisfied")
+
+        conservative = rows["edge-conservative-redirect-before-runner"]
+        self.assertEqual((conservative["inSafeGrammar"], conservative["lastIsRealRunner"],
+                          conservative["defaultTests"], conservative["strictAttributable"]),
+                         (True, False, "missing", False))
+        for row_id in forged + inside + ["edge-conservative-redirect-before-runner"]:
+            with self.subTest(id=row_id):
+                self.assertEqual(set(rows[row_id]["baseline5801cb9"].values()), {"satisfied"})
 
     # Guards: a background job (`&`, including after an escaped operator character) marked attributable, or a
     # redirection, `|&`, quoted or commented `&` misread as a background job (D21).

@@ -319,21 +319,72 @@ class BR6SafeGrammarTests(unittest.TestCase):
     node = BR6BackgroundAttributionTests.node
 
     def test_table_grammar_columns(self):
-        # Mutation: any dropped production or word set, or judging only the last `||` operand, mismatches a row.
+        # Mutation: any dropped production or word set, judging only the last `||` operand, or identifying runners by
+        # the 5801cb9 text check instead of the grammar-derived rule (D27), mismatches a row.
         rows = json.loads(BR6_TABLE.read_text(encoding="utf-8"))["rows"]
-        script = ("import {inSafeBr6Grammar, trailingOrRun, isVersionOrHelpOnly, hasUnquotedPipe, hasUnquotedBackground}"
-                  " from " + json.dumps(ROLLOUT_URI) + ";"
-                  "import {isRealRunnerInvocation, loadRequirements} from " + json.dumps(FLOW_EVIDENCE.as_uri()) + ";"
+        script = ("import {inSafeBr6Grammar, trailingOrRun, isVersionOrHelpOnly, hasUnquotedPipe, hasUnquotedBackground,"
+                  " isBr6RunnerStatement, lastStatement} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "import {loadRequirements} from " + json.dumps(FLOW_EVIDENCE.as_uri()) + ";"
                   "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () => {"
                   " const re = new RegExp(loadRequirements().testCommand, 'i');"
                   " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => { const run = trailingOrRun(c);"
+                  " const last = lastStatement(c);"
                   " return [inSafeBr6Grammar(c), run,"
-                  " run.length > 0 && run.every((x) => isRealRunnerInvocation(x, re) && !isVersionOrHelpOnly(x, re)),"
-                  " run.slice(0, -1).some((x) => hasUnquotedPipe(x) || hasUnquotedBackground(x))]; }))); });")
+                  " run.length > 0 && run.every((x) => isBr6RunnerStatement(x, re) && !isVersionOrHelpOnly(x, re)),"
+                  " run.slice(0, -1).some((x) => hasUnquotedPipe(x) || hasUnquotedBackground(x)),"
+                  " isBr6RunnerStatement(last, re), isVersionOrHelpOnly(last, re)]; }))); });")
         got = self.node(script, [r["command"] for r in rows])
-        columns = ("inSafeGrammar", "orRun", "orRunAllRealRunners", "orRunHeadHasPipeOrBackground")
+        columns = ("inSafeGrammar", "orRun", "orRunAllRealRunners", "orRunHeadHasPipeOrBackground", "lastIsRealRunner",
+                   "lastVersionOrHelpOnly")
         mismatches = [r["id"] for r, values in zip(rows, got) if values != [r[c] for c in columns]]
         self.assertEqual(mismatches, [], "rows where the Node grammar columns disagree with the table")
+
+    @staticmethod
+    def _d27_commands():
+        # Every table command, the D23 production lists and the four D27 lists of test_procedure_eval.
+        from test_procedure_eval import GRAMMAR_INSIDE, GRAMMAR_OUTSIDE, TestStrictRedGreen as lists
+        rows = json.loads(BR6_TABLE.read_text(encoding="utf-8"))["rows"]
+        commands = [r["command"] for r in rows] + list(GRAMMAR_INSIDE) + list(GRAMMAR_OUTSIDE)
+        commands += list(lists.RUNNER_STATEMENTS) + list(lists.NON_RUNNER_STATEMENTS)
+        commands += list(lists.OPERAND_OUTSIDE) + list(lists.OPERAND_INSIDE)
+        return list(dict.fromkeys(commands)), rows
+
+    def test_simple_commands_match_python_mirror(self):
+        # Mutation: any branch of br6SimpleCommands that differs from br6_simple_commands (a word value, an unknown or
+        # redirect mark, an assignment, an op, a join), or a statement split that differs from splitBr6StatementJoins.
+        from test_procedure_eval import procedure_eval
+        commands, _rows = self._d27_commands()
+        script = ("import {br6SimpleCommands, splitBr6StatementJoins} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () =>"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) => [br6SimpleCommands(c),"
+                  " splitBr6StatementJoins(c).map((x) => x.viaOr)]))));")
+        got = self.node(script, commands)
+        mismatches, split_mismatches = [], []
+        for command, (parsed, joins) in zip(commands, got):
+            node = None if parsed is None else [{"via_or": st["viaOr"], "commands": st["commands"]} for st in parsed]
+            if node != procedure_eval.br6_simple_commands(command):
+                mismatches.append(command)
+            if parsed is not None and [st["viaOr"] for st in parsed] != joins:
+                split_mismatches.append(command)
+        self.assertEqual(mismatches, [], "commands whose Node and Python simple commands differ")
+        self.assertEqual(split_mismatches, [], "commands inside the grammar whose parse differs from the BR6 split")
+
+    def test_runner_rule_matches_python_mirror(self):
+        # Mutation: any branch of isBr6RunnerStatement or isVersionOrHelpOnly that differs from the Python mirror.
+        from test_procedure_eval import TEST_RE, procedure_eval
+        commands, rows = self._d27_commands()
+        texts = list(dict.fromkeys(commands + [s for r in rows for s in r["statements"]]))
+        script = ("import {isBr6RunnerStatement, isVersionOrHelpOnly} from " + json.dumps(ROLLOUT_URI) + ";"
+                  "import {loadRequirements} from " + json.dumps(FLOW_EVIDENCE.as_uri()) + ";"
+                  "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () => {"
+                  " const re = new RegExp(loadRequirements().testCommand, 'i');"
+                  " process.stdout.write(JSON.stringify(JSON.parse(s).map((c) =>"
+                  " [isBr6RunnerStatement(c, re), isVersionOrHelpOnly(c, re)]))); });")
+        got = self.node(script, texts)
+        mismatches = [t for t, values in zip(texts, got)
+                      if values != [procedure_eval.is_br6_runner_statement(t, TEST_RE),
+                                    procedure_eval.is_version_or_help_only(t, TEST_RE)]]
+        self.assertEqual(mismatches, [], "statements whose Node and Python runner verdicts differ")
 
     def test_grammar_production_lists(self):
         # The same 129 commands test_procedure_eval.TestStrictRedGreen.test_safe_grammar_production_lists checks in Python.
