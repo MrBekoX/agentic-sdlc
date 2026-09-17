@@ -1352,6 +1352,9 @@ class TestStrictRedGreen(unittest.TestCase):
         "vitest run --no-help", "vitest run --update", "pytest --verbose", "pytest --tb=short",
         'pytest "--<bs>version"', "npm test -- --.h", "npm test -- --no-help", "npm test -- --update-snapshot",
         "npm test -- --1help", "go test --verbose", "make test --no-help",
+        # Embedded, non-leading `--<letters>`: both mirrors must anchor the long-option run at the start of the word
+        # (a Python `.search`, or a JS pattern without `^`, would read these as help-only and diverge).
+        "pytest tests/x--help.py", "pytest a--version",
     ))
 
     def test_d30_dash_word_shapes(self):
