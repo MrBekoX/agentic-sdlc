@@ -1195,6 +1195,30 @@ class TestBR6StatementSplit(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIs(result["inGrammar"], command in inside)
 
+    def test_d28_rules_match_python_lists(self):
+        # D28 (DP40), the Task 181 lists. Mutation: no pipeWaiting reset at a word, no null at a newline while a pipe
+        # waits, a selector after a python word, a `-[0-9.]+` selector, dropping the npm `k === 3` rule, the `iu` flags
+        # on BR6_SCRIPT_WORD (U+017F folds to `s`), toLowerCase before the ASCII script-word check (U+212A lowers to
+        # `k`), `--if-present` in BR6_PACKAGE_NEUTRAL, or VERSION_HELP_ARGS as the only version test. The `i` flag
+        # alone is an equivalent mutant: without `u`, JavaScript never folds a non-ASCII letter onto an ASCII one.
+        from test_procedure_eval import TestStrictRedGreen as lists
+        outside, inside = list(lists.D28_PIPE_NEWLINE_OUTSIDE), list(lists.D28_PIPE_NEWLINE_INSIDE)
+        runner = list(lists.D28_RUNNER_STATEMENTS)
+        non_runner = list(lists.D28_NON_RUNNER_STATEMENTS) + list(lists.D28_NON_ASCII_SCRIPT_WORDS)
+        version, not_version = list(lists.D28_VERSION_ONLY), list(lists.D28_NOT_VERSION_ONLY)
+        commands = outside + inside + runner + non_runner + version + not_version
+        results = dict(zip(commands, _br6_eval(commands)))
+        for command in outside + inside:
+            with self.subTest(grammar=command):
+                self.assertIs(results[command]["inGrammar"], command in inside)
+        for command in runner + non_runner:
+            with self.subTest(runner=command):
+                self.assertIs(results[command]["runsRunner"], command in runner)
+        for command in version + not_version:
+            with self.subTest(version=command):
+                self.assertIs(results[command]["runsRunner"], True)
+                self.assertIs(results[command]["versionOrHelpOnly"], command in version)
+
     def test_runner_rule_does_not_import_the_5801cb9_helper(self):
         # D27: runner identification no longer goes through the 5801cb9 text helper in the rollout module, and the
         # Codex flow evidence imports the grammar-derived rule.
@@ -1337,6 +1361,38 @@ class TestExitAttributionClosure(_Tmp):
         ids = [i for i in self.rows if i.startswith(("edge-inside-runner-", "edge-inside-value-", "edge-inside-append-",
                                                      "edge-inside-background-"))]
         self.assertEqual(len(ids), 23)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    # ---- D28 (DP40): pipe-newline, launcher, option and script-name rows in the default derivation ----
+    D28_FORGED_PREFIXES = ("edge-forged-pipe-newline-", "edge-forged-launcher-list-", "edge-forged-option-",
+                           "edge-forged-script-option-")
+
+    def test_d28_forgeries_with_a_separator_missing_by_default(self):
+        # Mutation: no null at a newline while a pipe waits (the pipe-newline rows), a `py -0` selector, or
+        # VERSION_HELP_ARGS as the only version test (the option rows) turns a row satisfied.
+        ids = [i for i, r in self.rows.items() if i.startswith(self.D28_FORGED_PREFIXES)
+               and any(s in r["command"] for s in (";", "\n", "||"))]
+        self.assertEqual(len(ids), 30)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "missing")
+
+    def test_d28_separator_free_forgeries_keep_5801cb9_default(self):
+        # Mutation: a default step that reads the DP40 rules for a separator-free command (these rows would turn
+        # missing).
+        for i in ("edge-forged-launcher-list-single", "edge-forged-option-pytest-cluster-single",
+                  "edge-forged-option-npm-single"):
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    def test_d28_inside_rows_satisfy(self):
+        # Mutation: dropping the script-name branch, the `py` selector, the verbose `-v` runner set or the neutral
+        # allowlist, or ending a statement at a newline after `&&`, turns a row missing.
+        ids = [i for i in self.rows if i.startswith(("edge-inside-join-", "edge-inside-selector-",
+                                                     "edge-inside-option-", "edge-inside-script-"))]
+        self.assertEqual(len(ids), 19)
         for i in ids:
             with self.subTest(id=i):
                 self.assertEqual(self.outcome[i], "satisfied")

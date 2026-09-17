@@ -341,12 +341,16 @@ class BR6SafeGrammarTests(unittest.TestCase):
 
     @staticmethod
     def _d27_commands():
-        # Every table command, the D23 production lists and the four D27 lists of test_procedure_eval.
+        # Every table command, the D23 production lists, the four D27 lists and the six D28 lists of
+        # test_procedure_eval.
         from test_procedure_eval import GRAMMAR_INSIDE, GRAMMAR_OUTSIDE, TestStrictRedGreen as lists
         rows = json.loads(BR6_TABLE.read_text(encoding="utf-8"))["rows"]
         commands = [r["command"] for r in rows] + list(GRAMMAR_INSIDE) + list(GRAMMAR_OUTSIDE)
         commands += list(lists.RUNNER_STATEMENTS) + list(lists.NON_RUNNER_STATEMENTS)
         commands += list(lists.OPERAND_OUTSIDE) + list(lists.OPERAND_INSIDE)
+        commands += list(lists.D28_PIPE_NEWLINE_OUTSIDE) + list(lists.D28_PIPE_NEWLINE_INSIDE)
+        commands += list(lists.D28_RUNNER_STATEMENTS) + list(lists.D28_NON_RUNNER_STATEMENTS)
+        commands += list(lists.D28_VERSION_ONLY) + list(lists.D28_NOT_VERSION_ONLY)
         return list(dict.fromkeys(commands)), rows
 
     def test_simple_commands_match_python_mirror(self):

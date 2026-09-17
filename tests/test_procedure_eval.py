@@ -1225,6 +1225,73 @@ class TestStrictRedGreen(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIs(procedure_eval.in_safe_br6_grammar(command), expected)
 
+    # D28 (DP40) lists, shared with the Node tests in test_codex_flow_step_guard.py and test_codex_current_rollout.py.
+    # `<bs>` and `<nl>` stand for a backslash and a newline.
+    D28_PIPE_NEWLINE_OUTSIDE = tuple(c.replace("<nl>", chr(10)) for c in (
+        "true || echo |<nl>pytest", "true || echo |&<nl>pytest", "true || echo | # c<nl>pytest",
+        "true || echo |<nl><nl>pytest", "pytest |<nl>pytest", "echo x |& # c<nl>npm test",
+    ))
+    D28_PIPE_NEWLINE_INSIDE = tuple(c.replace("<bs>", chr(92)).replace("<nl>", chr(10)) for c in (
+        "echo ok |<bs><nl>pytest", "echo ok &&<nl>pytest", "pytest ||<nl><nl>pytest", "echo ok | tee log<nl>pytest",
+        "echo ok | > out.txt<nl>pytest",
+    ))
+    D28_RUNNER_STATEMENTS = (
+        "py -3 -m pytest", "py -3.13 -m pytest", "py -2 -m pytest", "py -3.99 -m pytest", "npm run test:unit",
+        "npm run test-ci -- --coverage", "NPM run test:unit", "npm run test:unit_fast", "pnpm test:e2e",
+        "pnpm run test.x", "yarn test:unit", "make test-unit",
+    )
+    D28_NON_RUNNER_STATEMENTS = (
+        "py -0 -m pytest", "py -00 -m pytest", "py -0p -m pytest", "py -4 -m pytest", "py -1 -m pytest",
+        "py -03 -m pytest", "py -3. -m pytest", "py -3-64 -m pytest", "py -V:3.13 -m pytest", "python -3 -m pytest",
+        "python3 -3.13 -m pytest", "python -0 -m pytest", "python3.13 -3 -m pytest", "npm test:unit",
+        "npm run test_unit", "npm run test:", "npm run testing", "yarn run test:unit", "go test-x", "cargo test:x",
+        "mvn test-compile", "npm run test:$X",
+    )
+    # Script words whose non-ASCII letter case-folds (U+017F) or lowercases (U+212A) onto an ASCII letter.
+    D28_NON_ASCII_SCRIPT_WORDS = ("npm run test:uni" + chr(0x17F), "npm run test:" + chr(0x212A))
+    D28_VERSION_ONLY = (
+        "npm test --if-present", "npm run test:nope --if-present", "pytest -Vq", "pytest -qV", "pytest -hq",
+        "python -m pytest -qV", "python -m unittest --he", "pytest --version=x", "pytest --help=x", "pytest --usage",
+        "npm test -v", "npm run test -v", "npm test -H", "npm test --usage=1", "npm test -hq", "npm test -ddv",
+        "npm test -vq", "npm test -qH", "npm test --h", "npm test --hel", "npm test -usage", "npm test --HELP",
+        "npm test -x", "npm test -- -v", "pnpm test -v", "yarn test -v", "make test -v", "mvn test -v", "jest -v",
+        "npm run test:unit --version", "npm run test:unit -v", "pytest -kh",
+    )
+    D28_NOT_VERSION_ONLY = (
+        "pytest -v", "pytest -qx", "pytest -k test_help", "python -m pytest -v", "tox -v", "go test -v ./...",
+        "cargo test -v", "npm test -s", "npm test --silent", "npm test -q", "npm test --quiet", "npm test -d",
+        "npm test -ddd", "npm test -- --coverage", "npm run test -- --ci", "npm test help", "pytest --verbose",
+        "pytest --co", "make test -j4",
+    )
+
+    def test_newline_while_pipe_waits_is_outside(self):
+        # Mutation: not returning None at a newline while a `|` or `|&` waits, or not clearing the pipe flag at a
+        # word (a redirection target included: `echo ok | > out.txt<nl>pytest`), flips an entry.
+        for command, outside in ([(c, True) for c in self.D28_PIPE_NEWLINE_OUTSIDE]
+                                 + [(c, False) for c in self.D28_PIPE_NEWLINE_INSIDE]):
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.br6_simple_commands(command) is None, outside)
+                self.assertIs(procedure_eval.in_safe_br6_grammar(command), not outside)
+
+    def test_d28_runner_words(self):
+        # Mutations: a selector after a python word, a `-[0-9.]+` or `-[1-9]` selector (py -0, py -4), no npm k == 3
+        # rule (npm test:unit), `_` as a script separator, re.IGNORECASE without re.ASCII (U+017F folds to `s`), lower()
+        # before the ASCII script-word check (U+212A lowers to `k`), or match instead of fullmatch.
+        for command, expected in ([(c, True) for c in self.D28_RUNNER_STATEMENTS]
+                                  + [(c, False) for c in self.D28_NON_RUNNER_STATEMENTS + self.D28_NON_ASCII_SCRIPT_WORDS]):
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.is_br6_runner_statement(command, TEST_RE), expected)
+
+    def test_d28_version_and_help_spellings(self):
+        # Mutations: dropping the verbose `-v` runner set (pytest -v), applying the package-manager allowlist after
+        # `--` (npm test -- --coverage), dropping `--usage` from the prefix list, or adding `--if-present` to the
+        # neutral set (npm run test:nope --if-present).
+        for command, expected in ([(c, True) for c in self.D28_VERSION_ONLY]
+                                  + [(c, False) for c in self.D28_NOT_VERSION_ONLY]):
+            with self.subTest(command=command):
+                self.assertIs(procedure_eval.is_br6_runner_statement(command, TEST_RE), True)
+                self.assertIs(procedure_eval.is_version_or_help_only(command, TEST_RE), expected)
+
     def test_simple_commands_follow_the_grammar(self):
         # Mutation: ending an assignment at an escaped blank, splitting a word at an escaped separator, reading
         # `NAME+=` as a word, dropping the redirection marks, or keeping a backslash-newline in a word.
