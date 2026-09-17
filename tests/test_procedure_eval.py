@@ -1956,6 +1956,201 @@ class TestEvidencePacket(unittest.TestCase):
         self.assertEqual(procedure_eval.mask_home_paths(raw),
                          "C:\\Users\\***MASKED:home***\\repo /home/***MASKED:home***/y c:/users/***MASKED:home***/z")
 
+    @staticmethod
+    def stream_record(index, body, session="s1"):
+        return {"type": "stream_event", "session_id": session, "parent_tool_use_id": None,
+                "event": dict(body, index=index)}
+
+    def stream_block(self, index, kind, pieces, content_block):
+        field = "partial_json" if kind == "input_json_delta" else "text"
+        return ([self.stream_record(index, {"type": "content_block_start", "content_block": content_block})]
+                + [self.stream_record(index, {"type": "content_block_delta", "delta": {"type": kind, field: piece}})
+                   for piece in pieces]
+                + [self.stream_record(index, {"type": "content_block_stop"})])
+
+    @staticmethod
+    def joined_block(records, index):
+        pieces = []
+        for record in records:
+            event = record.get("event") if isinstance(record, dict) else None
+            if record.get("type") == "stream_event" and isinstance(event, dict) and event.get("index") == index \
+                    and event.get("type") == "content_block_delta":
+                delta = event["delta"]
+                pieces.append(delta.get("partial_json", delta.get("text")))
+        return "".join(pieces)
+
+    @staticmethod
+    def decoded_strings(value):
+        out, stack = [], [value]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, str):
+                out.append(item)
+            elif isinstance(item, list):
+                stack.extend(item)
+            elif isinstance(item, dict):
+                stack.extend(item.values())
+        return out
+
+    def test_home_identity_forms_masked_everywhere(self):  # D26 / DP38
+        # Mutations: chunk-by-chunk masking (no block rule), omitting the slug grammar, requiring a blank before the
+        # path form (misses -I/home/), omitting the backslash-only path form, collecting only the spaced run, or
+        # applying identity matching to packet structural fields.
+        bs, marker, case = chr(92), "***MASKED:home***", "identity-probe"
+        user, flag, unc, space = "evaluser", "evalflag", "evalunc", "evalspace"
+        control = "The home page lists users; the test runner ran in /home/runner/work; users-admin and --home-dir stay."
+        records = [
+            *self.stream_block(0, "input_json_delta", ['{"command": "ls /home/', user + '/.cache/x"}'],
+                               {"type": "tool_use", "id": "b0", "name": "Bash", "input": {}}),
+            *self.stream_block(1, "text_delta", ["ls /home/", "evalu", "ser/w"], {"type": "text", "text": ""}),
+            {"type": "system", "subtype": "init", "memory": "/p/projects/-home-" + user + "--cache-agentic-sdlc-eval/memory"},
+            {"type": "system", "subtype": "note", "memory": "C:/p/projects/C--Users-" + user + "-repo/memory"},
+            full_tool_use("b1", "Bash", {"command": "dir C:" + bs + "Users" + bs + user + bs + "repo"}),
+            assistant_text_event("logged in as EvalUser"),
+            full_tool_use("b2", "Bash", {"command": "gcc -I/home/" + flag + "/inc"}),
+            assistant_text_event(flag + " ran"),
+            full_tool_use("b3", "Bash", {"command": bs + bs + "wsl$" + bs + "Distro" + bs + "home" + bs + unc + bs + "x"}),
+            assistant_text_event(unc + " ran"),
+            full_tool_use("b4", "Bash", {"command": "cp /home/" + space + " ab/c"}),
+            assistant_text_event(space + " ran"),
+            assistant_text_event(control),
+            # The case-id word is also a collected identity, so identity matching on structural fields is observable.
+            {"type": "system", "subtype": "note", "cwd": "/home/probe/x"},
+        ]
+        transcript_text = "".join(json.dumps(record) + "\n" for record in records)
+        with tempfile.TemporaryDirectory() as td:
+            packet = procedure_eval.build_evidence_packet(
+                {"id": case, "prompt": "probe"}, procedure_eval.Trace(),
+                ["unsafe_artifact_path:/p/-home-" + user + "--cache-x"], cwd=Path(td), fixture_root=None,
+                scoring_source="transcript-replay", strict=True, identity="unavailable:build-release-absent",
+                git_commit="0" * 40)
+            evidence = Path(td) / "ev"
+            procedure_eval.write_evidence_packet(packet, evidence, case, transcript_text, fixture_roots=[])
+            packet_text = (evidence / f"{case}.json").read_text(encoding="utf-8")
+            copy_text = (evidence / f"{case}.transcript.jsonl").read_text(encoding="utf-8")
+            unmasked = procedure_eval.redact_json(
+                dict(packet, helper_paths=procedure_eval.helper_paths(evidence.resolve(strict=False))))
+            unmasked = json.loads(procedure_eval.mask_home_paths(json.dumps(unmasked, indent=2, ensure_ascii=False)))
+        # Boolean assertions with fixed messages, so a failure never echoes file text.
+        for label, text in (("packet", packet_text), ("copy", copy_text)):
+            for name in (user, flag, unc, space):
+                self.assertFalse(name in text.lower(), f"a synthetic home identity persisted in the {label}")
+            self.assertTrue(marker in text, f"the {label} lacks the home marker")
+        copy_lines = copy_text.split("\n")
+        self.assertTrue(len(copy_lines) == len(transcript_text.split("\n")), "the copy changed its line count")
+        parsed = []
+        for line in copy_lines:
+            if not line:
+                continue
+            try:
+                parsed.append(json.loads(line))
+            except json.JSONDecodeError:
+                self.fail("a copy line no longer parses as JSON")
+        block_a = self.joined_block(parsed, 0)
+        try:
+            command_a = json.loads(block_a)["command"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            self.fail("block (a) no longer reassembles to JSON with a command")
+        self.assertTrue(command_a == "ls /home/" + marker + "/.cache/x", "block (a) lacks the masked path")
+        self.assertTrue(self.joined_block(parsed, 1) == "ls /home/" + marker + "/w", "block (b) is not masked whole")
+        try:
+            packet_value = json.loads(packet_text)
+        except json.JSONDecodeError:
+            self.fail("the packet no longer parses")
+        self.assertTrue(set(packet_value) == set(unmasked), "the packet key set changed")
+        for field in ("case_id", "transcript_path", "helper_paths"):
+            self.assertTrue(packet_value[field] == unmasked[field], f"packet {field} changed under identity masking")
+        self.assertTrue(packet_value["errors"][0] == "unsafe_artifact_path:/p/-home-" + marker + "--cache-x",
+                        "packet error slug is not masked in position")
+        strings = [s for record in parsed for s in self.decoded_strings(record)]
+        for expected, label in (
+                ("/p/projects/-home-" + marker + "--cache-agentic-sdlc-eval/memory", "dash slug"),
+                ("C:/p/projects/C--Users-" + marker + "-repo/memory", "drive slug"),
+                ("dir C:" + bs + "Users" + bs + marker + bs + "repo", "backslash Users path"),
+                ("logged in as " + marker, "prose identity"),
+                ("gcc -I/home/" + marker + "/inc", "flag-glued path"),
+                (bs + bs + "wsl$" + bs + "Distro" + bs + "home" + bs + marker + bs + "x", "backslash-only path"),
+                ("cp /home/" + marker + "/c", "spaced run path"),
+                (control.replace("/home/runner/", "/home/" + marker + "/"), "control text")):
+            self.assertTrue(expected in strings, f"the copy lacks the expected {label}")
+        self.assertTrue(strings.count(marker + " ran") == 3, "prose identities are not all masked")
+
+    def test_split_stream_block_masks_like_the_joined_block(self):  # D26 / DP38
+        # Mutations: masking chunk by chunk, collecting from raw chunks (a two-character prefix becomes an identity),
+        # or treating a source escape backslash as a separator in partial_json blocks.
+        marker = "***MASKED:home***"
+        text = 'cd "/home/evaluser/x" && ls /p/-home-evaluser--cache-y'
+        expected = 'cd "/home/' + marker + '/x" && ls /p/-home-' + marker + "--cache-y"
+        for cut in range(len(text) - 1):
+            pieces = [text[:cut], text[cut:cut + 2], text[cut + 2:]]
+            records = self.stream_block(3, "text_delta", pieces, {"type": "text", "text": ""})
+            jsonl = "".join(json.dumps(record) + "\n" for record in records)
+            with self.subTest(block="text", cut=cut):
+                out = procedure_eval.mask_home_identities([jsonl])[0]
+                joined = self.joined_block([json.loads(line) for line in out.split("\n") if line], 3)
+                self.assertEqual(joined, expected)
+                self.assertNotIn("evaluser", out)
+                # Raw chunks are never a collection source: a chunk prefix such as `eva` is not an identity.
+                self.assertEqual(procedure_eval.collect_home_identities([jsonl]), ["evaluser"])
+        source = json.dumps({"command": "cd /Users/" + chr(10) + "x && ls /home/evaluser/y"})
+        self.assertIn(chr(92) + "n", source)  # precondition: the source holds a newline escape
+        for cut in range(len(source) - 1):
+            pieces = [source[:cut], source[cut:cut + 2], source[cut + 2:]]
+            records = self.stream_block(4, "input_json_delta", pieces, {"type": "tool_use", "id": "t", "name": "Bash"})
+            jsonl = "".join(json.dumps(record) + "\n" for record in records)
+            with self.subTest(block="partial_json", cut=cut):
+                out = procedure_eval.mask_home_identities([jsonl])[0]
+                joined = self.joined_block([json.loads(line) for line in out.split("\n") if line], 4)
+                self.assertEqual(json.loads(joined)["command"],
+                                 "cd /Users/" + chr(10) + "x && ls /home/" + marker + "/y")
+                self.assertNotIn("evaluser", out)
+                self.assertEqual(procedure_eval.collect_home_identities([jsonl]), ["evaluser"])
+        # An identity that starts with an escape letter: a match right after an odd backslash run sits inside the
+        # escape (`\nate` is a newline and `ate`) and stays; after an escaped backslash pair it is masked.
+        # Mutation: checking only the character before the match leaves `\*` in the source, which no longer parses.
+        source = json.dumps({"command": "cat /home/nate/x", "note": "done" + chr(10) + "ate lunch",
+                             "raw": "x" + chr(92) + "nate y"})
+        for cut in range(len(source) - 1):
+            pieces = [source[:cut], source[cut:cut + 2], source[cut + 2:]]
+            records = self.stream_block(5, "input_json_delta", pieces, {"type": "tool_use", "id": "t", "name": "Bash"})
+            jsonl = "".join(json.dumps(record) + "\n" for record in records)
+            with self.subTest(block="escape-letter identity", cut=cut):
+                out = procedure_eval.mask_home_identities([jsonl])[0]
+                joined = self.joined_block([json.loads(line) for line in out.split("\n") if line], 5)
+                try:
+                    value = json.loads(joined)
+                except json.JSONDecodeError:
+                    self.fail("masking broke a JSON escape in the reassembled block")
+                self.assertEqual(value, {"command": "cat /home/" + marker + "/x",
+                                         "note": "done" + chr(10) + "ate lunch", "raw": "x" + chr(92) + marker + " y"})
+
+    def test_masking_keeps_json_escapes_and_prose_controls(self):  # D26 / DP38
+        # Mutations: masking the serialized line instead of decoded strings, dropping the generic-name set or the
+        # minimum length (prose root / ab), reading URL tokens (prose list), or treating `_` as a boundary.
+        bs, marker = chr(92), "***MASKED:home***"
+        name = chr(0xC7) + "a" + chr(0x11F) + "r" + chr(0x131)
+        cases = [
+            ("ls /Users/" + chr(10) + "Shared", "ls /Users/" + chr(10) + "Shared"),
+            ("cd /home/" + chr(9) + "x", "cd /home/" + marker),
+            ("/home/ab/x and ab", "/home/" + marker + "/x and ab"),
+            ("/home/root/x and root", "/home/" + marker + "/x and root"),
+            ("the-home-page and --home-dir", "the-home-page and --home-dir"),
+            # The URL path is quoted so the DP37 segment ends before the prose word (an unquoted segment would run on
+            # over " and list" and hide the URL-token mutation); the URL token keeps its position mask only.
+            ('see "https://example.test/users/list" and list',
+             'see "https://example.test/users/' + marker + '" and list'),
+            ("C:" + bs + "Users" + bs + "Evan Doe" + bs + "r and C--Users-Evan-Doe-r",
+             "C:" + bs + "Users" + bs + marker + bs + "r and C--Users-" + marker + "-r"),
+            ("/home/" + name + "/x and " + name, "/home/" + marker + "/x and " + marker),
+            ("logged in as EvalUser after /home/evaluser/w; evaluser_tmp and preevaluser stay",
+             "logged in as " + marker + " after /home/" + marker + "/w; evaluser_tmp and preevaluser stay"),
+            # A slug-only identity: without the slug grammar its prose occurrence would survive.
+            ("/p/-home-evalslug--cache and evalslug ran", "/p/-home-" + marker + "--cache and " + marker + " ran"),
+        ]
+        line = json.dumps([raw for raw, _ in cases])
+        out = procedure_eval.mask_home_identities([line])[0]
+        self.assertEqual(json.loads(out), [want for _, want in cases])
+
     def test_live_harness_packet_not_scorable(self):
         case = {"id": "safe-case", "prompt": "probe"}
         with tempfile.TemporaryDirectory() as td:

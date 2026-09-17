@@ -2140,6 +2140,332 @@ def redact_transcript_lines(text: str) -> str:
     return "\n".join(out)
 
 
+# D26 / DP38: a home identity found in a path or project-slug form is masked wherever it occurs in the evidence copy
+# and in the packet's free-text fields. Masking reads decoded JSON strings (never serialized lines) and reassembled
+# Claude stream blocks, so a name split across delta chunks is still found and every JSON line still parses.
+_HOME_MARKER = "***MASKED:home***"
+_HOME_NAME_CHARS = "A-Za-z0-9_-\U0010FFFF"
+_HOME_NAME = f"[{_HOME_NAME_CHARS}](?:[{_HOME_NAME_CHARS}.-]*[{_HOME_NAME_CHARS}])?"
+_DECODED_SEPARATOR = r"[/\\]"
+_SOURCE_SEPARATOR = r"(?:/|\\/|\\\\)"  # partial_json source text: `/`, `\/` or an escaped backslash pair
+
+
+def _home_path_name_re(separator: str, preceded: str) -> re.Pattern[str]:
+    """A `home`/`Users` directory after a separator; group 1 is a spaced run before a separator, else one name."""
+    run = f"({_HOME_NAME}(?: {_HOME_NAME})+(?={separator})|{_HOME_NAME})"
+    return re.compile(f"{preceded}(?i:home|users){separator}+{run}")
+
+
+_HOME_PATH_NAME_RE = _home_path_name_re(_DECODED_SEPARATOR, r"(?<=[/\\])")
+_SOURCE_PATH_NAME_RE = _home_path_name_re(_SOURCE_SEPARATOR, r"(?:(?<=/)|(?<=\\\\))")
+# The DP37 (f) segment in partial_json source: any backslash escape other than a separator ends the segment.
+_SOURCE_SEGMENT_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])((?i:home|users)" + _SOURCE_SEPARATOR + r"+)(?!\*\*\*MASKED)[^/\\\r\n\"'<>|:;,*]+")
+_HOME_SLUG_NAME_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:-(?:mnt-[A-Za-z]-)?(?i:home|users)-|[A-Za-z]--(?i:users)-)([A-Za-z0-9_]+)")
+_URL_TOKEN_DELIMITERS = " \t\r\n\"'`"
+_GENERIC_HOME_NAMES = frozenset({
+    "root", "runner", "user", "users", "home", "admin", "administrator", "default", "public", "guest", "shared",
+    "ubuntu", "vscode", "node", "codespace",
+})
+_MIN_HOME_IDENTITY = 3
+_STREAM_DELTA_FIELDS = ("partial_json", "text", "thinking")
+# Packet fields that keep only the DP37 (f) position mask; identity matching never rewrites them.
+_PACKET_POSITION_FIELDS = frozenset({
+    "schema_version", "case_id", "runtime", "git_commit", "runtime_payload_identity", "fixture_hash", "spec_sha256",
+    "plan_sha256", "terminal_status", "scoring_source", "procedure_row_scorable", "transcript_path", "helper_paths",
+})
+
+
+def _in_url_token(text: str, start: int) -> bool:
+    """True when the blank/quote/backtick-delimited token around `start` holds `://` (a leading `file://` aside)."""
+    left = max(text.rfind(char, 0, start) for char in _URL_TOKEN_DELIMITERS) + 1
+    ends = [end for end in (text.find(char, start) for char in _URL_TOKEN_DELIMITERS) if end >= 0]
+    token = text[left:min(ends) if ends else len(text)]
+    return "://" in token.removeprefix("file://")
+
+
+def _collect_home_names(text: str, identities: set[str], source: bool) -> None:
+    path_re = _SOURCE_PATH_NAME_RE if source else _HOME_PATH_NAME_RE
+    for match in path_re.finditer(text):
+        if _in_url_token(text, match.start()):
+            continue
+        name = match.group(1)
+        identities.add(name)
+        if " " in name:  # a spaced run also yields its first name
+            identities.add(name.split(" ", 1)[0])
+    identities.update(match.group(1) for match in _HOME_SLUG_NAME_RE.finditer(text))
+
+
+def _home_identity_patterns(identities: set[str], source: bool) -> list[re.Pattern[str]]:
+    """Case-insensitive, name-bounded patterns per eligible identity: plain, slug and (in source) escaped spellings."""
+    forms: dict[str, str] = {}
+    for identity in identities:
+        if len(identity) < _MIN_HOME_IDENTITY or identity.lower() in _GENERIC_HOME_NAMES:
+            continue
+        spellings = [identity]
+        slug = re.sub(r"[^A-Za-z0-9]", "-", identity)
+        if slug.strip("-"):  # an all-dash spelling would mask punctuation runs, not a name
+            spellings.append(slug)
+        if source:
+            spellings += [json.dumps(identity, ensure_ascii=False)[1:-1], json.dumps(identity)[1:-1]]
+        for spelling in spellings:
+            forms.setdefault(spelling.lower(), spelling)
+    boundary = f"[{_HOME_NAME_CHARS}]"
+    return [re.compile(f"(?<!{boundary}){re.escape(forms[key])}(?!{boundary})", re.IGNORECASE) for key in sorted(forms)]
+
+
+def _starts_in_escape(text: str, start: int) -> bool:
+    """True when an odd backslash run ends at `start`: in JSON source the match begins on an escape letter."""
+    position = start
+    while position > 0 and text[position - 1] == "\\":
+        position -= 1
+    return (start - position) % 2 == 1
+
+
+def _home_spans(text: str, patterns: list[re.Pattern[str]], source: bool) -> list[tuple[int, int]]:
+    """Merged spans to mask: DP37 (f) segments, slug names in position and every identity occurrence."""
+    segment_re = _SOURCE_SEGMENT_RE if source else _HOME_SEGMENT_RE
+    spans = [(match.end(1), match.end()) for match in segment_re.finditer(text)]
+    spans += [match.span(1) for match in _HOME_SLUG_NAME_RE.finditer(text)
+              if not (source and _starts_in_escape(text, match.start()))]
+    for pattern in patterns:
+        spans += [match.span() for match in pattern.finditer(text)
+                  if not (source and _starts_in_escape(text, match.start()))]
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:  # overlapping or touching spans become one marker
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _mask_home_pieces(pieces: list[str], patterns: list[re.Pattern[str]], source: bool) -> list[str]:
+    """Mask the joined pieces; each marker goes into the piece holding its span's first character."""
+    joined = "".join(pieces)
+    spans = _home_spans(joined, patterns, source)
+    if not spans:
+        return list(pieces)
+    out: list[str] = []
+    end = 0
+    for piece in pieces:
+        start, end = end, end + len(piece)
+        parts: list[str] = []
+        cursor = start
+        for span_start, span_end in spans:
+            if span_end <= start or span_start >= end:
+                continue
+            if span_start > cursor:
+                parts.append(joined[cursor:span_start])
+            if span_start >= start:
+                parts.append(_HOME_MARKER)
+            cursor = max(cursor, min(span_end, end))
+        parts.append(joined[cursor:end])
+        out.append("".join(parts))
+    return out
+
+
+def _home_strings(value: Any, skip: set[tuple[int, str]]) -> list[str]:
+    """Every decoded string (keys too) of a parsed JSON value, except the skipped stream chunk strings."""
+    out: list[str] = []
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, list):
+            stack.extend(item)
+        elif isinstance(item, dict):
+            out.extend(item)
+            stack.extend(child for key, child in item.items() if (id(item), key) not in skip)
+    return out
+
+
+def _mask_home_value(value: Any, mask: Callable[[str], str], skip: set[tuple[int, str]]) -> bool:
+    """Mask every string inside a parsed JSON list or object in place (keys too); return whether it changed."""
+    changed = False
+    if isinstance(value, list):
+        for position, item in enumerate(value):
+            if isinstance(item, str):
+                masked = mask(item)
+                if masked != item:
+                    value[position] = masked
+                    changed = True
+            elif _mask_home_value(item, mask, skip):
+                changed = True
+    elif isinstance(value, dict):
+        entries: list[tuple[str, Any]] = []
+        rebuilt = False
+        for key, item in value.items():
+            if isinstance(item, str):
+                masked = item if (id(value), key) in skip else mask(item)
+                rebuilt = rebuilt or masked != item
+            else:
+                masked = item
+                changed = _mask_home_value(item, mask, skip) or changed
+            new_key = mask(key)
+            rebuilt = rebuilt or new_key != key
+            entries.append((new_key, masked))
+        if rebuilt:
+            if len({key for key, _ in entries}) != len(entries):
+                raise RuntimeError("home identity masking merged two object keys")
+            value.clear()
+            value.update(entries)
+            changed = True
+    return changed
+
+
+def _stream_chunk(value: Any) -> tuple[str, dict[str, Any] | None, str | None] | None:
+    """(block key, delta, field) for a Claude content_block_delta chunk, (block key, None, None) for a start or stop."""
+    if not isinstance(value, dict) or value.get("type") != "stream_event":
+        return None
+    event = value.get("event")
+    if not isinstance(event, dict):
+        return None
+    key = json.dumps([value.get("session_id"), value.get("parent_tool_use_id"), event.get("index")],
+                     sort_keys=True, default=str)
+    if event.get("type") in ("content_block_start", "content_block_stop"):
+        return key, None, None
+    delta = event.get("delta")
+    if event.get("type") != "content_block_delta" or not isinstance(delta, dict):
+        return None
+    field = next((name for name in _STREAM_DELTA_FIELDS if isinstance(delta.get(name), str)), None)
+    return None if field is None else (key, delta, field)
+
+
+_StreamBlock = list[tuple[int, dict[str, Any], str]]  # (copy line index, delta object, delta field) per chunk
+
+
+def _parse_home_units(
+        texts: list[str]) -> tuple[list[str], dict[int, Any], list[_StreamBlock], dict[int, dict[str, Any]]]:
+    """Split texts into copy lines, parsed JSON lines, stream blocks (by key, start/stop bounded) and packets."""
+    lines = texts[0].split("\n") if texts else []
+    parsed: dict[int, Any] = {}
+    for index, line in enumerate(lines):
+        try:
+            parsed[index] = json.loads(line[:-1] if line.endswith("\r") else line)
+        except json.JSONDecodeError:
+            continue
+    blocks: list[_StreamBlock] = []
+    open_blocks: dict[str, _StreamBlock] = {}
+    for index, value in parsed.items():
+        chunk = _stream_chunk(value)
+        if chunk is None:
+            continue
+        key, delta, field = chunk
+        if delta is None or field is None:
+            if key in open_blocks:
+                blocks.append(open_blocks.pop(key))
+        else:
+            open_blocks.setdefault(key, []).append((index, delta, field))
+    blocks.extend(open_blocks.values())  # a block still open at end of file ends there
+    packets: dict[int, dict[str, Any]] = {}
+    for position, text in enumerate(texts[1:], start=1):
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            packets[position] = value
+    return lines, parsed, blocks, packets
+
+
+def _chunk_skip(blocks: list[_StreamBlock]) -> set[tuple[int, str]]:
+    return {(id(delta), field) for block in blocks for _index, delta, field in block}
+
+
+def _is_source_block(block: _StreamBlock) -> bool:
+    return any(field == "partial_json" for _index, _delta, field in block)
+
+
+def _collect_home_units(texts: list[str], lines: list[str], parsed: dict[int, Any], blocks: list[_StreamBlock],
+                        packets: dict[int, dict[str, Any]]) -> set[str]:
+    identities: set[str] = set()
+    skip = _chunk_skip(blocks)
+    for index, line in enumerate(lines):
+        if index in parsed:
+            for text in _home_strings(parsed[index], skip):
+                _collect_home_names(text, identities, source=False)
+        else:
+            _collect_home_names(line, identities, source=False)
+    for block in blocks:
+        joined = "".join(delta[field] for _index, delta, field in block)
+        if not _is_source_block(block):
+            _collect_home_names(joined, identities, source=False)
+            continue
+        try:
+            decoded = json.loads(joined)
+        except json.JSONDecodeError:
+            _collect_home_names(joined, identities, source=True)
+            continue
+        for text in _home_strings(decoded, set()):
+            _collect_home_names(text, identities, source=False)
+    for position, text in enumerate(texts[1:], start=1):
+        for unit in _home_strings(packets[position], set()) if position in packets else [text]:
+            _collect_home_names(unit, identities, source=False)
+    return identities
+
+
+def collect_home_identities(texts: list[str]) -> list[str]:
+    """Every home identity found in a path or slug form across the texts (DP38 (a)), eligible or not."""
+    return sorted(_collect_home_units(texts, *_parse_home_units(texts)))
+
+
+def mask_home_identities(texts: list[str]) -> list[str]:
+    """Mask home identities (DP38) in a transcript copy (`texts[0]`) and in packets or plain texts (`texts[1:]`).
+
+    The copy is JSONL-or-text: a line that parses as JSON is masked through its decoded strings and re-serialized
+    only when it changed; a stream block is masked as its reassembled text; any other line is masked as text. A
+    later text that parses as one JSON object is a packet: its structural fields keep the DP37 (f) position mask
+    only, and it is re-serialized as write_evidence_packet serializes it. Any failure raises.
+    """
+    lines, parsed, blocks, packets = _parse_home_units(texts)
+    identities = _collect_home_units(texts, lines, parsed, blocks, packets)
+    decoded_patterns = _home_identity_patterns(identities, source=False)
+    source_patterns = _home_identity_patterns(identities, source=True)
+
+    def full(text: str) -> str:
+        return _mask_home_pieces([text], decoded_patterns, source=False)[0]
+
+    skip = _chunk_skip(blocks)
+    changed: set[int] = set()
+    for index, value in parsed.items():
+        if isinstance(value, str):
+            masked = full(value)
+            if masked != value:
+                parsed[index] = masked
+                changed.add(index)
+        elif _mask_home_value(value, full, skip):
+            changed.add(index)
+    for block in blocks:
+        source = _is_source_block(block)
+        masked = _mask_home_pieces([delta[field] for _index, delta, field in block],
+                                   source_patterns if source else decoded_patterns, source)
+        for (index, delta, field), piece in zip(block, masked):
+            if piece != delta[field]:
+                delta[field] = piece
+                changed.add(index)
+    out_lines = []
+    for index, line in enumerate(lines):
+        if index in changed:
+            out_lines.append(json.dumps(parsed[index], ensure_ascii=False) + ("\r" if line.endswith("\r") else ""))
+        else:
+            out_lines.append(line if index in parsed else full(line))
+    result = ["\n".join(out_lines)] if texts else []
+    for position, text in enumerate(texts[1:], start=1):
+        if position not in packets:
+            result.append(full(text))
+            continue
+        packet: dict[str, Any] = {}
+        for key, value in packets[position].items():
+            holder = [value]
+            _mask_home_value(holder, mask_home_paths if key in _PACKET_POSITION_FIELDS else full, set())
+            packet[mask_home_paths(key)] = holder[0]
+        result.append(json.dumps(packet, indent=2, ensure_ascii=False) + "\n")
+    return result
+
+
 def write_evidence_packet(packet: dict[str, Any], evidence_dir: Path, case_id: str, transcript_text: str, *,
                           fixture_roots: list[Path]) -> None:
     """Validate, redact in memory, then write `<case-id>.transcript.jsonl` and `<case-id>.json` (AC66, AC67).
@@ -2161,8 +2487,8 @@ def write_evidence_packet(packet: dict[str, Any], evidence_dir: Path, case_id: s
         raise ValueError("evidence_packet_exists")
     try:
         clean_packet = redact_json(dict(packet, helper_paths=helper_paths(evidence_root)))
-        clean_transcript = mask_home_paths(redact_transcript_lines(transcript_text))
-        packet_text = mask_home_paths(json.dumps(clean_packet, indent=2, ensure_ascii=False) + "\n")
+        clean_transcript, packet_text = mask_home_identities(
+            [redact_transcript_lines(transcript_text), json.dumps(clean_packet, indent=2, ensure_ascii=False) + "\n"])
     except (RuntimeError, OSError, ValueError) as exc:  # redaction fails closed: nothing is written
         raise RuntimeError("evidence_redaction_failed") from exc
     try:
