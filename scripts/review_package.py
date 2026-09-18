@@ -10,7 +10,7 @@ import argparse
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out_dir = args.out_dir or default_out_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out = out_dir / f"review-package-{_slug(args.base)}-{_slug(args.head)}-{stamp}.md"
     try:
         log = git(["log", "--oneline", f"{args.base}..{args.head}"])

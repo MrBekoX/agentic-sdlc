@@ -11,7 +11,8 @@ Before any git operation; before finalizing a change set.
 - Work on a feature branch; keep `main` / `master` clean.
 - Before committing: run `git status` + `git diff`, confirm **only intended files** changed, scan the diff for secrets.
 - Propose a clear commit message tied to the task; let the user commit.
-- Use `/git-safety-check` (read-only) as the pre-commit gate.
+- Run the read-only git-safety-check command as the pre-commit gate.
+  Claude Code example: /agentic-sdlc:git-safety-check (Codex exposes the converted command as a skill).
 
 ## Forbidden
 - Auto-committing or auto-pushing.

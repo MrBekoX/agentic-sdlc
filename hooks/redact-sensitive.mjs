@@ -10,7 +10,8 @@ if (process.argv.includes('--json')) {
   const clean = (value, key) => {
     if (typeof value === 'string') {
       if (key !== undefined) {
-        const member = JSON.stringify({ [key]: value });
+        // A `"` inside the value would end json-credential's value class early (SEC-14).
+        const member = JSON.stringify({ [key]: value.replace(/"/g, "'") });
         if (redactSecrets(member, credentialPatterns) !== member) return '***MASKED:json-credential***';
       }
       return redactSecrets(value);

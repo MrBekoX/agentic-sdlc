@@ -56,7 +56,37 @@
         "\\bgit\\s+commit\\b",
         "\\bgit\\s+push\\b",
         "\\bgit\\s+merge\\b"
-      ]
+      ],
+      "_strict_note": "The strict fields are inert without --strict-evidence. The Codex reviewer result is read only from the documented reviewer output (the security-audit findings table header, or the implementation-auditor / Implementation Control Report verdict), never from a new marker.",
+      "strict": {
+        "require_red_green": true,
+        "check_artifact_depth": true,
+        "reviewers": [
+          {
+            "step": "security",
+            "skills": ["agentic-sdlc:security-audit"],
+            "agents": ["security-reviewer"],
+            "codex_result": "findings-table"
+          },
+          {
+            "step": "control",
+            "skills": ["agentic-sdlc:implementation-control"],
+            "agents": ["implementation-auditor"],
+            "codex_result": "control-verdict"
+          }
+        ],
+        "required_order": [
+          "dispatch-strategy",
+          "spec-written",
+          "plan-written",
+          "core-skill",
+          "red-run",
+          "green-run",
+          "security",
+          "control",
+          "completion-claim-gate"
+        ]
+      }
     },
     {
       "id": "agentic-sdlc-pipeline-per-package",
@@ -74,7 +104,37 @@
         "\\bgit\\s+commit\\b",
         "\\bgit\\s+push\\b",
         "\\bgit\\s+merge\\b"
-      ]
+      ],
+      "_strict_note": "The strict fields are inert without --strict-evidence. The Codex reviewer result is read only from the documented reviewer output (the security-audit findings table header, or the implementation-auditor / Implementation Control Report verdict), never from a new marker.",
+      "strict": {
+        "require_red_green": true,
+        "check_artifact_depth": true,
+        "reviewers": [
+          {
+            "step": "security",
+            "skills": ["agentic-sdlc:security-audit"],
+            "agents": ["security-reviewer"],
+            "codex_result": "findings-table"
+          },
+          {
+            "step": "control",
+            "skills": ["agentic-sdlc:implementation-control"],
+            "agents": ["implementation-auditor"],
+            "codex_result": "control-verdict"
+          }
+        ],
+        "required_order": [
+          "dispatch-strategy",
+          "spec-written",
+          "plan-written",
+          "core-skill",
+          "red-run",
+          "green-run",
+          "security",
+          "control",
+          "completion-claim-gate"
+        ]
+      }
     }
   ]
 }

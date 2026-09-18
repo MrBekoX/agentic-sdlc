@@ -20,6 +20,28 @@ Each entry includes:
 
 ---
 
+## 2026-09-18 — A patched seam the code no longer uses makes a test assert the environment
+
+- **Task / context:** The first two-OS CI run of the publication-readiness branch. Both platforms failed; neither failure was reproducible on the development machine.
+- **Symptom:** `test_live_run_stops_before_model_on_git_failure` patched `procedure_eval.shutil.which` and asserted a fixture-git error, but CI reported `error=claude CLI missing`. Separately, Windows CI failed `test_codex_home_resolution` with `None != 'C:/Users/RUNNER~1/.../.codex'`.
+- **Root cause:** Two different shapes of the same blindness. (1) A security fix (SEC-8) moved the bare-name CLI lookup off `shutil.which` onto an absolute-PATH scan, so the test's patch became inert and the real PATH decided the result: it passed locally only because a `claude` binary happened to be installed. (2) `hooks/codex-rollout.mjs` excluded `~` from its literal-absolute-path pattern, so `resolveCodexHome` returned null for every Windows 8.3 short name — a real product bug, invisible locally because this machine's temp path is a long name.
+- **Correct fix:** Patch the seam the implementation actually calls (`resolve_agent_cli`) and assert against the stub it returns, so the test no longer depends on what is installed. Accept `~` inside the path pattern: it is a literal there, and leading-`~` expansion cannot apply because the pattern already requires the path to start with `/` or a drive letter. RED test first in both cases.
+- **Preventive rule / automated check:** When a change moves a lookup, grep the tests for patches of the OLD seam — an inert patch does not fail, it silently hands the assertion to the environment. And treat a green local gate as evidence about one OS with one set of installed binaries: keep the two-OS CI matrix in the required set, because path shapes (8.3 short names, case folding, separators) and absent binaries only appear there.
+- **Related files & tests:** `scripts/run_procedure_eval.py` (`resolve_agent_cli`), `tests/test_procedure_eval.py::TestFixtureGitFailure`, `hooks/codex-rollout.mjs` (`LITERAL_ABSOLUTE_PATH`), `tests/test_codex_completion_claim_guard.py::TestOwnerSignalScanner::test_codex_home_resolution`.
+
+---
+
+## 2026-09-18 — A run that never happened is not a failed run
+
+- **Task / context:** Publication-readiness live evidence. The one maintainer-approved Claude file-tool sentinel probe was made; the CLI could not authenticate, answered with its own `<synthetic>` message, billed nothing, and never started a model turn.
+- **Symptom:** `probe_check.py` classified the record `claude_file_sentinel=failed:no_write_attempt,model_mismatch` / `blocked:probe_failed`, which reads as "Claude was asked to write into the capture area and attempted nothing" — a statement about sandbox behaviour that the evidence does not support. `fill_ledger.py` then rendered the same false reading into the release ledger ("no native refusal was observed, so the AC78 prerequisite was not met"), and its reason rule rejected the honest not-run row because the text carried none of the accepted tokens.
+- **Root cause:** Both classifiers had exactly two outcomes for an unsuccessful call — passed or failed — so every environment failure was funnelled into the failure vocabulary of the thing under test. The evidence needed a third state that distinguishes *the run happened and failed* from *the run never happened*.
+- **Correct fix:** A fail-closed `not-run:no_model_turn` classification requiring every one of: only `<synthetic>` assistant model ids, no `tool_use`, an error result, zero cost, and no approval violation — a real model id, any tool call, a non-error result or any spend keeps the failure verdict. The record gained `assistant_model_ids`, re-derived from the kept stream without repeating the paid call. The ledger row now states that the call never reached the model, that the prerequisite could not be evaluated in either direction, and that the runtime is halted.
+- **Preventive rule / automated check:** A tool that grades a live run must be able to say "this run never happened", and that state must be *earned* by positive evidence, never inferred from the absence of a success signal — otherwise an expired session, a missing binary or a network fault is published as a product or security finding. Pair every such classifier with fail-closed twin controls (real model id, billed run, unapproved command) that must stay `failed`.
+- **Related files & tests:** `tests/artifacts/publication/tools/probe_check.py` (`no_model_turn`), `tools/fill_ledger.py` (Claude procedure row), the fourteen Task 136 probe controls, and plan decision D32.
+
+---
+
 ## 2026-09-13 — Compare canonical paths when the API resolves candidates
 
 - **Task / context:** Merge the dual-runtime changes through Windows and Ubuntu CI.

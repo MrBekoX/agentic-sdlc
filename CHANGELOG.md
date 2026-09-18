@@ -12,6 +12,19 @@
 - Add Codex presentation assets while retaining the hook-capable compatibility manifest; document native lifecycle coverage and its snapshot, trust and effort limits.
 - Refresh release documentation, public evidence visibility and clean distribution checks; use the repository's python3 entry point in CI.
 - Clarify pipeline branch-before-write evidence, completed security reviewer results and dependency-install boundaries; require failing test commands to propagate failure to the implementation auditor.
+- Close Codex exit-attribution forgery by default: a correlated exit code counts only when the runner is the last statement after splitting on unquoted `;`, newline and `||`, the trailing runner is not version-only or help-only, and a command with a separator stays inside the documented safe shell grammar.
+- Add warn-level `branch` and `review-result` flow steps; neither ever blocks.
+- Add opt-in strict Codex evidence through `AGENTIC_FLOW_STRICT_EVIDENCE` and the offline `scripts/strict_flow_evidence.py`, which prints `strict_evidence`, `strict_completion` and `strict_branch`.
+- Emit an owner-neutral Codex completion message in Superpowers-owned or Ambiguous phases, and release that hook's byte lock with House-message byte pins.
+- Add procedure-eval `--strict-evidence`, `--evidence-dir`, `--fixture-root` and `--allow-fixture-commit` (now required for `--live`).
+- Add `scripts/build_release.py` for commit-tree release and skills-only archives, `--verify` and `--scan-history`, and make secret scanning examine every match on a line.
+- Build, verify and gate the extracted release archive in CI on every push and pull request.
+- Correct the Codex listing manifest fields and record unauthenticated link checks in `docs/publication/link-checks.json`.
+- Check every visible version declaration in `bump_version.py --check`.
+- Document the four distribution paths, the namespaced Claude command `/agentic-sdlc:git-safety-check` with runtime-neutral naming elsewhere, and the corrected Codex personal plugin path `~/plugins/agentic-sdlc`.
+- Add `scripts/check_codex_hook_trust.py`, a read-only post-install Codex hook trust check, with per-environment trust steps in `docs/troubleshooting.md`.
+- Clear the three real-tree scanner matches: a same-line allow marker on the git-safety-check grep pattern line, a reworded security-audit masking example, and a concatenated JWT-shaped validator test sample.
+- Add the release ledger structure tests (`tests/test_release_ledger_docs.py`), the data-handling disclosure and the Claude community and OpenAI skills-only submission packets.
 
 ## 0.4.2 - 2026-09-08
 

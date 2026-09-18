@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out_dir = (args.out_dir or plan.parent / ".handoffs").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out = out_dir / f"task-{args.task_number}-brief-{stamp}.md"
     try:
         source = plan.relative_to(Path.cwd().resolve()).as_posix()

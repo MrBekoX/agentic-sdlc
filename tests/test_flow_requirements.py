@@ -67,6 +67,41 @@ class TestFlowRequirements(unittest.TestCase):
         for key in ("testCommand", "completionClaim"):
             re.compile(self.cfg[key])
 
+    def test_branch_step_warn_only_in_all_four_flows(self):  # AC32, AC33
+        for name in ("root-cause-fix", "feature-build", "safe-refactor", "agentic-sdlc-pipeline"):
+            with self.subTest(flow=name):
+                steps = [s for s in self.cfg["flows"][name]["steps"] if s["id"] == "branch"]
+                self.assertEqual(len(steps), 1)
+                step = steps[0]
+                self.assertEqual((step["stop"], step["beforeSourceEdit"], [e["kind"] for e in step["evidence"]]),
+                                 ("warn", False, ["branch"]))
+
+    def test_review_result_reviewers_match_flow_steps(self):  # AC37
+        for name, flow in self.cfg["flows"].items():
+            with self.subTest(flow=name):
+                steps = {s["id"]: s for s in flow["steps"]}
+                review = [s for s in flow["steps"] if s["id"] == "review-result"]
+                self.assertEqual(len(review), 1)
+                step = review[0]
+                self.assertEqual((step["stop"], step["beforeSourceEdit"], len(step["evidence"])), ("warn", False, 1))
+                evidence = step["evidence"][0]
+                self.assertEqual(evidence["kind"], "reviewResult")
+                expected = {group: [{"tool": e["tool"], "contains": e["contains"]}
+                                    for e in steps[group]["evidence"] if e["kind"] == "toolUse"]
+                            for group in ("control", "security") if group in steps}
+                self.assertEqual(evidence["reviewers"], expected)
+        safe_refactor = [s for s in self.cfg["flows"]["safe-refactor"]["steps"] if s["id"] == "review-result"]
+        self.assertEqual(set(safe_refactor[0]["evidence"][0]["reviewers"]), {"control"})
+
+    def test_review_result_markers_resolve(self):  # AC37
+        markers = [member["contains"]
+                   for flow in self.cfg["flows"].values() for step in flow["steps"]
+                   for item in step["evidence"] if item.get("kind") == "reviewResult"
+                   for group in item["reviewers"].values() for member in group]
+        self.assertTrue(markers, "no reviewResult evidence declares reviewers")
+        for marker in markers:
+            self.assertIn(marker, self.known)
+
 
 if __name__ == "__main__":
     unittest.main()

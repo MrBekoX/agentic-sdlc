@@ -86,6 +86,15 @@ def scan_high(text):
     )
 
 
+def scan_broad(text):
+    """secret-patterns.scanLines(text, BROAD) -> list of findings."""
+    return _node_json(
+        "import('./hooks/secret-patterns.mjs')"
+        ".then(m=>process.stdout.write(JSON.stringify(m.scanLines(c,m.BROAD))))",
+        text,
+    )
+
+
 @unittest.skipIf(NODE is None, "node not available")
 class TestPlaceholderFilterOnVendorTokens(unittest.TestCase):
     """F4 - the placeholder heuristic must not suppress a structurally valid vendor token.
@@ -1187,6 +1196,142 @@ class TestInlineAllowlistMarker(unittest.TestCase):
         self.assertTrue(scan_high("TOKEN = " + GH_CLEAN))
 
 
+@unittest.skipIf(NODE is None, "node not available")
+class TestPerMatchSuppression(unittest.TestCase):
+    """D22 - a suppressed match (a placeholder value, a published documentation sample or a degenerate
+    token) must hide only ITSELF. scanLines used to inspect only the first match of each pattern, so a
+    real token after a suppressed one on the same line - separated, glued, or joined by a comma or an
+    ampersand inside one greedy value - was never examined. Every token here is assembled at runtime."""
+
+    AWS_DOC = "AKIA" + "IOSFODNN7EXAMPLE"   # the published AWS documentation sample (exact DOC_SAMPLES value)
+    PASSWORD = "pass" + "word="
+    CHANGE_ME = "change" + "me"
+    REAL_PASSWORD = "Hunter2" + "Real99"     # 13 synthetic characters
+    MIXED_GITHUB = "TOKEN = " + GH_PLACEHOLDER + " and " + GH_CLEAN
+
+    def _one_finding(self, line, label=None):
+        for scan in (scan_high, scan_broad):
+            found = scan(line)
+            self.assertEqual(len(found), 1, scan.__name__ + ": " + repr(found))
+            self.assertEqual(found[0]["line"], 1)
+            if label is not None:
+                self.assertEqual(found[0]["label"], label)
+
+    def test_real_token_after_suppressed_vendor_sample_is_detected(self):
+        # Mutation: stopping at the first match of a pattern, or dropping the token-boundary retry (glued forms).
+        cases = {
+            "github-separated": GH_PLACEHOLDER + " then " + GH_CLEAN,
+            "github-glued": GH_PLACEHOLDER + GH_CLEAN,
+            "aws-separated": self.AWS_DOC + " then " + AWS_CLEAN,
+            "aws-glued": self.AWS_DOC + AWS_CLEAN,
+            "aws-sample-glued-to-github": self.AWS_DOC + GH_CLEAN,
+            "github-placeholder-glued-to-aws": GH_PLACEHOLDER + AWS_CLEAN,
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self._one_finding(line)
+
+    def test_real_password_after_placeholder_assignment_is_detected(self):
+        # Mutation: iterating the value pattern globally (the greedy change-me value swallows the real assignment).
+        cases = {
+            "semicolon": self.PASSWORD + self.CHANGE_ME + "; " + self.PASSWORD + self.REAL_PASSWORD,
+            "comma": self.PASSWORD + self.CHANGE_ME + "," + self.PASSWORD + self.REAL_PASSWORD,
+            "query-string": "?" + self.PASSWORD + "change-" + "me" + "&" + "pw" + "d=" + self.REAL_PASSWORD,
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self._one_finding(line, "password-literal")
+
+    def test_real_assigned_secret_after_placeholder_value_is_detected(self):
+        # Mutation: resuming the prefix search after the whole suppressed match instead of at its start + 1.
+        line = "api_" + "key=" + "change-me-" + "q" * 12 + "-" + "sec" + "ret=" + _R16
+        self.assertEqual(scan_high(line), [])
+        self.assertEqual(scan_broad(line), [{"line": 1, "label": "assigned-secret"}])
+
+    def test_first_unsuppressed_pattern_labels_the_single_finding(self):
+        # Mutation: labelling by the first pattern with ANY match, or keeping the hidden lower-index match hidden.
+        cases = {
+            "sample-then-real-aws-then-github": self.AWS_DOC + " " + AWS_CLEAN + " " + GH_CLEAN,
+            "github-glued-to-aws": GH_CLEAN + AWS_CLEAN,
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                expected = [{"line": 1, "label": "aws-access-key-id"}]
+                self.assertEqual(scan_high(line), expected)
+                self.assertEqual(scan_broad(line), expected)
+
+    def test_suppressed_matches_alone_stay_suppressed(self):
+        # CONTROL: examining every match must not turn a placeholder, a sample or prose into a finding.
+        cases = {
+            "github-placeholder": GH_PLACEHOLDER,
+            "aws-sample": self.AWS_DOC,
+            "github-placeholders-glued": GH_PLACEHOLDER + GH_PLACEHOLDER,
+            "change-me-then-env-reference": self.PASSWORD + self.CHANGE_ME + "; " + self.PASSWORD + "${DB_PASSWORD}",
+            "task-prose": "task-" + "abcdefghij" * 3,
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self.assertEqual(scan_high(line), [])
+                self.assertEqual(scan_broad(line), [])
+
+    def test_marker_still_escapes_a_mixed_line(self):
+        # CONTROL: the per-line escape hatch is unchanged.
+        self.assertEqual(scan_high(self.MIXED_GITHUB + " # agentic-sdlc:allow-secret"), [])
+
+    def test_per_match_scan_stays_linear(self):
+        # Mutation: re-scanning the greedy value from every prefix start (quadratic on a comma chain).
+        import time
+        lines = [
+            GH_PLACEHOLDER * 16000,
+            (GH_PLACEHOLDER + " ") * 16000,
+            AWS_PLACEHOLDER * 32000,
+            (self.PASSWORD + self.CHANGE_ME + ",") * 16000,
+            ('"pass' + 'word": "' + "change-me-please" + '", ') * 16000,
+        ]
+        started = time.time()
+        found = _node_json(
+            "import('./hooks/secret-patterns.mjs').then(m=>{const ls=JSON.parse(c);"
+            "process.stdout.write(JSON.stringify(ls.map(l=>[m.scanLines(l,m.HIGH).length,m.scanLines(l,m.BROAD).length])))})",
+            json.dumps(lines),
+        )
+        self.assertLess(time.time() - started, 10.0, "per-match scanning is not linear")
+        self.assertEqual(found, [[0, 0]] * len(lines))
+
+    def _git_repo_with_staged(self, td, body):
+        subprocess.run(["git", "init", "-b", "feat"], cwd=td, check=True, capture_output=True)
+        (Path(td) / "config.txt").write_text(body + "\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "config.txt"], cwd=td, check=True, capture_output=True)
+
+    def _scan_commit(self, td):
+        proc = subprocess.run(
+            [NODE, str(REPO / "hooks" / "scan-commit.mjs")], cwd=td,
+            input=json.dumps({"tool_input": {"command": "git commit -m wip"}, "cwd": td}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, "scan-commit.mjs crashed")
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    @unittest.skipIf(GIT is None, "git not available")
+    def test_commit_guard_blocks_mixed_line(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._git_repo_with_staged(td, self.MIXED_GITHUB)
+            out = self._scan_commit(td)
+            self.assertEqual(out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+            proc = subprocess.run([NODE, str(REPO / "hooks" / "git-hook-scan.mjs"), "pre-commit"], cwd=td,
+                                  capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(proc.returncode, 1, "git-hook-scan pre-commit did not block the mixed line")
+            self.assertTrue("github-token" in proc.stderr, "the block message does not name the label")
+            self.assertFalse(GH_CLEAN in proc.stderr + proc.stdout, "the raw token was echoed")
+
+    @unittest.skipIf(GIT is None, "git not available")
+    def test_commit_guard_does_not_deny_suppressed_sample_only(self):
+        # CONTROL: a staged placeholder alone must stay committable.
+        with tempfile.TemporaryDirectory() as td:
+            self._git_repo_with_staged(td, "TOKEN = " + GH_PLACEHOLDER)
+            out = self._scan_commit(td)
+            self.assertNotEqual(out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+
+
 class TestGuardWiring(unittest.TestCase):
     """F7 - the wiring itself must not gate a security guard behind a filter that a legitimate
     spelling of the same operation escapes.
@@ -1247,6 +1392,67 @@ class TestGuardWiring(unittest.TestCase):
                         guard + ": `if` " + repr(cond) + " filters on a git subcommand; an alias "
                         "for that subcommand escapes the filter and the guard never runs.",
                     )
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestQuotedKeyPasswordLiteral(unittest.TestCase):
+    """SEC-7 - `password-literal` required its keyword to be followed directly by `\\s*[:=]`, so a
+    JSON-quoted key never matched: the closing `"` intervenes. `json-credential` covers the same line
+    only from 16 characters, so a 6-15 character password was blocked in YAML/env spelling and
+    invisible in the identical JSON spelling - the same value, two verdicts. Every value here is
+    synthetic and assembled at runtime, so no password-shaped literal exists in this file."""
+
+    REAL = "Hunter2" + "Real99"                 # 13 characters
+    SHORT = "Sw0rd" + "fish"                    # 9 characters
+    LONG = "Hunter2" + "Real99" + "Xyz123"      # 19 characters: already inside json-credential's floor
+    WORD = "pass" + "word"
+    FINDING = [{"line": 1, "label": "password-literal"}]
+
+    @classmethod
+    def member(cls, name, value, quote='"'):
+        """One `  "name": "value",` member, built at runtime so this source holds no such literal."""
+        sep = ":" + " "
+        return "  " + quote + name + quote + sep + quote + value + quote + ","
+
+    def test_quoted_key_password_is_high_confidence(self):
+        # Mutation: requiring the separator to follow the keyword directly (the JSON spelling escapes).
+        cases = {
+            "quoted-json-name": self.member(self.WORD.capitalize(), self.REAL),
+            "quoted-sa-name": self.member(("sa_" + self.WORD).upper(), self.REAL),
+            "quoted-short-value": self.member("pw" + "d", self.SHORT),
+            "single-quoted-name": self.member(self.WORD[:4] + "wd", self.SHORT, "'"),
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self.assertEqual(scan_high(line), self.FINDING)
+
+    def test_existing_spellings_keep_their_verdict(self):
+        # CONTROL: the shapes already covered must stay covered, in HIGH and in BROAD.
+        for label, line in {
+            "yaml-single-quoted": "  " + ("sa_" + self.WORD).upper() + ": " + "'" + self.REAL + "'",
+            "env-assignment": self.WORD + "=" + self.REAL,
+            "connection-string": "Server=db;" + self.WORD.capitalize() + "=" + self.REAL + ";",
+        }.items():
+            with self.subTest(case=label):
+                self.assertEqual(scan_high(line), self.FINDING)
+                self.assertEqual(scan_broad(line), self.FINDING)
+
+    def test_long_quoted_value_is_still_a_finding(self):
+        # A 16+ character quoted value was already reported (as json-credential); it stays a HIGH
+        # finding, now under the lower-indexed password-literal label.
+        self.assertEqual(scan_high(self.member(self.WORD.capitalize(), self.LONG)), self.FINDING)
+
+    def test_widening_does_not_flag_hashes_templates_or_prose(self):
+        # CONTROL: a fix that simply matches more fails these.
+        for label, line in {
+            "password-hash": self.member(self.WORD + "_hash", self.REAL),
+            "template-value": self.member(self.WORD.capitalize(), "${DB_" + self.WORD.upper() + "}"),
+            "masked-value": self.member(self.WORD.capitalize(), "***MASKED***"),
+            "prose": "just a normal line of documentation about " + self.WORD + "s",
+            "short-value": self.member(self.WORD.capitalize(), "ab12"),
+        }.items():
+            with self.subTest(case=label):
+                self.assertEqual(scan_high(line), [])
 
 
 if __name__ == "__main__":

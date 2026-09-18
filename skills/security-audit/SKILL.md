@@ -71,7 +71,7 @@ The lenses (injection / authz-IDOR / secrets / auth) are independent read-only s
 13. **Permission boundaries** — least privilege; no privilege escalation paths.
 
 ## Reporting rule (critical)
-- **Never print a real secret value.** Mask it: `Password=***MASKED***`.
+- **Never print a real secret value.** Keep the key name and replace only the value with `***MASKED***` (a connection-string password value is written as `***MASKED***`).
 - Give only `file:line` + risk type. Classify by severity (Critical / High / Medium / Low).
 
 ## Output

@@ -36,8 +36,8 @@ Use the repository-mandated `python3` entry point on both platforms; verify it i
 
 | Command | Proves |
 |---|---|
-| `python3 scripts/bump_version.py --check` | `VERSION`, all shipped plugin manifests, and Claude marketplace metadata agree. |
-| `python3 scripts/check_all.py` | Every `skills/<name>/SKILL.md` has valid frontmatter; name matches the directory; only the six shared keys (`name`, `description`, `license`, `allowed-tools`, `metadata`, `compatibility`); description length and angle-bracket checks, plus rejection of the known leading-Use imperative regression (third-person meaning and trigger intent still need review); the discovered `tests/test_*.py` suites pass. |
+| `python3 scripts/bump_version.py --check` | `VERSION`, all shipped plugin manifests, and Claude marketplace metadata agree, and so do the visible version declarations: the README `Version` token and README current-version sentence, the `docs/plugin-readme.md` version line, and the `docs/release-readiness.md` publish-gate sentence and verdict-template `version=` line. |
+| `python3 scripts/check_all.py` | A regex-based frontmatter check, not a full YAML parser or Agent Skills specification validator. Official Agent Skills fields: only the six keys `name`, `description`, `license`, `allowed-tools`, `metadata` and `compatibility` may appear, and `name` matches the directory. House-only rules, checked separately: third-person description framing, enforced only as rejection of the known leading-Use imperative regression (description meaning and trigger intent still need review); the angle-bracket ban; and a description length check. It also runs the discovered `tests/test_*.py` suites. |
 | `python3 tests/skills/harness.py` | Skill/agent/workflow/hook/skill-contract references resolve; golden cross-references have not drifted; safety-fixture evidence is wired to real files; `${CLAUDE_PLUGIN_ROOT}` and `${PLUGIN_ROOT}` paths plus Claude/Codex hook configs resolve. |
 | `python3 -m unittest discover -s tests -v` | `detect_context.py` classifies workspaces correctly; `validate_artifacts.py` enforces spec/plan structure and scans for placeholders/secrets; hook and workflow JavaScript parses under `node --check` (skipped if `node` is missing). |
 
@@ -54,7 +54,16 @@ Use live evals for those claims.
 
 ## Automation / CI policy
 
-**No CI workflow is configured.** The local gate is the default health check (GitHub Actions CI was intentionally removed — see CHANGELOG `0.2.0`).
+`.github/workflows/ci.yml` runs on `push` and `pull_request`, on `ubuntu-latest` and `windows-latest`. The source steps run:
+
+```bash
+python3 scripts/bump_version.py --release-check
+python3 scripts/check_all.py
+python3 tests/skills/harness.py
+python3 -m unittest discover -s tests -v
+```
+
+The archive steps (DP16) then run on every push and pull request. They build the release archive with `python3 scripts/build_release.py --output`, verify it with `python3 scripts/build_release.py --verify`, extract it to a clean directory without creating a commit, and run all five local gate commands there, including `python3 scripts/bump_version.py --check`. A coverage comparison against the source run counts named skips, and the archive-run logs are named `archive-*`.
 
 Publishing, release creation, pushing generated commits, and marketplace/plugin publication must remain **manual and explicitly requested**. Do not automate those steps from an eval or a script.
 
@@ -340,9 +349,11 @@ Behavior evals should move toward **transcript JSONL** checks for evidence such 
 |---|---|---|
 | Dry-run / schema | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --dry-run` | Validate the eval fixture without running a model. |
 | Transcript | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-pass.jsonl` | Evaluate a captured transcript deterministically. |
-| Live | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live --max-budget-usd 5.00` | Run the prompt through Claude Code in an isolated copied fixture and evaluate the resulting transcript. |
+| Live | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live --allow-fixture-commit --max-budget-usd 5.00` | Run the prompt through Claude Code in an isolated copied fixture and evaluate the resulting transcript. |
 
-Live mode defaults to `--permission-mode auto` so safe headless commands can run without an interactive prompt. Override it only when intentionally auditing permission behavior.
+Live mode defaults to `--permission-mode auto` so safe headless commands can run without an interactive prompt. Override it only when intentionally auditing permission behavior. `python3 scripts/run_procedure_eval.py --live` now requires `--allow-fixture-commit`, the consent for the baseline commit the harness creates inside the isolated fixture copy; without it the eval exits 2 before creating a temporary directory, running Git or starting a model.
+
+Live mode starts the agent CLI only from an absolute path found on an absolute `PATH` entry, the same rule `git` and `node` already follow (D25 model (5)), so a `claude` planted in the checked-out project is never run. When the CLI sits outside any absolute `PATH` entry — a WSL or nvm layout — name it explicitly with `--claude <path>`; an unresolvable CLI still fails with `claude CLI missing`.
 
 ### What it checks
 

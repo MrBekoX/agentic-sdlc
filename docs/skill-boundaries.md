@@ -235,7 +235,7 @@ Standalone `spec-authoring` / `plan-authoring` may still use `spec-plan-draft` a
 | `skills/` | Procedure and agentic workflow surface; one directory per skill. |
 | `agents/` | Fresh-context specialist roles (context-analyst, code-reviewer, security-reviewer, implementation-auditor, spec-plan-author, spec-plan-critic, …). |
 | `workflows/` | Deterministic multi-agent loops: `spec-plan-draft.js`, `skill-draft.js`, and higher-rigor `multi-lens-review.js`. |
-| `commands/` | Explicit manual checks such as `/git-safety-check`. |
+| `commands/` | Explicit manual checks such as `/agentic-sdlc:git-safety-check`. |
 | `scripts/` | Machine-checkable helpers (`check_all.py`, `validate_artifacts.py`, `detect_context.py`, eval runners, packaging tools). |
 | `tests/` | Deterministic test, fixture, golden, and procedure-eval infrastructure. |
 
@@ -298,6 +298,20 @@ Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdl
 Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
+
+## Method mapping relative to Superpowers
+
+This section maps five method slices of [Superpowers at `b36e0829c6d0140e93cfef2ca599b1b07d4a7797`](https://github.com/obra/superpowers/tree/b36e0829c6d0140e93cfef2ca599b1b07d4a7797) to the house skills, contracts and hooks that cover the same slice. The pinned snapshot serves as a structural reference only.
+
+| Method slice | House counterparts |
+|---|---|
+| design gate | `mind-spark`, `spec-authoring`, `using-agentic-sdlc` |
+| written plan | `plan-authoring`, `agentic-sdlc-pipeline`, contract `03-plan-mode` |
+| TDD implementation | `feature-build`, `root-cause-fix`, `safe-refactor`, `test-authoring`, contract `05-testing`, `hooks/flow-step-guard.mjs` |
+| review | `code-quality-review`, `security-audit`, `feedback-triage`, `implementation-control` |
+| verification-before-completion | `completion-claim-gate`, `hooks/completion-claim-guard.mjs`, `hooks/completion-claim-guard-codex.mjs` |
+
+The mapping is structural, not a live parity or trigger-rate claim. A Superpowers catalog name with no house skill of the same name is not a gap, and the default process owner stays AGENTIC-SDLC.
 
 ## Cross-references
 

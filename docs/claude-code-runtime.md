@@ -27,7 +27,7 @@ Skills are intentionally stored in root `skills/`. Do not duplicate them into `.
 | Load a skill | Native `Skill` invocation. |
 | Dispatch a fresh-context specialist | `Agent` / `Task` facility when available. |
 | Run spec/plan author-critic loop | Native `Workflow` invocation of `agentic-sdlc:spec-plan-draft`. |
-| Manual safety command | `commands/*.md`, especially `/git-safety-check`. |
+| Manual safety command | `commands/*.md`, especially `/agentic-sdlc:git-safety-check`. |
 | Hook wiring | `hooks/hooks-claude.json`, declared by `.claude-plugin/plugin.json`. |
 | Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}`. |
 
@@ -47,6 +47,8 @@ Claude Code wires the full hook set through `hooks/hooks-claude.json`:
 - `Stop`: completion-claim guard and flow-step evidence guard.
 
 `flow-order-guard.mjs` and `flow-step-guard.mjs` both read `hooks/flow-requirements.json` through `flow-evidence.mjs`. They re-derive evidence from validated artifacts, real tool calls, and command transcripts; prose claims do not satisfy a step. They warn by default and block/deny only when `AGENTIC_FLOW_GATE_BLOCK=true`.
+
+The Stop guard also lists two warn-level steps for the house flows. `branch` flags a source edit while the Stop-time working directory is on `main` or `master`. `review-result` flags a reviewer that was dispatched (the control reviewers `implementation-control` / `implementation-auditor`, and where a flow has a security step, `security-audit` / `security-reviewer`) with no correlated non-error result. Neither step ever blocks or denies, even with `AGENTIC_FLOW_GATE_BLOCK=true`; `branch-guard.mjs` remains the commit and push guard.
 
 All paths resolve through `${CLAUDE_PLUGIN_ROOT}`. `node` must be on `PATH`.
 

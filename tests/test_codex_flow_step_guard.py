@@ -285,6 +285,94 @@ def _git_show(rel):
     return r.stdout if r.returncode == 0 else None
 
 
+# ---- BR6 exit attribution (publication-readiness Tasks 15, 16, 18) ------------
+BR6_TABLE = REPO / "tests" / "fixtures" / "transcripts" / "br6-attribution-cases.json"
+
+
+def _br6_rows():
+    """Rows of the shared BR6 attribution case table (D3). Read-only: no test here writes it."""
+    return json.loads(BR6_TABLE.read_text(encoding="utf-8"))["rows"]
+
+
+def _br6_eval(commands):
+    """Evaluate the BR6 helpers for a list of commands in ONE node process.
+
+    Per command: splitBr6Statements, lastStatement, the version/help and pipe flags and the
+    grammar-derived runner rule (isBr6RunnerStatement, D27) for the last statement and for the whole
+    command, the grammar verdict, and the 5801cb9 text check (isRealRunnerInvocation) of the whole
+    command. The list travels as one JSON argument, so a large input takes the _node_argv_or_stdin
+    stdin path."""
+    script = (
+        "const r = await import(%s); const f = await import(%s);"
+        "const re = new RegExp(f.loadRequirements().testCommand, 'i');"
+        "const out = JSON.parse(process.argv[1]).map((c) => { const last = r.lastStatement(c); return {"
+        "statements: r.splitBr6Statements(c), last,"
+        "lastVersionOrHelpOnly: r.isVersionOrHelpOnly(last, re), lastHasPipe: r.hasUnquotedPipe(last),"
+        "lastIsRealRunner: r.isBr6RunnerStatement(last, re), runnerShape: f.isRealRunnerInvocation(c, re),"
+        "runsRunner: r.isBr6RunnerStatement(c, re), inGrammar: r.inSafeBr6Grammar(c),"
+        "versionOrHelpOnly: r.isVersionOrHelpOnly(c, re), hasPipe: r.hasUnquotedPipe(c)}; });"
+        "process.stdout.write(JSON.stringify(out));"
+        % (json.dumps(ROLLOUT.as_uri()), json.dumps(FLOW_EVID.as_uri())))
+    return json.loads(_node(script, json.dumps(list(commands))))
+
+
+def _fc_output_text(call_id, text):
+    """response_item function_call_output with verbatim output text (no added Exit code line)."""
+    return _line("response_item", {"type": "function_call_output", "call_id": call_id, "output": text})
+
+
+def _br6_rollout(cwd, row):
+    """Rollout for one shared-table row: a valid in-session spec/plan pair for work id W, a source
+    edit, then the row's carrier - callEvents exec_command calls sharing one call_id and
+    outputRecords outputs whose text is outputSummary, preceded by 'Exit code: N' only when the
+    row's exitCode is non-null."""
+    spec = _artifact(cwd, "spec", "W", valid=True)
+    plan = _artifact(cwd, "plan", "W", valid=True)
+    carrier = row["carrier"]
+    call_id = "call-" + row["id"]
+    text = carrier["outputSummary"] or ""
+    if carrier["exitCode"] is not None:
+        text = f"Exit code: {carrier['exitCode']}\n{text}"
+    lines = [_mark_write(spec), _mark_write(plan), _src_patch()]
+    lines += [_exec_fc_id(row["command"], call_id)] * carrier["callEvents"]
+    lines += [_fc_output_text(call_id, text)] * carrier["outputRecords"]
+    return _write_rollout(lines)
+
+
+def _derive_env(rollout_paths, cwd, env_extra=None):
+    """deriveFlowEvidence for many rollouts in one node process, with the flow flags cleared and
+    env_extra applied. The strict flag is read per call, so one process serves every row."""
+    script = ("const m = await import(%s);"
+              "const out = JSON.parse(process.argv[1]).map((p) => m.deriveFlowEvidence(p, process.argv[2]));"
+              "process.stdout.write(JSON.stringify(out));" % json.dumps(EVID.as_uri()))
+    argv, payload = _node_argv_or_stdin(script, (json.dumps(list(rollout_paths)), str(cwd)))
+    env = dict(os.environ)
+    for name in ("AGENTIC_FLOW_GATE_BLOCK", "AGENTIC_FLOW_STRICT_EVIDENCE"):
+        env.pop(name, None)
+    if env_extra:
+        env.update(env_extra)
+    r = subprocess.run(argv, input=payload, capture_output=True, text=True, encoding="utf-8", env=env)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def _br6_tests_outcomes(env_extra=None):
+    """{row id: 'missing'|'satisfied'} for the live Codex `tests` step, one rollout per table row, plus
+    the raw derivation results so callers can check that only `tests` varies."""
+    rows = _br6_rows()
+    cwd = tempfile.mkdtemp(prefix="codex-br6-cwd-")
+    paths = [_br6_rollout(cwd, row) for row in rows]
+    try:
+        results = _derive_env(paths, cwd, env_extra)
+    finally:
+        shutil.rmtree(cwd, ignore_errors=True)
+        for path in paths:
+            os.unlink(path)
+    outcomes = {row["id"]: ("missing" if "tests" in res["missingBlockSteps"] else "satisfied")
+                for row, res in zip(rows, results)}
+    return {row["id"]: row for row in rows}, outcomes, dict(zip((row["id"] for row in rows), results))
+
+
 class _Tmp(unittest.TestCase):
     def _cwd(self):
         d = tempfile.mkdtemp(prefix="codex-flow-cwd-")
@@ -846,8 +934,25 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # `if: Bash(git commit*)` filters never started the hook for a git alias. Covered by
         # tests/test_secret_guard_bypasses.py::TestGuardWiring.
         "hooks/completion-claim-guard.mjs",
-        "hooks/completion-claim-guard-codex.mjs",
+        # hooks/completion-claim-guard-codex.mjs RELEASED by publication-readiness 0.4.3 (BR17) for the
+        # owner-aware completion message (same convention as codex-rollout.mjs); coverage in
+        # tests/test_codex_completion_claim_guard.py (TestHouseMessageBytes, TestOwnerAwareCompletion).
     ]
+
+    def test_released_completion_guard_not_locked_and_rationale_present(self):  # AC48
+        self.assertNotIn("hooks/completion-claim-guard-codex.mjs", self.BYTE_LOCKED)
+        comments = [line for line in Path(__file__).read_text(encoding="utf-8").splitlines()
+                    if line.strip().startswith("#")]
+        self.assertTrue(any("publication-readiness 0.4.3 (BR17)" in line for line in comments),
+                        "the lock release needs its rationale comment beside the list")
+
+    def test_remaining_locks_still_listed(self):  # AC48
+        import test_codex_flow_order_guard as order_suite
+        self.assertLessEqual({"hooks/flow-step-guard.mjs", "hooks/completion-claim-guard.mjs"},
+                             set(self.BYTE_LOCKED))
+        self.assertLessEqual({"hooks/flow-order-guard.mjs", "hooks/flow-step-guard.mjs",
+                              "hooks/completion-claim-guard.mjs", "hooks/flow-step-guard-codex.mjs"},
+                             set(order_suite.TestRegressionSurfaceUntouched.BYTE_LOCKED))
 
     def test_locked_files_byte_identical_to_head(self):  # AC18
         for rel in self.BYTE_LOCKED:
@@ -920,6 +1025,647 @@ class TestB5CrossConsumer(_Tmp):
         out = _derive(roll, cwd)
         self.assertFalse(out["flow"])
         self.assertEqual(out["missingBlockSteps"], [])
+
+
+# ---- AC118, AC29: BR6 statement split and version/help/pipe helpers (Task 15) ----
+class TestBR6StatementSplit(unittest.TestCase):
+    """Pure BR6 helpers exported by hooks/codex-rollout.mjs, checked against spec shapes and the
+    shared table. Each test names the helper mutation that would turn it red."""
+
+    def _one(self, command):
+        return _br6_eval([command])[0]
+
+    def test_split_on_semicolon_newline_oror_not_andand(self):
+        # Mutation: splitting on '&&', '|' or '&', or not splitting on '||'.
+        self.assertEqual(self._one("cd a; pytest || true")["statements"], ["cd a", "pytest", "true"])
+        self.assertEqual(self._one("cd repo && pytest")["statements"], ["cd repo && pytest"])
+        self.assertEqual(self._one("pytest | tee x & wait")["statements"], ["pytest | tee x & wait"])
+        import time
+        flood = ";\n||" * 50000 + "pytest"  # 200 KB of separators, shipped on stdin
+        started = time.time()
+        self.assertEqual(self._one(flood)["statements"], ["pytest"])
+        self.assertLess(time.time() - started, 5.0, "the BR6 split must stay linear")
+
+    def test_backslash_newline_continuation_joins(self):
+        # Mutation: treating the continuation newline as a statement separator.
+        self.assertEqual(self._one("pytest \\\n-q")["statements"], ["pytest -q"])
+
+    def test_empty_and_comment_statements_ignored(self):
+        # Mutation: keeping empty or comment-only statements (the last statement would change).
+        for command in ("pytest;", "pytest ; ", "pytest\n# done"):
+            with self.subTest(command=command):
+                got = self._one(command)
+                self.assertEqual(got["statements"], ["pytest"])
+                self.assertEqual(got["last"], "pytest")
+        empty = self._one("")
+        self.assertEqual((empty["statements"], empty["last"]), ([], ""))
+
+    def test_midline_comment_hides_its_separators(self):
+        # Mutation: splitting on a `;` inside a comment that starts mid-line, or reading a `#` that
+        # does not start a word as a comment.
+        cases = {
+            "pytest; echo EXIT=$? # ; pytest": (["pytest", "echo EXIT=$?"], "echo EXIT=$?"),
+            "pytest # ; echo x": (["pytest"], "pytest"),
+            "pytest;# ; echo x": (["pytest"], "pytest"),
+            "pytest -k a#b; echo x": (["pytest -k a#b", "echo x"], "echo x"),
+            "echo $#; pytest": (["echo $#", "pytest"], "pytest"),
+            "pytest -k 'a # ;b'": (["pytest -k 'a # ;b'"], "pytest -k 'a # ;b'"),
+            "pytest; (echo x)# ; pytest": (["pytest", "(echo x)"], "(echo x)"),
+        }
+        for (command, (statements, last)), got in zip(cases.items(), _br6_eval(list(cases))):
+            with self.subTest(command=command):
+                self.assertEqual((got["statements"], got["last"]), (statements, last))
+
+    # Every bash metacharacter after which an unquoted `#` starts a comment. Bash 5.2 probe:
+    # `false; (true)<b># ; echo RAN` never prints RAN for any of them (a syntax error for `(`, `|`,
+    # `<` and `>` also stops bash). COMMENT_BOUNDARY in hooks/codex-rollout.mjs must equal this set.
+    COMMENT_BOUNDARIES = (" ", "\t", "\n", ";", "|", "&", "(", ")", "<", ">")
+
+    def test_comment_starts_after_every_bash_metacharacter(self):
+        # Mutation: dropping any character from COMMENT_BOUNDARY, so the separator hidden in the
+        # comment splits again (splitBr6Statements) or the pipe in the comment counts (forEachUnquoted).
+        splits = ["pytest; (echo x)" + b + "# ; pytest" for b in self.COMMENT_BOUNDARIES]
+        pipes = ["pytest" + b + "# | tee x" for b in self.COMMENT_BOUNDARIES]
+        got = _br6_eval(splits + pipes)
+        for n, b in enumerate(self.COMMENT_BOUNDARIES):
+            with self.subTest(boundary=repr(b)):
+                head = "(echo x)" if b in ";\n" else ("(echo x)" + b).strip()
+                split = got[n]
+                self.assertEqual((split["statements"], split["last"]), (["pytest", head], head))
+                self.assertEqual(got[len(splits) + n]["hasPipe"], b == "|")  # only a real `|` pipes
+
+    def test_hash_glued_to_a_word_character_is_data(self):
+        # Mutation: widening COMMENT_BOUNDARY past bash's metacharacters (`$#`, `x}#`, `a=#` are words).
+        glued = ("a", "$", "=", "}", "/", "-", "#")
+        commands = ["pytest -k x" + c + "#; pytest" for c in glued]
+        for c, command, got in zip(glued, commands, _br6_eval(commands)):
+            with self.subTest(glued=c):
+                self.assertEqual(got["statements"], ["pytest -k x" + c + "#", "pytest"])
+
+    def _helpers(self, commands):
+        script = ("const r = await import(%s);"
+                  "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).map((c) => ["
+                  "r.trailingOrRun(c), r.hasUnmodeledShellSyntax(c)])));" % json.dumps(ROLLOUT.as_uri()))
+        return json.loads(_node(script, json.dumps(list(commands))))
+
+    def test_trailing_oror_run_records_the_joining_separator(self):
+        # Mutation: resetting the `||` join on a newline or comment after `||` (bash continues the
+        # list there), or carrying it past a `;` or newline that ends a statement.
+        cases = {"cd a; pytest || true": ["pytest", "true"], "echo ok ||\npytest": ["echo ok", "pytest"],
+                 "a ||\n# note\nb": ["a", "b"], "a || b; c": ["c"], "a || b\nc": ["c"],
+                 "a && b || c": ["a && b", "c"], "pytest -k 'a||b'": ["pytest -k 'a||b'"], "": []}
+        for (command, run), (got, _) in zip(cases.items(), self._helpers(cases)):
+            with self.subTest(command=command):
+                self.assertEqual(got, run)
+
+    # Constructs the lexer does not model, each paired with every separator it can hide.
+    UNMODELED = ("$(", "`", "<(", ">(", "$'")
+    HIDDEN_SEPARATORS = (";", "\n", "||")
+
+    def test_unmodeled_syntax_with_any_separator_fails_closed(self):
+        # Mutation: dropping any construct or separator, or reading the quote mask instead of raw text.
+        commands = ["pytest " + u + "x" + s + "y" for u in self.UNMODELED for s in self.HIDDEN_SEPARATORS]
+        controls = ["pytest " + u + "x" for u in self.UNMODELED] + ["pytest; pytest || pytest", "echo $x; pytest"]
+        got = [flag for _, flag in self._helpers(commands + controls)]
+        self.assertEqual(got, [True] * len(commands) + [False] * len(controls))
+
+    def test_quoted_separators_are_data(self):
+        # Mutation: splitting inside single or double quotes.
+        for command in ('pytest -k "a;b"', "pytest -k 'a;b'", "pytest -k 'a||b'"):
+            with self.subTest(command=command):
+                self.assertEqual(self._one(command)["statements"], [command])
+
+    def test_version_help_only_per_andand_segment(self):
+        # Mutation: checking only the first '&&' segment, counting a non-flag word such as
+        # 'help', or calling a runner-less statement version-only.
+        true_cases = ("pytest --version", "pytest --version -q", "python -m pytest --version",
+                      "npm test -- --help", "pytest -V", "pytest -h")
+        false_cases = ("pytest -k help", "pytest && pytest --version", "pytest --version && pytest",
+                       "cd repo", "echo --version")
+        got = _br6_eval(true_cases + false_cases)
+        for command, result in zip(true_cases + false_cases, got):
+            with self.subTest(command=command):
+                self.assertEqual(result["versionOrHelpOnly"], command in true_cases)
+
+    def test_runner_words_follow_bash_quote_removal(self):
+        # D25 model (1), the Task 141 lists. Mutation: comparing raw words, splitting only at blanks, reading an
+        # expansion or a slash-free glob as literal text, or counting a segment that only names the runner.
+        from test_procedure_eval import TestStrictRedGreen as lists
+        bs = chr(92)
+        version_only = [c.replace("<bs>", bs) for c in lists.VERSION_ONLY_WORDS]
+        runner = [c.replace("<bs>", bs) for c in lists.RUNNER_WORDS]
+        got = _br6_eval(version_only + runner)
+        for command, result in zip(version_only + runner, got):
+            with self.subTest(command=command):
+                self.assertIs(result["versionOrHelpOnly"], command in version_only)
+        nbsp_pipe = chr(0xA0) + "#x | pytest | tee log.txt"
+        result = self._one(nbsp_pipe)
+        self.assertEqual(result["statements"], [nbsp_pipe])
+        self.assertIs(result["hasPipe"], True)
+
+    def test_heredoc_helper_is_not_exported(self):
+        # QUAL-12: the unused hasUnquotedHeredoc export is deleted, not left as dead API.
+        script = ("const r = await import(%s); process.stdout.write(JSON.stringify(["
+                  "'hasUnquotedHeredoc' in r, typeof r.isVersionOrHelpOnly]));" % json.dumps(ROLLOUT.as_uri()))
+        self.assertEqual(json.loads(_node(script, "[]")), [False, "function"])
+        self.assertNotIn("hasUnquotedHeredoc", ROLLOUT.read_text(encoding="utf-8"))
+
+    def test_runner_rule_matches_whole_words(self):
+        # D27, the Task 174 lists. Mutation: reading `NAME+=` as a command word, splitting at an escaped separator,
+        # ending an assignment value at a Unicode or escaped blank, building the pattern without `^(?:...)$`, dropping
+        # the ASCII word check, dropping BR6_PYTHON_MODULES, or accepting a redirection word before the command word.
+        # Adding the `i`/`u` flag to the ASCII word check is an equivalent mutant here (the `i`-only testCommand
+        # already refuses U+017F); the Python mirror's TestStrictRedGreen kills that mutation.
+        from test_procedure_eval import TestStrictRedGreen as lists
+        runner, non_runner = list(lists.RUNNER_STATEMENTS), list(lists.NON_RUNNER_STATEMENTS)
+        versions = ["pytest --version;", "pytest --version\n", "pytest --help # ;"]
+        got = _br6_eval(runner + non_runner + versions)
+        for command, result in zip(runner + non_runner, got):
+            with self.subTest(command=command):
+                self.assertIs(result["runsRunner"], command in runner)
+        for command, result in zip(versions, got[len(runner) + len(non_runner):]):
+            with self.subTest(version=command):
+                self.assertIs(result["versionOrHelpOnly"], True)
+
+    def test_operand_rule_puts_syntax_errors_outside(self):
+        # D27. Mutation: dropping either half of the operand rule admits a bash syntax error that runs nothing.
+        from test_procedure_eval import TestStrictRedGreen as lists
+        outside, inside = list(lists.OPERAND_OUTSIDE), list(lists.OPERAND_INSIDE)
+        for command, result in zip(outside + inside, _br6_eval(outside + inside)):
+            with self.subTest(command=command):
+                self.assertIs(result["inGrammar"], command in inside)
+
+    def test_d28_rules_match_python_lists(self):
+        # D28 (DP40), the Task 181 lists. Mutation: no pipeWaiting reset at a word, no null at a newline while a pipe
+        # waits, a selector after a python word, a `-[0-9.]+` selector, dropping the npm `k === 3` rule, the `iu` flags
+        # on BR6_SCRIPT_WORD (U+017F folds to `s`), toLowerCase before the ASCII script-word check (U+212A lowers to
+        # `k`), `--if-present` in BR6_PACKAGE_NEUTRAL, or VERSION_HELP_ARGS as the only version test. The `i` flag
+        # alone is an equivalent mutant: without `u`, JavaScript never folds a non-ASCII letter onto an ASCII one.
+        from test_procedure_eval import TestStrictRedGreen as lists
+        outside, inside = list(lists.D28_PIPE_NEWLINE_OUTSIDE), list(lists.D28_PIPE_NEWLINE_INSIDE)
+        runner = list(lists.D28_RUNNER_STATEMENTS)
+        non_runner = list(lists.D28_NON_RUNNER_STATEMENTS) + list(lists.D28_NON_ASCII_SCRIPT_WORDS)
+        version, not_version = list(lists.D28_VERSION_ONLY), list(lists.D28_NOT_VERSION_ONLY)
+        commands = outside + inside + runner + non_runner + version + not_version
+        results = dict(zip(commands, _br6_eval(commands)))
+        for command in outside + inside:
+            with self.subTest(grammar=command):
+                self.assertIs(results[command]["inGrammar"], command in inside)
+        for command in runner + non_runner:
+            with self.subTest(runner=command):
+                self.assertIs(results[command]["runsRunner"], command in runner)
+        for command in version + not_version:
+            with self.subTest(version=command):
+                self.assertIs(results[command]["runsRunner"], True)
+                self.assertIs(results[command]["versionOrHelpOnly"], command in version)
+
+    def test_runner_rule_does_not_import_the_5801cb9_helper(self):
+        # D27: runner identification no longer goes through the 5801cb9 text helper in the rollout module, and the
+        # Codex flow evidence imports the grammar-derived rule.
+        self.assertNotIn("from './flow-evidence.mjs'", ROLLOUT.read_text(encoding="utf-8"))
+        imports = EVID.read_text(encoding="utf-8").split("from './codex-rollout.mjs'")[0]
+        self.assertRegex(imports, r"\bisBr6RunnerStatement\b")
+
+    def test_rollout_module_imports_without_cycle(self):
+        # The rollout module no longer imports hooks/flow-evidence.mjs (D27); loading it alone in a fresh process must
+        # still succeed.
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "node binary missing")
+        script = "import(%s).then((m) => process.stdout.write(typeof m.deliveryReadSkill))" % json.dumps(
+            ROLLOUT.as_uri())
+        proc = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True,
+                              encoding="utf-8", timeout=60)
+        self.assertEqual((proc.returncode, proc.stdout), (0, "function"), proc.stderr[-400:])
+
+    def test_pipe_detection_quote_aware(self):
+        # Mutation: reading '||' as a pipe, or a quoted '|' as a pipe.
+        cases = {"pytest | tee log": True, "pytest |& tee log": True,
+                 "pytest || true": False, 'echo "a|b"': False}
+        got = _br6_eval(list(cases))
+        for (command, expected), result in zip(cases.items(), got):
+            with self.subTest(command=command):
+                self.assertEqual(result["hasPipe"], expected)
+
+    def test_shared_table_split_and_flags(self):
+        # D3 consumer rule: every row of the shared table, no row-count literal.
+        rows = _br6_rows()
+        results = _br6_eval([row["command"] for row in rows])
+        self.assertEqual(len(results), len(rows))
+        mismatches = []
+        for row, got in zip(rows, results):
+            expected = (row["statements"], row["lastVersionOrHelpOnly"], row["lastHasPipe"],
+                        row["lastIsRealRunner"], row["runnerShape5801cb9"])
+            actual = (got["statements"], got["lastVersionOrHelpOnly"], got["lastHasPipe"],
+                      got["lastIsRealRunner"], got["runnerShape"])
+            if expected != actual:
+                mismatches.append(row["id"])
+        self.assertEqual(mismatches, [], f"BR6 helpers disagree with table rows: {mismatches}")
+
+
+# ---- AC28-AC31, AC118, AC41: default-on BR6 exit-attribution closure (Task 16) ----
+class TestExitAttributionClosure(_Tmp):
+    """Live Codex Stop `tests` outcome, every flag unset, for each shared-table row carried by its own
+    rollout. Outcomes are derived once per class; the tests select rows by id or tag, never by a
+    duplicated command literal."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rows, cls.outcome, cls.results = _br6_tests_outcomes()
+
+    def _mismatches(self, ids, expected_column):
+        return [i for i in ids if self.outcome[i] != self.rows[i][expected_column]]
+
+    def test_shared_table_default_column(self):  # D3 (RED before the closure)
+        bad = self._mismatches(self.rows, "defaultTests")
+        self.assertEqual(bad, [], f"rows whose default tests outcome differs from defaultTests: {bad}")
+
+    def test_semicolon_echo_exit_forgery_tests_missing(self):  # AC28
+        self.assertEqual(self.outcome["ac28-semicolon-echo-exit"], "missing")
+
+    def test_nbsp_comment_pipe_head_is_missing_by_default(self):  # D25 model (2), QUAL-3
+        # Mutation: trimming U+00A0 off the statement (its `#` would start a comment and hide the head's pipe).
+        self.assertEqual(self.outcome["edge-forged-blank-nbsp-comment-pipe-head"], "missing")
+
+    def test_trailing_version_help_oror_newline_forms_missing(self):  # AC118
+        ids = [i for i, r in self.rows.items() if "AC118" in r["specRefs"] and r["defaultTests"] == "missing"]
+        self.assertTrue(ids)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "missing")
+
+    # ---- guards: pass before and after the closure ----
+    def test_rows_only_vary_the_tests_step(self):  # fixture validity: spec/plan valid, flow active
+        bad = [i for i, res in self.results.items()
+               if not res["flow"] or not set(res["missingBlockSteps"]) <= {"tests"}]
+        self.assertEqual(bad, [], f"rows whose rollout is not a valid active flow: {bad}")
+
+    def test_shared_table_unchanged_rows_match_baseline(self):
+        ids = [i for i, r in self.rows.items() if r["defaultTests"] == r["baseline5801cb9"]["codexStopTests"]]
+        bad = self._mismatches(ids, "defaultTests")
+        self.assertEqual(bad, [], f"rows that changed although the table says they keep 5801cb9: {bad}")
+
+    def test_andand_chains_keep_attribution(self):  # AC118 `&&` half
+        for i in ("ac118-andand-echo-ok", "ac118-andand-trailing-version"):
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    def test_legitimate_last_statement_runner_shapes_satisfy(self):  # AC29
+        ids = [i for i, r in self.rows.items() if "AC29" in r["specRefs"]]
+        self.assertTrue(ids)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    def test_semicolon_echo_nonzero_exit_missing_as_before(self):  # AC30
+        self.assertEqual(self.outcome["ac30-semicolon-echo-exit-nonzero"], "missing")
+
+    def test_pipeline_default_outcome_unchanged(self):  # AC31 default half
+        for i in ("ac31-pipe-tee", "ac31-pipe-tail"):
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], self.rows[i]["baseline5801cb9"]["codexStopTests"])
+
+    def test_no_exit_code_multi_statement_fails_open(self):
+        self.assertEqual(self.outcome["edge-semicolon-echo-no-exit-record"], "satisfied")
+
+    def test_bash_c_wrapper_not_newly_satisfied(self):
+        self.assertEqual(self.outcome["edge-bash-c-wrapper"], "missing")
+
+    # ---- D27: grammar-derived runner identification in the default derivation ----
+    D27_FORGED_PREFIXES = ("edge-forged-append-", "edge-forged-escaped-separator-", "edge-forged-join-",
+                           "edge-forged-value-blank-", "edge-forged-pipeline-mention-", "edge-forged-version-single-")
+
+    def _d27_forged(self, with_separator):
+        ids = [i for i, r in self.rows.items() if i.startswith(self.D27_FORGED_PREFIXES)
+               and any(s in r["command"] for s in (";", "\n", "||")) is with_separator]
+        return ids
+
+    def test_d27_forgeries_with_a_separator_missing_by_default(self):
+        # Mutation: keeping isRealRunnerInvocation in attributable, keeping the unconditional single-statement
+        # shortcut, or testing only isBr6RunnerStatement in step 4 (the version-single rows).
+        ids = self._d27_forged(True)
+        self.assertEqual(len(ids), 26)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "missing")
+
+    def test_d27_separator_free_forgeries_keep_5801cb9_default(self):
+        # Mutation: dropping the explicit separator-free step (these rows would turn missing).
+        ids = self._d27_forged(False)
+        self.assertEqual(len(ids), 6)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    def test_d27_grammar_runner_shapes_satisfy(self):
+        # Mutation: reading an assignment prefix, an escaped blank in a value or a background head as no runner run.
+        ids = [i for i in self.rows if i.startswith(("edge-inside-runner-", "edge-inside-value-", "edge-inside-append-",
+                                                     "edge-inside-background-"))]
+        self.assertEqual(len(ids), 23)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    # ---- D28 (DP40): pipe-newline, launcher, option and script-name rows in the default derivation ----
+    D28_FORGED_PREFIXES = ("edge-forged-pipe-newline-", "edge-forged-launcher-list-", "edge-forged-option-",
+                           "edge-forged-script-option-")
+
+    def test_d28_forgeries_with_a_separator_missing_by_default(self):
+        # Mutation: no null at a newline while a pipe waits (the pipe-newline rows), a `py -0` selector, or
+        # VERSION_HELP_ARGS as the only version test (the option rows) turns a row satisfied.
+        ids = [i for i, r in self.rows.items() if i.startswith(self.D28_FORGED_PREFIXES)
+               and any(s in r["command"] for s in (";", "\n", "||"))]
+        self.assertEqual(len(ids), 30)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "missing")
+
+    def test_d28_separator_free_forgeries_keep_5801cb9_default(self):
+        # Mutation: a default step that reads the DP40 rules for a separator-free command (these rows would turn
+        # missing).
+        for i in ("edge-forged-launcher-list-single", "edge-forged-option-pytest-cluster-single",
+                  "edge-forged-option-npm-single"):
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    def test_d28_inside_rows_satisfy(self):
+        # Mutation: dropping the script-name branch, the `py` selector, the verbose `-v` runner set or the neutral
+        # allowlist, or ending a statement at a newline after `&&`, turns a row missing.
+        ids = [i for i in self.rows if i.startswith(("edge-inside-join-", "edge-inside-selector-",
+                                                     "edge-inside-option-", "edge-inside-script-"))]
+        self.assertEqual(len(ids), 19)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    # ---- D29 (DP41): redirection-target `--` and key-letter rows in the default derivation ----
+    D29_FORGED_PREFIXES = ("edge-forged-target-separator-", "edge-forged-key-letter-")
+
+    def test_d29_forgeries_with_a_separator_missing_by_default(self):
+        # Mutation: a redirection target `--` that ends the option region, or a single-dash word judged to its end,
+        # turns a row satisfied.
+        ids = [i for i, r in self.rows.items() if i.startswith(self.D29_FORGED_PREFIXES)
+               and any(s in r["command"] for s in (";", "\n", "||"))]
+        self.assertEqual(len(ids), 18)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "missing")
+
+    def test_d29_separator_free_forgeries_keep_5801cb9_default(self):
+        for i in ("edge-forged-target-separator-single", "edge-forged-key-letter-single"):
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    def test_d29_inside_rows_satisfy(self):
+        # Mutation: counting a redirection target `--` as an option word, or reading a single-dash word without a key
+        # letter as a version or help spelling, turns a row missing.
+        ids = [i for i in self.rows if i.startswith(("edge-inside-target-separator-", "edge-inside-key-letter-"))]
+        self.assertEqual(len(ids), 4)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+    # ---- D30 (DP42): dash-word rows in the default derivation ----
+    D30_REAL_FORGED_PREFIX = "edge-real-forged-dash-word-"
+
+    def test_d30_forgeries_with_a_separator_missing_by_default(self):
+        # Mutation: a two-dash word judged by its whole part before `=`, or a three-dash word left out, turns a row
+        # satisfied.
+        ids = [i for i, r in self.rows.items() if i.startswith(self.D30_REAL_FORGED_PREFIX)
+               and any(s in r["command"] for s in (";", "\n", "||"))]
+        self.assertEqual(len(ids), 15)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "missing")
+
+    def test_d30_separator_free_forgery_keeps_5801cb9_default(self):
+        self.assertEqual(self.outcome[self.D30_REAL_FORGED_PREFIX + "single"], "satisfied")
+
+    def test_d30_inside_rows_satisfy(self):
+        # Mutation: reading a two-dash word without a leading letter-run prefix (`--.h`, `--no-help`) as a version or
+        # help spelling turns a row missing.
+        ids = [i for i in self.rows if i.startswith("edge-inside-dash-word-")]
+        self.assertEqual(len(ids), 4)
+        for i in ids:
+            with self.subTest(id=i):
+                self.assertEqual(self.outcome[i], "satisfied")
+
+
+# ---- AC31, AC41, AC42: opt-in AGENTIC_FLOW_STRICT_EVIDENCE for live Codex evidence (Task 18) ----
+STRICT_ON = {"AGENTIC_FLOW_STRICT_EVIDENCE": "true"}
+
+
+def _strictly_attributable(rows):
+    """isStrictlyAttributable({command, callEvents, outputRecords, exitCode}, re) per table row."""
+    items = [{"command": r["command"], "callEvents": r["carrier"]["callEvents"],
+              "outputRecords": r["carrier"]["outputRecords"], "exitCode": r["carrier"]["exitCode"]} for r in rows]
+    script = ("const e = await import(%s); const f = await import(%s);"
+              "const re = new RegExp(f.loadRequirements().testCommand, 'i');"
+              "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).map((x) => e.isStrictlyAttributable(x, re))));"
+              % (json.dumps(EVID.as_uri()), json.dumps(FLOW_EVID.as_uri())))
+    return json.loads(_node(script, json.dumps(items)))
+
+
+class TestStrictEvidenceFlag(_Tmp):
+    """Strict Codex `tests` evidence under the flag: only an attributable, single-counted, green run
+    satisfies it. Table outcomes are derived once per flag state; the tests select rows by id."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rows, cls.strict, _ = _br6_tests_outcomes(STRICT_ON)
+        _, cls.default, _ = _br6_tests_outcomes()
+
+    def _row_rollout(self, row_id):
+        cwd = self._cwd()
+        path = _br6_rollout(cwd, self.rows[row_id])
+        self.addCleanup(os.unlink, path)
+        return path, cwd
+
+    def test_is_strictly_attributable_matches_table(self):  # D3
+        rows = list(self.rows.values())
+        got = _strictly_attributable(rows)
+        bad = [row["id"] for row, value in zip(rows, got) if value != row["strictAttributable"]]
+        self.assertEqual(bad, [], f"isStrictlyAttributable disagrees with strictAttributable: {bad}")
+
+    def test_shared_table_strict_column(self):  # D3
+        bad = [i for i, row in self.rows.items() if self.strict[i] != row["strictTests"]]
+        self.assertEqual(bad, [], f"rows whose strict tests outcome differs from strictTests: {bad}")
+
+    def test_strict_flag_rejects_fail_open_shape_only_version_only_and_pipe(self):  # AC42, AC31 strict half
+        for i in ("carrier-substrate-absent", "edge-standalone-version", "edge-cd-andand-version",
+                  "ac31-pipe-tee", "ac31-pipe-tail"):
+            with self.subTest(id=i):
+                self.assertEqual(self.strict[i], "missing")
+
+    def test_strict_duplicate_call_or_missing_output_not_satisfied(self):
+        for i in ("carrier-duplicate-call-event", "carrier-duplicate-output-record", "carrier-missing-exit-code"):
+            with self.subTest(id=i):
+                self.assertEqual(self.strict[i], "missing")
+
+    def test_strict_flag_value_matrix(self):
+        path, cwd = self._row_rollout("carrier-substrate-absent")
+        for value, expected in (("TRUE", "missing"), ("1", "missing"), ("yes", "missing"),
+                                ("false", "satisfied"), ("0", "satisfied"), ("", "satisfied"), (None, "satisfied")):
+            with self.subTest(value=value):
+                env = None if value is None else {"AGENTIC_FLOW_STRICT_EVIDENCE": value}
+                steps = _derive_env([path], cwd, env)[0]["missingBlockSteps"]
+                self.assertEqual("missing" if "tests" in steps else "satisfied", expected)
+
+    def test_strict_hook_blocks_under_gate_flag(self):
+        path, cwd = self._row_rollout("carrier-substrate-absent")
+        out = _run_hook({"transcript_path": path, "cwd": str(cwd)},
+                        {"AGENTIC_FLOW_GATE_BLOCK": "true", **STRICT_ON})
+        self.assertIn('"decision":"block"', out.replace(" ", ""))
+        self.assertIn("[tests]", out)
+
+    # ---- guards: pass before and after the flag exists ----
+    def test_shared_table_flag_unset_equals_default(self):
+        bad = [i for i, row in self.rows.items() if self.default[i] != row["defaultTests"]]
+        self.assertEqual(bad, [], f"flag-unset outcomes that differ from defaultTests: {bad}")
+
+    def test_strict_flag_accepts_attributable_green_run(self):
+        self.assertEqual(self.strict["carrier-plain-green"], "satisfied")
+
+    def test_flag_unset_existing_fixture_outcomes_unchanged(self):  # AC41
+        for i in ("edge-standalone-version", "carrier-substrate-absent", "carrier-missing-exit-code"):
+            with self.subTest(id=i):
+                self.assertEqual(self.default[i], "satisfied")
+
+
+# ---- AC28 closure: a mid-line comment or a heredoc cannot lend a trailing exit 0 to the runner ----
+def _synthetic_row(row_id, command, exit_code=0):
+    """A carrier shaped like a shared-table row (one call event, one output record), built in this
+    module only: the shared table is read-only (D3)."""
+    return {"id": row_id, "command": command,
+            "carrier": {"callEvents": 1, "outputRecords": 1, "exitCode": exit_code, "outputSummary": "5 passed"}}
+
+
+class TestCommentAndHeredocForgery(_Tmp):
+    """bash ends `pytest; echo EXIT=$? # ; pytest` on echo and `pytest; cat <<EOF\\npytest` on cat, so
+    their exit 0 never belongs to pytest. D23: an exit code is attributed only while the command lies inside
+    the safe shell grammar (inSafeBr6Grammar); a command holding `;`, newline or `||` outside it is never
+    attributable by default, and strict evaluation applies the grammar to every command. Mutation: dropping
+    the comment skip in splitBr6Statements, the grammar check in attributable() / isStrictlyAttributable(),
+    or the head-operand pipe/background check."""
+
+    FORGED = {"comment": "pytest; echo EXIT=$? # ; pytest", "heredoc": "pytest; cat <<EOF\npytest",
+              "heredoc-dash": "pytest; cat <<-EOF\npytest",
+              "paren-comment": "pytest; (echo x)# ; pytest",  # bash ends on the subshell's exit 0
+              # Constructs outside the safe grammar hide a separator inside a word, so bash ends on
+              # echo/cat (bash 5.2.37: rc=0 from the trailing echo/cat for every row).
+              "command-substitution": "pytest; echo $(echo x; pytest)",
+              "process-substitution": "pytest; cat <(echo x; pytest)",
+              "backtick": "pytest; echo `true; pytest`",
+              "substitution-in-double-quotes": 'pytest; echo "$(echo "; pytest")"',
+              "ansi-c-quote": "pytest; echo $'\\'; pytest'",
+              "param-comment-closer": "pytest; echo ${x:-; pytest #}",
+              "double-bracket": "[[ x &&\npytest ||\npytest ]]",
+              # Command words outside the grammar shadow the runner or rewrite the exit status.
+              "function-shadow": "pytest() { true; }; pytest",
+              "eval-function-shadow": "cd repo; eval 'pytest() { true; }'; pytest",
+              "set-noexec": "set -n; pytest",
+              "trap-exit-rewrite": "trap 'exit 0' EXIT; pytest",
+              # A left `||` operand that succeeds means bash never runs the right side, and a piped or
+              # backgrounded head operand's own exit decides whether the runner after `||` runs.
+              "oror-leading-success": "true || pytest",
+              "oror-leading-version": "pytest --version || pytest",
+              "oror-newline-leading-echo": "echo ok ||\npytest",
+              "oror-piped-operand": "pytest | tee log.txt || pytest",
+              "oror-background-head": "pytest & wait || pytest"}
+    # Separator-free commands outside the grammar keep their 5801cb9 default (a disclosed limit: `set -n &&
+    # pytest` never runs pytest), but strict evaluation applies the grammar to every command.
+    STRICT_ONLY = {"hidden-pipe-ansi-c": "pytest $'\\'' | true ''",
+                   "separator-free-substitution": "pytest $(cat args)",
+                   "separator-free-noexec": "set -n && pytest"}
+    # Every operand of the trailing `||` run is a real runner inside the grammar.
+    OROR_RUNNERS = {"oror-real-runners": "pytest -x || pytest --lf"}
+    # `pytest # --version` runs a bare pytest: the gate reads version/help on the comment-free last
+    # statement only, so it is a real run (the whole-command helper value alone still sees `--version`).
+    ONE_RUNNER = {"comment-after-runner": "pytest # ; echo x", "comment-version": "pytest # --version"}
+    # Disclosed conservative limits of the grammar: a false 'missing', never a false satisfy. Any syntax or
+    # command word outside the safe grammar together with a `;`, newline or `||` fails closed, so a
+    # legitimate `cd repo; pytest $(cat args)` or `source .venv/bin/activate; pytest` is missing.
+    CONSERVATIVE = {"arith-shift": "pytest; echo $((1<<2)); pytest",
+                    "substitution-with-separator": "cd repo; pytest $(cat args)",
+                    "here-string": "pytest; cat <<<x; pytest",
+                    "source-venv": "source .venv/bin/activate; pytest"}
+
+    def _outcomes(self, rows, env_extra=None):
+        cwd = self._cwd()
+        paths = [_br6_rollout(cwd, row) for row in rows]
+        for path in paths:
+            self.addCleanup(os.unlink, path)
+        results = _derive_env(paths, cwd, env_extra)
+        return {row["id"]: ("missing" if "tests" in res["missingBlockSteps"] else "satisfied")
+                for row, res in zip(rows, results)}
+
+    def _rows(self, commands):
+        return [_synthetic_row(name, command) for name, command in commands.items()]
+
+    def test_forged_shapes_default_tests_step_missing(self):
+        got = self._outcomes(self._rows(self.FORGED))
+        self.assertEqual(got, {name: "missing" for name in self.FORGED})
+
+    def test_forged_shapes_not_strictly_attributable(self):
+        rows = self._rows(self.FORGED)
+        self.assertEqual(_strictly_attributable(rows), [False] * len(rows))
+        self.assertEqual(self._outcomes(rows, STRICT_ON), {name: "missing" for name in self.FORGED})
+
+    # ---- guards: pass before and after the closure ----
+    def test_single_runner_statement_shapes_still_satisfy(self):
+        rows = self._rows(self.ONE_RUNNER)
+        self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.ONE_RUNNER})
+        self.assertEqual(_strictly_attributable(rows), [True] * len(rows))
+
+    def test_single_statement_outside_grammar_is_strict_only(self):
+        # Mutation: applying the grammar to strict separator commands only. The default keeps 5801cb9 for them.
+        rows = self._rows(self.STRICT_ONLY)
+        self.assertEqual(_strictly_attributable(rows), [False] * len(rows))
+        self.assertEqual(self._outcomes(rows, STRICT_ON), {name: "missing" for name in self.STRICT_ONLY})
+        self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.STRICT_ONLY})
+
+    def test_real_runner_oror_run_still_satisfies(self):
+        rows = self._rows(self.OROR_RUNNERS)
+        self.assertEqual(self._outcomes(rows), {name: "satisfied" for name in self.OROR_RUNNERS})
+        self.assertEqual(_strictly_attributable(rows), [True] * len(rows))
+
+    def test_disclosed_conservative_limits_never_satisfy(self):
+        rows = self._rows(self.CONSERVATIVE)
+        self.assertEqual(self._outcomes(rows), {name: "missing" for name in self.CONSERVATIVE})
+        self.assertEqual(self._outcomes(rows, STRICT_ON), {name: "missing" for name in self.CONSERVATIVE})
+
+
+# ---- AC35: the locked Codex Stop guard never reports the branch step (Task 19) ----
+GIT = shutil.which("git")
+
+
+@unittest.skipIf(GIT is None, "git not available")
+class TestCodexStopNoBranchReport(_Tmp):
+    def _repo(self, branch):
+        repo = Path(self._cwd())
+        for args in (("init", "-b", "main"),
+                     ("-c", "user.email=slice-b@invalid", "-c", "user.name=slice-b", "commit", "--allow-empty", "-m", "init")):
+            subprocess.run([GIT, *args], cwd=repo, check=True, capture_output=True)
+        if branch != "main":
+            subprocess.run([GIT, "checkout", "-b", branch], cwd=repo, check=True, capture_output=True)
+        return repo
+
+    def _stop_output(self, branch, extra, env_extra):
+        repo = self._repo(branch)
+        spec = _artifact(repo, "spec", "W")
+        plan = _artifact(repo, "plan", "W")
+        path = _write_rollout([_mark_write(spec), _mark_write(plan), _src_patch(), *extra])
+        self.addCleanup(os.unlink, path)
+        return _run_hook({"transcript_path": path, "cwd": str(repo)}, env_extra)
+
+    def test_main_and_feature_outputs_identical_no_branch(self):  # AC35
+        for flags in ({}, {"AGENTIC_FLOW_GATE_BLOCK": "true"}, {"AGENTIC_FLOW_GATE_BLOCK": "true", **STRICT_ON}):
+            with self.subTest(flags=flags):
+                on_main = self._stop_output("main", [], flags)
+                self.assertTrue(on_main.strip())  # the tests step is missing, so the guard speaks
+                self.assertEqual(on_main, self._stop_output("feature/x", [], flags))
+                self.assertNotIn("branch", on_main)
+        green = [_exec_fc_id("pytest", "c1"), _fc_output("c1", 0, "1 passed")]
+        self.assertEqual(self._stop_output("main", green, {}).strip(), "")
 
 
 if __name__ == "__main__":
