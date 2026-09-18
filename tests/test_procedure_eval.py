@@ -1985,6 +1985,39 @@ class TestEvidencePacket(unittest.TestCase):
         shutil.copytree(BASIC_FIXTURE, root)
         return root
 
+    def test_build_release_import_survives_a_shadowing_namespace_package(self):
+        """A foreign `scripts` namespace package (e.g. pywin32) must not make the payload identity unavailable.
+
+        `from scripts import build_release` then raises ImportError, not ModuleNotFoundError, so a fallback that
+        catches only ModuleNotFoundError leaves every packet with `unavailable:build-release-failed` (D11 blocks
+        scoring on it). Mutation: narrow the except clause back to ModuleNotFoundError.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            shadow = Path(td) / "site-packages"
+            (shadow / "scripts").mkdir(parents=True)  # a namespace package without build_release
+            saved_path = list(sys.path)
+            saved_modules = {name: sys.modules.pop(name)
+                             for name in ("scripts", "scripts.build_release", "build_release")
+                             if name in sys.modules}
+            # The CLI runs as `python3 scripts/run_procedure_eval.py`, so the repository root is NOT on sys.path;
+            # only its scripts directory is. Reproduce that, then add the foreign namespace portion.
+            roots = {str(REPO), str(REPO) + os.sep, os.getcwd(), ""}
+            sys.path[:] = [p for p in sys.path if p not in roots]
+            sys.path.insert(0, str(REPO / "scripts"))
+            sys.path.insert(0, str(shadow))
+            try:
+                with self.assertRaises(ImportError) as raised:
+                    from scripts import build_release  # noqa: F401
+                self.assertNotIsInstance(raised.exception, ModuleNotFoundError)
+                module = procedure_eval._import_build_release()
+                self.assertTrue(callable(getattr(module, "release_members", None)))
+                self.assertTrue(callable(getattr(module, "payload_identity", None)))
+            finally:
+                sys.path[:] = saved_path
+                for name in ("scripts", "scripts.build_release", "build_release"):
+                    sys.modules.pop(name, None)
+                sys.modules.update(saved_modules)
+
     def test_packet_contains_required_bindings(self):
         with tempfile.TemporaryDirectory() as td:
             evidence = Path(td) / "ev"

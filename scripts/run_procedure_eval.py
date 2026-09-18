@@ -2090,7 +2090,7 @@ def repository_commit() -> str:
 def _import_build_release() -> Any:
     try:
         from scripts import build_release
-    except ModuleNotFoundError:
+    except ImportError:  # a foreign `scripts` namespace package (pywin32) raises plain ImportError
         import build_release
     return build_release
 
