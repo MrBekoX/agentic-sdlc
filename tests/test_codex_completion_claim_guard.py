@@ -148,6 +148,56 @@ def _read_rollout(path):
     return json.loads(r.stdout)
 
 
+def _rollout_lines(*records):
+    """Write the records as one JSONL rollout in a temp file and return its path."""
+    handle, path = tempfile.mkstemp(suffix=".jsonl")
+    with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as out:
+        for record in records:
+            out.write(json.dumps(record) + "\n")
+    return path
+
+
+class PreviousTurnMarkerTests(unittest.TestCase):
+    """SEC-2: the final-message carrier is the last one by FILE POSITION, scoped to the current turn."""
+
+    def test_previous_turn_task_complete_does_not_supply_this_turn_final_message(self):
+        marker = _gate_marker_const()
+        claim = "All tests pass and the feature is complete."
+        path = _rollout_lines(
+            {"type": "event_msg", "payload": {"type": "task_complete",
+                                              "last_agent_message": "Earlier turn done. " + marker}},
+            {"type": "event_msg", "payload": {"type": "task_started"}},
+            {"type": "response_item", "payload": {"type": "message", "role": "user",
+                                                  "content": [{"type": "text", "text": "next please"}]}},
+            {"type": "response_item", "payload": {"type": "message", "role": "assistant",
+                                                  "content": [{"type": "output_text", "text": claim}]}},
+        )
+        try:
+            result = _read_rollout(path)
+        finally:
+            os.unlink(path)
+        self.assertTrue(result["readable"])
+        self.assertEqual(result["finalMessage"], claim)
+        self.assertFalse(result["gateMarkerPresent"],
+                         "a marker from an earlier turn must not count for this turn")
+
+    def test_current_turn_task_complete_still_wins_over_its_own_assistant_message(self):
+        marker = _gate_marker_const()
+        final = "Done, verified. " + marker
+        path = _rollout_lines(
+            {"type": "event_msg", "payload": {"type": "task_started"}},
+            {"type": "response_item", "payload": {"type": "message", "role": "assistant",
+                                                  "content": [{"type": "output_text", "text": "working on it"}]}},
+            {"type": "event_msg", "payload": {"type": "task_complete", "last_agent_message": final}},
+        )
+        try:
+            result = _read_rollout(path)
+        finally:
+            os.unlink(path)
+        self.assertEqual(result["finalMessage"], final)
+        self.assertTrue(result["gateMarkerPresent"])
+
+
 def _gate_marker_const():
     """The GATE_MARKER constant as the module actually exports it."""
     script = ("const m = await import(%s); process.stdout.write(m.GATE_MARKER);"

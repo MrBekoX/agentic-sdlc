@@ -47,6 +47,14 @@ function assistantText(p) {
   return null;
 }
 
+// A turn boundary in the rollout: codex writes `event_msg task_started` when a turn begins and a
+// `turn_context` record when the turn's context is set. Records before the last boundary belong to an
+// earlier turn, so they can never supply this turn's final message (SEC-2).
+function isTurnBoundary(o, p) {
+  if (o && typeof o === 'object' && o.type === 'turn_context') return true;
+  return Boolean(p && p.type === 'task_started');
+}
+
 export function readRollout(path) {
   const EMPTY = { finalMessage: '', gateMarkerPresent: false, readable: false };
   if (!path || typeof path !== 'string') return EMPTY;
@@ -59,6 +67,11 @@ export function readRollout(path) {
     return EMPTY; // unreadable -> unconfirmable
   }
 
+  // Inside one turn `task_complete.last_agent_message` stays authoritative (AC1), but the carriers are
+  // scoped to the CURRENT turn: a turn boundary (`event_msg task_started`, or a `turn_context` record)
+  // clears both. Without that scope a previous turn's last_agent_message became this turn's final
+  // message, because a Stop hook fires before this turn's task_complete is persisted, so a marker
+  // emitted once silenced the backstop for every later turn of the session (Security #2, SEC-2).
   let lastTaskComplete = null;
   let lastAssistant = null;
   for (const line of raw.split(/\r?\n/)) {
@@ -66,6 +79,7 @@ export function readRollout(path) {
     let o;
     try { o = JSON.parse(line); } catch { continue; } // tolerate a malformed line
     const p = payloadOf(o);
+    if (isTurnBoundary(o, p)) { lastTaskComplete = null; lastAssistant = null; continue; }
     const tc = taskCompleteText(p);
     if (tc != null) lastTaskComplete = tc;
     else {

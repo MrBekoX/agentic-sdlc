@@ -2018,6 +2018,45 @@ class TestEvidencePacket(unittest.TestCase):
                     sys.modules.pop(name, None)
                 sys.modules.update(saved_modules)
 
+    def test_secret_split_across_stream_chunks_is_not_recoverable(self):
+        """SEC-1: the copy must not hold a secret that only appears once the stream block is reassembled.
+
+        The token is assembled at runtime (never a literal in this file) in a classic PAT shape the HIGH patterns
+        match. Mutation: redact per JSON record only, which leaves the joined chunks recoverable.
+        """
+        token = "ghp_" + "A1b2" * 9
+        chunks = [token[:7], token[7:19], token[19:]]
+
+        def chunk_line(index, piece):
+            return json.dumps({"type": "stream_event", "session_id": "s1", "parent_tool_use_id": None,
+                               "event": {"type": "content_block_delta", "index": 0,
+                                         "delta": {"type": "text_delta", "text": piece}}})
+
+        lines = [json.dumps({"type": "stream_event", "session_id": "s1", "parent_tool_use_id": None,
+                             "event": {"type": "content_block_start", "index": 0}})]
+        lines += [chunk_line(i, piece) for i, piece in enumerate(chunks)]
+        lines.append(json.dumps({"type": "stream_event", "session_id": "s1", "parent_tool_use_id": None,
+                                 "event": {"type": "content_block_stop", "index": 0}}))
+        copy = procedure_eval.redact_transcript_lines("\n".join(lines) + "\n")
+
+        joined_text = "".join(
+            json.loads(line)["event"]["delta"]["text"]
+            for line in copy.split("\n")
+            if line.strip() and json.loads(line).get("event", {}).get("type") == "content_block_delta"
+        )
+        self.assertNotIn(token, copy)
+        self.assertNotIn(token, joined_text, "the reassembled block still holds the secret")
+        for line in copy.split("\n"):
+            if line.strip():
+                json.loads(line)  # every line still parses
+
+    def test_same_record_secret_is_still_redacted(self):
+        """Control: the per-record pass keeps working, so the block pass is additive."""
+        token = "ghp_" + "C3d4" * 9
+        line = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": token}]}})
+        copy = procedure_eval.redact_transcript_lines(line + "\n")
+        self.assertNotIn(token, copy)
+
     def test_packet_contains_required_bindings(self):
         with tempfile.TemporaryDirectory() as td:
             evidence = Path(td) / "ev"

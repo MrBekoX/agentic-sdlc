@@ -2255,6 +2255,13 @@ def redact_transcript_lines(text: str) -> str:
     context) and are re-serialized with ensure_ascii=False. Each run of consecutive other lines goes through the text
     redactor as one block, so a multi-line private key between them is still masked whole. Any redaction failure
     raises, and the caller writes nothing.
+
+    A Claude stream block is redacted as its REASSEMBLED text too, through the same block walk DP38 masking uses.
+    A credential split across consecutive `content_block_delta` chunks matches no pattern in any single record, so
+    without that pass it reached the copy recoverable (Security review #2, SEC-1; spec S2, AC67). When the
+    reassembled text changes under redaction the block is rewritten fail-closed: the first chunk carries the whole
+    redacted text and the later chunks become empty, so the masked text appears exactly once and every line still
+    parses. A block that needs no redaction keeps its chunks byte for byte.
     """
     lines = text.split("\n")
     parsed: dict[int, Any] = {}
@@ -2286,7 +2293,36 @@ def redact_transcript_lines(text: str) -> str:
         else:
             run.append(line)
     flush()
-    return "\n".join(out)
+    return _redact_stream_blocks("\n".join(out))
+
+
+def _redact_stream_blocks(text: str) -> str:
+    """Redact each Claude stream block as its reassembled text (SEC-1). Unchanged text is returned untouched."""
+    lines, parsed, blocks, _packets = _parse_home_units([text])
+    changed: set[int] = set()
+    for block in blocks:
+        if not block:
+            continue
+        reassembled = "".join(delta[field] for _index, delta, field in block)
+        if not reassembled.strip():
+            continue
+        redacted = redact_text(reassembled)
+        if redacted.endswith("\n") and not reassembled.endswith("\n"):
+            redacted = redacted[:-1]
+        if redacted == reassembled:
+            continue
+        for position, (index, delta, field) in enumerate(block):
+            delta[field] = redacted if position == 0 else ""
+            changed.add(index)
+    if not changed:
+        return text
+    out_lines = []
+    for index, line in enumerate(lines):
+        if index in changed:
+            out_lines.append(json.dumps(parsed[index], ensure_ascii=False) + ("\r" if line.endswith("\r") else ""))
+        else:
+            out_lines.append(line)
+    return "\n".join(out_lines)
 
 
 # D26 / DP38: a home identity found in a path or project-slug form is masked wherever it occurs in the evidence copy
