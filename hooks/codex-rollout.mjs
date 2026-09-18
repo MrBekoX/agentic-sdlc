@@ -1200,9 +1200,13 @@ function withoutTrailingSlashes(p) {
   return p.slice(0, end);
 }
 
-// D25 model (3): a literal path holds only ASCII letters, digits, `_ . - @ + , /`, characters at or above U+0080
-// and an optional drive `X:`, so bash reads it as the same bytes (no expansion, quote, escape or blank).
-const LITERAL_ABSOLUTE_PATH = /^(?:[A-Za-z]:)?\/[A-Za-z0-9_.\-@+,/\u0080-\uFFFF]*$/;
+// D25 model (3): a literal path holds only ASCII letters, digits, `_ . - @ + , ~ /`, characters at or above
+// U+0080 and an optional drive `X:`, so bash reads it as the same bytes (no expansion, quote, escape or blank).
+// `~` is a literal character in a real Windows path: every 8.3 short name carries one (C:\Users\RUNNER~1),
+// and the leading-`~` home expansion cannot apply here because the pattern already requires the path to start
+// with `/` or a drive letter. Excluding it made resolveCodexHome return null on any Windows profile whose user
+// name is long enough to have a short name.
+const LITERAL_ABSOLUTE_PATH = /^(?:[A-Za-z]:)?\/[A-Za-z0-9_.\-@+,~/\u0080-\uFFFF]*$/;
 const WORD_BLANKS = /[ \t\n]+/;
 
 // A literal absolute path whose segments after the root are never empty, `.` or `..`.

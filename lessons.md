@@ -20,6 +20,17 @@ Each entry includes:
 
 ---
 
+## 2026-09-18 — A patched seam the code no longer uses makes a test assert the environment
+
+- **Task / context:** The first two-OS CI run of the publication-readiness branch. Both platforms failed; neither failure was reproducible on the development machine.
+- **Symptom:** `test_live_run_stops_before_model_on_git_failure` patched `procedure_eval.shutil.which` and asserted a fixture-git error, but CI reported `error=claude CLI missing`. Separately, Windows CI failed `test_codex_home_resolution` with `None != 'C:/Users/RUNNER~1/.../.codex'`.
+- **Root cause:** Two different shapes of the same blindness. (1) A security fix (SEC-8) moved the bare-name CLI lookup off `shutil.which` onto an absolute-PATH scan, so the test's patch became inert and the real PATH decided the result: it passed locally only because a `claude` binary happened to be installed. (2) `hooks/codex-rollout.mjs` excluded `~` from its literal-absolute-path pattern, so `resolveCodexHome` returned null for every Windows 8.3 short name — a real product bug, invisible locally because this machine's temp path is a long name.
+- **Correct fix:** Patch the seam the implementation actually calls (`resolve_agent_cli`) and assert against the stub it returns, so the test no longer depends on what is installed. Accept `~` inside the path pattern: it is a literal there, and leading-`~` expansion cannot apply because the pattern already requires the path to start with `/` or a drive letter. RED test first in both cases.
+- **Preventive rule / automated check:** When a change moves a lookup, grep the tests for patches of the OLD seam — an inert patch does not fail, it silently hands the assertion to the environment. And treat a green local gate as evidence about one OS with one set of installed binaries: keep the two-OS CI matrix in the required set, because path shapes (8.3 short names, case folding, separators) and absent binaries only appear there.
+- **Related files & tests:** `scripts/run_procedure_eval.py` (`resolve_agent_cli`), `tests/test_procedure_eval.py::TestFixtureGitFailure`, `hooks/codex-rollout.mjs` (`LITERAL_ABSOLUTE_PATH`), `tests/test_codex_completion_claim_guard.py::TestOwnerSignalScanner::test_codex_home_resolution`.
+
+---
+
 ## 2026-09-18 — A run that never happened is not a failed run
 
 - **Task / context:** Publication-readiness live evidence. The one maintainer-approved Claude file-tool sentinel probe was made; the CLI could not authenticate, answered with its own `<synthetic>` message, billed nothing, and never started a model turn.

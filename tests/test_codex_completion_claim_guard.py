@@ -577,9 +577,17 @@ class TestOwnerSignalScanner(unittest.TestCase):
         body = ("const m = await import(%s);"
                 "process.stdout.write(JSON.stringify(input.map(([env, home]) => m.resolveCodexHome(env, home))));"
                 % json.dumps(ROLLOUT.as_uri()))
+        # A Windows 8.3 short path carries `~` in a real segment (C:\Users\RUNNER~1\...). It is a literal
+        # character there - the path must start with `/` or a drive, so no leading-`~` home expansion can
+        # apply - and rejecting it left every Windows profile with a long user name unable to resolve its
+        # Codex home. Found by the two-OS CI, not by the local Windows run, whose temp path is a long name.
         cases = [({"CODEX_HOME": "/x/y/"}, "/h"), ({}, "/h"), ({"CODEX_HOME": ""}, "C:\\Users\\u"),
-                 ({"CODEX_HOME": "rel/dir"}, "/h"), ({"CODEX_HOME": "/a/../b"}, "/h"), ({"CODEX_HOME": "/a//b"}, "/h")]
-        self.assertEqual(_node_json(body, cases), ["/x/y", "/h/.codex", "C:/Users/u/.codex", None, None, None])
+                 ({"CODEX_HOME": "rel/dir"}, "/h"), ({"CODEX_HOME": "/a/../b"}, "/h"), ({"CODEX_HOME": "/a//b"}, "/h"),
+                 ({"CODEX_HOME": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\t\\.codex"}, "/h"),
+                 ({}, "C:\\Users\\RUNNER~1")]
+        self.assertEqual(_node_json(body, cases),
+                         ["/x/y", "/h/.codex", "C:/Users/u/.codex", None, None, None,
+                          "C:/Users/RUNNER~1/AppData/Local/Temp/t/.codex", "C:/Users/RUNNER~1/.codex"])
         with tempfile.TemporaryDirectory() as home:
             env = {k: v for k, v in os.environ.items() if k != "CODEX_HOME"}
             env.update(HOME=home, USERPROFILE=home)

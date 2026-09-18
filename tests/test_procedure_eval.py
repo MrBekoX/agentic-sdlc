@@ -664,15 +664,21 @@ class TestFixtureGitFailure(unittest.TestCase):
                 self.assertEqual([git_step_of(c) for c in calls if git_step_of(c) in later], [])
 
     def test_live_run_stops_before_model_on_git_failure(self):
+        # The CLI must resolve for the run to reach the fixture step, but WHICH binary is not this
+        # test's subject: it patches the resolver, not shutil.which. SEC-8 moved the bare-name lookup
+        # off shutil.which (Windows searches the current directory first), so patching which left the
+        # real PATH in play - the test then passed on a machine with `claude` installed and failed on
+        # CI with `error=claude CLI missing`, asserting the environment instead of AC72.
         calls = []
-        with mock.patch.object(procedure_eval.shutil, "which", return_value="claude"), \
+        stub = os.path.join(os.sep, "stub", "bin", "claude")
+        with mock.patch.object(procedure_eval, "resolve_agent_cli", return_value=stub), \
                 mock.patch.object(procedure_eval.subprocess, "run", side_effect=self.fake_run("add", calls)):
             code, stdout = run_main(["--eval-set", PIPELINE_EVAL, "--case-id", "agentic-sdlc-pipeline-feature-no-commit",
                                      "--live", "--allow-fixture-commit"])
         self.assertEqual(code, 1, stdout)
         self.assertIn("error=fixture_git_failed:add", stdout)
         self.assertIn("procedure_eval=failed", stdout)
-        self.assertEqual([c for c in calls if c and c[0] == "claude"], [])
+        self.assertEqual([c for c in calls if c and c[0] == stub], [])
 
 
 PASS_TRANSCRIPT = "tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-pass.jsonl"
