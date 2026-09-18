@@ -57,6 +57,7 @@ _GIT_ENV_DROP = (
     "GIT_INDEX_FILE",
     "GIT_OBJECT_DIRECTORY",
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",  # redirects refs and objects even when GIT_DIR is dropped (SEC-5 residual)
 )
 
 
@@ -77,7 +78,12 @@ def _has_unsafe_character(path: str) -> bool:
 def _is_unsafe_path(path: str) -> bool:
     if not path or path.startswith("/") or "\\" in path or _DRIVE_PREFIX.match(path):
         return True
-    if ".." in path.split("/") or _has_unsafe_character(path):
+    # SEC-3: compare each segment with trailing dots and spaces stripped, as `exclusion_class` and
+    # `_collisions` already do. NTFS and APFS strip those, so '.. ', '...' and '. ' open the same
+    # directory as '..' and '.'; a literal comparison against ".." is evaded by such a spelling.
+    if any(part.rstrip(". ") in ("", ".", "..") for part in path.split("/")):
+        return True
+    if _has_unsafe_character(path):
         return True
     try:
         require_relative_pattern(path, "archive member")
@@ -342,7 +348,11 @@ def _write_atomic(output: Path, data: bytes) -> None:
 def _select_skills_only(members: dict) -> dict:
     """BR24: the committed members under the skills-only roots plus LICENSE, with no MCP configuration."""
     selected = {p: v for p, v in members.items() if p == "LICENSE" or p.startswith(SKILLS_ONLY_ROOTS)}
-    errors = [f"error=mcp_configuration:{p}" for p in _utf8_order(selected) if p.rsplit("/", 1)[-1] == ".mcp.json"]
+    # SEC-4: compare the NORMALIZED basename, as the credential-filename path in this file already does.
+    # A case-insensitive, trailing-dot-stripping filesystem opens '.MCP.JSON' and '.mcp.json.' as
+    # '.mcp.json', so a byte comparison ships exactly the live MCP configuration BR24 forbids.
+    errors = [f"error=mcp_configuration:{p}" for p in _utf8_order(selected)
+              if unicodedata.normalize("NFC", p).rsplit("/", 1)[-1].casefold().rstrip(". ") == ".mcp.json"]
     manifest = selected.get(CODEX_MANIFEST)
     if manifest is not None:
         try:
@@ -406,11 +416,14 @@ BINARY_PROBE_BYTES = 8000
 # Text arrives only on stdin as JSON lines; only line numbers, labels and reasons leave the bridge.
 # A suppressed line is one scanLines does not report. A marked line that still has an unsuppressed match
 # once its marker text is blanked is listed as allow-marker, with that match's label (D22: the marker is
-# what suppresses it). Otherwise the reason follows the scanner's own order: an exact documentation
-# sample, then a degenerate token, then a same-line allow marker.
+# what suppresses it). Otherwise EVERY suppressed match on the line is listed, deduplicated per
+# label+reason, through the same D22 per-match collector scanLines uses (SEC-6: the pre-D22
+# first-match-then-break walk dropped every suppression after the first, and mutated the shared
+# `p.re` objects). The reason follows the scanner's own order: an exact documentation sample, then a
+# degenerate token, then a same-line allow marker.
 _SCAN_BRIDGE = r"""
 import { pathToFileURL } from 'node:url';
-const { HIGH, scanLines, looksPlaceholder, ALLOW_MARKER, DOC_SAMPLES, isDegenerateToken } =
+const { HIGH, scanLines, lineMatches, ALLOW_MARKER, DOC_SAMPLES } =
   await import(pathToFileURL(__PATTERNS__).href);
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -428,16 +441,21 @@ for (const raw of input.split('\n')) {
       const hidden = scanLines(line.replace(new RegExp(ALLOW_MARKER.source, 'gi'), ' '), HIGH);
       if (hidden.length) { suppressed.push({ line: i + 1, label: hidden[0].label, reason: 'allow-marker' }); return; }
     }
-    for (const p of HIGH) {
-      p.re.lastIndex = 0;
-      const m = p.re.exec(line);
-      if (!m) continue;
-      if (p.valueGroup && looksPlaceholder(m[p.valueGroup])) continue;
+    const listed = new Set();
+    for (const m of lineMatches(line, HIGH)) {
+      const p = HIGH[m.index];
       let reason = null;
-      if (!p.valueGroup && DOC_SAMPLES.has(m[0])) reason = 'documentation-sample';
-      else if (!p.valueGroup && isDegenerateToken(m[0])) reason = 'degenerate-token';
-      else if (ALLOW_MARKER.test(line)) reason = 'allow-marker';
-      if (reason) { suppressed.push({ line: i + 1, label: p.label, reason }); break; }
+      if (m.suppressed) {
+        if (p.valueGroup) continue;  // a template value is not a suppressed SECRET; unlisted as before
+        reason = DOC_SAMPLES.has(line.slice(m.start, m.end)) ? 'documentation-sample' : 'degenerate-token';
+      } else if (ALLOW_MARKER.test(line)) {
+        reason = 'allow-marker';
+      }
+      if (!reason) continue;
+      const key = p.label + ':' + reason;
+      if (listed.has(key)) continue;
+      listed.add(key);
+      suppressed.push({ line: i + 1, label: p.label, reason });
     }
   });
   out.push(JSON.stringify({ id, findings, suppressed }));

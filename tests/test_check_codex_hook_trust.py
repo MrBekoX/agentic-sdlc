@@ -22,6 +22,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 UNDER_TEST = Path(os.environ.get("AGENTIC_TRUST_CHECK_UNDER_TEST") or REPO / "scripts" / "check_codex_hook_trust.py")
@@ -456,6 +457,68 @@ class TestTerminateTree(unittest.TestCase):
         finally:
             module.subprocess.run = original
         self.assertEqual(len(calls), 1)
+
+    def _posix_module(self):
+        """The module with its POSIX tree-kill branch selected, whatever the host platform is."""
+        spec = importlib.util.spec_from_file_location("check_codex_hook_trust_posix", UNDER_TEST)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        patches = [
+            mock.patch.object(module.sys, "platform", "linux"),
+            mock.patch.object(module.signal, "SIGKILL", 9, create=True),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        return module
+
+    def test_posix_branch_never_signals_a_reaped_child(self):
+        # SEC-9: query_hooks reaches _terminate_tree through its `finally:` on the SUCCESS path, after
+        # proc.wait() already reaped the child. The pid is then free for kernel reuse, so killpg would
+        # SIGKILL whatever session leader inherited it. The win32 branch already guards with poll().
+        module = self._posix_module()
+        killed = []
+
+        class ReapedProc:
+            pid = 515151
+
+            def poll(self):
+                return 0  # already reaped by query_hooks' proc.wait()
+
+            def kill(self):
+                killed.append("kill")
+
+            def wait(self, timeout=None):
+                return 0
+
+        def refuse(pid, sig):
+            killed.append((pid, sig))
+            raise AssertionError(f"killpg on a reaped pid: {pid!r}")
+
+        with mock.patch.object(module.os, "killpg", refuse, create=True):
+            module._terminate_tree(ReapedProc())
+        self.assertEqual(killed, [], "a reaped child's process group was signalled")
+
+    def test_posix_branch_still_kills_a_live_child_group(self):
+        # Control: the guard must not turn the tree kill off for a child that is still running.
+        module = self._posix_module()
+        calls = []
+
+        class LiveProc:
+            pid = 626262
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                calls.append("kill")
+
+            def wait(self, timeout=None):
+                return 0
+
+        with mock.patch.object(module.os, "killpg", lambda pid, sig: calls.append((pid, sig)), create=True):
+            module._terminate_tree(LiveProc())
+        self.assertEqual(calls, [(626262, 9)])
 
 
 class TestReadOnlyProtocol(TrustCheckCase):

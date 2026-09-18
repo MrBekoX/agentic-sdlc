@@ -595,6 +595,23 @@ class TestBranchStep(unittest.TestCase):
             fake.chmod(0o755)
         return sentinel
 
+    def test_repository_environment_does_not_redirect_the_branch_probe(self):  # SEC-5
+        # The probe hardens the program, the argv and the cwd, then forwards the whole ambient
+        # environment. GIT_DIR and friends override the cwd for symbolic-ref/rev-parse, so a repo
+        # genuinely on `main` reported 'ok' and a protected-branch edit went unreported. The sibling
+        # added in the same change set (scripts/build_release.py `_GIT_ENV_DROP`) drops these keys.
+        protected = self.make_repo("main")
+        other = self.make_repo("feature/elsewhere")
+        for name, overrides in (
+            ("git-dir", {"GIT_DIR": str(other / ".git")}),
+            ("git-dir+work-tree", {"GIT_DIR": str(other / ".git"), "GIT_WORK_TREE": str(other)}),
+            ("index-file", {"GIT_INDEX_FILE": str(other / ".git" / "index")}),
+        ):
+            with self.subTest(override=name):
+                env = os.environ.copy()
+                env.update(overrides)
+                self.assertEqual(self._resolve_in(protected, env), "protected")
+
     def test_git_behind_relative_path_entry_is_not_run(self):  # AC32, AC120
         # Mutation: resolveBranchState spawning a bare `git`, so the lookup walks the relative `.` entry.
         repo = self.make_repo("main")

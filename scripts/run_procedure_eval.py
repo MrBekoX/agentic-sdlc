@@ -251,6 +251,17 @@ def _record_codex_item(trace: Trace, item: dict[str, Any]) -> None:
 
 _WIN_ABSOLUTE_ENTRY_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|//)")
 
+# SEC-5: repository-selecting environment keys, dropped from a git child so the answer comes from the
+# working directory. Mirrors scripts/build_release.py `_GIT_ENV_DROP` and hooks/flow-evidence.mjs.
+_GIT_ENV_DROP = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",  # redirects refs and objects even when GIT_DIR is dropped (SEC-5 residual)
+)
+
 
 def _program_on_absolute_path(name: str) -> str | None:
     """`name` as an absolute path found in an absolute PATH entry, else None (D25 model (5)).
@@ -1996,23 +2007,42 @@ def copy_fixture(case: dict[str, Any], tmp_root: Path, *, allow_commit: bool = F
     ]
     if allow_commit:
         steps += [("add", ["add", "."]), ("commit", ["commit", "-m", "fixture baseline"])]
+    # The baseline commit belongs to THIS fixture copy: an ambient GIT_DIR or GIT_COMMON_DIR would otherwise
+    # make git init/add/commit act on another repository (SEC-5 residual, same list as `_GIT_ENV_DROP`).
+    env = {key: value for key, value in os.environ.items() if key not in _GIT_ENV_DROP}
     for step, argv in steps:
-        proc = subprocess.run([git, *argv], cwd=dst, capture_output=True, text=True, encoding="utf-8")
+        proc = subprocess.run([git, *argv], cwd=dst, env=env, capture_output=True, text=True, encoding="utf-8")
         if proc.returncode != 0:
             # Git stderr is never echoed: it can carry local paths or configuration values.
             raise FixtureGitError(f"fixture_git_failed:{step}")
     return dst
 
 
+def resolve_agent_cli(name: str) -> str | None:
+    """The agent CLI as an ABSOLUTE path, or None (D25 model (5), SEC-8).
+
+    A bare name is looked up only on absolute PATH entries: `shutil.which` on Windows searches the
+    current directory first even with an explicit `path=`, which would start a `claude.exe` planted in
+    the checked-out project with the repository as `--plugin-dir` and the case prompt on argv. A name
+    that carries a directory is an explicit `--claude <path>`, which is how a WSL/nvm layout names a
+    CLI that sits on no absolute PATH entry; it is resolved like the maintainer's shell would.
+    """
+    if os.path.dirname(name):
+        found = shutil.which(name)
+        return os.path.abspath(found) if found else None
+    return _program_on_absolute_path(name)
+
+
 def run_live_case(case: dict[str, Any], args: argparse.Namespace, tmp_root: Path) -> tuple[Trace, Path, Path]:
-    if shutil.which("claude") is None:
+    claude = resolve_agent_cli(getattr(args, "claude", None) or "claude")
+    if claude is None:
         raise RuntimeError("claude CLI missing")
     cwd = copy_fixture(case, tmp_root, allow_commit=args.allow_fixture_commit)
     transcript_dir = args.transcript_dir.resolve() if args.transcript_dir else (tmp_root / "transcripts")
     transcript_dir.mkdir(parents=True, exist_ok=True)
     transcript_path = resolve_under(transcript_dir, f"{case['id']}.jsonl", "transcript filename")
     cmd = [
-        "claude",
+        claude,
         "-p",
         case["prompt"],
         "--plugin-dir",
@@ -2076,10 +2106,13 @@ def repository_commit() -> str:
     git = _program_on_absolute_path("git")  # D25 model (5)
     if git is None:
         return NO_GIT_CHECKOUT
+    # SEC-5: the repository-selecting keys are dropped, not inherited; they override `cwd` and would
+    # stamp another repository's commit into the evidence packet. Same list as `_GIT_ENV_DROP`.
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_DROP}
     try:
         proc = subprocess.run(
             [git, "-c", "core.fsmonitor=false", "rev-parse", "--verify", "HEAD^{commit}"],
-            cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
         )
     except OSError:
         return NO_GIT_CHECKOUT
@@ -2738,6 +2771,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--model")
     parser.add_argument("--permission-mode", default="auto")
+    parser.add_argument(
+        "--claude",
+        default="claude",
+        help="Agent CLI for --live: a path, or a name resolved only on absolute PATH entries. "
+        "Name the path when the CLI sits outside an absolute PATH entry (WSL/nvm layouts).",
+    )
     parser.add_argument(
         "--max-budget-usd",
         default="5.00",

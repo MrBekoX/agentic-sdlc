@@ -351,16 +351,28 @@ function programOnAbsolutePath(name) {
   return null;
 }
 
+// SEC-5: the repository-selecting keys are DELETED from the child environment, not forwarded. They
+// override `cwd` for symbolic-ref/rev-parse, so an inherited GIT_DIR made a repository genuinely on
+// `main` report 'ok' — and docs/runtime-adapter.md states the branch is the WORKING-DIRECTORY branch.
+// The list mirrors scripts/build_release.py `_GIT_ENV_DROP`, the sibling probe in the same change set.
+const BRANCH_GIT_ENV_DROP = Object.freeze([
+  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR', // redirects refs and objects even when GIT_DIR is dropped (SEC-5 residual)
+]);
+
 export function resolveBranchState(cwd) {
   try {
     const git = programOnAbsolutePath('git');
     if (!git) return 'unknown';
+    const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', NoDefaultCurrentDirectoryInExePath: '1' };
+    for (const key of BRANCH_GIT_ENV_DROP) delete env[key];
     const options = {
       cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5000,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', NoDefaultCurrentDirectoryInExePath: '1' },
+      env,
     };
     const name = execFileSync(git, BRANCH_GIT_ARGV.symbolicRef, options).trim();
     execFileSync(git, BRANCH_GIT_ARGV.verifyHead, options); // throws when there is no commit yet

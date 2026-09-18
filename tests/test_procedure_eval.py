@@ -2640,6 +2640,106 @@ class TestProgramLookup(unittest.TestCase):
         self.assertEqual(helpers, {"exits": [], "real": [True]})
 
 
+class TestLiveAgentCliSpawn(unittest.TestCase):
+    """SEC-8: the agent CLI is the highest-privilege spawn in this file (the repository as
+    `--plugin-dir`, the case prompt on argv) and was the only program left on a BARE NAME, gated by a
+    `shutil.which` call that is itself what pulls the win32 current-directory lookup in. D25 model (5)
+    already resolves `git` and `node` to an absolute path found on an absolute PATH entry.
+
+    No CLI is started here and no paid call can happen: `copy_fixture` and the redactor are stubbed,
+    the CLI stand-in is an inert file in a temp directory, and the subprocess fake RAISES on any argv
+    it does not recognize instead of falling through to the real `subprocess.run`."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="live-spawn-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.cli = self.tmp / ("claude.exe" if sys.platform == "win32" else "claude")
+        self.cli.write_bytes(b"inert stand-in, never executed\n")
+        if sys.platform != "win32":
+            self.cli.chmod(0o755)
+
+    def _args(self, **over):
+        base = dict(transcript_dir=self.tmp / "transcripts", timeout=30, model=None,
+                    permission_mode="auto", max_budget_usd="1.00", allow_fixture_commit=False,
+                    strict_evidence=False)
+        base.update(over)
+        return types.SimpleNamespace(**base)
+
+    def _spawn_argv(self, args, *, resolved):
+        """run_live_case's argv, with the fixture copy, the redactor and the spawn all stubbed."""
+        recorded = {}
+
+        def fake_run(cmd, **kwargs):
+            # Fail closed: only the agent-CLI argv is accepted, and it is never executed.
+            if not isinstance(cmd, list) or len(cmd) < 3 or cmd[1] != "-p":
+                raise AssertionError(f"unexpected subprocess argv: {cmd!r}")
+            recorded["cmd"] = list(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        real_which = shutil.which
+
+        def stub_which(name, **kwargs):
+            # A BARE name never reaches a real installation here; an explicit path (the temp
+            # stand-in) resolves normally, which is what the --claude override has to keep working.
+            return real_which(name, **kwargs) if os.path.dirname(name) else resolved
+
+        case = {"id": "spawn-probe", "prompt": "hello", "fixture_dir": "tests/fixtures"}
+        with mock.patch.object(procedure_eval, "copy_fixture", lambda *a, **k: self.tmp), \
+             mock.patch.object(procedure_eval, "redact_text", lambda text: text), \
+             mock.patch.object(procedure_eval, "_program_on_absolute_path", lambda name: resolved), \
+             mock.patch.object(procedure_eval.shutil, "which", stub_which), \
+             mock.patch.object(procedure_eval.subprocess, "run", fake_run):
+            procedure_eval.run_live_case(case, args, self.tmp)
+        return recorded["cmd"]
+
+    def test_default_spawn_uses_an_absolute_cli_path(self):
+        # Mutation: spawning the bare name `claude`, which on win32 searches the current directory first.
+        argv = self._spawn_argv(self._args(), resolved=str(self.cli))
+        self.assertTrue(os.path.isabs(argv[0]), argv[0])
+        self.assertEqual(argv[0], str(self.cli))
+        self.assertIn("--plugin-dir", argv)
+
+    def test_explicit_override_is_used_when_the_cli_is_off_the_absolute_path(self):
+        # WSL/nvm layouts keep the CLI outside any absolute PATH entry; --claude names it explicitly.
+        argv = self._spawn_argv(self._args(claude=str(self.cli)), resolved=None)
+        self.assertTrue(os.path.isabs(argv[0]), argv[0])
+        self.assertEqual(argv[0], str(self.cli))
+
+    def test_unresolvable_cli_still_raises_the_named_runtime_error(self):
+        # CONTROL: the existing gate must stay; a missing CLI is an error, never a bare-name spawn.
+        def refuse(cmd, **kwargs):
+            raise AssertionError(f"a spawn was attempted with no resolved CLI: {cmd!r}")
+
+        with mock.patch.object(procedure_eval, "copy_fixture", lambda *a, **k: self.tmp), \
+             mock.patch.object(procedure_eval, "_program_on_absolute_path", lambda name: None), \
+             mock.patch.object(procedure_eval.shutil, "which", lambda name, **k: None), \
+             mock.patch.object(procedure_eval.subprocess, "run", refuse):
+            with self.assertRaises(RuntimeError):
+                procedure_eval.run_live_case({"id": "spawn-probe", "prompt": "hello",
+                                              "fixture_dir": "tests/fixtures"}, self._args(), self.tmp)
+
+
+class TestRepositoryCommitEnvironment(unittest.TestCase):
+    """SEC-5: the evidence packet's git_commit names THIS repository, not whatever GIT_DIR selects.
+
+    `repository_commit()` hardened its program and argv but passed no `env=`, so it inherited the
+    repository-selecting keys its sibling `scripts/build_release.py::_run_git` drops (`_GIT_ENV_DROP`).
+    An ambient GIT_DIR then stamps another repository's commit into the packet, or erases it."""
+
+    def test_repository_commit_ignores_repository_selecting_environment(self):
+        if procedure_eval._program_on_absolute_path("git") is None:
+            self.skipTest("git is not on an absolute PATH entry")
+        head = procedure_eval.repository_commit()
+        self.assertRegex(head, r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+        elsewhere = Path(tempfile.mkdtemp(prefix="commit-env-"))
+        self.addCleanup(shutil.rmtree, elsewhere, ignore_errors=True)
+        for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR"):
+            with self.subTest(variable=name):
+                with mock.patch.dict(os.environ, {name: str(elsewhere)}):
+                    self.assertEqual(procedure_eval.repository_commit(), head)
+
+
 def path_is_within(path, directory):
     return os.path.normcase(os.path.abspath(path)).startswith(os.path.normcase(os.path.abspath(directory)) + os.sep)
 

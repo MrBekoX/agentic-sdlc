@@ -241,6 +241,22 @@ class TestMemberPolicy(unittest.TestCase):
                 self.assertEqual(build_release.exclusion_class(path.lower(), "100644"), expected)
         self.assertIsNone(build_release.exclusion_class(".env.EXAMPLE", "100644"))
 
+    def test_traversal_class_folds_trailing_dots_and_spaces(self):
+        # SEC-3: the class-7 traversal rule must normalize each segment the way classes 1-6 already do.
+        # NTFS/APFS strip trailing dots and spaces from a name, so '.. ', '..' and '...' all open the
+        # parent directory; a literal "==" against '..' is evaded by a spelling the filesystem folds.
+        for path in (".. /pwned.txt", "a/.. /.. /x", ".../x", "a/.../b", ".. ", "... ", ". /x", "a/. /b"):
+            with self.subTest(path=path):
+                self.assertTrue(build_release._is_unsafe_path(path))
+                self.assertEqual(build_release.exclusion_class(path, "100644"), 7)
+
+    def test_traversal_normalization_keeps_ordinary_names_included(self):
+        # Control: a name that merely CONTAINS dots or ends in them after real characters still ships.
+        for path in ("docs/a..b.md", "skills/x/SKILL.md", "docs/version.1.0.md", "docs/trailing...md"):
+            with self.subTest(path=path):
+                self.assertFalse(build_release._is_unsafe_path(path))
+                self.assertIsNone(build_release.exclusion_class(path, "100644"))
+
     def test_control_and_surrogate_paths_are_unsafe_and_escaped(self):
         # SEC-13: a control character in a member path could forge a result line in a scan log.
         for path in ("docs/x\nverify=passed", "a\rb", "a\x00b", "a\x1fb", "a\x7fb", "bad\udcff.md"):
@@ -729,6 +745,37 @@ class TestSkillsOnlyBuild(ScratchTestCase):
                 self.assertIn(f"error=mcp_configuration:{named}", text.splitlines())
                 self.assertFalse(out.exists())
 
+    def test_skills_only_rejects_case_and_trailing_dot_mcp_spellings(self):
+        # SEC-4: the BR24 guard compared the basename byte-for-byte, but NTFS/APFS open '.MCP.JSON'
+        # and '.mcp.json.' as '.mcp.json' — live MCP configuration for the consuming runtime, which
+        # is exactly what BR24 forbids. The index is written directly, because Windows cannot create
+        # a file whose name ends in a dot.
+        for index, named in enumerate((".codex-plugin/.MCP.JSON", "skills/.mcp.json.", "hooks/.Mcp.Json")):
+            with self.subTest(carrier=named):
+                repo = self.scratch(f"mcp-fold-{index}")
+                repo.commit(self.br24_files(), "br24")
+                oid = repo.git("hash-object", "-w", "--stdin", stdin=b'{"mcpServers": {}}\n')
+                # core.protectNTFS refuses a trailing-dot path in the index; the point of the finding
+                # is that such a path can still be committed (on any host without that default).
+                repo.git("-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo",
+                         f"100644,{oid},{named}")
+                repo.git("commit", "-q", "-m", "mcp spelling")
+                result, text, out = self.build(repo.root, f"mcp-fold-{index}.zip", skills_only=True)
+                self.assertEqual(result.exit_code, 1, text)
+                self.assertIn(f"error=mcp_configuration:{named}", text.splitlines())
+                self.assertFalse(out.exists())
+
+    def test_skills_only_mcp_guard_leaves_near_miss_names_in_the_archive(self):
+        # Control: normalizing the comparison must not start excluding ordinary members.
+        members = {
+            "LICENSE": ("100644", b"MIT\n"),
+            "skills/x/.mcp.json.md": ("100644", b"# docs\n"),
+            "skills/x/mcp.json": ("100644", b"{}\n"),
+            "skills/x/my.mcp.json": ("100644", b"{}\n"),
+            "scripts/tool.py": ("100644", b"print('tool')\n"),
+        }
+        self.assertEqual(sorted(build_release._select_skills_only(members)), sorted(members))
+
     def test_skills_only_real_head_has_no_forbidden_roots_and_all_br24_paths(self):
         result, text, out = self.build(REPO, "skills-only.zip", skills_only=True)
         self.assertEqual(result.exit_code, 0, text)
@@ -1111,6 +1158,28 @@ class TestVerifySecretScan(ScratchTestCase):
         self.assertIn("suppressed_finding=notes/samples.txt:1:private-key:allow-marker", lines)
         self.assertIn("suppressed_finding=notes/samples.txt:2:aws-access-key-id:documentation-sample", lines)
         self.assertIn("suppressed_finding=notes/samples.txt:3:aws-access-key-id:degenerate-token", lines)
+        self.assertIn("suppressed_count=3", lines)
+        self.assertEqual([l for l in lines if l.startswith("secret_finding=")], [])
+        self.assertEqual(lines[-1], "verify=passed")
+
+    def test_verify_lists_every_suppression_on_one_line(self):
+        # SEC-6: the BR22 bridge kept the pre-D22 first-match-then-break loop, so the SECOND suppressed
+        # token on a line never reached the listing that AC94-AC99 make the maintainer's re-judgement
+        # loop. A misjudged degeneracy verdict is then dropped silently whenever an earlier-ordered
+        # pattern was also suppressed on that line.
+        degenerate = "gh" + "p_" + "x" * 36
+        body = "\n".join([
+            "documented = " + exported_doc_sample("AK" + "IA") + " token = " + degenerate,
+            "alone = " + degenerate,
+        ]) + "\n"
+        repo, out = self.built_with({"notes/pair.txt": body.encode("ascii")})
+        report, text = self.quiet(build_release.verify_archive, out, repo.root)
+        lines = text.splitlines()
+        self.assertEqual(report.exit_code, 0, text)
+        self.assertIn("suppressed_finding=notes/pair.txt:1:aws-access-key-id:documentation-sample", lines)
+        self.assertIn("suppressed_finding=notes/pair.txt:1:github-token:degenerate-token", lines)
+        # Control: the same token alone IS listed, so only its position on the line decided.
+        self.assertIn("suppressed_finding=notes/pair.txt:2:github-token:degenerate-token", lines)
         self.assertIn("suppressed_count=3", lines)
         self.assertEqual([l for l in lines if l.startswith("secret_finding=")], [])
         self.assertEqual(lines[-1], "verify=passed")
@@ -1586,14 +1655,16 @@ class TestHistoryPrivatePaths(HistoryTestCase):
         base = repo.commit({"README.md": b"readme\n"}, "c1")
         crafted = repo.crafted_commit(
             [("100644", "README.md", b"readme\n"), ("120000", "link", b"../outside"),
-             ("100644", "..", b"dotdot\n"), ("100644", "a\\b", b"backslash\n")],
+             ("100644", "..", b"dotdot\n"), ("100644", "a\\b", b"backslash\n"),
+             # SEC-3: spellings a trailing-dot-stripping filesystem folds back onto '..'.
+             ("100644", ".. ", b"dotdot-space\n"), ("100644", "...", b"tripledot\n")],
             "refs/pull/3/head",
             parent=base,
         )
         report, text = self.scan(self.mirror(repo))
         self.assertEqual(report.exit_code, 1, text)
         lines = text.splitlines()
-        for path in ("link", "..", "a\\b"):
+        for path in ("link", "..", "a\\b", ".. ", "..."):
             with self.subTest(path=path):
                 self.assertIn(f"private_path_finding=path={path} class=7 first_commit={crafted} state=unresolved", lines)
 

@@ -153,12 +153,15 @@ def _terminate_tree(proc: subprocess.Popen) -> None:
                 )
             except (OSError, subprocess.SubprocessError):
                 proc.kill()
-    else:
-        # The server leads its own session, so its group id is its pid.
+    elif proc.poll() is None:
+        # The server leads its own session, so its group id is its pid. Never signal a REAPED child
+        # (SEC-9): `query_hooks` reaches this through its `finally:` on the success path, after
+        # `proc.wait()` returned, and the kernel is then free to recycle that pid onto an unrelated
+        # session leader. `os.killpg` has no liveness guard of its own, so the poll() test is it.
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
-            pass
+            proc.kill()
     try:
         proc.wait(timeout=KILL_WAIT_SECONDS)
     except subprocess.TimeoutExpired:

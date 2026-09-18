@@ -353,6 +353,8 @@ Behavior evals should move toward **transcript JSONL** checks for evidence such 
 
 Live mode defaults to `--permission-mode auto` so safe headless commands can run without an interactive prompt. Override it only when intentionally auditing permission behavior. `python3 scripts/run_procedure_eval.py --live` now requires `--allow-fixture-commit`, the consent for the baseline commit the harness creates inside the isolated fixture copy; without it the eval exits 2 before creating a temporary directory, running Git or starting a model.
 
+Live mode starts the agent CLI only from an absolute path found on an absolute `PATH` entry, the same rule `git` and `node` already follow (D25 model (5)), so a `claude` planted in the checked-out project is never run. When the CLI sits outside any absolute `PATH` entry — a WSL or nvm layout — name it explicitly with `--claude <path>`; an unresolvable CLI still fails with `claude CLI missing`.
+
 ### What it checks
 
 For each case, the evaluator parses the transcript into a trace and checks:

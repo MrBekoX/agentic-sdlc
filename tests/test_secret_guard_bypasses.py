@@ -1394,5 +1394,66 @@ class TestGuardWiring(unittest.TestCase):
                     )
 
 
+@unittest.skipIf(NODE is None, "node not available")
+class TestQuotedKeyPasswordLiteral(unittest.TestCase):
+    """SEC-7 - `password-literal` required its keyword to be followed directly by `\\s*[:=]`, so a
+    JSON-quoted key never matched: the closing `"` intervenes. `json-credential` covers the same line
+    only from 16 characters, so a 6-15 character password was blocked in YAML/env spelling and
+    invisible in the identical JSON spelling - the same value, two verdicts. Every value here is
+    synthetic and assembled at runtime, so no password-shaped literal exists in this file."""
+
+    REAL = "Hunter2" + "Real99"                 # 13 characters
+    SHORT = "Sw0rd" + "fish"                    # 9 characters
+    LONG = "Hunter2" + "Real99" + "Xyz123"      # 19 characters: already inside json-credential's floor
+    WORD = "pass" + "word"
+    FINDING = [{"line": 1, "label": "password-literal"}]
+
+    @classmethod
+    def member(cls, name, value, quote='"'):
+        """One `  "name": "value",` member, built at runtime so this source holds no such literal."""
+        sep = ":" + " "
+        return "  " + quote + name + quote + sep + quote + value + quote + ","
+
+    def test_quoted_key_password_is_high_confidence(self):
+        # Mutation: requiring the separator to follow the keyword directly (the JSON spelling escapes).
+        cases = {
+            "quoted-json-name": self.member(self.WORD.capitalize(), self.REAL),
+            "quoted-sa-name": self.member(("sa_" + self.WORD).upper(), self.REAL),
+            "quoted-short-value": self.member("pw" + "d", self.SHORT),
+            "single-quoted-name": self.member(self.WORD[:4] + "wd", self.SHORT, "'"),
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self.assertEqual(scan_high(line), self.FINDING)
+
+    def test_existing_spellings_keep_their_verdict(self):
+        # CONTROL: the shapes already covered must stay covered, in HIGH and in BROAD.
+        for label, line in {
+            "yaml-single-quoted": "  " + ("sa_" + self.WORD).upper() + ": " + "'" + self.REAL + "'",
+            "env-assignment": self.WORD + "=" + self.REAL,
+            "connection-string": "Server=db;" + self.WORD.capitalize() + "=" + self.REAL + ";",
+        }.items():
+            with self.subTest(case=label):
+                self.assertEqual(scan_high(line), self.FINDING)
+                self.assertEqual(scan_broad(line), self.FINDING)
+
+    def test_long_quoted_value_is_still_a_finding(self):
+        # A 16+ character quoted value was already reported (as json-credential); it stays a HIGH
+        # finding, now under the lower-indexed password-literal label.
+        self.assertEqual(scan_high(self.member(self.WORD.capitalize(), self.LONG)), self.FINDING)
+
+    def test_widening_does_not_flag_hashes_templates_or_prose(self):
+        # CONTROL: a fix that simply matches more fails these.
+        for label, line in {
+            "password-hash": self.member(self.WORD + "_hash", self.REAL),
+            "template-value": self.member(self.WORD.capitalize(), "${DB_" + self.WORD.upper() + "}"),
+            "masked-value": self.member(self.WORD.capitalize(), "***MASKED***"),
+            "prose": "just a normal line of documentation about " + self.WORD + "s",
+            "short-value": self.member(self.WORD.capitalize(), "ab12"),
+        }.items():
+            with self.subTest(case=label):
+                self.assertEqual(scan_high(line), [])
+
+
 if __name__ == "__main__":
     unittest.main()

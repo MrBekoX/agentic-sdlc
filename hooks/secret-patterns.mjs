@@ -112,7 +112,11 @@ export const HIGH = [
   // Authorization: Bearer <token>. In HIGH (not just BROAD) so commits are blocked, not only warned.
   { label: 'bearer-token', re: /\bbearer\s+[A-Za-z0-9._\-]{20,}/i },
   // Password=...  veya  PASSWORD: "..."  (connection string / compose / env)
-  { label: 'password-literal', re: /\b(?:password|pwd|passwd|sa_password|mssql_sa_password)\s*[:=]\s*["']?([^;"'\s]{6,})/i, valueGroup: 1 },
+  // The `["']?` after the keyword closes SEC-7: a JSON-quoted key (`"Password": "..."`) puts a quote
+  // between the keyword and the separator, so the same value was reported in env/YAML spelling and
+  // missed in JSON spelling, with json-credential's 16-character floor leaving 6-15 uncovered. It stays
+  // one OPTIONAL quote, so `"password_hash": "..."` (a `_` follows the keyword) still does not match.
+  { label: 'password-literal', re: /\b(?:password|pwd|passwd|sa_password|mssql_sa_password)["']?\s*[:=]\s*["']?([^;"'\s]{6,})/i, valueGroup: 1 },
   // JSON credential:  "...Key|Secret|Password|Token|Credential...": "long-value" (>=16 chars)
   { label: 'json-credential', re: /"[^"]*(?:password|secret|key|token|credential|signing)[^"]*"\s*:\s*"([^"]{16,})"/i, valueGroup: 1 },
 ];
@@ -204,7 +208,9 @@ function valueMatchAt(line, v, valueStart, run) {
 }
 
 // Every match on one line as { index (pattern), start, end, suppressed }, one per pattern and start.
-function lineMatches(line, patterns) {
+// Exported so a consumer that must LIST suppressions (the BR22 archive/history bridge) reads the same
+// per-match verdicts the guard and durable redaction use, instead of re-walking `p.re` itself (SEC-6).
+export function lineMatches(line, patterns) {
   const out = [];
   const seen = new Set();
   const boundaries = [];
