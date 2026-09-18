@@ -660,10 +660,13 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # releases above); coverage in tests/test_codex_completion_claim_guard.py
         # (TestHouseMessageBytes, TestOwnerAwareCompletion).
         "hooks/flow-step-guard-codex.mjs",
-        # hooks/codex-write-signal.mjs IS locked here (B5/DP-C): the #5 fix keeps the shared secret-write
-        # extractor byte-untouched (the precise recognizer re-implements its pattern rather than editing it),
-        # and the spec Must-not-change names it a protected surface; its prior ReDoS follow-up is at HEAD, so
-        # locking-to-HEAD is consistent — this is the only automated enforcement of that Must-not-change item.
+        # hooks/codex-write-signal.mjs is NOT locked here, and no other list locks it either. The #5 fix left
+        # the shared secret-write extractor byte-untouched (the precise recognizer re-implements its pattern
+        # rather than editing it), but the file has since been a security-fix target twice, and a byte lock
+        # would have blocked those fixes — the same reason codex-rollout.mjs and scan-write-codex.mjs are out.
+        # So the spec Must-not-change item it names is enforced by behaviour, not by bytes: its coverage is
+        # tests/test_secret_guard_bypasses.py (closed bypass plus a control proving the guard still passes
+        # legitimate input). Anyone relying on a byte lock for that surface should read this as: there is none.
         # AP1 command/write guards + reused pattern source (this slice edits the very
         # Bash|apply_patch block scan-write-codex.mjs lives in, so its bytes must be locked).
         # hooks/scan-write-codex.mjs is NOT locked here — a security follow-up sanitized the target

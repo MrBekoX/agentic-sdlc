@@ -80,14 +80,14 @@ Current [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) describ
 
 ### CLI versions by platform
 
-The versions below were re-captured from `--version` output on the implementation date. The currently documented version is that re-capture. The last live-tested version is the CLI of the most recent recorded live run on that platform, taken from the evidence above and the release ledger.
+The versions below were re-captured from `--version` output on 2026-09-18 and the outputs are retained under `tests/artifacts/publication/cli/{windows,wsl}/versions.txt`, so every value in this table can be checked against a file. The currently documented version is that re-capture. The last live-tested version is the CLI of the most recent recorded live run on that platform, taken from the evidence above and the release ledger.
 
 | Platform | Claude Code | Codex | python3 | node | Capture date and time (UTC) | Last live-tested version | Currently documented version |
 |---|---|---|---|---|---|---|---|
-| Windows 11 | 2.1.271 | 0.154.0 | 3.13.9 | v24.16.0 | 2026-09-15T09:38:31Z | Claude Code 2.1.269 (Windows lifecycle chain); Codex none recorded (the Windows fixture's sandbox permissions prevented allowed execution) | Claude Code 2.1.271, Codex 0.154.0 |
-| WSL Ubuntu 24.04 | 2.1.269 | 0.154.0 (`~/.local/bin/codex`) | 3.12.3 | v24.14.0 through nvm, not on the login `PATH` | 2026-09-15T09:41:18Z | Claude Code 2.1.269 and Codex 0.154.0 (lifecycle and coexistence captures) | Claude Code 2.1.269, Codex 0.154.0 |
+| Windows 11 | 2.1.274 | 0.154.0 | 3.13.9 | v24.16.0 | 2026-09-18T11:43:59Z | Claude Code 2.1.269 (Windows lifecycle chain); Codex none recorded (the Windows fixture's sandbox permissions prevented allowed execution) | Claude Code 2.1.274, Codex 0.154.0 |
+| WSL Ubuntu 24.04 | 2.1.269 | 0.154.0 (`~/.local/bin/codex`) | 3.12.3 | v24.14.0 through nvm, not on the login `PATH` | 2026-09-18T11:43:59Z | Claude Code 2.1.269 and Codex 0.154.0 (lifecycle and coexistence captures) | Claude Code 2.1.269, Codex 0.154.0 |
 
-- Gap: Windows Claude Code is 2.1.271, while the planning capture on 2026-09-14T19:56:53Z read 2.1.270. The re-capture is the documented version; no live run was repeated on it, so its last live-tested version stays 2.1.269. The other three CLI values equal the planning capture.
+- Gap: Windows Claude Code moves faster than this table - the 2026-09-14T19:56:53Z planning capture read 2.1.270, a 2026-09-15 re-capture read 2.1.271, and the retained 2026-09-18 re-capture reads 2.1.274. The retained re-capture is the documented version; no live run was repeated on any of them, so the last live-tested version stays 2.1.269. WSL is the platform the live batch ran on, and its four values are unchanged across all three captures. The other three Windows CLI values equal the planning capture.
 - Gap: on WSL, `node` resolves only through nvm and must be added to `PATH` explicitly before Codex hooks can run.
 - `codex plugin marketplace list`, captured 2026-09-15: Windows lists `openai-primary-runtime` and `openai-curated`; WSL lists `personal` and `openai-curated`. Both equal the planning capture.
 - `claude plugin marketplace list` (the CLI form of `/plugin marketplace list`), captured 2026-09-15: Windows lists `claude-plugins-official` and `anthropic-agent-skills`; WSL lists `claude-plugins-official` and `mrbekox` from a local directory source.
