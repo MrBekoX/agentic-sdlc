@@ -41,6 +41,11 @@ docs/agentic-sdlc/evidence/*
 !docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md
 # Model-generated audit write-ups stay local; never distributed.
 audit-docs/
+# Maintainer prompt and plan inputs for agent sessions; local only, never distributed.
+agentic-sdlc-prompts/
+# Contract test for a prompt in agentic-sdlc-prompts/; it reads that folder, so it can only
+# run where the folder exists and must stay out of clean clones and CI.
+tests/test_superpowers_referenced_eval_prompt.py
 
 # Debug / local runtime artifacts
 debug.txt
