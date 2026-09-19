@@ -395,8 +395,9 @@ function deny(finding) {
 const raw = await readStdin();
 let input = {};
 try { input = JSON.parse(raw || '{}'); } catch { /* fail open */ }
-const cmd = String(input?.tool_input?.command || '');
-const bashSemantics = String(input?.tool_name || '') === 'Bash';
+const cmd = String(input?.toolInput?.command || input?.tool_input?.command || '');
+const toolName = String(input?.toolName || input?.tool_name || '');
+const bashSemantics = toolName === 'Bash' || toolName === 'run_terminal_command';
 
 for (const finding of BLOCKED) {
   const blocked = finding.check ? finding.check(cmd, bashSemantics) : finding.re.test(cmd);

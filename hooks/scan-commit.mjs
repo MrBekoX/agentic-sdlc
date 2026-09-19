@@ -33,7 +33,7 @@ function gitDiff(args, cwd) {
 const raw = await readStdin();
 let input = {};
 try { input = JSON.parse(raw || '{}'); } catch { /* ignore */ }
-const cmd = String(input?.tool_input?.command || '');
+const cmd = String(input?.toolInput?.command || input?.tool_input?.command || '');
 
 // Cheap reject first: this hook is wired on every Bash/PowerShell call (the previous
 // `if: Bash(git commit*)` wiring filter was itself bypassable by an alias, so the decision moved
