@@ -9,10 +9,13 @@ This file is the publish gate for `agentic-sdlc` version `0.4.3`. It keeps the r
 | Claude Code | Supported | Local gate plus live routing/procedure transcript evidence before claiming live behavior. |
 | Codex | Supported | Local gate plus route-classifier/procedure transcript evidence before claiming live behavior. |
 | OpenCode, Kimi Code, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.3`. |
+| ZCode (Z.ai) | Experimental adapter, not a 0.4.3 release target | Adapter files (`.zcode-plugin/plugin.json`, root `marketplace.json`, `hooks/hooks-zcode.json`) support local installs only; ZCode stays outside the supported scope above regardless of local-install evidence. |
 
 ## Distribution paths and go/no-go
 
 The four distribution paths below each get their own go/no-go decision; the same labels are used in [`README.md`](../README.md) and both runtime READMEs. Each verdict stays no-go, pending maintainer review, until a recorded maintainer review of that path is linked in the ledger's [path verdicts](release-evidence-0.4.3.md#path-verdicts). The old 45/45 routing results, synthetic replay and marketplace-only validation never close a path.
+
+The experimental ZCode local install is not one of these four paths and carries no 0.4.3 verdict; its gap list lives in `docs/publication/zcode-marketplace.md`.
 
 ### Claude own marketplace
 

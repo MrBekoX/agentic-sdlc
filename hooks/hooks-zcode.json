@@ -1,0 +1,56 @@
+{
+  "description": "ZCode hook wiring (experimental adapter, not a 0.4.3 release target). Only events and tool names verified against the fetched ZCode hook schema (zcode.z.ai/en/docs/hooks, 2026-09-19) and tools observed in a live session are wired: process executors via argv (no shell), ${ZCODE_PLUGIN_ROOT} paths, Bash and Write|Edit matchers, SessionStart startup|clear|compact. The Claude-transcript and Codex-rollout Stop readers and the flow-order guard stay unwired (see docs/runtime-adapter.md).",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/scan-commit.mjs"],
+            "timeoutMs": 20000
+          },
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/destructive-command-guard.mjs"],
+            "timeoutMs": 15000
+          },
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/branch-guard.mjs"],
+            "timeoutMs": 15000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/scan-write.mjs"],
+            "timeoutMs": 15000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/session-start.mjs"],
+            "timeoutMs": 15000
+          }
+        ]
+      }
+    ]
+  }
+}
