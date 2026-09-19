@@ -165,6 +165,32 @@ class TestDestructiveCommandGuard(unittest.TestCase):
                 reason = out["hookSpecificOutput"]["permissionDecisionReason"]
                 self.assertIn("rm-recursive", reason)
 
+    def test_blocks_flag_order_and_case_variants(self):
+        # Force before recursive, long and short flags mixed, the flag ahead of the path, and a
+        # lower-case cmdlet. The guard at a525117^ allowed six of these; nothing else pins them.
+        blocked = [
+            ("rm -Rf ./tmp", "rm-recursive"),
+            ("rm -rfv ./tmp", "rm-recursive"),
+            ("rm -f -r ./tmp", "rm-recursive"),
+            ("rm --force --recursive ./tmp", "rm-recursive"),
+            ("rm -r --force ./tmp", "rm-recursive"),
+            ("/usr/bin/rm -rf ./tmp", "rm-recursive"),
+            ("Remove-Item -Recurse ./tmp", "powershell-remove-item-recurse"),
+            ("Remove-Item -r ./tmp", "powershell-remove-item-recurse"),
+            ("remove-item ./tmp -recurse", "powershell-remove-item-recurse"),
+        ]
+        for command, label in blocked:
+            with self.subTest(command=command):
+                out = self.run_hook(command)
+                reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn(label, reason)
+
+    def test_allows_interactive_and_recursive_named_single_deletes(self):
+        # -i is not recursive, and "recursive" inside a file name is not a flag.
+        for command in ["rm -i ./tmp/file.txt", "rm ./my-recursive-notes.txt"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.run_hook(command), {})
+
     def test_blocks_wrapped_recursive_rm(self):
         # Shell -c payloads, eval, and prefix wrappers that hide the real command.
         blocked = [
