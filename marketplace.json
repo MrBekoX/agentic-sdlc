@@ -1,0 +1,27 @@
+{
+  "name": "mrbekox",
+  "description": "AGENTIC-SDLC plugin marketplace (ZCode schema). Claude Code uses .claude-plugin/marketplace.json; Codex uses the personal catalog.",
+  "owner": {
+    "name": "Beko",
+    "url": "https://github.com/MrBekoX"
+  },
+  "plugins": [
+    {
+      "name": "agentic-sdlc",
+      "version": "0.4.3",
+      "description": "Skill library for gated spec, plan, TDD, security, and review workflows",
+      "description_i18n": {
+        "en": "Skill library for gated spec, plan, TDD, security, and review workflows.",
+        "zh-CN": "面向规格、计划、TDD、安全与评审工作流的技能库，带证据门禁。"
+      },
+      "source": "./",
+      "category": "developer-tools",
+      "tags": [
+        "sdlc",
+        "skills",
+        "tdd",
+        "security"
+      ]
+    }
+  ]
+}

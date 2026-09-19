@@ -17,11 +17,11 @@ This repository supports two runtimes:
 | Claude Code | [`.claude-plugin/README.md`](.claude-plugin/README.md) | [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) + [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) |
 | Codex | [`.codex-plugin/README.md`](.codex-plugin/README.md) | [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json) |
 
-Other harnesses are intentionally deferred. [`docs/runtime-adapter.md`](docs/runtime-adapter.md) may mention adapter concepts for future or experimental portability, but Claude Code and Codex are the supported release targets.
+Other harnesses are intentionally deferred. [`docs/runtime-adapter.md`](docs/runtime-adapter.md) may mention adapter concepts for future or experimental portability, but Claude Code and Codex are the supported release targets. ZCode (Z.ai) exists only as an **experimental adapter** for local personal-marketplace installs — see [`.zcode-plugin/README.md`](.zcode-plugin/README.md); it is not a supported release target.
 
 ## Distribution paths
 
-`agentic-sdlc` has four distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.4.3.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published.
+`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.4.3.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. An additional experimental ZCode local install exists outside the four release-gated paths; it carries no 0.4.3 verdict.
 
 ### Claude own marketplace
 
@@ -106,6 +106,22 @@ The same skills run through the embedded author/critic adapter where Claude-only
 **Go condition.** A catalog at `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`; install through `codex plugin add agentic-sdlc@personal`; native `plugin/read` showing 16 skills and `hooks/list` showing 8 hooks; and hook trust granted through the native `/hooks` trust protocol as a required step.
 
 State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded in the ledger.
+
+### ZCode personal marketplace (experimental, not a release-gated path)
+
+> **Experimental adapter.** ZCode is not a supported 0.4.3 release target; this local install path carries no go/no-go verdict and no official submission exists. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
+
+**Prerequisites.** The ZCode desktop client, `node` on `PATH`, and this clone.
+
+**Steps.** ZCode discovers `.zcode-plugin/plugin.json`, a flat `skills/<name>/SKILL.md` layout, and loads the separate [`hooks/hooks-zcode.json`](hooks/hooks-zcode.json) wire declared by the manifest (`hooks/hooks.json` is never created — ZCode auto-loads that standard location).
+
+1. **Settings → Plugins → Discover**, click **+** (**Create → Add marketplace**), and add this repository root — the folder containing the root [`marketplace.json`](marketplace.json), written in the ZCode marketplace schema (`name=mrbekox`, `source="./"`, `category=developer-tools`).
+2. In the **Personal** segment, **Install** then **Enable** the `agentic-sdlc` card.
+3. Start a new session, then check **Settings → Skills** (16 plugin skills), **Settings → Hooks** (plugin hook entries), and invoke `$using-agentic-sdlc` once.
+
+**Go condition (adapter only).** Discovery evidence: the plugin card lists name/version/category, all 16 skills appear under plugin skills, the wired hooks appear read-only under Hooks, and one router invocation routes to a focused skill. Recorded evidence does not upgrade ZCode to a supported release target.
+
+State: GAP. The manifest, marketplace and hook wire exist and pass `tests/test_zcode_packaging.py`; live marketplace-add / install / discovery evidence has not been recorded yet. The official-marketplace gap list is in [`docs/publication/zcode-marketplace.md`](docs/publication/zcode-marketplace.md).
 
 ### OpenAI public directory
 
@@ -226,6 +242,7 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 |---|---|
 | Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. The command guards match `Bash|PowerShell` and carry no `if` filter — a `Bash`-only matcher is inert on a Windows host without Git Bash, and a subcommand-level `if` never starts the hook for a git alias, so each guard self-gates internally instead. |
 | Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`, after Codex hook review/trust: `SessionStart` bootstrap **plus** native blocking `PreToolUse` command guards, a pre-write secret guard, and two `Stop` backstops. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md) for the exact set and its documented coverage gaps. |
+| ZCode (experimental adapter) | [`hooks/hooks-zcode.json`](hooks/hooks-zcode.json), declared by `.zcode-plugin/plugin.json`: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, and the `SessionStart` bootstrap on `startup\|clear\|compact`, each a `process` executor (`node` on `PATH` required). Stop completion/flow guards and the flow-order guard stay unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
 
 Claude Code wires flow enforcement through `flow-order-guard.mjs` and `flow-step-guard.mjs`. Codex uses its own `flow-order-guard-codex.mjs` and `flow-step-guard-codex.mjs` adapters over the same [`hooks/flow-requirements.json`](hooks/flow-requirements.json); the Codex order gate is opt-in and its Stop gate can continue the turn but cannot undo effects.
 

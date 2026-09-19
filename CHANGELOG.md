@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add an experimental ZCode adapter (not a release target): `.zcode-plugin/plugin.json`, a root ZCode-schema `marketplace.json`, a narrow verified-event `hooks/hooks-zcode.json` wire, adapter README pair, and `tests/test_zcode_packaging.py` version binding.
+
 ## 0.4.3 - 2026-09-13
 
 - Select the authoring toolkit by required validation, evaluation, viewer and packaging capabilities, with explicit diagnostics for incomplete installations.

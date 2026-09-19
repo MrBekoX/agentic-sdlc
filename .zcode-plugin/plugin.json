@@ -1,0 +1,26 @@
+{
+  "name": "agentic-sdlc",
+  "version": "0.4.3",
+  "description": "Skill library for gated spec, plan, TDD, security, and review workflows",
+  "description_i18n": {
+    "en": "Skill library for gated spec, plan, TDD, security, and review workflows.",
+    "zh-CN": "面向规格、计划、TDD、安全与评审工作流的技能库，带证据门禁。"
+  },
+  "author": {
+    "name": "Beko",
+    "url": "https://github.com/MrBekoX"
+  },
+  "homepage": "https://github.com/MrBekoX/agentic-sdlc",
+  "repository": "https://github.com/MrBekoX/agentic-sdlc",
+  "license": "MIT",
+  "keywords": [
+    "sdlc",
+    "skills",
+    "tdd",
+    "security"
+  ],
+  "skills": "skills",
+  "commands": "commands",
+  "agents": "agents",
+  "hooks": "./hooks/hooks-zcode.json"
+}
