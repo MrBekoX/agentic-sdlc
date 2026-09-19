@@ -1,6 +1,6 @@
 # agentic-sdlc
 
-![agentic-sdlc](agentic-sdlc.png)
+![agentic-sdlc](agentic-sdlc-image.png)
 
 > A local AGENTIC-SDLC plugin for **Claude Code** and **Codex**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
