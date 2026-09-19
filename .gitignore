@@ -48,6 +48,8 @@ agentic-sdlc-prompts/
 tests/test_superpowers_referenced_eval_prompt.py
 
 # Debug / local runtime artifacts
+# Local agent-tool state; plugin_root holds this machine's absolute path.
+.video_agent/
 debug.txt
 2026-06-21-161126-sessionstartstartup-hook-error.txt
 2026-06-22-181040-hooksbranch-guardmjs-hooku-tetiklenmiyor-bu.txt

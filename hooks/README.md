@@ -11,6 +11,7 @@ Two kinds of guard live here:
 |---|---|---|
 | Claude Code | `hooks/hooks-claude.json` via `.claude-plugin/plugin.json` | `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop` |
 | Codex | `hooks/hooks-codex.json` via `.codex-plugin/plugin.json`, after hook review/trust; portable root manifests are not hook-equivalent on CLI 0.154.0 | `PreToolUse`, `SessionStart`, `Stop` |
+| Grok CLI (experimental adapter, not a 0.4.3 release target) | `hooks/hooks-grok.json` via `.grok-plugin/plugin.json`; `hooks/hooks.json` is never created | `PreToolUse` only (`Bash\|run_terminal_command`); write-scan / Stop / SessionStart unwired |
 
 > **Command-guard matcher is `Bash\|PowerShell`, with no `if` filter.** Both details are security-load-bearing.
 > On a Windows host without Git Bash, Claude Code does not register the Bash tool at all, so a `Bash`-only
@@ -22,7 +23,7 @@ Two kinds of guard live here:
 
 The hook scripts are shared in this directory, but being present as a script is not the same as being wired by every runtime.
 
-Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve through `${PLUGIN_ROOT}`.
+Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve through `${PLUGIN_ROOT}`. Grok CLI paths resolve through `${GROK_PLUGIN_ROOT}` (Grok also injects the `${CLAUDE_PLUGIN_ROOT}` alias). Grok command-guard stdin is camelCase `toolInput.command`; the shared scripts also still read `tool_input.command`.
 
 ## Real Hook Scripts
 
@@ -122,6 +123,6 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 
 ## Adding Or Disabling Hooks
 
-- Add new scripts under the matching event in `hooks/hooks-claude.json` for Claude Code or `hooks/hooks-codex.json` for Codex when that runtime supports the event.
+- Add new scripts under the matching event in `hooks/hooks-claude.json` for Claude Code or `hooks/hooks-codex.json` for Codex when that runtime supports the event. The Grok adapter wire is `hooks/hooks-grok.json`; do not copy Claude/Codex parsers into it, and do not create `hooks/hooks.json`.
 - Use runtime hook controls to browse or temporarily disable hooks.
 - Keep scripts deterministic. Checks that need judgment belong in skills/contracts.

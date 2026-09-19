@@ -17,11 +17,11 @@ This repository supports two runtimes:
 | Claude Code | [`.claude-plugin/README.md`](.claude-plugin/README.md) | [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) + [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) |
 | Codex | [`.codex-plugin/README.md`](.codex-plugin/README.md) | [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json) |
 
-Other harnesses are intentionally deferred. [`docs/runtime-adapter.md`](docs/runtime-adapter.md) may mention adapter concepts for future or experimental portability, but Claude Code and Codex are the supported release targets. ZCode (Z.ai) exists only as an **experimental adapter** for local personal-marketplace installs — see [`.zcode-plugin/README.md`](.zcode-plugin/README.md); it is not a supported release target.
+Other harnesses are intentionally deferred. [`docs/runtime-adapter.md`](docs/runtime-adapter.md) may mention adapter concepts for future or experimental portability, but Claude Code and Codex are the supported release targets. ZCode (Z.ai) exists only as an **experimental adapter** for local personal-marketplace installs — see [`.zcode-plugin/README.md`](.zcode-plugin/README.md); it is not a supported release target. Grok CLI exists only as an **experimental adapter** for local personal-marketplace installs — see [`.grok-plugin/README.md`](.grok-plugin/README.md); it is not a supported release target.
 
 ## Distribution paths
 
-`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.4.3.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. An additional experimental ZCode local install exists outside the four release-gated paths; it carries no 0.4.3 verdict.
+`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.4.3.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. Additional experimental ZCode and Grok CLI local installs exist outside the four release-gated paths; they carry no 0.4.3 verdict.
 
 ### Claude own marketplace
 
@@ -123,6 +123,28 @@ State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile ho
 
 State: GAP. The manifest, marketplace and hook wire exist and pass `tests/test_zcode_packaging.py`; live marketplace-add / install / discovery evidence has not been recorded yet. The official-marketplace gap list is in [`docs/publication/zcode-marketplace.md`](docs/publication/zcode-marketplace.md).
 
+### Grok CLI personal marketplace (experimental, not a release-gated path)
+
+> **Experimental adapter.** Grok CLI is not a supported 0.4.3 release target; this local install path carries no go/no-go verdict and no official xAI directory submission exists. `grok plugin validate .` green on the Claude layout is not Grok-native publish. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
+
+**Prerequisites.** Grok CLI, `node` on `PATH`, and this clone. Install with `--trust` or hooks/skills stay inactive.
+
+**Steps.** Grok discovers `.grok-plugin/plugin.json` and `.grok-plugin/marketplace.json`, a shared `skills/<name>/SKILL.md` layout, and loads the separate [`hooks/hooks-grok.json`](hooks/hooks-grok.json) wire declared by the manifest (`hooks/hooks.json` is never created — that is Grok's auto-discovered hook file).
+
+```text
+grok plugin marketplace add .
+grok plugin install agentic-sdlc --trust
+grok plugin enable agentic-sdlc
+grok plugin details agentic-sdlc
+grok inspect
+```
+
+After install, press `r` in the Plugins tab or start a new session. The router is `/using-agentic-sdlc` (qualified `/agentic-sdlc:using-agentic-sdlc` on collision).
+
+**Go condition (adapter only).** Discovery evidence: `grok plugin details` / `grok inspect` list all 16 house skills including `using-agentic-sdlc`, command `git-safety-check`, and `agents/*`. Recorded evidence does not upgrade Grok to a supported release target.
+
+State: local adapter evidence recorded on grok 1.0.34. `grok plugin marketplace add .` lists this root as a source. `grok plugin install agentic-sdlc --trust` (name lookup) did not find the plugin in `--available` — Grok did not index the `source: "./"` marketplace entry for name install. `grok plugin install . --trust` on the live worktree hit Windows I/O error 5 while copying `.git`. `grok plugin install <local-path> --trust` of a git-less snapshot of this packaging, then `grok plugin enable agentic-sdlc`, succeeded: `grok plugin details` shows the Grok-facing description and hook component; `grok inspect --json` twice listed the same 16 house skills including `using-agentic-sdlc`, command `git-safety-check`, nine `agents/*` files, and `hooks/hooks-grok.json`. That evidence does not upgrade Grok to a supported release target. The personal-marketplace note is [`docs/publication/grok-marketplace.md`](docs/publication/grok-marketplace.md).
+
 ### OpenAI public directory
 
 **Prerequisites.** Maintainer-verified identity and Apps Management Write (`api.apps.write`).
@@ -183,6 +205,7 @@ Important boundary: `spec-authoring` and `plan-authoring` are standalone prompt-
 ```text
 .claude-plugin/    Claude Code manifest, local marketplace metadata, runtime README
 .codex-plugin/     Codex manifest and runtime README
+.grok-plugin/      Grok CLI adapter manifest + personal marketplace index (experimental)
 skills/            Shared skill source: one directory per skill
 agents/            Bounded sub-agent role contracts (review roles are tool-level read-only)
 workflows/         Claude Code dynamic workflow scripts
@@ -243,6 +266,7 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 | Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. The command guards match `Bash|PowerShell` and carry no `if` filter — a `Bash`-only matcher is inert on a Windows host without Git Bash, and a subcommand-level `if` never starts the hook for a git alias, so each guard self-gates internally instead. |
 | Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`, after Codex hook review/trust: `SessionStart` bootstrap **plus** native blocking `PreToolUse` command guards, a pre-write secret guard, and two `Stop` backstops. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md) for the exact set and its documented coverage gaps. |
 | ZCode (experimental adapter) | [`hooks/hooks-zcode.json`](hooks/hooks-zcode.json), declared by `.zcode-plugin/plugin.json`: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, and the `SessionStart` bootstrap on `startup\|clear\|compact`, each a `process` executor (`node` on `PATH` required). Stop completion/flow guards and the flow-order guard stay unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
+| Grok CLI (experimental adapter) | [`hooks/hooks-grok.json`](hooks/hooks-grok.json), declared by `.grok-plugin/plugin.json`: `PreToolUse` command guards on `Bash\|run_terminal_command` (`type: command`, `timeout` in seconds, `${GROK_PLUGIN_ROOT}`). Write-scan, Stop, and SessionStart stay unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
 
 Claude Code wires flow enforcement through `flow-order-guard.mjs` and `flow-step-guard.mjs`. Codex uses its own `flow-order-guard-codex.mjs` and `flow-step-guard-codex.mjs` adapters over the same [`hooks/flow-requirements.json`](hooks/flow-requirements.json); the Codex order gate is opt-in and its Stop gate can continue the turn but cannot undo effects.
 

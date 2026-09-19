@@ -26,7 +26,7 @@ function currentBranch(cwd) {
 const raw = await readStdin();
 let input = {};
 try { input = JSON.parse(raw || '{}'); } catch { /* ignore */ }
-const cmd = String(input?.tool_input?.command || '');
+const cmd = String(input?.toolInput?.command || input?.tool_input?.command || '');
 
 // Cheap reject first: this hook is wired on every Bash/PowerShell call, because the previous
 // `if: Bash(git commit*)` wiring filter was itself escapable by a git alias. Quote and backslash

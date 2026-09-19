@@ -231,6 +231,83 @@ class TestDestructiveCommandGuard(unittest.TestCase):
                 self.assertEqual(out, {})
 
 
+@unittest.skipIf(NODE is None, "node not available")
+class TestGrokCamelCaseCommandPayload(unittest.TestCase):
+    """Grok PreToolUse stdin uses camelCase toolName/toolInput (10-hooks.md, grok 1.0.34).
+
+    The shipped command guards must deny a Grok-shaped payload; a silent no-op on
+    empty tool_input.command would fail-open. Existing Claude/Codex snake_case
+    payloads must still deny.
+    """
+
+    HOOK = REPO / "hooks" / "destructive-command-guard.mjs"
+
+    def run_hook(self, payload):
+        proc = subprocess.run(
+            [NODE, str(self.HOOK)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def test_denies_git_reset_hard_on_grok_tool_input(self):
+        out = self.run_hook({
+            "hookEventName": "pre_tool_use",
+            "hook_event_name": "PreToolUse",
+            "toolName": "run_terminal_command",
+            "toolInput": {"command": "git reset --hard HEAD"},
+        })
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("git-reset-hard", out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_legacy_tool_input_still_denies(self):
+        out = self.run_hook({
+            "tool_name": "Bash",
+            "tool_input": {"command": "git reset --hard HEAD"},
+        })
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    @staticmethod
+    def _grok_commit_payload():
+        return json.dumps({
+            "toolName": "run_terminal_command",
+            "toolInput": {"command": "git commit -m test"},
+        })
+
+    @unittest.skipIf(shutil.which("git") is None, "git not available")
+    def test_scan_commit_denies_a_staged_secret_on_grok_tool_input(self):
+        # Before the camelCase fallback, a Grok payload left the command empty and the scan
+        # never ran. The token is synthetic and assembled at runtime.
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            Path(td, "config.txt").write_text("TOKEN = " + "ghp_" + "a1B2" * 9 + "\n", encoding="utf-8")
+            subprocess.run(["git", "add", "--", "config.txt"], cwd=td, check=True, capture_output=True)
+            proc = subprocess.run(
+                [NODE, str(REPO / "hooks" / "scan-commit.mjs")],
+                cwd=td, input=self._grok_commit_payload(),
+                capture_output=True, text=True, encoding="utf-8",
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny", out)
+
+    @unittest.skipIf(shutil.which("git") is None, "git not available")
+    def test_branch_guard_denies_a_main_commit_on_grok_tool_input(self):
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            proc = subprocess.run(
+                [NODE, str(REPO / "hooks" / "branch-guard.mjs")],
+                cwd=td, input=self._grok_commit_payload(),
+                env={**os.environ, "AGENTIC_BRANCH_GUARD_BLOCK": "true"},
+                capture_output=True, text=True, encoding="utf-8",
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        self.assertEqual(out.get("hookSpecificOutput", {}).get("permissionDecision"), "deny", out)
+
+
 @unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")
 class TestBranchGuard(unittest.TestCase):
     def run_hook(self, command, cwd, block=False):

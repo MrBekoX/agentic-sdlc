@@ -11,6 +11,7 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 | Claude Code | Supported | Native `Skill`, `Workflow`, `Agent`/`Task`, commands, and full hook wiring. See [`../.claude-plugin/README.md`](../.claude-plugin/README.md). |
 | Codex | Supported | Shared skills, Codex manifest metadata, personal-marketplace install flow, and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
 | ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through the root ZCode-schema `marketplace.json`; a narrow verified-event hook wire and no Workflow runtime. See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
+| Grok CLI | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through `.grok-plugin/marketplace.json`; a narrow verified-event hook wire (`hooks/hooks-grok.json`); no Rhai conversion of `workflows/*.js`. See [`../.grok-plugin/README.md`](../.grok-plugin/README.md). |
 | OpenCode / Kimi Code / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.3`. |
 
 ## Installation Model
@@ -25,6 +26,9 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 | `.zcode-plugin/plugin.json` | ZCode | Adapter plugin metadata; `skills`, `commands`, `agents`, and the ZCode hook wire. |
 | `marketplace.json` (repository root) | ZCode | Local marketplace source in the ZCode schema; the repo root is the source. |
 | `hooks/hooks-zcode.json` | ZCode | Verified-event wiring only: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, `SessionStart` bootstrap on `startup\|clear\|compact`. |
+| `.grok-plugin/plugin.json` | Grok CLI | Adapter plugin metadata and the Grok hook wire. |
+| `.grok-plugin/marketplace.json` | Grok CLI | Local marketplace source in the Grok schema; the repo root is the source. |
+| `hooks/hooks-grok.json` | Grok CLI | Verified-event wiring only: `PreToolUse` command guards on `Bash\|run_terminal_command`. |
 
 `.claude-plugin/marketplace.json` is Claude's marketplace schema and not the supported Codex install path. Codex 0.154.0 can read it as a legacy-compatible layout, and `codex plugin marketplace add MrBekoX/agentic-sdlc` surfacing the `mrbekox` marketplace has been observed, but that route is unsupported. Installing both routes can list the plugin twice, once from `mrbekox` and once from `personal`. The supported Codex install remains `codex plugin add agentic-sdlc@personal`.
 
@@ -35,6 +39,7 @@ Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Run
 | Claude Code | `${CLAUDE_PLUGIN_ROOT}` |
 | Codex | `${PLUGIN_ROOT}` |
 | ZCode | `${ZCODE_PLUGIN_ROOT}` (ZCode also injects the `${CLAUDE_PLUGIN_ROOT}` alias, per the fetched hook documentation) |
+| Grok CLI | `${GROK_PLUGIN_ROOT}` (Grok also injects the `${CLAUDE_PLUGIN_ROOT}` alias, per `09-plugins.md`) |
 
 ## Layered Components
 

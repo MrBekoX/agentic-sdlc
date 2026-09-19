@@ -1,0 +1,27 @@
+{
+  "description": "Grok CLI hook wiring (experimental adapter, not a 0.4.3 release target). Only events listed in ~/.grok/docs/user-guide/10-hooks.md and tool names proven this session are wired: PreToolUse command guards on Bash|run_terminal_command (10-hooks.md alias table plus live toolName). Handlers are type:command with timeout in seconds and ${GROK_PLUGIN_ROOT} expansion. Write-scan, Stop, SessionStart, and Claude-transcript / Codex-rollout readers stay unwired (no captured Grok payload for those events).",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|run_terminal_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${GROK_PLUGIN_ROOT}/hooks/scan-commit.mjs",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "node ${GROK_PLUGIN_ROOT}/hooks/destructive-command-guard.mjs",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node ${GROK_PLUGIN_ROOT}/hooks/branch-guard.mjs",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
