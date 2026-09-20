@@ -4,9 +4,27 @@
 //
 // Scope (deliberate — a backstop, NOT full coverage): rm -rf, git reset --hard, git clean -fd,
 // Remove-Item -Recurse — including quoted command names ("rm"/'rm'), wrappers
-// (sudo/env/command/timeout/nice/xargs/...), and shell `-c` / `eval` payloads. NOT covered, by
-// design: other destructive verbs (find -delete, shred, truncate -s 0, dd of=, >-redirect) and
-// runtime shell indirection that is statically undecidable (eval "$(...)", a=rm;$a, rm$IFS-rf).
+// (sudo/env/command/timeout/nice/xargs/...), shell `-c` / `eval` payloads, and every
+// POSIX cmd_prefix that may precede a command word: assignment prefixes, io_redirections in
+// all their spellings (spaced, attached, numbered, fd-duplicating, input), bash reserved
+// words (if/then/else/elif/for/while/until/select/do/done/case/coproc/exec), `!`, and command
+// substitution in all three contexts (unquoted, inside double quotes, backtick spelling).
+// Substitution inside SINGLE quotes is literal text and is deliberately not inspected.
+// Consequence worth knowing: a commit message that puts a destructive verb in a BACKTICK
+// pair inside double quotes is denied, because bash really runs it there and this guard
+// is scope-narrow by VERB rather than by target (a bare `rm -rf` with no operand already
+// denies). Single quotes suppress the substitution and are allowed - which is what a
+// careful shell user would write anyway.
+//
+// Two halves with different guarantees. The cmd_prefix set is CLOSED by the shell grammar
+// (POSIX 2.9.1 plus bash's reserved-word list), so it is a positive grammar and complete.
+// The WRAPPERS table is OPEN-ENDED and stays a deny-list: there is no specification that
+// bounds "programs that run another program", so a wrapper not in the table is a gap, not a
+// bug in the walker. Do not read the parity check as evidence that the table is complete.
+//
+// NOT covered, by design: other destructive verbs (find -delete, shred, truncate -s 0, dd of=,
+// >-redirect) and runtime shell indirection that is statically undecidable (eval "$(...)",
+// a=rm;$a, rm$IFS-rf) — the class the shell resolves after this hook has already decided.
 // The permission prompt remains the primary control; this guard only catches the common cases.
 import { readStdin } from './secret-patterns.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
@@ -45,7 +63,16 @@ const WRAPPERS = {
   stdbuf: { positional: 0, argOpts: new Set(['-i', '-o', '-e']) },
   time: { positional: 0, argOpts: new Set(['-o', '--output', '-f', '--format']) },
   timeout: { positional: 1, argOpts: new Set(['-s', '--signal', '-k', '--kill-after']) },
-  xargs: { positional: 0, argOpts: new Set(['-n', '--max-args', '-p', '--max-procs', '-i', '--replace', '-d', '--delimiter', '-a', '--arg-file', '-s', '--max-chars', '-l', '--max-lines', '-e', '--eof']) },
+  // argOpts is EXACTLY the options that take a SEPARATE following value. Both errors are
+  // bypasses: over-consuming skips past the command name, and under-consuming leaves the
+  // option's value sitting where the command name should be, so `5` resolves as the command
+  // and nothing matches. In GNU xargs `-p`/`--interactive` is a plain flag, and `-i[R]`,
+  // `-l[N]`, `-e[eof]` take only an ATTACHED value - as do the long forms `--replace`,
+  // `--max-lines` and `--eof`, whose optional arguments must be written with `=`.
+  xargs: { positional: 0, argOpts: new Set(['-n', '--max-args', '-P', '--max-procs', '-I', '-L', '-E', '-d', '--delimiter', '-a', '--arg-file', '-s', '--max-chars']) },
+  // `builtin` was carried by git-invocation.mjs and not by this guard - the capability
+  // asymmetry BR2 calls a defect by definition.
+  builtin: { positional: 0, argOpts: new Set() },
 };
 
 // Shells whose `-c <payload>` (and `eval <payload>`) run an inline command we must inspect.
@@ -88,13 +115,70 @@ function removeBashLineContinuations(cmd) {
   return out;
 }
 
+// True when the `&` at `index` belongs to a redirect operator rather than being a separator:
+// `2>&1`, `<&0`, `&>log`, `&>>log`. Splitting on it left a segment starting with a bare fd
+// digit, so the command after it was never resolved.
+function ampersandIsRedirect(text, index, segment) {
+  if (text[index + 1] === '>') return true;          // &> / &>>
+  for (let i = segment.length - 1; i >= 0; i -= 1) { // 2>& / <&
+    const c = segment[i];
+    if (c === ' ' || c === '\t') continue;
+    return c === '>' || c === '<';
+  }
+  return false;
+}
+
 function rawCommandSegments(cmd, protectEscapedSeparators = false) {
   const segments = [];
   let segment = '';
   let quote = null;
   let escaped = false;
-  for (const ch of cmd) {
+  // Command substitution INSIDE a double-quoted string. Bash runs it there, so its BODY is
+  // a command context - but the quoted text around it is an argument to the outer command,
+  // not a new statement. An earlier revision split the string at the substitution, which
+  // restarted the segment mid-text and resolved the next word as a command name: that turned
+  // `git commit -m "fix(x) rm -rf handling"` and `echo "$(date) rm -rf /tmp/build finished"`
+  // into denials. Extracting the body instead keeps the outer segment intact.
+  let subDepth = 0;
+  let subBuf = '';
+  let backtickOpen = false;
+  const extracted = [];
+  const flush = () => {
+    if (segment.trim()) segments.push(segment.trim());
+    segment = '';
+  };
+  for (let idx = 0; idx < cmd.length; idx += 1) {
+    const ch = cmd[idx];
     if (quote) {
+      // Command substitution is performed inside DOUBLE quotes, so it opens a new command
+      // there and must split. Inside SINGLE quotes it is literal text and must not -- that
+      // is what keeps a documentation commit message with a backtick pair from being
+      // blocked. The quote state is deliberately left intact across the split: the inner
+      // command is exposed as its own segment while the outer string keeps its context.
+      if (quote === '"' && !escaped) {
+        if (subDepth > 0 || backtickOpen) {
+          // Inside the substitution body: accumulate separately, and close on the matching
+          // delimiter. An unmatched `)` in ordinary prose never reaches here, because
+          // subDepth only rises on a `$(` this scanner saw.
+          if (ch === '$' && cmd[idx + 1] === '(') { subBuf += '$('; subDepth += 1; idx += 1; continue; }
+          if (ch === ')' && subDepth > 0) {
+            subDepth -= 1;
+            if (subDepth === 0) { if (subBuf.trim()) extracted.push(subBuf.trim()); subBuf = ''; }
+            else subBuf += ch;
+            continue;
+          }
+          if (ch === '`' && backtickOpen) {
+            backtickOpen = false;
+            if (subBuf.trim()) extracted.push(subBuf.trim());
+            subBuf = '';
+            continue;
+          }
+          subBuf += ch;
+          continue;
+        }
+        if (ch === '$' && cmd[idx + 1] === '(') { subDepth = 1; idx += 1; continue; }
+        if (ch === '`') { backtickOpen = true; continue; }
+      }
       segment += ch;
       if (escaped) {
         escaped = false;
@@ -105,6 +189,9 @@ function rawCommandSegments(cmd, protectEscapedSeparators = false) {
       }
       continue;
     }
+    // Unquoted backtick: the other spelling of `$( )`, which the paren separators below
+    // already handle. Without this the inner command kept the outer command's argv[0].
+    if (ch === '`') { flush(); continue; }
     if (protectEscapedSeparators && escaped) {
       // Keep the pair intact. tokenizePreservingQuotes() performs the ONE Bash unescape pass;
       // consuming it here as well turns safe r\\\\m into rm and creates a false denial.
@@ -122,15 +209,21 @@ function rawCommandSegments(cmd, protectEscapedSeparators = false) {
       segment += ch;
       continue;
     }
+    if (ch === '&' && ampersandIsRedirect(cmd, idx, segment)) {
+      segment += ch;
+      continue;
+    }
     if (/[;&|\n(){}]/.test(ch)) {
-      if (segment.trim()) segments.push(segment.trim());
-      segment = '';
+      flush();
       continue;
     }
     segment += ch;
   }
-  if (segment.trim()) segments.push(segment.trim());
-  return segments;
+  flush();
+  // An unterminated substitution still carries whatever was read: dropping it would let an
+  // unbalanced `"$(rm -rf x` go unexamined.
+  if (subBuf.trim()) extracted.push(subBuf.trim());
+  return segments.concat(extracted);
 }
 
 function tokenizePreservingQuotes(text, unescapeUnquoted = false) {
@@ -191,7 +284,100 @@ function commandName(token) {
   return basename(token).toLowerCase().replace(/\.exe$/, '');
 }
 
-function commandTokensOne(cmd, unescapeUnquoted) {
+// --- Bounds on the payload walk -------------------------------------------------------
+//
+// `commandTokensOne` and `shellPayloads` are mutually recursive, and `shellPayloads` restarts
+// its scan at EVERY token index, so N nested `-c` shells produced ~2^N expansions. Measured
+// before this bound, on a completely BENIGN command (nested shells in front of a harmless
+// print): 67 chars 121 ms, 91 chars 854 ms, 103 chars 3056 ms, 115 chars 11.4 s -- against a
+// 15 s hook timeout on every wired runtime. A hook the runtime kills renders no decision, so
+// the guard fails open: the hardening becomes the bypass, for the third recorded time here.
+//
+// The ALLOW path is the worst case, which is why it is bounded first: a denial short-circuits
+// at the first matching check, while an allow runs all four to completion. No attacker is
+// required -- an ordinary command with a few nested shells was one nesting away from
+// disabling the guard during normal work.
+//
+// Depth carries the exponent, so the depth cap is the fix and the budget is the backstop.
+// MAX_PAYLOAD_DEPTH 3 sits above real usage: `bash -c "sh -c '...'"` is depth 2.
+const MAX_PAYLOAD_DEPTH = 3;
+const WORK_BUDGET = 20000;
+const MAX_INPUT_CHARS = 20000;
+// Payload fan-out per tokenizer level. `shellPayloads` emits one payload per shell/eval token
+// in a segment, so a long chain of them is quadratic in work and memory even at depth 1.
+// 32 is far above any real command: a shell invocation nests a handful of layers, not dozens.
+const MAX_PAYLOADS_PER_LEVEL = 32;
+
+// Per-invocation walk state. A hook process handles ONE command, so a module-level record is
+// the whole lifetime. `unresolved` starts FALSE and is set only by a path that gave up: it
+// answers "did I account for this input?", never "did I happen to see no hazard".
+const WALK = { budget: 0, unresolved: false };
+
+// Linear fallback for input the walk did not fully account for. Deliberately NOT "re-run each
+// check at every token position": that is O(n^2), measured at ~18 s on 32k tokens, which would
+// make the escape hatch slower than the code it replaces and rebuild the DoS one layer down.
+// Instead: ONE pass collecting which command names and which matching flags appear anywhere,
+// then a fixed number of set lookups. Order-insensitive, so it over-approximates -- acceptable
+// because it runs only on input that could not be parsed, and it is the difference between
+// "I could not read this, so I checked coarsely" and "I could not read this, so I allowed it".
+function widenedFindingLabel(cmd) {
+  // Decode the same layers the precise walk decodes. Reading the raw string here let
+  // `r\m -rf x` and `$'\x72\x6d' -rf x` through past the length cap, where the precise walk
+  // would have caught them: a backstop that reads a narrower language than the path it backs
+  // up has a blind spot exactly where it is needed.
+  // The backslash pass is the third decoder the precise walk applies (through the
+  // tokenizer's unescape), and without it `r\m -rf x` reads as the literal token `r\m`.
+  // Dropping every backslash is coarser than the tokenizer - it ignores quoting context -
+  // which is the right direction for a backstop: it can only widen what is examined.
+  const decoded = expandAnsiCQuotes(removeBashLineContinuations(cmd)).replace(/\\(.)/g, '$1');
+  // Statement-scoped and ORDER-AWARE. The first version collected names and flags into two
+  // global sets, so a flag belonging to one command satisfied a rule about another:
+  // `grep -rn "rm" src/...` matched the rm rule, with `-rn` grep's and `rm` grep's search
+  // pattern. Here a rule matches only when the flag appears AFTER the command name inside
+  // the same statement. One backward sweep per statement builds the suffix answers, then one
+  // forward sweep asks them - linear, with no slice in the loop.
+  for (const statement of decoded.split(/[;&|\n]+/)) {
+    const tokens = statement.split(/[\s(){}'"`]+/).filter(Boolean);
+    if (!tokens.length) continue;
+    const n = tokens.length;
+    const recursiveAfter = new Array(n + 1).fill(false);
+    const hardAfter = new Array(n + 1).fill(false);
+    const forceAfter = new Array(n + 1).fill(false);
+    const cleanTargetAfter = new Array(n + 1).fill(false);
+    const riAfter = new Array(n + 1).fill(false);
+    const resetAfter = new Array(n + 1).fill(false);
+    const cleanAfter = new Array(n + 1).fill(false);
+    for (let i = n - 1; i >= 0; i -= 1) {
+      const t = tokens[i];
+      const args = [t];
+      recursiveAfter[i] = recursiveAfter[i + 1] || hasRmRecursiveFlag(args);
+      hardAfter[i] = hardAfter[i + 1] || t === '--hard';
+      forceAfter[i] = forceAfter[i + 1] || t === '--force' || /^-[A-Za-z]*f[A-Za-z]*$/.test(t);
+      cleanTargetAfter[i] = cleanTargetAfter[i + 1] || t === '--ignored'
+        || t === '--exclude-standard' || /^-[A-Za-z]*[dxX][A-Za-z]*$/.test(t);
+      riAfter[i] = riAfter[i + 1] || hasRemoveItemRecursiveFlag(args);
+      resetAfter[i] = resetAfter[i + 1] || t === 'reset';
+      cleanAfter[i] = cleanAfter[i + 1] || t === 'clean';
+    }
+    const REMOVE_ITEM = new Set(['remove-item', 'ri', 'del', 'erase', 'rd', 'rmdir', 'rm']);
+    for (let i = 0; i < n; i += 1) {
+      const name = commandName(tokens[i]);
+      if (name === 'git' && resetAfter[i + 1] && hardAfter[i + 1]) return 'git-reset-hard';
+      if (name === 'git' && cleanAfter[i + 1] && forceAfter[i + 1] && cleanTargetAfter[i + 1]) {
+        return 'git-clean-force';
+      }
+      if (name === 'rm' && recursiveAfter[i + 1]) return 'rm-recursive';
+      if (REMOVE_ITEM.has(name) && riAfter[i + 1]) return 'powershell-remove-item-recurse';
+    }
+  }
+  return null;
+}
+
+function commandTokensOne(cmd, unescapeUnquoted, depth = 0) {
+  if (cmd.length > MAX_INPUT_CHARS) { WALK.unresolved = true; return []; }
+  if (depth > MAX_PAYLOAD_DEPTH) { WALK.unresolved = true; return []; }
+  if (WALK.budget <= 0) { WALK.unresolved = true; return []; }
+  WALK.budget -= 1;
   const source = unescapeUnquoted
     ? expandAnsiCQuotes(removeBashLineContinuations(cmd))
     : cmd;
@@ -205,20 +391,53 @@ function commandTokensOne(cmd, unescapeUnquoted) {
     .map((segment) => tokenizePreservingQuotes(segment, unescapeUnquoted))
     .map(unwrapCommand)
     .filter((items) => items.length);
-  const wrapped = segments
-    .flatMap((segment) => shellPayloads(segment, unescapeUnquoted))
-    // Each explicit shell starts a new parsing layer. A payload single-quoted for the outer shell
-    // can contain a backslash-newline or ANSI-C quote that only the INNER bash/sh realizes.
-    .flatMap((payload) => commandTokensOne(payload.text, payload.bashSemantics));
+  // Each explicit shell starts a new parsing layer. A payload single-quoted for the outer shell
+  // can contain a backslash-newline or ANSI-C quote that only the INNER bash/sh realizes.
+  const payloads = segments.flatMap((segment) => shellPayloads(segment, unescapeUnquoted));
+  if (payloads.length > MAX_PAYLOADS_PER_LEVEL) {
+    WALK.unresolved = true;
+    payloads.length = MAX_PAYLOADS_PER_LEVEL;
+  }
+  const wrapped = [];
+  for (const payload of payloads) {
+    // Charge by LENGTH, not by call: the cost and the memory are both in the payload text,
+    // and a handful of very long payloads is as expensive as many short ones.
+    const cost = 1 + (payload.text.length >> 6);
+    if (WALK.budget < cost) { WALK.unresolved = true; break; }
+    WALK.budget -= cost;
+    for (const t of commandTokensOne(payload.text, payload.bashSemantics, depth + 1)) {
+      wrapped.push(t);
+    }
+  }
   return tokens.concat(wrapped);
 }
 
+// Memoised across the four BLOCKED checks. Each check re-ran the whole walk, and the two views
+// doubled it again -- eight full traversals per command. On the allow path, where nothing
+// short-circuits, that multiplier was most of the cost.
+let cachedKey = null;
+let cachedTokens = null;
+
 function commandTokens(cmd, bashSemantics = false) {
-  const raw = commandTokensOne(cmd, false);
-  if (!bashSemantics) return raw;
-  // Preserve the generic/PowerShell view and add a Bash-realized view. The union prevents Bash
-  // quote removal from hiding Windows-style paths while still exposing r\m and $'\\x72\\x6d'.
-  return raw.concat(commandTokensOne(cmd, true));
+  const key = (bashSemantics ? '1|' : '0|') + cmd;
+  if (cachedKey === key) return cachedTokens;
+  WALK.unresolved = false;
+  // Per-VIEW budget. Sharing one drained on the raw view and then returned [] for the bash
+  // view at entry - silently discarding the only view that unescapes, so `r\m -rf x` came
+  // back as a fast, confident allow. A bound must narrow what is examined visibly, never
+  // delete a whole reading.
+  WALK.budget = WORK_BUDGET;
+  const raw = commandTokensOne(cmd, false, 0);
+  // Preserve the generic/PowerShell view and add a Bash-realized view; the union keeps Bash
+  // quote removal from hiding Windows-style paths while still exposing the escaped spellings.
+  let all = raw;
+  if (bashSemantics) {
+    WALK.budget = WORK_BUDGET;
+    all = raw.concat(commandTokensOne(cmd, true, 0));
+  }
+  cachedKey = key;
+  cachedTokens = all;
+  return all;
 }
 
 function shellPayloads(segment, unescapeUnquoted) {
@@ -249,8 +468,87 @@ function shellPayloads(segment, unescapeUnquoted) {
   return payloads;
 }
 
+
+// POSIX Shell & Utilities 2.9.1 closes the production that sits in front of a command name:
+//
+//   simple_command := cmd_prefix* [ cmd_word cmd_suffix* ]
+//   cmd_prefix     := io_redirect | ASSIGNMENT_WORD
+//
+// plus bash's reserved words and `!`. That set is fixed BY THE LANGUAGE, which is why this
+// half is a positive grammar rather than another deny-list -- unlike WRAPPERS above, which
+// is open-ended and stays a deny-list. Every bypass this closes was the same mechanical
+// failure: tokens[0] was a prefix construct, so the real command was never examined.
+
+// Reserved words that may legally precede a command word.
+const RESERVED_WORDS = new Set([
+  'if', 'then', 'elif', 'else', 'fi',
+  'for', 'while', 'until', 'select', 'do', 'done',
+  'case', 'esac', 'function', 'coproc', 'exec',
+  '{', '}', '!', '[[', ']]',
+]);
+
+// An ASSIGNMENT_WORD: NAME=value with a portable shell NAME. One linear scan -- deliberately
+// not a regex with a quantifier before an anchor (see lessons.md 2026-07-01 / 2026-08-22).
+function isAssignmentWord(token) {
+  const eq = token.indexOf('=');
+  if (eq <= 0) return false;
+  for (let i = 0; i < eq; i += 1) {
+    const c = token[i];
+    if (i === 0 && c >= '0' && c <= '9') return false;
+    const ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+      || (c >= '0' && c <= '9') || c === '_';
+    if (!ok) return false;
+  }
+  return true;
+}
+
+// Length of the io_redirect OPERATOR at the head of a token, or 0. Covers `>`, `>>`, `<`,
+// `<>`, `>|`, `>&`, a leading fd (`2>`), and the `&>` family. A return value shorter than
+// the token means the target is attached (`>/tmp/x`, `2>&1`) and no following word is
+// consumed; equal to the token length means the target is the next word (`> /tmp/x`).
+function redirectOperatorLength(token) {
+  let i = 0;
+  while (i < token.length && token[i] >= '0' && token[i] <= '9') i += 1;
+  if (i === 0 && token[0] === '&' && token[1] === '>') i = 1;
+  if (i >= token.length) return 0;
+  if (token[i] !== '>' && token[i] !== '<') return 0;
+  let j = i + 1;
+  if (token[j] === '>' || token[j] === '<' || token[j] === '|' || token[j] === '&') j += 1;
+  return j;
+}
+
+// Walk off one run of cmd_prefix tokens. Returns the index of the first token that is not a
+// prefix construct. Linear in the number of tokens examined.
+function skipCommandPrefix(tokens, start) {
+  let i = start;
+  while (i < tokens.length) {
+    const raw = tokens[i];
+    if (RESERVED_WORDS.has(raw.toLowerCase())) { i += 1; continue; }
+    if (isAssignmentWord(raw)) { i += 1; continue; }
+    const op = redirectOperatorLength(raw);
+    if (op > 0) {
+      // Attached target (`>/tmp/x`, `2>&1`) consumes only this token; a bare operator
+      // (`>`, `2>`) consumes the following word as its target.
+      i += op < raw.length ? 1 : 2;
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
 function unwrapCommand(tokens) {
   let i = 0;
+  // The prefix walker and the wrapper table must ALTERNATE to a fixed point, not replace one
+  // another: `then env FOO=1 nohup rm -rf x` is prefix, wrapper, prefix, wrapper. A first
+  // prototype that swapped the table for the walker regressed `env rm -rf` and `nohup rm -rf`
+  // from deny to allow -- the exact "a new component re-loses its neighbour's capability"
+  // shape recorded in lessons.md 2026-08-23. The round cap makes non-termination impossible.
+  for (let round = 0; round < 16; round += 1) {
+    const next = skipCommandPrefix(tokens, i);
+    if (next === i) break;
+    i = next;
+  }
   while (i < tokens.length) {
     const name = commandName(tokens[i]);
     if (name === 'sudo') {
@@ -291,7 +589,15 @@ function unwrapCommand(tokens) {
       i += 1;
       while (i < tokens.length && tokens[i].startsWith('-')) {
         const raw = tokens[i];
-        const opt = raw.split('=')[0].toLowerCase();
+        // Option names are CASE-SENSITIVE, and lowercasing here made the table unable to
+        // express its own contents: in xargs `-I` takes a separate replace-string while
+        // `-i` takes only an attached one, and `-L`/`-l`, `-P`/`-p`, `-E`/`-e` are likewise
+        // distinct options. Folding case merged each pair, so whichever spelling was listed
+        // decided both - and getting it wrong is a bypass in either direction (over-consume
+        // and the command name is skipped; under-consume and the option's value is resolved
+        // as the command). The wrapper NAME stays case-insensitive, because that is a
+        // filename and Windows treats those case-insensitively.
+        const opt = raw.split('=')[0];
         i += 1;
         if (!raw.includes('=') && wrap.argOpts.has(opt) && i < tokens.length && !tokens[i].startsWith('-')) {
           i += 1;
@@ -313,6 +619,14 @@ function unwrapCommand(tokens) {
     }
     break;
   }
+  // A wrapper may be followed by another prefix run (`nohup FOO=1 rm -rf x`).
+  if (i !== 0) {
+    for (let round = 0; round < 16; round += 1) {
+      const next = skipCommandPrefix(tokens, i);
+      if (next === i) break;
+      i = next;
+    }
+  }
   return tokens.slice(i);
 }
 
@@ -323,8 +637,28 @@ function hasRmRecursiveFlag(args) {
   return args.some((arg) => arg === '--recursive' || /^-[A-Za-z]*[rR][A-Za-z]*$/.test(arg));
 }
 
+// PowerShell switch parameters accept an optional bound value: `-Recurse`, `-Recurse:$true`,
+// `-Recurse:$false`. This is parameter BINDING, not a grammar difference, so it needs no
+// separate segmenter - only that the switch name may carry a `:value` suffix. `-Recurse:$false`
+// is the switch turned OFF, so denying it would be a false block on an explicit opt-out.
+// The pattern is a fixed prefix chain with no ambiguous repetition before the anchor: the
+// ReDoS shape this repo recorded twice does not apply (see lessons.md 2026-08-22).
 function hasRemoveItemRecursiveFlag(args) {
-  return args.some((arg) => /^-r(?:e(?:c\w*)?)?$/i.test(arg));
+  // `-Recurse: $false` is legal binding syntax with the value in the next token, so a switch
+  // ending in `:` takes the following word as its bound value.
+  const joined = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i].endsWith(':') && i + 1 < args.length) {
+      joined.push(args[i] + args[i + 1]);
+      i += 1;
+    } else joined.push(args[i]);
+  }
+  return joined.some((arg) => {
+    const m = /^-(r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?)(?::(.*))?$/i.exec(arg);
+    if (!m) return false;
+    if (m[2] === undefined) return true;                 // bare switch
+    return !/^\s*\$?(?:false|0|null)\s*$/i.test(m[2]);   // set unless bound to a falsy value
+  });
 }
 
 function hasRecursiveRm(cmd, bashSemantics) {
@@ -400,9 +734,24 @@ const toolName = String(input?.toolName || input?.tool_name || '');
 const bashSemantics = toolName === 'Bash' || toolName === 'run_terminal_command';
 
 for (const finding of BLOCKED) {
-  const blocked = finding.check ? finding.check(cmd, bashSemantics) : finding.re.test(cmd);
-  if (blocked) {
+  if (finding.check(cmd, bashSemantics)) {
     deny(finding);
+    process.exit(0);
+  }
+}
+
+// The walk gave up somewhere: a depth cap, an exhausted budget, or an over-long input. It must
+// not report clean on the strength of a parse it did not finish. Widen once, linearly.
+if (WALK.unresolved) {
+  const label = widenedFindingLabel(cmd);
+  const finding = label ? BLOCKED.find((f) => f.label === label) : null;
+  if (finding) {
+    deny({
+      label: finding.label,
+      reason: finding.reason
+        + ' (matched by a widened scan: this command is longer or more deeply nested than the'
+        + ' guard parses, so it was checked coarsely rather than reported clean.)',
+    });
     process.exit(0);
   }
 }

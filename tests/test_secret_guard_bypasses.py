@@ -30,6 +30,7 @@ must stay blocked. A fix that simply blocks everything fails these.
 import json
 import shutil
 import subprocess
+import time
 import tempfile
 import unittest
 from pathlib import Path
@@ -1453,6 +1454,555 @@ class TestQuotedKeyPasswordLiteral(unittest.TestCase):
         }.items():
             with self.subTest(case=label):
                 self.assertEqual(scan_high(line), [])
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestRoundElevenPrefixParity(unittest.TestCase):
+    """Eleventh adversarial round. One root cause across all three command guards.
+
+    Each guard resolves the command name at tokens[0] of a statement, and each walks off a
+    DIFFERENT subset of the constructs that may legally precede a command name. POSIX 2.9.1
+    closes that production (`cmd_prefix := io_redirect | ASSIGNMENT_WORD`), and bash adds a
+    finite reserved-word list, so the prefix set is a positive grammar rather than another
+    deny-list. Every deny row below was measured as ALLOW at main 82230cb.
+
+    Severity is not uniform. destructive-command-guard.mjs has NO effect layer - a deleted
+    tree does not come back. branch-guard.mjs has none for PUSH: install_git_hooks.py
+    installs pre-commit / pre-merge-commit / commit-msg / prepare-commit-msg, and no
+    pre-push. Only the commit scanner has a second layer, and only where the installer ran.
+    """
+
+    GUARD = REPO / "hooks" / "destructive-command-guard.mjs"
+
+    def _decide(self, command, tool="Bash"):
+        proc = subprocess.run(
+            [NODE, str(self.GUARD)], cwd=str(REPO),
+            input=json.dumps({"tool_name": tool, "tool_input": {"command": command}}),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        return out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+    def _all_deny(self, cases):
+        for cmd in cases:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self._decide(cmd), "deny", cmd)
+
+    def _all_allow(self, cases, tool="Bash"):
+        for cmd in cases:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self._decide(cmd, tool=tool), "allow", cmd)
+
+    def test_assignment_prefix_is_walked_off(self):  # AC1
+        self._all_deny(["FOO=bar rm -rf /tmp/x", "A=1 B=2 rm -rf /tmp/x",
+                        "FOO=bar git reset --hard"])
+
+    def test_reserved_words_are_walked_off(self):  # AC2
+        self._all_deny([
+            "if true; then rm -rf /tmp/x; fi",
+            "for i in 1; do rm -rf /tmp/x; done",
+            "if false; then :; else rm -rf /tmp/x; fi",
+            "while true; do rm -rf /tmp/x; done",
+            "until false; do rm -rf /tmp/x; done",
+            "if false; then :; elif true; then rm -rf /tmp/x; fi",
+            "coproc rm -rf /tmp/x",
+            "exec rm -rf /tmp/x",
+            "if true; then git reset --hard; fi",
+        ])
+
+    def test_leading_redirections_and_negation_are_walked_off(self):  # AC3
+        self._all_deny([
+            "> /tmp/l rm -rf /tmp/x",
+            ">/tmp/l rm -rf /tmp/x",
+            ">> /tmp/l rm -rf /tmp/x",
+            "2>/dev/null rm -rf /tmp/x",
+            "2>&1 rm -rf /tmp/x",
+            "< /tmp/in rm -rf /tmp/x",
+            "> /tmp/l git reset --hard",
+            "! rm -rf /tmp/x",
+        ])
+
+    def test_substitution_reaches_the_guard_in_every_spelling(self):  # AC4
+        # The unquoted $( ) spelling already denies; the backtick spelling and the
+        # double-quoted $( ) do not. Bash performs substitution inside double quotes.
+        self._all_deny([
+            "echo $(rm -rf /tmp/x)",
+            "echo " + chr(96) + "rm -rf /tmp/x" + chr(96),
+            'echo "$(rm -rf /tmp/x)"',
+        ])
+
+    def test_single_quoted_substitution_stays_allowed(self):  # AC4 control
+        # CONTROL both ways: inside single quotes a backtick or $( ) is literal text. A
+        # handler that is not quote-context aware turns an ordinary documentation commit
+        # into a hard block - the failure mode that gets a guard switched off.
+        self._all_allow([
+            "echo '$(rm -rf /tmp/x)'",
+            "echo '" + chr(96) + "rm -rf /tmp/x" + chr(96) + "'",
+            "echo 'rm -rf /tmp/x'",
+        ])
+
+    def test_flag_and_attached_value_options_never_consume_the_command(self):  # AC1c
+        # Seven measured rows, all ALLOW at main. The wrapper table declares these as taking
+        # a FOLLOWING value; in GNU xargs they are either plain flags (`-p`/`--interactive`)
+        # or take only an ATTACHED value (`-i[R]`, `-l[N]`, `-e[eof]`, and the long forms,
+        # whose optional arguments must use `=`). Declaring them as value-taking makes the
+        # walker skip the command name.
+        self._all_deny([
+            "xargs -i rm -rf /tmp/x",
+            "xargs -e rm -rf /tmp/x",
+            "xargs -p rm -rf /tmp/x",
+            "xargs -l rm -rf /tmp/x",
+            "xargs --replace rm -rf /tmp/x",
+            "xargs --eof rm -rf /tmp/x",
+            "xargs --max-lines rm -rf /tmp/x",
+        ])
+
+    def test_separate_value_options_still_consume_their_value(self):  # AC1c control
+        # The opposite error is equally a bypass: UNDER-consuming leaves the option's value
+        # sitting where the command name should be, so `5` is resolved as the command and
+        # nothing matches. The rule has to be exact in both directions.
+        self._all_deny([
+            "xargs -I{} rm -rf /tmp/x", "xargs -I R rm -rf /tmp/x",
+            "xargs -n 1 rm -rf /tmp/x", "xargs --max-args 1 rm -rf /tmp/x",
+            "xargs -P 2 rm -rf /tmp/x", "xargs -d , rm -rf /tmp/x",
+            "xargs -s 100 rm -rf /tmp/x", "xargs -L 1 rm -rf /tmp/x",
+            "xargs rm -rf /tmp/x",
+        ])
+
+    def test_wrapper_parity_across_the_shared_table(self):  # AC1b
+        self._all_deny([
+            "sudo rm -rf /tmp/x", "env FOO=1 rm -rf /tmp/x", "command rm -rf /tmp/x",
+            "builtin rm -rf /tmp/x", "nohup rm -rf /tmp/x", "setsid rm -rf /tmp/x",
+            "nice -n 10 rm -rf /tmp/x", "ionice -c2 rm -rf /tmp/x",
+            "stdbuf -o0 rm -rf /tmp/x", "timeout 3 rm -rf /tmp/x",
+            "timeout -k 5 3 rm -rf /tmp/x",
+        ])
+
+    def test_powershell_colon_bound_switch(self):  # AC5
+        for cmd in ["Remove-Item -Recurse:$true -Force C:/x",
+                    "Remove-Item -Recurse:$True -Force C:/x",
+                    "Remove-Item -Rec:$true -Force C:/x"]:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self._decide(cmd, tool="PowerShell"), "deny", cmd)
+
+    def test_powershell_switch_bound_false_is_not_recursive(self):  # AC5 control
+        self.assertEqual(
+            self._decide("Remove-Item -Recurse:$false -Force C:/x", tool="PowerShell"),
+            "allow", "a switch bound to false is off; denying it is a false block")
+
+    def test_ordinary_work_stays_allowed(self):  # AC7
+        self._all_allow([
+            "echo rm -rf /tmp/x",
+            "git reset --soft HEAD~1",
+            "npm test",
+            "npm test > /tmp/test.log 2>&1",
+            "$PYTHON -m pytest -q",
+            "rm file.txt",
+            "cp -r a b",
+            "git clean -n",
+            "for i in 1; do echo $i; done",
+            "if true; then npm test; fi",
+            "time rm file.txt",
+        ])
+
+    def test_verb_scope_is_preserved_not_narrowed(self):  # AC8
+        # Measured deny today and INTENDED: the guard is scope-narrow by VERB, not by
+        # target. Pinned so a later "reduce false positives" change cannot loosen the rule.
+        self.assertEqual(self._decide("rm -rf node_modules"), "deny")
+
+    def test_runtime_resolved_command_names_stay_declared_out_of_reach(self):  # BR5
+        # These resolve AFTER the hook decides, and are covered by the effect layer
+        # (installed git hooks, the Stop-time worktree scan) rather than by this guard.
+        # The guard header declares them; asserting ALLOW keeps that declaration honest.
+        self._all_allow(["C=rm; $C -rf /tmp/x", "$(echo rm) -rf /tmp/x"])
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestSegmenterBounds(unittest.TestCase):
+    """The walk must be bounded, and the ALLOW path is the one that matters.
+
+    A denial short-circuits at the first matching check; an allow runs all four checks to
+    completion, each re-walking the whole payload tree, and the tokenizer runs it twice more
+    for the generic and bash views. Measured at main 82230cb on a completely BENIGN command
+    - nested shells in front of a harmless print - 67 chars 121 ms, 91 chars 854 ms,
+    103 chars 3056 ms, 115 chars 11.4 s, against a 15 s wired timeout on every runtime.
+    No attacker is required: an ordinary command with a few nested shells comes within
+    seconds of disabling the guard for that call, and a timed-out hook renders no decision.
+    """
+
+    GUARD = REPO / "hooks" / "destructive-command-guard.mjs"
+    #: Generous enough not to flake on a loaded CI box, tight enough to catch the exponent.
+    CEILING_MS = 5000
+
+    def _timed(self, command):
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+        start = time.time()
+        try:
+            # A HARD timeout, not a convenience: against the unbounded walk these inputs do
+            # not finish in any useful time, and a test that hangs is worse than one that
+            # fails. The timeout IS the failure - a hook the runtime kills renders no
+            # decision, which is exactly the fail-open this class exists to close.
+            proc = subprocess.run([NODE, str(self.GUARD)], cwd=str(REPO), input=payload,
+                                  capture_output=True, text=True, encoding="utf-8",
+                                  timeout=self.CEILING_MS / 1000.0)
+        except subprocess.TimeoutExpired:
+            return float(self.CEILING_MS) * 10, "timeout"
+        elapsed = (time.time() - start) * 1000
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        decision = out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+        return elapsed, decision
+
+    def test_nesting_bomb_is_bounded_and_still_denies(self):  # AC9
+        elapsed, decision = self._timed(("sh -c " * 20) + "rm -rf /tmp/x")
+        self.assertEqual(decision, "deny", "a bound must not cost the detection")
+        self.assertLess(elapsed, self.CEILING_MS, "%.0f ms - the walk is unbounded" % elapsed)
+
+    def test_benign_nesting_is_bounded(self):  # AC9c
+        # The ALLOW path: nothing short-circuits, so every check runs the full walk. This is
+        # the path an ordinary command takes, which is why it is the worst case.
+        # N=200, not 20: at 20 the unbounded walk is already only ~120 ms, so the row could
+        # not fail. Unbounded, 200 nestings measured ~6 s and 400 measured ~35 s.
+        elapsed, decision = self._timed(("sh -c " * 200) + "echo hi")
+        self.assertEqual(decision, "allow")
+        self.assertLess(elapsed, self.CEILING_MS,
+                        "%.0f ms on a BENIGN command" % elapsed)
+
+    def test_cost_scales_flat_not_exponentially(self):  # AC9b
+        # A single wall-clock threshold cannot catch a reintroduced exponent on faster
+        # hardware; a ratio can. But the ratio has to be taken against the WORK, not against
+        # the process: node startup is ~70 ms here and dominates a shallow ladder, so a naive
+        # shallow-to-deep ratio would pass through a large regression. Subtract a baseline
+        # run that does no walking at all, and compare what is left.
+        baseline, _ = self._timed("echo hi")
+        shallow, _ = self._timed(("sh -c " * 8) + "echo hi")
+        deep, _ = self._timed(("sh -c " * 40) + "echo hi")
+        shallow_work = max(shallow - baseline, 1.0)
+        deep_work = max(deep - baseline, 1.0)
+        # Unbounded the curve is ~3.5x per two nestings, so 8 -> 40 is a factor in the
+        # thousands. Bounded it is linear in length, i.e. about 5x for 5x the input.
+        self.assertLess(deep_work, 25 * shallow_work,
+                        "baseline=%.0f shallow=%.0f deep=%.0f ms - the exponent is back"
+                        % (baseline, shallow, deep))
+
+    def test_ordinary_nesting_depths_stay_allowed(self):  # AC10b
+        # The bound must sit ABOVE real usage, or it becomes the false-block failure mode.
+        for cmd in ['bash -c "npm run build && npm test"',
+                    "timeout 300 bash -c 'npm test'",
+                    "bash -c " + chr(34) + "sh -c 'echo hi'" + chr(34)]:
+            with self.subTest(cmd=cmd):
+                _, decision = self._timed(cmd)
+                self.assertEqual(decision, "allow", cmd)
+
+    def _decision_and_reason(self, command):
+        proc = subprocess.run(
+            [NODE, str(self.GUARD)], cwd=str(REPO),
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}}),
+            capture_output=True, text=True, encoding="utf-8", timeout=self.CEILING_MS / 1000.0,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        block = out.get("hookSpecificOutput", {})
+        return block.get("permissionDecision", "allow"), block.get("permissionDecisionReason", "")
+
+    def test_over_cap_input_is_widened_not_skipped(self):  # AC10
+        # The ONLY input shape that isolates the widened pass. A nesting ladder does not:
+        # shellPayloads enumerates every shell position in one pass, so the innermost command
+        # is already visible at depth 1 and the normal checks catch it. Past the input-length
+        # cap the tokenizer returns nothing at all, so a deny here can only come from the
+        # widened scan - and the reason must say so rather than claiming a parsed match.
+        padded = "rm -rf /tmp/x " + ("# padding " * 3000)
+        decision, reason = self._decision_and_reason(padded)
+        self.assertEqual(decision, "deny", "an over-cap input must widen, not be skipped")
+        self.assertIn("widened scan", reason,
+                      "a coarse match must not be reported as a parsed one")
+
+    def test_padding_past_the_input_cap_does_not_hide_the_verb(self):  # AC10 regression
+        # The row that a first revision of this fix did NOT have, and that let a total
+        # fail-open through: the widened backstop truncated at the same MAX_INPUT_CHARS the
+        # precise walk uses, so padding the FRONT of a command pushed the destructive verb
+        # past both. Measured on that revision: 19 991 chars deny, 20 011 chars ALLOW.
+        # A backstop that stops where the thing it backs up stopped is not a backstop.
+        # The verb must sit at the END, after the padding - a leading verb stays inside the
+        # cap and the test cannot fail.
+        for pad in (19990, 30000, 60000):
+            with self.subTest(pad=pad):
+                command = "echo " + ("a" * pad) + " ; rm -rf /tmp/x"
+                decision, _ = self._decision_and_reason(command)
+                self.assertEqual(decision, "deny",
+                                 "%d chars of padding hid the verb" % len(command))
+
+    def test_padding_past_the_input_cap_still_allows_benign_work(self):  # AC10 control
+        decision, reason = self._decision_and_reason("echo " + ("a" * 60000) + " ; echo done")
+        self.assertEqual(decision, "allow", reason)
+
+    def test_a_bound_hit_in_one_segment_does_not_hide_its_siblings(self):  # BR3
+        # The bounds make `commandTokensOne` return [] on the recursive payload path. If that
+        # loss propagated to the sibling segments of the same command line, a partial parse
+        # would be reported as a complete clean one - which is the property BR3 forbids and
+        # the shape the input-cap fail-open already took once in this change.
+        deep = "sh -c " * 60
+        for command in (deep + "echo hi ; rm -rf /tmp/x",
+                        "rm -rf /tmp/x ; " + deep + "echo hi",
+                        deep + "echo hi ; git reset --hard",
+                        ("echo a ; " * 2000) + "rm -rf /tmp/x"):
+            with self.subTest(command=command[:40]):
+                decision, _ = self._decision_and_reason(command)
+                self.assertEqual(decision, "deny", "a sibling segment was lost")
+
+    def test_a_bound_hit_does_not_deny_a_clean_command_line(self):  # BR3 control
+        # The other half: exhausting a bound must not become "deny whatever I could not
+        # finish reading", which would block ordinary work.
+        for command in (("sh -c " * 60) + "echo hi ; echo done",
+                        ("echo a ; " * 2000) + "echo done"):
+            with self.subTest(command=command[:40]):
+                decision, reason = self._decision_and_reason(command)
+                self.assertEqual(decision, "allow", reason)
+
+    def test_widened_scan_over_approximates_deliberately(self):  # AC10 trade-off
+        # The widened pass treats quotes as token delimiters. That is not an accident: the
+        # case it exists for is an over-long `bash -c "rm -rf x"`, where the verb sits INSIDE
+        # quotes. The price is that an over-long command carrying a quoted destructive string
+        # it never runs is denied too. Both halves are pinned here so the trade-off cannot be
+        # changed silently in either direction.
+        padding = " " + ("# pad " * 6000)
+        needed, _ = self._decision_and_reason('bash -c "rm -rf /tmp/x"' + padding)
+        self.assertEqual(needed, "deny", "the case the widened pass exists for")
+        accepted_cost, _ = self._decision_and_reason('echo "rm -rf /tmp/x"' + padding)
+        self.assertEqual(accepted_cost, "deny",
+                         "accepted over-approximation: quoted verb past the cap")
+        # And the same command SHORT enough to parse is resolved precisely, so the
+        # over-approximation is confined to input the guard could not read.
+        parsed, _ = self._decision_and_reason('echo "rm -rf /tmp/x"')
+        self.assertEqual(parsed, "allow", "a parsable command must not be over-approximated")
+
+    def test_over_cap_benign_input_is_allowed_silently(self):  # AC10 control
+        # The other half: widening must not become "deny anything I could not parse", which
+        # is the false-block failure mode that gets a guard switched off.
+        decision, reason = self._decision_and_reason("echo hi " + ("# padding " * 3000))
+        self.assertEqual(decision, "allow", reason)
+
+    def test_a_deep_ladder_carrying_a_verb_is_still_denied(self):  # AC9
+        # This does NOT isolate the widened pass, and an earlier revision claimed it did.
+        # `shellPayloads` enumerates every shell position in one sweep, so the innermost
+        # command is already visible at depth 1 and the precise checks catch it - the deny
+        # reason for this input carries no widened-scan marker. Deleting the widened block
+        # leaves this green. What it does pin is that bounding the walk did not cost the
+        # detection. The widened pass is isolated by the over-cap rows below.
+        elapsed, decision = self._timed(("sh -c " * 24) + "rm -rf /tmp/x")
+        self.assertEqual(decision, "deny", "an exhausted bound must widen, not give up")
+        self.assertLess(elapsed, self.CEILING_MS, "%.0f ms" % elapsed)
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestRoundTwelveFixResiduals(unittest.TestCase):
+    """Twelfth round: six defects the previous round's FIX introduced, five of them
+    regressions against main. The pattern this repository has recorded nine times - the round
+    that audits a patch finds more than the round that audits the original.
+
+      A  A `)` or backtick inside DOUBLE quotes restarted the segment mid-string, so the next
+         word was resolved as a command name. `git commit -m "fix(x) rm -rf handling"` and
+         `printf "%s" "1) git reset --hard is blocked"` became denials: ordinary text, blocked.
+      B  The widened fallback read the RAW string while the precise walk decodes ANSI-C
+         quoting, line continuations and backslash escapes, so past the length cap `r\\m -rf x`
+         and the ANSI-C spelling were allowed where main denies them.
+      C  The widened fallback collected names and flags into two independent sets, so a flag
+         belonging to one command satisfied a rule about another: `grep -rn "rm" src/...`
+         matched the rm rule, with `-rn` grep's and `rm` grep's SEARCH PATTERN.
+      D  One shared budget across both tokenizer views meant draining it on the raw view
+         silently discarded the bash view - the only one that unescapes.
+      E  The budget counted CALLS, not the payloads `shellPayloads` fans out, so a flat
+         `eval eval ...` chain still exceeded the 15 s hook timeout (2 008 chars, 18.4 s) and
+         a 19 900-char input - under the length cap - exhausted a 4 GB heap with no decision.
+      F  Only `$false` counted as a falsy switch binding, so `-Recurse:0` was denied.
+    """
+
+    GUARD = REPO / "hooks" / "destructive-command-guard.mjs"
+    CEILING_MS = 5000
+
+    def _decide(self, command, tool="Bash"):
+        proc = subprocess.run(
+            [NODE, str(self.GUARD)], cwd=str(REPO),
+            input=json.dumps({"tool_name": tool, "tool_input": {"command": command}}),
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        return out.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+    # --- A: quoted prose is not a statement -------------------------------------------------
+
+    def test_a_quoted_text_after_a_paren_is_not_a_new_command(self):
+        # Every one of these is text a shell never executes. Blocking routine work is the
+        # failure mode that gets a guard switched off, and this repo writes commit messages
+        # about this very guard.
+        for command in (
+            'git commit -m "fix(x) rm -rf handling"',
+            'git commit -m "chore(deps) rm -rf node_modules no longer needed"',
+            'git commit -m "fix(hooks) git clean -fd is now denied"',
+            'printf "%s" "1) git reset --hard is blocked"',
+            'gh pr create --body "Closes #12 (see docs) rm -rf is denied by the guard"',
+        ):
+            with self.subTest(command=command[:44]):
+                self.assertEqual(self._decide(command), "allow", command)
+
+    def test_a_text_after_a_real_substitution_is_not_a_new_command(self):
+        # The substitution BODY is a command context; the quoted text around it is an
+        # argument to the outer command. Splitting there was the same defect one position on.
+        for command in (
+            'echo "$(date) rm -rf /tmp/build finished"',
+            'echo "$(date) git reset --hard was run"',
+            'echo "cost $(price) dollars"',
+            'git commit -m "release $(date +%F)"',
+        ):
+            with self.subTest(command=command[:44]):
+                self.assertEqual(self._decide(command), "allow", command)
+
+    def test_a_real_substitution_body_is_still_inspected(self):
+        # The other direction: bash really runs these, in all three spellings.
+        backtick = chr(96)
+        for command in (
+            'echo "$(rm -rf /tmp/x)"',
+            "echo " + backtick + "rm -rf /tmp/x" + backtick,
+            'echo "' + backtick + "rm -rf /tmp/x" + backtick + '"',
+            "echo $(rm -rf /tmp/x)",
+            'echo "$(git reset --hard)"',
+        ):
+            with self.subTest(command=command[:44]):
+                self.assertEqual(self._decide(command), "deny", command)
+
+    def test_a_live_backtick_in_a_message_is_denied_and_that_is_a_decision(self):
+        # Borderline, recorded as a decision rather than left as a surprise. In DOUBLE quotes
+        # bash really runs a backtick pair, so `git commit -m "docs: use `+B+B+"rm -rf"+B+B+` carefully"`
+        # executes it. The guard is scope-narrow by VERB, not by target, and main already
+        # denies a bare `rm -rf` with no operand - so denying it inside a live substitution is
+        # the same rule, not a new one. main allowed this only because it did not read
+        # backticks at all. The workaround is the one a careful shell user would pick anyway:
+        # single quotes, which suppress the substitution and stay allowed (asserted below).
+        live = "git commit -m " + chr(34) + "docs: use " + chr(96) + "rm -rf" + chr(96) + " carefully" + chr(34)
+        self.assertEqual(self._decide(live), "deny", live)
+        literal = "git commit -m " + chr(39) + "docs: use " + chr(96) + "rm -rf" + chr(96) + " carefully" + chr(39)
+        self.assertEqual(self._decide(literal), "allow", literal)
+
+    def test_a_single_quoted_substitution_stays_literal(self):
+        backtick = chr(96)
+        for command in ("echo '$(rm -rf /tmp/x)'",
+                        "echo '" + backtick + "rm -rf /tmp/x" + backtick + "'"):
+            with self.subTest(command=command[:44]):
+                self.assertEqual(self._decide(command), "allow", command)
+
+    # --- B: the backstop must read what the precise walk reads ------------------------------
+
+    OVER_CAP = "#" * 20001
+
+    def test_b_widened_scan_decodes_the_same_spellings(self):
+        # Past the length cap the precise walk returns nothing, so these are decided by the
+        # widened pass alone. main denies every one of them.
+        backslash = chr(92)
+        dollar = chr(36)
+        quote = chr(39)
+        for label, command, tool in (
+            ("backslash", "r" + backslash + "m -rf /tmp/x " + self.OVER_CAP, "Bash"),
+            ("ansi-c",
+             dollar + quote + backslash + "x72" + backslash + "x6d" + quote
+             + " -rf /tmp/x " + self.OVER_CAP, "Bash"),
+            ("powershell-bare-r",
+             "Remove-Item -r -Force C:/x " + self.OVER_CAP, "PowerShell"),
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(self._decide(command, tool=tool), "deny", label)
+
+    # --- C: a flag belongs to its own command ----------------------------------------------
+
+    def test_c_widened_scan_does_not_cross_attribute_a_flag(self):
+        # `-rn` is grep's and `rm` is grep's search pattern. A rule about rm must not be
+        # satisfied by a flag that belongs to something else.
+        for label, command in (
+            ("grep-rn", 'grep -rn "rm" ' + ("src/file.js " * 1400)),
+            ("grep-r", "echo " + ("a" * 25000) + " ; grep -r rm ."),
+            ("ls-r", "echo " + ("a" * 25000) + " ; ls -r rm"),
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(self._decide(command), "allow", label)
+
+    # --- D: a bound must not delete a whole reading -----------------------------------------
+
+    def test_d_escaped_spellings_survive_long_shell_chains(self):
+        # Honest scope: this pins that the bash view - the only one that unescapes - still
+        # reaches a `r\\m` spelling through a long chain of inner shells. It does NOT
+        # currently discriminate the per-view budget fix it was written for: sharing one
+        # budget again leaves every input here green, because the payload fan-out cap now
+        # keeps the budget from draining at any length that still parses. The fix stays
+        # because a bound must never delete a whole reading, but this test is a property
+        # assertion, not a regression lock, and saying otherwise would be the "cannot fail
+        # for the reason it names" defect this package exists to remove.
+        backslash = chr(92)
+        for count in (45, 50, 80):
+            with self.subTest(count=count):
+                command = ("eval " * count) + "echo hi ; r" + backslash + "m -rf /tmp/x"
+                self.assertEqual(self._decide(command), "deny", "%d evals" % count)
+
+    # --- E: the fan-out is bounded, not just the depth ---------------------------------------
+
+    def test_e_flat_shell_chains_stay_inside_the_hook_budget(self):
+        # `shellPayloads` emits one payload per shell/eval token in a segment, each a full
+        # suffix. Counting CALLS did not bound that; a 2 008-char command took 18.4 s against
+        # a 15 s timeout, and a timed-out hook renders no decision.
+        import time
+        for shape, tail, expected in (("eval ", "rm -rf /tmp/x", "deny"),
+                                      ("eval ", "echo hi", "allow"),
+                                      ("sh -c ", "echo hi", "allow")):
+            for count in (200, 400):
+                with self.subTest(shape=shape.strip(), count=count):
+                    start = time.time()
+                    decision = self._decide((shape * count) + tail)
+                    elapsed = (time.time() - start) * 1000
+                    self.assertEqual(decision, expected)
+                    self.assertLess(elapsed, self.CEILING_MS,
+                                    "%s x%d took %.0f ms" % (shape.strip(), count, elapsed))
+
+    def test_e_a_long_quoted_payload_does_not_exhaust_memory(self):
+        # This shape aborted the process with a 4 GB heap exhaustion and no decision at all,
+        # at a length UNDER the input cap - so the length cap gave no protection.
+        command = ("eval " * 100) + "'" + ("a" * 19797) + "'"
+        self.assertEqual(self._decide(command), "allow")
+
+    # --- F: a switch bound to any falsy value is off -----------------------------------------
+
+    def test_f_switch_bound_to_a_falsy_value_is_not_recursive(self):
+        for command in ("Remove-Item -Recurse:0 -Force C:/x",
+                        "Remove-Item -Recurse: $false -Force C:/x",
+                        "Remove-Item -Recurse:$false -Force C:/x",
+                        "Remove-Item -Recurse:$null -Force C:/x"):
+            with self.subTest(command=command):
+                self.assertEqual(self._decide(command, tool="PowerShell"), "allow", command)
+
+    def test_f_switch_bound_to_a_truthy_value_is_recursive(self):
+        for command in ("Remove-Item -Recurse:$true -Force C:/x",
+                        "Remove-Item -Recurse:1 -Force C:/x",
+                        "Remove-Item -Rec:$true -Force C:/x",
+                        "Remove-Item -Recurse -Force C:/x"):
+            with self.subTest(command=command):
+                self.assertEqual(self._decide(command, tool="PowerShell"), "deny", command)
+
+    # --- the splitter change that had no test at all -----------------------------------------
+
+    def test_ampersand_still_separates_statements(self):
+        # `&` stopped being a separator when it belongs to a redirect operator. If that
+        # narrowing over-reached, two statements would glue into one and the second would
+        # never be resolved. Nothing pinned this.
+        for command in ("git status && rm -rf /tmp/x",
+                        "git status & rm -rf /tmp/x",
+                        "npm test > /tmp/l 2>&1 && rm -rf /tmp/x",
+                        "npm test &> /tmp/l && rm -rf /tmp/x"):
+            with self.subTest(command=command):
+                self.assertEqual(self._decide(command), "deny", command)
+
+    def test_ampersand_in_a_redirect_is_not_a_separator(self):
+        for command in ("2>&1 rm -rf /tmp/x", "&> /tmp/l rm -rf /tmp/x"):
+            with self.subTest(command=command):
+                self.assertEqual(self._decide(command), "deny", command)
 
 
 if __name__ == "__main__":

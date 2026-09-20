@@ -121,7 +121,7 @@ The scripts are shared, but runtime wiring differs.
 | `scan-write.mjs` | `PostToolUse` | Not wired | Warns on secret-shaped new content. |
 | `scan-commit.mjs` | `PreToolUse` for shell commands; self-gates to commits | `PreToolUse` for `Bash`; self-gates to commits | Blocks high-confidence secrets in added diff lines. |
 | `branch-guard.mjs` | `PreToolUse` for shell commands; self-gates to commit/push | `PreToolUse` for `Bash`; self-gates to commit/push | Warns on protected branches; can block with `AGENTIC_BRANCH_GUARD_BLOCK=true`. |
-| `destructive-command-guard.mjs` | `PreToolUse` for shell commands | `PreToolUse` for `Bash` | Blocks the documented deterministic destructive-command subset. |
+| `destructive-command-guard.mjs` | `PreToolUse` for shell commands | `PreToolUse` for `Bash` | Blocks the documented deterministic destructive-command subset, after walking off every shell `cmd_prefix` that can precede a command name and reaching into `-c`/`eval` payloads and command substitutions. The walk is depth- and budget-bounded and widens to a coarse linear scan past the bound. The prefix set is closed by the shell grammar; the wrapper list is an open-ended deny-list. |
 | `scan-write-codex.mjs` | Not wired | `PreToolUse` for `Bash\|apply_patch` | Blocks high-confidence secrets in recognized literal writes. |
 | `flow-order-guard-codex.mjs` | Not wired | `PreToolUse` for `Bash\|apply_patch` | With `AGENTIC_FLOW_ORDER_BLOCK=true`, requires this-session spec/plan or test-run ordering evidence. |
 | `flow-order-guard.mjs` | `PreToolUse` for `Write`/`Edit`/`MultiEdit` | Not wired | Checks current-turn pre-edit evidence for active implementation flows before source edits; can deny with `AGENTIC_FLOW_GATE_BLOCK=true`. |
