@@ -2,10 +2,17 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+
+# A pull request pushed twice cancels its own superseded run; main keeps every run, because each
+# merge commit's result is the record that the branch was green at that commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   deterministic-gate:
@@ -14,12 +21,21 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # The gate runs the suite twice (source tree, then inside the extracted archive). The GitHub
+    # default is 360 minutes; a hung job should not burn six hours of the account's minutes.
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # Actions are pinned to a full commit SHA: a tag can be moved, a SHA cannot. Dependabot keeps
+      # both the SHA and the trailing version comment current (.github/dependabot.yml).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The gate only reads the tree; leaving the token in .git/config would hand it to every
+          # command the gate runs, including the suite's own git invocations.
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - name: Version consistency
@@ -72,3 +88,20 @@ jobs:
       - name: "Archive gate: coverage comparison"
         shell: bash
         run: python3 -c "import sys; sys.path.insert(0, 'scripts'); import build_release; sys.exit(build_release.check_archive_gate_log(sys.argv[1], '.'))" "$RUNNER_TEMP/archive-logs/archive-gate-unit-tests.log"
+
+  # A matrix reports one check per combination, so requiring the gate directly would mean requiring
+  # every generated name and re-listing them whenever the matrix changes. This job is the single
+  # stable name to require. `if: always()` makes it run even when a needed job fails; without the
+  # explicit result test it would then report success.
+  ci-ok:
+    if: always()
+    needs: [deterministic-gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every gate job to have succeeded
+        env:
+          GATE_RESULT: ${{ needs.deterministic-gate.result }}
+        run: |
+          echo "deterministic-gate=$GATE_RESULT"
+          test "$GATE_RESULT" = "success"
