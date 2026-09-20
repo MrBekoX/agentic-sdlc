@@ -205,10 +205,12 @@ Important boundary: `spec-authoring` and `plan-authoring` are standalone prompt-
 ```text
 .claude-plugin/    Claude Code manifest, local marketplace metadata, runtime README
 .codex-plugin/     Codex manifest and runtime README
+.zcode-plugin/     ZCode adapter manifest and runtime READMEs (experimental)
 .grok-plugin/      Grok CLI adapter manifest + personal marketplace index (experimental)
+.grok/workflows/   Grok CLI project workflow catalog (Rhai; loaded from the repo, not shipped by a plugin install)
 skills/            Shared skill source: one directory per skill
 agents/            Bounded sub-agent role contracts (review roles are tool-level read-only)
-workflows/         Claude Code dynamic workflow scripts
+workflows/         Claude Code dynamic workflow scripts; workflows/zcode/ holds an UNVERIFIED ZCode port
 hooks/             Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/  Durable behavior contracts
 commands/          Manual slash-command definitions

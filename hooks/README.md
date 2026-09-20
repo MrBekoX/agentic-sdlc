@@ -11,6 +11,7 @@ Two kinds of guard live here:
 |---|---|---|
 | Claude Code | `hooks/hooks-claude.json` via `.claude-plugin/plugin.json` | `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop` |
 | Codex | `hooks/hooks-codex.json` via `.codex-plugin/plugin.json`, after hook review/trust; portable root manifests are not hook-equivalent on CLI 0.154.0 | `PreToolUse`, `SessionStart`, `Stop` |
+| ZCode (Z.ai) (experimental adapter, not a 0.4.3 release target) | `hooks/hooks-zcode.json` via `.zcode-plugin/plugin.json`; `hooks/hooks.json` is never created | `PreToolUse` (`Bash`), `PostToolUse` (`Write\|Edit`), `SessionStart` (`startup\|clear\|compact`); Stop guards and `flow-order-guard` unwired |
 | Grok CLI (experimental adapter, not a 0.4.3 release target) | `hooks/hooks-grok.json` via `.grok-plugin/plugin.json`; `hooks/hooks.json` is never created | `PreToolUse` only (`Bash\|run_terminal_command`); write-scan / Stop / SessionStart unwired |
 
 > **Command-guard matcher is `Bash\|PowerShell`, with no `if` filter.** Both details are security-load-bearing.
@@ -23,15 +24,18 @@ Two kinds of guard live here:
 
 The hook scripts are shared in this directory, but being present as a script is not the same as being wired by every runtime.
 
-Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve through `${PLUGIN_ROOT}`. Grok CLI paths resolve through `${GROK_PLUGIN_ROOT}` (Grok also injects the `${CLAUDE_PLUGIN_ROOT}` alias). Grok command-guard stdin is camelCase `toolInput.command`; the shared scripts also still read `tool_input.command`.
+Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex paths resolve through `${PLUGIN_ROOT}`. Grok CLI paths resolve through `${GROK_PLUGIN_ROOT}` (Grok also injects the `${CLAUDE_PLUGIN_ROOT}` alias); ZCode paths resolve through `${ZCODE_PLUGIN_ROOT}` (ZCode also injects the `${CLAUDE_PLUGIN_ROOT}` alias). Executor forms differ: Claude and Codex and Grok use `type: "command"`, ZCode uses `type: "process"` with `command`/`args[]` argv and `timeoutMs`. Grok and Codex quote the expanded path inside the command string, because a command carrying shell metacharacters is run through a shell and an install path with a space would otherwise word-split. Grok command-guard stdin is camelCase `toolInput.command`; the shared scripts also still read `tool_input.command`.
 
 ## Real Hook Scripts
 
+
+> **The two columns below are Claude Code and Codex only.** Four scripts are additionally wired elsewhere: `scan-commit.mjs`, `destructive-command-guard.mjs` and `branch-guard.mjs` on **ZCode** and **Grok CLI** (`PreToolUse`), and `scan-write.mjs` plus `session-start.mjs` on **ZCode**. A row that reads "Not wired" in the Codex column is not a statement that the script is Claude-only — check the runtime table above.
+
 | Script | Claude Code event | Codex event | Behavior |
 |---|---|---|---|
-| `session-start.mjs` | `SessionStart` | Not wired | Injects git status summary and Claude Code Skill-tool bootstrap reminder. |
+| `session-start.mjs` | `SessionStart` | Not wired | Injects git status summary and the plugin bootstrap reminder. **Also wired on ZCode** (`SessionStart`). |
 | `session-start-codex.mjs` | Not wired | `SessionStart` | Injects git status summary and Codex-specific AGENTIC-SDLC bootstrap reminder. |
-| `scan-write.mjs` | `PostToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | Scans newly written text for secrets; warns only. (Claude `Write`/`Edit` field shape; superseded on Codex by `scan-write-codex.mjs`.) |
+| `scan-write.mjs` | `PostToolUse` (`Write`/`Edit`/`MultiEdit`) | Not wired | Scans newly written text for secrets; warns only. (Claude `Write`/`Edit` field shape; superseded on Codex by `scan-write-codex.mjs`.) **Also wired on ZCode** (`PostToolUse`, `Write\|Edit`) — and it is the ONLY PostToolUse hook wired there, so its advisory must reach a channel ZCode documents. It emits `systemMessage` (user-visible on Claude Code) and `hookSpecificOutput.additionalContext` (model-visible on `PostToolUse`; ZCode's documented channel). |
 | `scan-write-codex.mjs` | Not wired | `PreToolUse` (`Bash`/`apply_patch`) | Codex-native pre-write secret guard: extracts the literal added content of recognized write forms (apply_patch V4A; `printf`/`echo` `>`/`>>`; literal heredocs) and DENIES a high-confidence secret before the write. Bounded backstop — NOT covered (fail-open): pipe/`tee`/`base64`/command-substitution and `$VAR`/`${...}`/`$(...)` expansion. |
 | `scan-commit.mjs` | `PreToolUse` (`Bash`/`PowerShell`) | `PreToolUse` (`Bash`) | Scans added diff lines **and the commit message** (`-m`/`--message`/`-F`) for high-confidence secrets; blocks the commit. Flags credential files by name, including derived copies (`id_rsa.bak`, `.npmrc.old`, `server.key.bak`). Self-gates internally by resolving the git subcommand through `git-invocation.mjs`, so a git alias (`alias.ci = commit -a`) is still scanned. |
 | `branch-guard.mjs` | `PreToolUse` (`Bash`/`PowerShell`) | `PreToolUse` (`Bash`) | Warns on `main`/`master`; blocks when `AGENTIC_BRANCH_GUARD_BLOCK=true`; flags force-push. Self-gates internally through `git-invocation.mjs`, so an aliased commit/push is still seen. |

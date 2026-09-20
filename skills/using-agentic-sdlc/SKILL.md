@@ -149,6 +149,8 @@ If evidence is missing, say it is uncertain and state what would verify it.
 
 - In Claude Code, use the native Skill/Workflow/Agent mechanisms when available.
 - In Codex (the other supported runtime), follow activated skill instructions and the portable capability matrix in `docs/runtime-adapter.md`. Treat Claude Code Workflow-only gates as runtime-adapted: use subagents, parallel local tools, native agent mechanisms, or documented degraded main-loop execution as the skill specifies.
-- Resolve plugin-root paths by runtime: `${CLAUDE_PLUGIN_ROOT}` in Claude Code, `${PLUGIN_ROOT}` in Codex. Use the matching runtime root for `contracts/skills/`, `scripts/`, `hooks/`, and bundled files.
+- In ZCode (experimental adapter), the `Skill` tool and qualified `agentic-sdlc:<skill>` ids work after the plugin is installed and enabled; `$<skill>` and `/` → Skills also invoke. Plugin-root paths resolve as `${ZCODE_PLUGIN_ROOT}` (ZCode also injects the `${CLAUDE_PLUGIN_ROOT}` alias). Mechanism mappings live in `docs/zcode-runtime-adapter.md`.
+- In Grok CLI (experimental adapter), invoke named loops with `/workflow spec-plan-draft` (or `multi-lens-review` / `skill-draft`) or the `workflow` tool when `.grok/workflows/<name>.rhai` is in the project catalog. Do not call Claude JS `Workflow`. Plugin install does not deliver those scripts. If they are missing, use `spawn_subagent` plus the documented author -> critic -> revise fallback. Plugin-root paths resolve as `${GROK_PLUGIN_ROOT}` (Grok also injects the `${CLAUDE_PLUGIN_ROOT}` alias).
+- Resolve plugin-root paths by runtime: `${CLAUDE_PLUGIN_ROOT}` in Claude Code, `${PLUGIN_ROOT}` in Codex, `${GROK_PLUGIN_ROOT}` in Grok CLI. Use the matching runtime root for `contracts/skills/`, `scripts/`, `hooks/`, and bundled files.
 - If a required skill or workflow mechanism is unavailable, state the degraded path and use the smallest safe fallback.
 - Match the user's language unless they request otherwise.
