@@ -1869,6 +1869,19 @@ ARCHIVE_STEPS = [
 ]
 
 
+def job_block(text: str, job: str) -> str:
+    """The lines of one workflow job, from '  <job>:' up to the next job key at the same indent.
+
+    The workflow has more than one job, so a parse that starts at the first 'steps:' in the file
+    would fold a later job's steps into the gate's list.
+    """
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line == "  %s:" % job)
+    end = next((i for i, line in enumerate(lines[start + 1:], start + 1)
+                if re.match(r"^  [A-Za-z0-9_-]+:$", line)), len(lines))
+    return "\n".join(lines[start:end])
+
+
 def ci_steps(text: str) -> list:
     """(name, run, block text) for each '- ' step under 'steps:', in file order (stdlib text parse)."""
     lines = text.splitlines()
@@ -1899,11 +1912,11 @@ def ci_steps(text: str) -> list:
 class TestCiArchiveSteps(unittest.TestCase):
     def setUp(self):
         self.text = CI_WORKFLOW.read_text(encoding="utf-8")
-        self.steps = ci_steps(self.text)
+        self.steps = ci_steps(job_block(self.text, "deterministic-gate"))
         self.names = [name for name, _run, _block in self.steps]
 
     def test_source_steps_and_triggers_unchanged(self):
-        self.assertIn("on:\n  push:\n  pull_request:\n", self.text)
+        self.assertIn("on:\n  push:\n    branches: [main]\n  pull_request:\n", self.text)
         self.assertIn("os: [ubuntu-latest, windows-latest]", self.text)
         source = [(name, run) for name, run, _block in self.steps if name in dict(SOURCE_STEPS)]
         self.assertEqual(source, SOURCE_STEPS)
@@ -1954,6 +1967,68 @@ class TestCiArchiveSteps(unittest.TestCase):
         for phrase in ("stderr", "skip count", "fails closed"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, comment)
+
+
+class TestCiWorkflowHygiene(unittest.TestCase):
+    """Workflow-level settings. Each one is load-bearing, so each one is pinned here.
+
+    Without these, the gate runs twice per pull-request commit, a hung job burns the GitHub default
+    of 360 minutes, a moved action tag silently changes what runs, and the checkout token stays in
+    the clone that the suite's own git commands then use.
+    """
+
+    def setUp(self):
+        self.text = CI_WORKFLOW.read_text(encoding="utf-8")
+        # Scan only below `jobs:` — the `on:` keys sit at the same indent.
+        self.jobs = re.findall(r"^  ([A-Za-z0-9_-]+):$", self.text.split("\njobs:\n", 1)[1], re.M)
+
+    def test_push_gates_main_only_so_a_pull_request_is_not_gated_twice(self):
+        # `push:` with no branch filter fires on the PR branch as well, so every PR commit ran the
+        # whole matrix twice, once per event.
+        self.assertIn("on:\n  push:\n    branches: [main]\n  pull_request:\n", self.text)
+
+    def test_superseded_runs_are_cancelled_except_on_main(self):
+        self.assertIn("group: ${{ github.workflow }}-${{ github.ref }}", self.text)
+        self.assertIn("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}", self.text)
+
+    def test_every_job_bounds_its_runtime(self):
+        self.assertEqual(self.jobs, ["deterministic-gate", "ci-ok"])
+        for job in self.jobs:
+            with self.subTest(job=job):
+                self.assertRegex(job_block(self.text, job), r"(?m)^    timeout-minutes: \d+$")
+
+    def test_actions_are_pinned_to_a_full_sha_with_a_version_comment(self):
+        uses = re.findall(r"uses: (\S+)(?: # (\S+))?", self.text)
+        self.assertTrue(uses)
+        for ref, comment in uses:
+            with self.subTest(uses=ref):
+                # A tag can be moved to different code; a commit SHA cannot.
+                self.assertRegex(ref, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
+                # Dependabot needs the version comment to keep the pin current.
+                self.assertRegex(comment, r"^v\d+\.\d+\.\d+$")
+
+    def test_checkout_does_not_leave_the_token_in_the_clone(self):
+        self.assertIn("persist-credentials: false", self.text)
+
+    def test_ci_ok_is_a_single_stable_check_that_fails_closed(self):
+        block = job_block(self.text, "ci-ok")
+        self.assertIn("needs: [deterministic-gate]", block)
+        # `if: always()` is what lets it report on a failed matrix; the explicit result test is what
+        # stops it reporting success when it does.
+        self.assertIn("if: always()", block)
+        self.assertIn("GATE_RESULT: ${{ needs.deterministic-gate.result }}", block)
+        self.assertIn('test "$GATE_RESULT" = "success"', block)
+
+
+class TestDependabotConfig(unittest.TestCase):
+    def test_actions_are_watched_so_the_sha_pins_stay_current(self):
+        path = REPO / ".github" / "dependabot.yml"
+        self.assertTrue(path.is_file(), ".github/dependabot.yml missing")
+        text = path.read_text(encoding="utf-8")
+        for fragment in ("version: 2", "package-ecosystem: github-actions", "directory: /",
+                         "interval: weekly"):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, text)
 
 
 SAMPLE_TESTS = b'''import unittest

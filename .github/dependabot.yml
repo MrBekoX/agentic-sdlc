@@ -1,0 +1,15 @@
+version: 2
+
+updates:
+  # The workflows pin every action to a full commit SHA, which is the only immutable reference a
+  # tag cannot provide. Dependabot updates the SHA and the trailing version comment together, so
+  # pinning does not turn into staying on an unpatched action.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+    open-pull-requests-limit: 5
