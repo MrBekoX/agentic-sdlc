@@ -2430,6 +2430,72 @@ class TestRoundFourteenGitPathResiduals(unittest.TestCase):
                         "4x the input cost %.0fx the work (small=%.0f large=%.0f ms) - the "
                         "splitter is quadratic again" % (large / small, small, large))
 
+
+    def test_collecting_c_directories_is_not_quadratic(self):
+        # `-C <dir>` arguments are collected into an insertion-ordered array whose membership
+        # test was `Array.prototype.includes` - so every new directory was compared against
+        # every directory already collected, at two sites: the per-statement walk and the
+        # aggregation across statements. Measured end-to-end through this hook, net of a
+        # 75 ms baseline: 4 000 dirs 39 ms, 8 000 155 ms, 16 000 570 ms, 32 000 2 399 ms.
+        # Four times the work per doubling.
+        #
+        # This path has NO input cap - unlike the destructive guard, git-invocation.mjs sets no
+        # MAX_INPUT_CHARS - and a guard the runtime kills for exceeding its budget renders no
+        # decision at all, so the command proceeds unguarded. Cost here is a property of the
+        # decision, not of performance.
+        #
+        # A RATIO, not a threshold: the absolute numbers move with the host, the exponent does
+        # not. Quadratic, a 4x input is ~16x the work; linear it is ~4x. The bound sits between
+        # the two, so neither a slow host nor a fast one changes the verdict.
+        import time
+
+        def elapsed(count):
+            command = "git " + " ".join("-C d%d" % i for i in range(count)) + " status"
+            start = time.time()
+            self._run(self.SCAN, command)
+            return (time.time() - start) * 1000
+
+        baseline = elapsed(1)          # process start-up, which dominates at small sizes
+        small = max(elapsed(8000) - baseline, 5.0)
+        large = max(elapsed(32000) - baseline, 5.0)
+        self.assertLess(large, 6 * small + 400,
+                        "4x the directories cost %.1fx the work (small=%.0f large=%.0f ms) - "
+                        "the -C aggregation is quadratic" % (large / small, small, large))
+
+
+    def test_collected_c_directories_are_unchanged_by_the_set(self):
+        # A faster wrong answer is still wrong. `-C` directories COMPOSE - `git -C a -C b`
+        # resolves `b` relative to `a` - so their order is semantics, not presentation, and a
+        # membership change must not touch it. De-duplicating by sorting, or by a plain-object
+        # map, would also have been linear and would also have been wrong.
+        #
+        # Every expectation below was DERIVED by running the same input through the pre-fix
+        # `includes` implementation, not written from memory; all seven matched.
+        #
+        # `constructor`, `__proto__` and `has` are in the table on purpose: a plain object used
+        # as the membership map treats them as properties rather than as data, which is why the
+        # fix specifies a Set. The per-statement scoping half of this guarantee is pinned
+        # separately by test_t2_unrelated_dash_C_does_not_redirect_the_commit_scan.
+        cases = [
+            ("git status", [], False),
+            ("git -C a status", ["a"], False),
+            ("git -C a -C a status", ["a"], False),
+            ("git -C a -C b -C c status", ["a", "b", "c"], False),
+            ("git co", ["sub"], True),
+            ("git -C constructor -C __proto__ -C has status",
+             ["constructor", "__proto__", "has"], False),
+            ("git -C a status; git -C b -C a commit -m x", ["a", "b"], False),
+        ]
+        got = _node_json(
+            "import('./hooks/git-invocation.mjs').then(m=>process.stdout.write(JSON.stringify("
+            "JSON.parse(c).map(([cmd,alias])=>m.resolveGitCommands(cmd,{"
+            "lookup:(n)=>(alias&&n==='co')?'-C sub status':'',cwd:'.'}).dirs))))",
+            json.dumps([[cmd, alias] for cmd, _expected, alias in cases]),
+        )
+        self.assertEqual(len(got), len(cases))
+        for (cmd, expected, _alias), actual in zip(cases, got):
+            self.assertEqual(actual, expected, "collected -C directories changed for: " + cmd)
+
     def test_f_a_payload_chain_does_not_starve_the_alias_walk(self):
         # Two budgets that are only nominally separate are one budget. Every dequeue used to
         # charge the ALIAS budget, and payload-derived segments enter the same queue, so a

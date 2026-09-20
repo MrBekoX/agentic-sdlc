@@ -324,6 +324,13 @@ export function resolveGitCommands(command, opts = {}) {
     const texts = [];
     const payloadTexts = [];
     const dirs = [];
+    // `dirs` stays the ordered result; `dirSeen` is the membership test. It used to be
+    // `dirs.includes(d)`, which compares each new directory against every one already
+    // collected - quadratic, and this path has no input cap, so a long enough command line
+    // pushed the hook past its runtime budget. A killed hook renders no decision at all, so
+    // the command then proceeds unguarded. A Set rather than a plain object: `-C constructor`
+    // and `-C __proto__` must be data, not properties.
+    const dirSeen = new Set();
     const seen = new Set();
     const queue = [{ text: statement, depth: 0, viaPayload: false, payloadDepth: 0 }];
     let budget = 64;                                     // hard bound: alias chains cannot spin
@@ -368,7 +375,7 @@ export function resolveGitCommands(command, opts = {}) {
         payloadTexts.push(text);
       } else {
         texts.push(text);
-        for (const d of call.dirs) if (!dirs.includes(d)) dirs.push(d);
+        for (const d of call.dirs) if (!dirSeen.has(d)) { dirSeen.add(d); dirs.push(d); }
       }
       const sub = String(call.subcommand || '').toLowerCase();
       if (!sub || sub.startsWith('-')) continue;
@@ -402,11 +409,12 @@ export function resolveGitCommands(command, opts = {}) {
   const texts = [];
   const payloadTexts = [];
   const dirs = [];
+  const dirSeen = new Set();                             // same reason as in walk() above
   for (const c of calls) {
     for (const s of c.subcommands) subcommands.add(s);
     texts.push(...c.texts);
     payloadTexts.push(...c.payloadTexts);
-    for (const d of c.dirs) if (!dirs.includes(d)) dirs.push(d);
+    for (const d of c.dirs) if (!dirSeen.has(d)) { dirSeen.add(d); dirs.push(d); }
   }
   return { subcommands, texts, payloadTexts, dirs, calls };
 }
