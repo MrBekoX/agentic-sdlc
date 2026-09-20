@@ -27,7 +27,7 @@ jobs:
     steps:
       # Actions are pinned to a full commit SHA: a tag can be moved, a SHA cannot. Dependabot keeps
       # both the SHA and the trailing version comment current (.github/dependabot.yml).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The gate only reads the tree; leaving the token in .git/config would hand it to every
           # command the gate runs, including the suite's own git invocations.
