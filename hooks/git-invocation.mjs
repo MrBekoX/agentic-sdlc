@@ -26,6 +26,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { resolve as resolvePath } from 'node:path';
+import { skipCommandPrefix } from './shell-prefix.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
 
 // Wrappers whose real command follows them (mirrors destructive-command-guard.mjs).
@@ -36,6 +37,8 @@ const WRAPPERS = {
   command: { positional: 0, argOpts: [] },
   builtin: { positional: 0, argOpts: [] },
   nohup: { positional: 0, argOpts: [] },
+  setsid: { positional: 0, argOpts: [] },
+  time: { positional: 0, argOpts: ['-o', '--output', '-f', '--format'] },
   stdbuf: { positional: 0, argOpts: ['-i', '-o', '-e'] },
   timeout: { positional: 1, argOpts: ['-s', '--signal', '-k'] },
   nice: { positional: 0, argOpts: ['-n', '--adjustment'] },
@@ -91,20 +94,63 @@ export function tokenize(text) {
 }
 
 // Quote-aware split on statement separators, so each segment is one command.
+// True when an `&` belongs to a redirect operator rather than separating two statements:
+// `2>&1`, `<&0`, `&>log`, `&>>log`.
+//
+// Takes the last non-space character of the current segment and whether it was ESCAPED,
+// rather than the segment itself. An earlier version scanned backward over the segment; the
+// loop body was O(1), but indexing a string built by `+=` forces V8 to flatten the ConsString
+// rope that `+=` then rebuilds, so a shape where every `&` runs this check was quadratic -
+// 13.6 s at 512 KB, past the wired hook budget, where a killed hook renders no decision.
+//
+// An escaped `>` is literal text, not an operator: without that distinction
+// `echo a\> & git commit ...` read as a redirect, the `&` stopped separating, and the commit
+// after it was never resolved.
+function ampersandIsRedirect(next, lastNonSpace, lastWasEscaped) {
+  if (next === '>') return true;
+  if (lastNonSpace !== '>' && lastNonSpace !== '<') return false;
+  return !lastWasEscaped;
+}
+
 export function splitStatements(text) {
   const segs = [];
   let cur = '';
   let q = null;
   const s = String(text ?? '');
+  // Carried alongside `cur` so the redirect test never has to index it. `lastNonSpace` is the
+  // last non-blank character appended to the current segment, `lastWasEscaped` says whether
+  // an odd run of backslashes preceded it, and `backslashRun` counts the run in progress.
+  let lastNonSpace = '';
+  let lastWasEscaped = false;
+  let backslashRun = 0;
+  const keep = (ch) => {
+    cur += ch;
+    if (ch !== ' ' && ch !== '\t') {
+      lastNonSpace = ch;
+      lastWasEscaped = backslashRun % 2 === 1;
+    }
+    backslashRun = ch === '\\' ? backslashRun + 1 : 0;
+  };
+  const flush = () => {
+    segs.push(cur);
+    cur = '';
+    lastNonSpace = '';
+    lastWasEscaped = false;
+    backslashRun = 0;
+  };
   for (let i = 0; i < s.length; i += 1) {
     const c = s[i];
     const n = s[i + 1];
-    if (q) { cur += c; if (c === q) q = null; continue; }
-    if (c === "'" || c === '"') { q = c; cur += c; continue; }
-    if (c === ';' || c === '\n') { segs.push(cur); cur = ''; continue; }
-    if ((c === '&' || c === '|') && n === c) { segs.push(cur); cur = ''; i += 1; continue; }
-    if (c === '|' || c === '&') { segs.push(cur); cur = ''; continue; }
-    cur += c;
+    if (q) { keep(c); if (c === q) q = null; continue; }
+    if (c === "'" || c === '"') { q = c; keep(c); continue; }
+    if (c === ';' || c === '\n') { flush(); continue; }
+    if ((c === '&' || c === '|') && n === c) { flush(); i += 1; continue; }
+    // A bare `&` is a separator EXCEPT inside a redirect operator (`2>&1`, `<&0`, `&>log`).
+    // Splitting there left a fragment starting with a bare fd digit, so the command after it
+    // was never resolved.
+    if (c === '&' && ampersandIsRedirect(n, lastNonSpace, lastWasEscaped)) { keep(c); continue; }
+    if (c === '|' || c === '&') { flush(); continue; }
+    keep(c);
   }
   if (cur) segs.push(cur);
   return segs;
@@ -135,25 +181,35 @@ function basename(token) {
 
 // Strip leading `VAR=value` assignments and known wrappers to reach the real command.
 function unwrap(tokens) {
-  let t = tokens.slice();
-  for (let guard = 0; guard < 10 && t.length; guard += 1) {
-    while (t.length && /^[A-Za-z_]\w*=/.test(t[0])) t = t.slice(1);   // FOO=bar git commit
-    if (!t.length) return t;
-    const name = basename(t[0]).toLowerCase().replace(/\.exe$/, '');
+  // The prefix grammar and the wrapper table ALTERNATE to a fixed point: `then env FOO=1
+  // nohup git commit` is prefix, wrapper, prefix, wrapper. `skipCommandPrefix` is shared with
+  // destructive-command-guard.mjs so the two resolvers cannot diverge on the construct set
+  // again - they walked off different subsets before, and every bypass that produced was the
+  // same failure: the first token was a prefix construct, so the real command was never seen.
+  // Index walk rather than repeated slicing: the old version rebuilt the array at every step,
+  // which is quadratic on a long statement and reachable from agent-influenced input.
+  let i = 0;
+  for (let guard = 0; guard < 10 && i < tokens.length; guard += 1) {
+    i = skipCommandPrefix(tokens, i);
+    if (i >= tokens.length) return [];
+    const name = basename(tokens[i]).toLowerCase().replace(/\.exe$/, '');
     const w = WRAPPERS[name];
-    if (!w) return t;
-    t = t.slice(1);
-    for (let i = 0; i < w.positional && t.length; i += 1) {
-      if (t[0].startsWith('-')) break;
-      t = t.slice(1);
+    if (!w) return tokens.slice(i);
+    i += 1;
+    // OPTIONS FIRST, then the positional. The other order mis-parses `timeout -k 1 2 <cmd>`:
+    // `-k` takes `1`, and `2` is the duration. Consuming the positional first ate `1` and
+    // left `2` where the command name should be.
+    while (i < tokens.length && tokens[i].startsWith('-')) {
+      const opt = tokens[i];
+      i += 1;
+      if (w.argOpts.includes(opt) && i < tokens.length) i += 1;
     }
-    while (t.length && t[0].startsWith('-')) {
-      const opt = t[0];
-      t = t.slice(1);
-      if (w.argOpts.includes(opt) && t.length) t = t.slice(1);
+    for (let p = 0; p < w.positional && i < tokens.length; p += 1) {
+      if (tokens[i].startsWith('-')) break;
+      i += 1;
     }
   }
-  return t;
+  return tokens.slice(i);
 }
 
 // Given the tokens of ONE command, return { subcommand, args, inlineAliases } if it invokes git.
@@ -223,6 +279,34 @@ export function resolveTargetCwd(baseCwd, dirs) {
  * `opts.lookup` is injectable so the resolution logic is testable without a live repo;
  * `opts.cwd` selects the repository whose alias table is consulted.
  */
+// Shells whose `-c <payload>` runs an inline command line, plus `eval`. Mirrors the list in
+// destructive-command-guard.mjs; a payload is re-analyzed as its own statement.
+const PAYLOAD_SHELLS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'powershell', 'pwsh'];
+
+// The inline command line a statement hands to another shell, or null.
+//
+// Only the COMMAND position counts. Scanning every token meant a statement that merely
+// MENTIONS a shell - `echo bash -c "git push origin main"`, `which bash -c git push` - had
+// its remaining arguments re-analyzed as a command line and denied. `unwrap` is what resolves
+// that position, walking off prefixes and wrappers exactly as it does for a git call.
+function innerShellPayload(tokens) {
+  const t = unwrap(tokens);
+  if (!t.length) return null;
+  const name = basename(t[0]).toLowerCase().replace(/\.exe$/, '');
+  if (name === 'eval') {
+    const text = t.slice(1).join(' ').trim();
+    return text || null;
+  }
+  if (!PAYLOAD_SHELLS.includes(name)) return null;
+  for (let j = 1; j < t.length; j += 1) {
+    if (/^(?:-command|\/c|-[a-z]*c)$/i.test(t[j])) {
+      const text = t.slice(j + 1).join(' ').trim();
+      return text || null;
+    }
+  }
+  return null;
+}
+
 export function resolveGitCommands(command, opts = {}) {
   const injected = typeof opts === 'function' ? opts : opts.lookup;
   const baseCwd = (typeof opts === 'object' && opts.cwd) || process.cwd();
@@ -238,18 +322,54 @@ export function resolveGitCommands(command, opts = {}) {
   function walk(statement) {
     const subcommands = new Set();
     const texts = [];
+    const payloadTexts = [];
     const dirs = [];
     const seen = new Set();
-    const queue = [{ text: statement, depth: 0 }];
+    const queue = [{ text: statement, depth: 0, viaPayload: false, payloadDepth: 0 }];
     let budget = 64;                                     // hard bound: alias chains cannot spin
-    while (queue.length && budget > 0) {
-      budget -= 1;
-      const { text, depth } = queue.shift();
+    // SEPARATE from the alias budget above. Sharing one means a payload chain can exhaust the
+    // budget an alias expansion needs, and exhaustion in this loop is a silent allow.
+    let payloadBudget = 128;
+    while (queue.length) {
+      const item = queue.shift();
+      const { text, depth, viaPayload, payloadDepth } = item;
+      // Two budgets, spent by whoever the work belongs to. Charging payload-derived dequeues
+      // to the alias budget made the separation nominal: a payload chain starved the alias
+      // walk at 61 fillers, and running out of THAT budget is a silent allow.
+      if (viaPayload) {
+        if (payloadBudget <= 0) continue;
+        payloadBudget -= 1;
+      } else {
+        if (budget <= 0) continue;
+        budget -= 1;
+      }
       if (depth > 5) continue;                           // git itself bounds alias recursion
-      const call = gitCall(tokenize(stripGroupWrappers(text)));
-      if (!call) continue;
-      texts.push(text);
-      for (const d of call.dirs) if (!dirs.includes(d)) dirs.push(d);
+      const tokens = tokenize(stripGroupWrappers(text));
+      const call = gitCall(tokens);
+      if (!call) {
+        // Not a git call itself - but it may HAND one to another shell. Re-analyze the inline
+        // payload as its own statement, bounded independently of the alias walk.
+        const inner = payloadDepth < 3 && payloadBudget > 0 ? innerShellPayload(tokens) : null;
+        if (inner) {
+          payloadBudget -= 1;
+          for (const seg of splitStatements(inner)) {
+            queue.push({ text: seg, depth, viaPayload: true, payloadDepth: payloadDepth + 1 });
+          }
+        }
+        continue;
+      }
+      if (viaPayload) {
+        // Message text only, collected separately. A payload-derived call contributes no `-C`
+        // directory and never reaches the `-F`/`--file` reader, so reaching into a payload does
+        // not widen what the commit scanner opens on disk - otherwise
+        // `bash -c "git commit -F /etc/passwd"` would newly cause an arbitrary file read. The
+        // payload's SUBCOMMANDS still register below, which is what lets branch-guard see a
+        // commit or a push through an inner shell.
+        payloadTexts.push(text);
+      } else {
+        texts.push(text);
+        for (const d of call.dirs) if (!dirs.includes(d)) dirs.push(d);
+      }
       const sub = String(call.subcommand || '').toLowerCase();
       if (!sub || sub.startsWith('-')) continue;
       subcommands.add(sub);
@@ -265,24 +385,30 @@ export function resolveGitCommands(command, opts = {}) {
       if (!expansion) continue;
       if (expansion.startsWith('!')) {
         // `!`-alias: the expansion is a shell command line, so re-analyze it as one.
-        for (const seg of splitStatements(expansion.slice(1))) queue.push({ text: seg, depth: depth + 1 });
+        for (const seg of splitStatements(expansion.slice(1))) {
+          queue.push({ text: seg, depth: depth + 1, viaPayload, payloadDepth });
+        }
       } else {
-        queue.push({ text: 'git ' + expansion, depth: depth + 1 });
+        queue.push({ text: 'git ' + expansion, depth: depth + 1, viaPayload, payloadDepth });
       }
     }
-    return { subcommands, texts, dirs };
+    return { subcommands, texts, payloadTexts, dirs };
   }
 
-  const calls = splitStatements(command).map(walk).filter((c) => c.texts.length);
+  const calls = splitStatements(command)
+    .map(walk)
+    .filter((c) => c.texts.length || c.payloadTexts.length);
   const subcommands = new Set();
   const texts = [];
+  const payloadTexts = [];
   const dirs = [];
   for (const c of calls) {
     for (const s of c.subcommands) subcommands.add(s);
     texts.push(...c.texts);
+    payloadTexts.push(...c.payloadTexts);
     for (const d of c.dirs) if (!dirs.includes(d)) dirs.push(d);
   }
-  return { subcommands, texts, dirs, calls };
+  return { subcommands, texts, payloadTexts, dirs, calls };
 }
 
 /**

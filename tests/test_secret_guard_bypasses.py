@@ -1677,12 +1677,19 @@ class TestSegmenterBounds(unittest.TestCase):
         # run that does no walking at all, and compare what is left.
         baseline, _ = self._timed("echo hi")
         shallow, _ = self._timed(("sh -c " * 8) + "echo hi")
-        deep, _ = self._timed(("sh -c " * 40) + "echo hi")
+        # N=200, not 40: with an absolute floor in the gate below, 40 nestings cost too
+        # little even UNBOUNDED (~400 ms) to clear it, so the row could not fail.
+        # Unbounded, 200 measured ~6 s; bounded it is ~200 ms.
+        deep, _ = self._timed(("sh -c " * 200) + "echo hi")
         shallow_work = max(shallow - baseline, 1.0)
         deep_work = max(deep - baseline, 1.0)
         # Unbounded the curve is ~3.5x per two nestings, so 8 -> 40 is a factor in the
         # thousands. Bounded it is linear in length, i.e. about 5x for 5x the input.
-        self.assertLess(deep_work, 25 * shallow_work,
+        # The absolute floor matters: at these depths the bounded walk costs single-digit
+        # milliseconds, so `shallow_work` is mostly measurement noise and a pure ratio divides
+        # by nearly zero. 500 ms absorbs that while still leaving the gate meaningful -
+        # unbounded, this input measured ~35 s, which no floor hides.
+        self.assertLess(deep_work, 25 * shallow_work + 500,
                         "baseline=%.0f shallow=%.0f deep=%.0f ms - the exponent is back"
                         % (baseline, shallow, deep))
 
@@ -2003,6 +2010,503 @@ class TestRoundTwelveFixResiduals(unittest.TestCase):
         for command in ("2>&1 rm -rf /tmp/x", "&> /tmp/l rm -rf /tmp/x"):
             with self.subTest(command=command):
                 self.assertEqual(self._decide(command), "deny", command)
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node and git required")
+class TestRoundThirteenGitPathParity(unittest.TestCase):
+    """The same root cause on the git path, where two more guards resolve.
+
+    `scan-commit.mjs` and `branch-guard.mjs` both decide through `git-invocation.mjs`, which
+    walks off assignment prefixes and group wrappers and nothing else. Measured at the
+    package-one tip: baseline, assignment prefix and subshell fire; seventeen other shapes are
+    SILENT on both guards - no deny, not even a warning.
+
+    Severity differs between the two. A commit secret has a second layer wherever
+    `scripts/install_git_hooks.py` has run: `prepare-commit-msg` covers both the message and
+    the staged diff and is the one commit-path hook `--no-verify` does not suppress. A PUSH
+    has NO second layer at all - that installer installs no `pre-push` - so a force-push to a
+    protected branch wrapped in any of these shapes is unobserved by every layer.
+    """
+
+    SCAN = REPO / "hooks" / "scan-commit.mjs"
+    BRANCH = REPO / "hooks" / "branch-guard.mjs"
+
+    #: Every shape measured SILENT on both guards. `%s` takes the payload.
+    WRAPPED = (
+        ("reserved-then", "if true; then %s; fi"),
+        ("reserved-do", "for i in 1; do %s; done"),
+        ("reserved-else", "if false; then :; else %s; fi"),
+        ("reserved-while", "while false; do %s; done"),
+        ("reserved-elif", "if false; then :; elif true; then %s; fi"),
+        ("reserved-case", "case x in x) %s;; esac"),
+        ("exec", "exec %s"),
+        ("negation", "! %s"),
+        ("time", "time %s"),
+        ("setsid", "setsid %s"),
+        ("timeout-signal", "timeout -k 1 2 %s"),
+        ("redirect-spaced", "> /tmp/l %s"),
+        ("redirect-attached", ">/tmp/l %s"),
+        ("redirect-numbered", "2>/dev/null %s"),
+        ("redirect-fd-dup", "2>&1 %s"),
+        ("inner-bash", 'bash -c "%s"'),
+        ("inner-sh", 'sh -c "%s"'),
+        ("inner-eval", 'eval "%s"'),
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.repo = cls._tmp.name
+        run = lambda *a: subprocess.run(list(a), cwd=cls.repo, check=True, capture_output=True)
+        run(GIT, "init", "-b", "main")
+        run(GIT, "config", "user.email", "t@example.invalid")
+        run(GIT, "config", "user.name", "T")
+        (Path(cls.repo) / "a.txt").write_text("x\n", encoding="utf-8")
+        run(GIT, "add", "--", "a.txt")
+        run(GIT, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "init")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _run(self, hook, command, cwd=None):
+        proc = subprocess.run(
+            [NODE, str(hook)], cwd=cwd or self.repo,
+            input=json.dumps({"tool_name": "Bash", "cwd": cwd or self.repo,
+                              "tool_input": {"command": command}}),
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        decision = out.get("hookSpecificOutput", {}).get("permissionDecision")
+        if decision:
+            return decision
+        return "warn" if out.get("systemMessage") else "silent"
+
+    def test_commit_message_is_scanned_through_every_prefix(self):  # AC6
+        for label, shape in self.WRAPPED:
+            with self.subTest(shape=label):
+                command = shape % ("git commit -m '" + GH_CLEAN + "'")
+                self.assertEqual(self._run(self.SCAN, command), "deny", label)
+
+    def test_branch_guard_sees_a_commit_through_every_prefix(self):  # AC6c
+        for label, shape in self.WRAPPED:
+            with self.subTest(shape=label):
+                command = shape % "git commit -m wip"
+                self.assertNotEqual(self._run(self.BRANCH, command), "silent", label)
+
+    def test_branch_guard_sees_a_force_push_through_every_prefix(self):  # AC6c
+        # A force-push has NO effect layer: the installer installs no pre-push hook. This is
+        # the highest-severity row in this class.
+        for label, shape in self.WRAPPED:
+            with self.subTest(shape=label):
+                command = shape % "git push --force origin main"
+                self.assertNotEqual(self._run(self.BRANCH, command), "silent", label)
+
+    def test_inner_shell_deny_names_the_message_channel(self):  # AC6a
+        # The discriminating row. Resolving the command name inside `bash -c` is not enough:
+        # the message reader re-reads the statement text, and if the inner payload never joins
+        # it the guard falls through to the staged-diff channel, finds nothing in a clean
+        # index, and allows. Asserting the REASON proves which channel fired.
+        command = 'bash -c "git commit -m ' + "'" + GH_CLEAN + "'" + '"'
+        proc = subprocess.run(
+            [NODE, str(self.SCAN)], cwd=self.repo,
+            input=json.dumps({"tool_name": "Bash", "cwd": self.repo,
+                              "tool_input": {"command": command}}),
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        reason = out.get("hookSpecificOutput", {}).get("permissionDecisionReason", "")
+        self.assertIn("commit message", reason.lower(), reason or "(no deny)")
+
+
+    def test_a_payload_call_does_not_inherit_the_file_read(self):  # data-handling
+        # Reaching into an inner shell payload must not widen what this hook OPENS. The
+        # payload contributes its MESSAGE and its SUBCOMMAND; it does not contribute a
+        # `-F`/`--file` path to read, and it does not contribute a `-C` directory to redirect
+        # the diff read to. All three halves are asserted, because the useful half and the
+        # dangerous half travel together and a later change could grant both at once.
+        secret_file = Path(self.repo) / "msg.txt"
+        secret_file.write_text("chore: " + GH_CLEAN + "\n", encoding="utf-8")
+        # 1. The OUTER `-F` read is unchanged - it has always been in the read set.
+        self.assertEqual(self._run(self.SCAN, "git commit -F msg.txt"), "deny",
+                         "the outer -F read must not regress")
+        # 2. The same file named from INSIDE a payload is not opened, so nothing is found.
+        # No finding means no output at all, which `_run` reports as silent.
+        self.assertEqual(self._run(self.SCAN, 'bash -c "git commit -F msg.txt"'), "silent",
+                         "a payload must not gain an arbitrary file read")
+        # 3. But the payload's own message IS scanned - that is the point of reaching in.
+        self.assertEqual(
+            self._run(self.SCAN, 'bash -c "git commit -m ' + "'" + GH_CLEAN + "'" + '"'),
+            "deny", "the payload message must be scanned")
+
+    def test_nesting_up_to_the_depth_cap_still_resolves(self):
+        # Honest scope, corrected after a review showed the earlier name was wrong. This does
+        # NOT pin the budget separation: three nestings cost four of sixty-four dequeues, so
+        # the bound is never reached and removing the separation leaves this green. What it
+        # does pin is the depth cap's boundary - the deepest nesting the walk is configured to
+        # enter must still resolve the real call. The budget separation is pinned by
+        # `test_f_a_payload_chain_does_not_starve_the_alias_walk`, with a filler count past
+        # the threshold the review measured.
+        command = ('bash -c "' * 3) + "git commit -m '" + GH_CLEAN + "'" + ('"' * 3)
+        self.assertEqual(self._run(self.SCAN, command), "deny", command)
+
+    def test_payload_noise_does_not_mask_a_real_commit(self):  # BR3
+        # The structural reason it cannot starve: `walk` runs PER STATEMENT, so each statement
+        # carries its own budget and noise statements never spend the real one's. Asserted in
+        # both orders, because a queue that leaked state across statements would fail one of
+        # them - and at a count well past the budget so the property is actually exercised.
+        real = "git commit -m '" + GH_CLEAN + "'"
+        noise = 'bash -c "echo hi" ; '
+        for count in (60, 200):
+            with self.subTest(count=count, order="noise-first"):
+                self.assertEqual(self._run(self.SCAN, (noise * count) + real), "deny")
+            with self.subTest(count=count, order="commit-first"):
+                self.assertEqual(
+                    self._run(self.SCAN, real + (' ; bash -c "echo hi"' * count)), "deny")
+
+    def test_controls_stay_silent_on_a_feature_branch(self):  # AC6d
+        # No such control exists today: every branch-guard test asserts a warn or a deny.
+        # Widening the resolver makes it see strictly more, and with the blocking flag set a
+        # false positive is a hard block - so the silent side has to be pinned too.
+        subprocess.run([GIT, "switch", "-q", "-c", "feature/x"], cwd=self.repo, check=True,
+                       capture_output=True)
+        try:
+            for label, shape in self.WRAPPED:
+                with self.subTest(shape=label):
+                    self.assertEqual(self._run(self.BRANCH, shape % "git commit -m wip"),
+                                     "silent", label)
+        finally:
+            subprocess.run([GIT, "switch", "-q", "main"], cwd=self.repo, check=True,
+                           capture_output=True)
+
+    def test_read_only_git_commands_stay_silent_on_a_protected_branch(self):  # AC6d
+        for command in ("git status", "git log --oneline", "git diff --stat",
+                        "if true; then git status; fi", "time git log"):
+            with self.subTest(command=command):
+                self.assertEqual(self._run(self.BRANCH, command), "silent", command)
+
+    def test_ordinary_commit_messages_are_not_denied(self):  # AC7
+        for message in ("fix typo", "fix(parser) handle empty input",
+                        "chore(deps) bump lockfile", "docs: describe the guard"):
+            with self.subTest(message=message):
+                command = "git commit -m '" + message + "'"
+                # A clean commit produces no output at all, which `_run` reports as silent.
+                self.assertEqual(self._run(self.SCAN, command), "silent", message)
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node and git required")
+class TestPrefixGrammarParity(unittest.TestCase):
+    """One construct set, driven through both resolvers.
+
+    `hooks/shell-prefix.mjs` holds the POSIX `cmd_prefix` production. It is only a single
+    source while both resolvers import it, and it is only correct while both AGREE - so this
+    asserts the wiring statically and the behaviour by execution, from one table.
+    """
+
+    SHARED = REPO / "hooks" / "shell-prefix.mjs"
+    DESTRUCTIVE = REPO / "hooks" / "destructive-command-guard.mjs"
+    GIT_INVOCATION = REPO / "hooks" / "git-invocation.mjs"
+
+    #: (construct, statement shape). `%s` takes the command under test.
+    CONSTRUCTS = (
+        ("assignment", "FOO=bar %s"),
+        ("assignment-multi", "A=1 B=2 %s"),
+        ("reserved-then", "if true; then %s; fi"),
+        ("reserved-do", "for i in 1; do %s; done"),
+        ("reserved-else", "if false; then :; else %s; fi"),
+        ("reserved-while", "while false; do %s; done"),
+        ("reserved-elif", "if false; then :; elif true; then %s; fi"),
+        ("exec", "exec %s"),
+        ("negation", "! %s"),
+        ("redirect-spaced", "> /tmp/l %s"),
+        ("redirect-attached", ">/tmp/l %s"),
+        ("redirect-numbered", "2>/dev/null %s"),
+        ("redirect-fd-dup", "2>&1 %s"),
+        ("wrapper-time", "time %s"),
+        ("wrapper-setsid", "setsid %s"),
+        ("wrapper-timeout-signal", "timeout -k 1 2 %s"),
+        ("inner-bash", 'bash -c "%s"'),
+        ("inner-eval", 'eval "%s"'),
+    )
+
+    def test_both_resolvers_import_the_shared_grammar(self):
+        self.assertTrue(self.SHARED.is_file(), "hooks/shell-prefix.mjs missing")
+        for path in (self.DESTRUCTIVE, self.GIT_INVOCATION):
+            with self.subTest(file=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("from './shell-prefix.mjs'", text,
+                              path.name + " defines its own prefix grammar instead of sharing one")
+
+    def test_the_shared_grammar_declares_no_wrapper_table(self):
+        # The prefix set is closed by the shell grammar and therefore complete; a wrapper
+        # table ("programs that run another program") is open-ended and belongs to each
+        # caller. Mixing them here would make the completeness claim false.
+        text = self.SHARED.read_text(encoding="utf-8")
+        for token in ("WRAPPERS", "sudo", "nohup", "xargs"):
+            self.assertNotIn(token, text, "wrapper knowledge leaked into the prefix grammar")
+
+    def test_every_construct_reaches_both_guards(self):
+        # The behavioural half. One table; a row that only one side handles is the divergence
+        # this module exists to prevent.
+        with tempfile.TemporaryDirectory() as repo:
+            run = lambda *a: subprocess.run(list(a), cwd=repo, check=True, capture_output=True)
+            run(GIT, "init", "-b", "main")
+            run(GIT, "config", "user.email", "t@example.invalid")
+            run(GIT, "config", "user.name", "T")
+            (Path(repo) / "a.txt").write_text("x\n", encoding="utf-8")
+            run(GIT, "add", "--", "a.txt")
+            run(GIT, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "init")
+
+            def decide(hook, command, cwd):
+                proc = subprocess.run(
+                    [NODE, str(REPO / "hooks" / hook)], cwd=cwd,
+                    input=json.dumps({"tool_name": "Bash", "cwd": cwd,
+                                      "tool_input": {"command": command}}),
+                    capture_output=True, text=True, encoding="utf-8", timeout=30,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+                return out.get("hookSpecificOutput", {}).get("permissionDecision") or (
+                    "warn" if out.get("systemMessage") else "silent")
+
+            for label, shape in self.CONSTRUCTS:
+                with self.subTest(construct=label):
+                    # Destructive side: the verb is reached through the construct.
+                    self.assertEqual(
+                        decide("destructive-command-guard.mjs", shape % "rm -rf /tmp/x", str(REPO)),
+                        "deny", label + " (destructive)")
+                    # Git side: the same construct, the same conclusion.
+                    self.assertEqual(
+                        decide("scan-commit.mjs", shape % ("git commit -m '" + GH_CLEAN + "'"), repo),
+                        "deny", label + " (commit scan)")
+
+
+@unittest.skipIf(NODE is None or GIT is None, "node and git required")
+class TestRoundFourteenGitPathResiduals(unittest.TestCase):
+    """Fourteenth round: seven defects the git-path fix introduced, all regressions.
+
+    Four of them came from ONE line - making `(`, `)`, `{` and `}` separators in the git
+    statement splitter, so that a `case` arm would arrive as its own fragment. The design
+    error was looking for parity at the wrong layer. The destructive guard wants MAXIMAL
+    splitting (it asks whether any segment's first token is a destructive verb, so an extra
+    boundary costs nothing); the git resolver wants the opposite, because a git invocation has
+    to stay whole - command, global options, subcommand. Parity belongs to the shared PREFIX
+    grammar, not to either splitter. The line was reverted and the `case` construct moved into
+    the shared grammar, where both resolvers get it and neither splitter changes.
+
+      A  `$( )`, `( )` or `{ }` between `git` and its subcommand made the whole commit or push
+         invisible to BOTH guards - a silent fail-open on ordinary CI idioms such as
+         `git -c user.name=$(whoami) commit` and `git --git-dir=$(pwd)/.git commit`.
+      B  A commit message was truncated at the first unquoted brace or paren, so a secret
+         after it was committed unscanned.
+      C  `-a`/`--all` after such a character was lost, so unstaged tracked changes went
+         unscanned.
+      D  A shell COMMENT or a heredoc line became a live statement, so `npm test # (git commit
+         -m x)` was denied - a command that commits nothing, blocked unconditionally.
+      E  The `&` rule did not model backslash escaping, so `echo a\\> & git commit` merged two
+         statements and lost the second.
+      F  The payload budget did not separate: every dequeue charged the ALIAS budget, so a
+         payload chain starved the alias walk at 61 fillers - and that exhaustion is a silent
+         allow.
+      G  The payload extractor scanned every token rather than the command position, so a
+         statement that merely MENTIONED a shell (`echo bash -c "git push"`) had its arguments
+         re-analyzed and denied.
+    """
+
+    SCAN = REPO / "hooks" / "scan-commit.mjs"
+    BRANCH = REPO / "hooks" / "branch-guard.mjs"
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.repo = cls._tmp.name
+        run = lambda *a: subprocess.run(list(a), cwd=cls.repo, check=True, capture_output=True)
+        run(GIT, "init", "-b", "main")
+        run(GIT, "config", "user.email", "t@example.invalid")
+        run(GIT, "config", "user.name", "T")
+        (Path(cls.repo) / "a.txt").write_text("x\n", encoding="utf-8")
+        run(GIT, "add", "--", "a.txt")
+        run(GIT, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "init")
+        # A staged secret, so the diff channel has something to find for the A rows.
+        (Path(cls.repo) / "staged.txt").write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        run(GIT, "add", "--", "staged.txt")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _run(self, hook, command):
+        proc = subprocess.run(
+            [NODE, str(hook)], cwd=self.repo,
+            input=json.dumps({"tool_name": "Bash", "cwd": self.repo,
+                              "tool_input": {"command": command}}),
+            capture_output=True, text=True, encoding="utf-8", timeout=40,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        decision = out.get("hookSpecificOutput", {}).get("permissionDecision")
+        if decision:
+            return decision
+        return "warn" if out.get("systemMessage") else "silent"
+
+    def test_a_substitution_between_git_and_its_subcommand_is_still_seen(self):
+        # Ordinary CI idioms. A staged secret is present, so a miss here commits it unscanned.
+        for command in ("git -c user.name=$(whoami) commit -m wip",
+                        "git --git-dir=$(pwd)/.git commit -m wip",
+                        "git --work-tree=$(pwd) commit -m wip",
+                        "git -C $(pwd) commit -m wip"):
+            with self.subTest(command=command):
+                self.assertNotEqual(self._run(self.SCAN, command), "silent", command)
+
+    def test_a_substitution_in_git_options_does_not_hide_a_push(self):
+        # The worst row: a force-push to a protected branch has NO effect layer at all.
+        for command in ("git -c user.name=$(whoami) push --force origin main",
+                        "git --git-dir=$(pwd)/.git push --force origin main"):
+            with self.subTest(command=command):
+                self.assertNotEqual(self._run(self.BRANCH, command), "silent", command)
+
+    def test_d_a_shell_comment_is_not_a_command(self):
+        # These commit and push nothing. Denying them is the false-block failure mode.
+        for command in ("npm test # (git commit -m x) when green",
+                        "npm test # (git push) later",
+                        "git status # check (git push) readiness",
+                        "echo done # see (git commit) above"):
+            with self.subTest(command=command):
+                self.assertEqual(self._run(self.SCAN, command), "silent", command)
+                self.assertEqual(self._run(self.BRANCH, command), "silent", command)
+
+    def test_e_an_escaped_redirect_does_not_swallow_the_next_statement(self):
+        backslash = chr(92)
+        for command in ("echo a" + backslash + "> & git commit -m '" + GH_CLEAN + "'",
+                        "echo a" + backslash + "< & git commit -m '" + GH_CLEAN + "'"):
+            with self.subTest(command=command[:40]):
+                self.assertEqual(self._run(self.SCAN, command), "deny", command)
+
+    def test_e_a_real_redirect_still_is_not_a_separator(self):
+        # The other direction, which is why the rule exists at all.
+        for command in ("2>&1 git commit -m '" + GH_CLEAN + "'",
+                        "echo hi & git commit -m '" + GH_CLEAN + "'"):
+            with self.subTest(command=command[:40]):
+                self.assertEqual(self._run(self.SCAN, command), "deny", command)
+
+    def test_g_mentioning_a_shell_is_not_invoking_one(self):
+        for command in ('echo bash -c "git push origin main"',
+                        "which bash -c git push",
+                        "echo eval git push",
+                        'printf "%s" sh -c "git commit -m x"'):
+            with self.subTest(command=command):
+                self.assertEqual(self._run(self.BRANCH, command), "silent", command)
+
+    def test_g_actually_invoking_one_is_still_resolved(self):
+        command = 'bash -c "git commit -m ' + "'" + GH_CLEAN + "'" + '"'
+        self.assertEqual(self._run(self.SCAN, command), "deny", command)
+
+
+
+    def test_the_redirect_test_does_not_make_the_splitter_quadratic(self):
+        # `ampersandIsRedirect` used to scan BACKWARD over the accumulating segment. The loop
+        # body was O(1) - it stops at the first non-blank character - but indexing a string
+        # built with `+=` forces V8 to flatten the ConsString rope that the next `+=` rebuilds,
+        # so a shape where every `&` runs the check paid a flatten per character. Measured:
+        # 256 KB 3 295 ms, 512 KB 13 613 ms, 1 MB 39 659 ms end-to-end - past both wired hook
+        # budgets, and a hook the runtime kills renders no decision. The check now carries what
+        # it needs in scalars; same decision, no flatten.
+        #
+        # A RATIO, not a threshold: the absolute numbers move with the host, the exponent does
+        # not. Quadratic, a 4x input is ~16x the work; linear it is ~4x.
+        import time
+
+        def elapsed(count):
+            command = "git commit -m ok; " + ("> & " * count)
+            start = time.time()
+            self._run(self.SCAN, command)
+            return (time.time() - start) * 1000
+
+        baseline = elapsed(1)          # process start-up, which dominates at small sizes
+        small = max(elapsed(16000) - baseline, 1.0)
+        large = max(elapsed(64000) - baseline, 1.0)
+        self.assertLess(large, 8 * small + 500,
+                        "4x the input cost %.0fx the work (small=%.0f large=%.0f ms) - the "
+                        "splitter is quadratic again" % (large / small, small, large))
+
+    def test_f_a_payload_chain_does_not_starve_the_alias_walk(self):
+        # Two budgets that are only nominally separate are one budget. Every dequeue used to
+        # charge the ALIAS budget, and payload-derived segments enter the same queue, so a
+        # payload chain exhausted the walk an alias expansion needed - measured threshold
+        # exactly 61 fillers. Exhaustion there returns quietly, which is a silent allow.
+        #
+        # The filler count has to be PAST that threshold or the row cannot fail; an earlier
+        # version of this assertion used three nestings, which cost four of sixty-four
+        # dequeues and never reached the bound at all.
+        with tempfile.TemporaryDirectory() as repo:
+            run = lambda *a: subprocess.run(list(a), cwd=repo, check=True, capture_output=True)
+            run(GIT, "init", "-b", "main")
+            run(GIT, "config", "user.email", "t@example.invalid")
+            run(GIT, "config", "user.name", "T")
+            (Path(repo) / "a.txt").write_text("x\n", encoding="utf-8")
+            run(GIT, "add", "--", "a.txt")
+            run(GIT, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "init")
+            run(GIT, "config", "alias.ci", "commit -m " + GH_CLEAN)
+            for count in (58, 61, 70, 120):
+                run(GIT, "config", "alias.t%d" % count,
+                    "!bash -c '" + ("true;" * count) + "'; git ci")
+
+            def decide(command):
+                proc = subprocess.run(
+                    [NODE, str(self.SCAN)], cwd=repo,
+                    input=json.dumps({"tool_name": "Bash", "cwd": repo,
+                                      "tool_input": {"command": command}}),
+                    capture_output=True, text=True, encoding="utf-8", timeout=60,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+                return out.get("hookSpecificOutput", {}).get("permissionDecision") or (
+                    "warn" if out.get("systemMessage") else "silent")
+
+            for count in (58, 61, 70, 120):
+                with self.subTest(fillers=count):
+                    self.assertEqual(decide("git t%d" % count), "deny",
+                                     "%d payload fillers starved the alias walk" % count)
+
+    def test_c_a_payload_c_flag_does_not_redirect_the_diff_read(self):
+        # The half the previous class claimed to assert and did not. The secret lives ONLY in
+        # the other repository, and the repo the hook runs in has a clean index - so a deny
+        # here could only come from reading somewhere this hook should not reach.
+        with tempfile.TemporaryDirectory() as clean, tempfile.TemporaryDirectory() as other:
+            for path, secret in ((clean, False), (other, True)):
+                run = lambda *a: subprocess.run(list(a), cwd=path, check=True, capture_output=True)
+                run(GIT, "init", "-b", "main")
+                run(GIT, "config", "user.email", "t@example.invalid")
+                run(GIT, "config", "user.name", "T")
+                (Path(path) / "a.txt").write_text("x\n", encoding="utf-8")
+                run(GIT, "add", "--", "a.txt")
+                run(GIT, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "init")
+                if secret:
+                    (Path(path) / "s.txt").write_text("TOKEN = " + GH_CLEAN + "\n",
+                                                      encoding="utf-8")
+                    run(GIT, "add", "--", "s.txt")
+
+            def decide(command):
+                proc = subprocess.run(
+                    [NODE, str(self.SCAN)], cwd=clean,
+                    input=json.dumps({"tool_name": "Bash", "cwd": clean,
+                                      "tool_input": {"command": command}}),
+                    capture_output=True, text=True, encoding="utf-8", timeout=40,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+                return out.get("hookSpecificOutput", {}).get("permissionDecision") or (
+                    "warn" if out.get("systemMessage") else "silent")
+
+            target = other.replace(chr(92), "/")
+            # The OUTER `-C` has always redirected the read, and must keep doing so.
+            self.assertEqual(decide("git -C " + target + " commit -m ok"), "deny",
+                             "the outer -C read must not regress")
+            # The same `-C` inside a payload must NOT: reaching into a payload gives the guard
+            # the payload's message and subcommand, never a new directory to read.
+            self.assertNotEqual(decide('bash -c "git -C ' + target + ' commit -m ok"'), "deny",
+                                "a payload -C redirected the diff read")
 
 
 if __name__ == "__main__":
