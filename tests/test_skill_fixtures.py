@@ -105,6 +105,38 @@ def _scoring_errors(label, scoring):
     return errors
 
 
+
+# The error labels `_submission_case_errors` records for each field, across the full
+# 11-field x 5-value hostile-value matrix. MEASURED, not written from reading the function.
+#
+# Asserted as an exact set, which is what makes the row able to fail: an earlier version of
+# this test asserted only that SOME error was recorded, and a mutation that silenced
+# `invalid_polarity` stayed green because `polarity_split` and `missing_field` were still
+# there. "Some error" is a weaker claim than "this error".
+#
+# Widening or narrowing the schema means editing the matching entry in the same commit.
+#
+# Note what `prompt` and `expected_behavior` say: `missing_field` only. Their sole check is
+# `if not case.get(field)`, so a TRUTHY non-string passes - a real, narrow gap, recorded here
+# rather than widened inside a test-integrity package, since other rows depend on this
+# helper's current behaviour.
+FIELD_ERROR_PREFIXES = {
+    "id": frozenset({"invalid_id", "missing_field"}),
+    "polarity": frozenset({"invalid_polarity", "missing_field", "polarity_split"}),
+    "category": frozenset({"missing_field", "polarity_split"}),
+    "expected_skill": frozenset({"expected_skill"}),
+    "prompt": frozenset({"missing_field"}),
+    "fixture": frozenset({"fixture_empty", "missing_field"}),
+    "expected_behavior": frozenset({"missing_field"}),
+    "scoring_condition": frozenset({"missing_field", "native_evidence_empty",
+                                    "scoring_not_object", "scoring_text_missing"}),
+    "native_evidence": frozenset({"native_evidence_empty", "no_transcript_evidence",
+                                  "non_native_evidence"}),
+    "native_evidence_item": frozenset({"no_transcript_evidence", "non_native_evidence"}),
+    "pass_when": frozenset({"scoring_text_missing"}),
+}
+
+
 def _submission_case_errors(data, root=REPO):
     """Every AC109 schema violation as a sorted list of strings; never raises."""
     cases = data.get("cases") if isinstance(data, dict) else None
@@ -322,14 +354,31 @@ class TestSubmissionCases(unittest.TestCase):
             "native_evidence_item": lambda c, v: c["scoring_condition"].__setitem__("native_evidence", [v]),
             "pass_when": lambda c, v: c["scoring_condition"].__setitem__("pass_when", v),
         }
+        # `assertEqual(errors, sorted(errors))` used to stand here, inside the value loop. The
+        # function ends `return sorted(errors)`, so that was unconditionally true - for `[]`
+        # too. It asserted only the "never raises" half of this test's own stated claim and
+        # left "records a label" unasserted entirely.
+        self.assertEqual(sorted(setters), sorted(FIELD_ERROR_PREFIXES),
+                         "the hostile-value matrix and the expected-label map have drifted "
+                         "apart; a field in one and not the other is unchecked")
         for field, setter in setters.items():
+            recorded = set()
             for value in values:
                 with self.subTest(field=field, value=value):
                     data = _valid_submission_dataset()
                     setter(data["cases"][0], value)
                     errors = _submission_case_errors(data)
+                    # The stated claim: never raises. Reaching this line at all proves it.
                     self.assertIsInstance(errors, list)
-                    self.assertEqual(errors, sorted(errors))
+                    self.assertEqual(errors, sorted(errors), "labels must come back sorted")
+                    recorded.update(e.split(":")[0] for e in errors)
+            with self.subTest(field=field):
+                self.assertEqual(
+                    recorded, set(FIELD_ERROR_PREFIXES[field]),
+                    "the labels recorded for %s changed. Silencing one check is exactly what "
+                    "this exact-set comparison exists to catch; if the schema really changed, "
+                    "update FIELD_ERROR_PREFIXES in the same commit." % field,
+                )
         for top in (None, [], {"cases": None}, {"cases": [None, 7, ["x"]]}):
             with self.subTest(top=top):
                 self.assertIsInstance(_submission_case_errors(top), list)

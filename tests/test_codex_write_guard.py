@@ -7,6 +7,7 @@ Plus config/doc state (TestCodexWriteGuardWiring/Docs). Synthetic secrets only.
 """
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import unittest
@@ -314,8 +315,16 @@ class TestCodexWriteGuardDocs(unittest.TestCase):
         self.assertIn("scan-write-codex.mjs", readme)
         self.assertIn("codex-write-signal.mjs", readme)
         # NOT-covered forms enumerated somewhere in the docs (pipe/tee/base64 + command-sub + $VAR).
+        #
+        # `assertIn("tee", both)` used to stand here. Measured: 10 occurrences of the substring,
+        # 2 of them inside "guarantee" - so all 8 real mentions could be deleted, overstating
+        # what the Codex write guard covers, and this still passed. Word-boundary matching for
+        # the tokens that are words; plain substring for the ones that are not (`$(`, `$VAR`).
         both = ra + readme
-        for tok in ["tee", "base64", "$(", "$VAR"]:
+        for tok in ["tee", "base64"]:
+            self.assertRegex(both, r"\b%s\b" % re.escape(tok),
+                             f"NOT-covered enumeration missing the word {tok!r}")
+        for tok in ["$(", "$VAR"]:
             self.assertIn(tok, both, f"NOT-covered enumeration missing {tok!r}")
         # Claude scan-write.mjs stays deferred (absent from the codex hook config)
         cfg = (REPO / "hooks" / "hooks-codex.json").read_text(encoding="utf-8")

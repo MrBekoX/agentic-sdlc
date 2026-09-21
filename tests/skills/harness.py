@@ -427,6 +427,25 @@ def validate_safety_guardrails():
 # Doc-vs-reality consistency (reported as warnings — README/docs drift)
 # ---------------------------------------------------------------------------
 
+
+def _shipped(root, name):
+    """Files named `name` that this plugin actually ships.
+
+    `Path.rglob` reaches archived run output under tests/artifacts/, which holds hundreds of
+    copies of the repository - 159 marketplace.json files at the time of writing. A check that
+    asks "does this plugin ship X" must not be satisfied by a snapshot of a previous run.
+
+    `.claude/` is excluded for the same reason from the other direction: CLAUDE.md states it
+    holds local workspace settings only, so the `.claude/settings.json` on a contributor's
+    machine is not something this plugin ships. Leaving it in is what made the caller's error
+    unreachable - the README named no settings.json AND one existed, so both conjuncts were
+    false whatever the documentation said.
+    """
+    return [p for p in root.rglob(name)
+            if "artifacts" not in p.parts and ".git" not in p.parts
+            and ".claude" not in p.parts]
+
+
 def check_doc_consistency():
     """Surface README/doc claims that contradict the real tree. (errors, warnings)."""
     errors, warnings = [], []
@@ -441,7 +460,12 @@ def check_doc_consistency():
     if hooks_readme.exists():
         txt = hooks_readme.read_text(encoding="utf-8")
         # The hooks are wired in hooks.json, not a settings.json (none exists in the tree).
-        if "settings.json" in txt and not list(REPO.rglob("settings.json")):
+        # Was `"settings.json" in txt and not list(REPO.rglob("settings.json"))`. Both conjuncts
+        # were false in practice - the README names no settings.json, and one exists in the
+        # tree - so this error could never fire even with the documentation bug present. The
+        # rglob also reached archived run output under tests/artifacts/, which is not a
+        # shipped file.
+        if "settings.json" in txt and not _shipped(REPO, "settings.json"):
             errors.append("hooks_readme_references_missing_settings_json")
     return errors, warnings
 

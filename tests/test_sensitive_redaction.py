@@ -21,7 +21,20 @@ class TestSensitiveRedaction(unittest.TestCase):
         self.assertNotIn(value, json.dumps(out))
         self.assertEqual(out["result"]["items"][0]["name"], "safe")
         self.assertIn("access_token", out["result"])
-        self.assertEqual(json.loads(json.dumps(out)), out)
+        # `assertEqual(json.loads(json.dumps(out)), out)` used to stand here: a round-trip of
+        # the output against ITSELF, which holds for any JSON-clean value including one that
+        # dropped or reshaped every key. "Preserves structure" means the shape matches the
+        # INPUT, so that is what is compared - keys and nesting, with leaf values free to be
+        # masked.
+        def shape(node):
+            if isinstance(node, dict):
+                return {k: shape(v) for k, v in sorted(node.items())}
+            if isinstance(node, list):
+                return [shape(v) for v in node]
+            return type(node).__name__
+
+        self.assertEqual(shape(out), shape(data),
+                         "redaction changed the structure, not just the leaf values")
         self.assertEqual(data["result"]["access_token"], value)
 
     def test_json_redaction_masks_embedded_vendor_token_and_private_key(self):
