@@ -62,6 +62,10 @@ PER_PACKAGE_CASE_ID = "agentic-sdlc-pipeline-per-package"
 # known-good skill-depth-deep fixture). Reused to prove flat /specs/ classification
 # and per-package gate firing without coupling those tests to a fixture file.
 DEEP_SPEC = (
+    # Frontmatter: validate_artifacts.py now checks the keys resolve_work_package.py
+    # requires, and evaluate_artifact_depth runs that validator under --strict, so a spec
+    # without it is reported as a shallow artifact.
+    "---\nwork_id: deep-spec\nstatus: draft\n---\n\n"
     "# Spec\n\n"
     "## Problem\nThe greet function hardcodes the trailing punctuation.\n\n"
     "## Business Rules\nDefault output is unchanged when no suffix is given.\n\n"

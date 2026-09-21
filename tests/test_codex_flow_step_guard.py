@@ -52,7 +52,12 @@ MARKER = "<!-- agentic-sdlc:gate:completion-claim:verified -->"
 FLOW_LABEL = "an artifact-bearing SDLC flow (spec/plan/tests)"
 
 # ---- artifact bodies (must pass/fail validate_artifacts.py --strict for the RIGHT reason) ----
-_VALID_SPEC = """# Spec {work_id}
+_VALID_SPEC = """---
+work_id: {work_id}
+status: draft
+---
+
+# Spec {work_id}
 
 ## Problem
 This describes the problem domain in enough descriptive detail to exceed the forty-character floor.
@@ -73,7 +78,14 @@ The work is done when every acceptance criterion is met and the validator report
 The regression surface that stays byte-identical is described here with enough text for the floor.
 """
 
-_VALID_PLAN = """# Plan {work_id}
+_VALID_PLAN = """---
+work_id: {work_id}
+spec: ../specs/{work_id}.md
+branch: feat/{work_id}
+status: draft
+---
+
+# Plan {work_id}
 
 ## Task 1
 Create hooks/example.mjs to implement the behavior for this work item.
