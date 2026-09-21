@@ -1852,6 +1852,7 @@ class TestFindingsRecord(HistoryTestCase):
 CI_WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 SOURCE_STEPS = [
     ("Version consistency", "python3 scripts/bump_version.py --release-check"),
+    ("Manifest coverage", "python3 scripts/bump_version.py --audit"),
     ("Static checks", "python3 scripts/check_all.py"),
     ("Skill harness", "python3 tests/skills/harness.py"),
     ("Unit tests", "python3 -m unittest discover -s tests -v"),
@@ -1992,7 +1993,7 @@ class TestCiWorkflowHygiene(unittest.TestCase):
         self.assertIn("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}", self.text)
 
     def test_every_job_bounds_its_runtime(self):
-        self.assertEqual(self.jobs, ["deterministic-gate", "ci-ok"])
+        self.assertEqual(self.jobs, ["deterministic-gate", "plugin-validate", "ci-ok"])
         for job in self.jobs:
             with self.subTest(job=job):
                 self.assertRegex(job_block(self.text, job), r"(?m)^    timeout-minutes: \d+$")
@@ -2012,12 +2013,23 @@ class TestCiWorkflowHygiene(unittest.TestCase):
 
     def test_ci_ok_is_a_single_stable_check_that_fails_closed(self):
         block = job_block(self.text, "ci-ok")
-        self.assertIn("needs: [deterministic-gate]", block)
-        # `if: always()` is what lets it report on a failed matrix; the explicit result test is what
-        # stops it reporting success when it does.
+        self.assertIn("needs: [deterministic-gate, plugin-validate]", block)
+        # `if: always()` is what lets it report on a failed matrix; the explicit result tests are
+        # what stop it reporting success when one fails.
         self.assertIn("if: always()", block)
-        self.assertIn("GATE_RESULT: ${{ needs.deterministic-gate.result }}", block)
-        self.assertIn('test "$GATE_RESULT" = "success"', block)
+        for job in ("deterministic-gate", "plugin-validate"):
+            with self.subTest(job=job):
+                variable = "GATE_RESULT" if job == "deterministic-gate" else "VALIDATE_RESULT"
+                self.assertIn("%s: ${{ needs.%s.result }}" % (variable, job), block)
+                self.assertIn('test "$%s" = "success"' % variable, block)
+
+    def test_plugin_validate_pins_the_cli_and_names_both_manifests(self):
+        block = job_block(self.text, "plugin-validate")
+        # A floating CLI install would make an unrelated upstream release fail an unrelated PR.
+        self.assertRegex(block, r"npm install -g @anthropic-ai/claude-code@\d+\.\d+\.\d+")
+        # `validate .` reads the marketplace manifest only; the plugin manifest is a second target.
+        self.assertIn("claude plugin validate . --strict --json", block)
+        self.assertIn("claude plugin validate .claude-plugin/plugin.json --strict --json", block)
 
 
 class TestDependabotConfig(unittest.TestCase):

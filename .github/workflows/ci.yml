@@ -66,6 +66,8 @@ jobs:
           node-version: "22"
       - name: Version consistency
         run: python3 scripts/bump_version.py --release-check
+      - name: Manifest coverage
+        run: python3 scripts/bump_version.py --audit
       - name: Static checks
         run: python3 scripts/check_all.py
       - name: Skill harness
@@ -119,15 +121,44 @@ jobs:
   # every generated name and re-listing them whenever the matrix changes. This job is the single
   # stable name to require. `if: always()` makes it run even when a needed job fails; without the
   # explicit result test it would then report success.
+  # The manifest checks Anthropic's own review pipeline runs on a submission. Verified to need no
+  # credentials: with an empty HOME, an empty config directory and no API key, both calls exit 0.
+  # The CLI is pinned so a new release cannot turn an unrelated day's run red; bumping the pin is
+  # a reviewable change, like any other dependency.
+  plugin-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Install the pinned Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.278
+      - name: Validate the marketplace and plugin manifests
+        shell: bash
+        run: |
+          # `validate .` reads the marketplace manifest; the plugin manifest and its components are
+          # a separate target, so both are named. --strict fails on warnings the runtime tolerates.
+          rc=0
+          claude plugin validate . --strict --json > marketplace-validation.json || rc=1
+          claude plugin validate .claude-plugin/plugin.json --strict --json > plugin-validation.json || rc=1
+          python3 -c "import json,sys; [print('%s success=%s strict=%s' % (f, json.load(open(f))['success'], json.load(open(f))['strict'])) for f in sys.argv[1:]]" marketplace-validation.json plugin-validation.json
+          exit $rc
+
   ci-ok:
     if: always()
-    needs: [deterministic-gate]
+    needs: [deterministic-gate, plugin-validate]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every gate job to have succeeded
         env:
           GATE_RESULT: ${{ needs.deterministic-gate.result }}
+          VALIDATE_RESULT: ${{ needs.plugin-validate.result }}
         run: |
-          echo "deterministic-gate=$GATE_RESULT"
+          echo "deterministic-gate=$GATE_RESULT plugin-validate=$VALIDATE_RESULT"
           test "$GATE_RESULT" = "success"
+          test "$VALIDATE_RESULT" = "success"

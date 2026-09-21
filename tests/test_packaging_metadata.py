@@ -893,6 +893,86 @@ class TestVersionDeclarations(unittest.TestCase):
                 self.assertIn(f"version_mismatch={rel}:version:", out)
                 self.assertIn("version_check=failed", out)
 
+    ADAPTER_MANIFESTS = {
+        ".zcode-plugin/plugin.json": {"name": "agentic-sdlc", "version": "0.4.3"},
+        "marketplace.json": {"name": "mrbekox", "plugins": [{"name": "agentic-sdlc", "version": "0.4.3"}]},
+        ".grok-plugin/plugin.json": {"name": "agentic-sdlc", "version": "0.4.3"},
+        ".grok-plugin/marketplace.json": {"name": "mrbekox", "plugins": [{"name": "agentic-sdlc", "version": "0.4.3"}]},
+    }
+
+    def test_adapter_manifest_drift_fails_like_the_release_manifests(self):
+        # Before this, ZCode and Grok versions were pinned only by their own packaging tests, so a
+        # bump that forgot them drifted until one of those tests happened to run.
+        for rel, data in self.ADAPTER_MANIFESTS.items():
+            stale = json.loads(json.dumps(data))
+            if "plugins" in stale:
+                stale["plugins"][0]["version"] = "0.4.2"
+            else:
+                stale["version"] = "0.4.2"
+            with self.subTest(rel):
+                code, out = self.run_check(manifests={**self.ADAPTER_MANIFESTS, rel: stale})
+                self.assertEqual(code, 1, out)
+                self.assertIn(f"version_mismatch={rel}:version:0.4.2", out)
+
+    def test_an_absent_adapter_manifest_is_not_drift(self):
+        # The skills-only archive and any future adapter removal leave these files out.
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+        for rel in self.ADAPTER_MANIFESTS:
+            with self.subTest(rel):
+                self.assertNotIn(f"version_mismatch={rel}", out)
+
+    def test_bump_writes_every_present_manifest_including_adapters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_tree(root, manifests=self.ADAPTER_MANIFESTS)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = self.bump_version.bump("0.4.4", root=root)
+            self.assertEqual(code, 0, out.getvalue())
+            for rel in {**self.MANIFESTS, **self.ADAPTER_MANIFESTS}:
+                with self.subTest(rel):
+                    self.assertIn(b'"version": "0.4.4"', (root / rel).read_bytes(), rel)
+
+    def test_audit_reports_a_manifest_the_version_gate_does_not_cover(self):
+        # The failure this catches: a new runtime adapter ships a manifest, nothing registers it,
+        # and the next bump leaves it on the old version.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_tree(root, manifests=self.ADAPTER_MANIFESTS)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = self.bump_version.audit(root=root)
+            self.assertEqual(code, 0, out.getvalue())
+            self.assertIn("audit=passed", out.getvalue())
+
+            unregistered = root / ".newharness-plugin" / "plugin.json"
+            unregistered.parent.mkdir(parents=True, exist_ok=True)
+            unregistered.write_text(json.dumps({"name": "agentic-sdlc", "version": "0.4.3"}) + "\n",
+                                    encoding="utf-8", newline="\n")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = self.bump_version.audit(root=root)
+            self.assertEqual(code, 1, out.getvalue())
+            self.assertIn("audit_manifest=.newharness-plugin/plugin.json:unregistered", out.getvalue())
+            self.assertIn("audit=failed", out.getvalue())
+
+    def test_audit_ignores_test_fixtures_and_untracked_scratch_trees(self):
+        # The walk fallback runs here (a temp dir is not a git repository), so the prune list is
+        # what keeps another project's manifests out of this project's audit.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_tree(root)
+            fixture = root / "tests" / "fixtures" / "plugin.json"
+            fixture.parent.mkdir(parents=True, exist_ok=True)
+            fixture.write_text(json.dumps({"name": "fixture", "version": "9.9.9"}) + "\n",
+                               encoding="utf-8", newline="\n")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = self.bump_version.audit(root=root)
+            self.assertEqual(code, 0, out.getvalue())
+            self.assertNotIn("tests/fixtures", out.getvalue())
+
     def test_verdict_template_version_drift_fails(self):
         stale = self.RELEASE_READINESS.replace("\nversion=0.4.3\n", "\nversion=0.4.2\n")
         self.assertNotEqual(stale, self.RELEASE_READINESS)
