@@ -10,8 +10,8 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 |---|---|---|
 | Claude Code | Supported | Native `Skill`, `Workflow`, `Agent`/`Task`, commands, and full hook wiring. See [`../.claude-plugin/README.md`](../.claude-plugin/README.md). |
 | Codex | Supported | Shared skills, Codex manifest metadata, personal-marketplace install flow, and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
-| ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through the root ZCode-schema `marketplace.json`; a narrow verified-event hook wire and no Workflow runtime. See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
-| Grok CLI | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through `.grok-plugin/marketplace.json`; a narrow verified-event hook wire (`hooks/hooks-grok.json`); no Rhai conversion of `workflows/*.js`. See [`../.grok-plugin/README.md`](../.grok-plugin/README.md). |
+| ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through the root ZCode-schema `marketplace.json`; a narrow verified-event hook wire. ZCode 3.14.0 added dynamic workflows, but Z.ai publishes no script API and `plugin.json` has no `workflows` key, so none ships here. See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
+| Grok CLI | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through `.grok-plugin/marketplace.json`; a narrow verified-event hook wire (`hooks/hooks-grok.json`); project-catalog Rhai at `.grok/workflows/*.rhai` (not a plugin component). See [`../.grok-plugin/README.md`](../.grok-plugin/README.md). |
 | OpenCode / Kimi Code / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.3`. |
 
 ## Installation Model
@@ -48,7 +48,7 @@ Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Run
 | `skills/` | Runnable procedures: `SKILL.md` plus optional `scripts/`, `references/`, and `assets/`. |
 | `contracts/skills/` | Durable behavior rules: context-first, spec, plan, testing, security, git safety, documentation, collaboration. |
 | `agents/` | Bounded role contracts used for fresh-context analysis, review, audit, and author/critic passes; diagnostic roles may run tests, while reviewer/auditor roles omit shell tools. |
-| `workflows/` | Claude Code dynamic workflow scripts. Codex does not run these directly. |
+| `workflows/` | Claude Code dynamic workflow scripts. Codex does not run these directly. Grok CLI uses the separate project catalog `.grok/workflows/*.rhai` (not a plugin component). |
 | `hooks/` | Deterministic guard scripts, active-flow evidence rules, and runtime hook wiring. |
 | `commands/` | Manual slash-command definitions such as `/agentic-sdlc:git-safety-check`. |
 | `scripts/` | Deterministic probes, validators, eval runners, version helpers, and review-package helpers. |
@@ -84,6 +84,7 @@ Gate skills feed the pipeline at control points: `dispatch-strategy`, `security-
 |---|---|
 | Claude Code | Uses the named Workflow `agentic-sdlc:spec-plan-draft` for both spec and plan phases. |
 | Codex | Uses the embedded author -> critic -> revise adapter inside `agentic-sdlc-pipeline`; validates saved artifacts with `validate_artifacts.py`. |
+| Grok CLI (experimental) | Uses `/workflow spec-plan-draft` (project catalog `.grok/workflows/spec-plan-draft.rhai`) when present; otherwise `spawn_subagent` author -> critic -> revise plus `validate_artifacts.py`. Not a plugin-shipped workflow. |
 
 The pipeline must not call standalone `spec-authoring` or `plan-authoring` for its internal steps 4-5.
 
@@ -121,7 +122,7 @@ The scripts are shared, but runtime wiring differs.
 | `scan-write.mjs` | `PostToolUse` | Not wired | Warns on secret-shaped new content. |
 | `scan-commit.mjs` | `PreToolUse` for shell commands; self-gates to commits | `PreToolUse` for `Bash`; self-gates to commits | Blocks high-confidence secrets in added diff lines. |
 | `branch-guard.mjs` | `PreToolUse` for shell commands; self-gates to commit/push | `PreToolUse` for `Bash`; self-gates to commit/push | Warns on protected branches; can block with `AGENTIC_BRANCH_GUARD_BLOCK=true`. |
-| `destructive-command-guard.mjs` | `PreToolUse` for shell commands | `PreToolUse` for `Bash` | Blocks the documented deterministic destructive-command subset. |
+| `destructive-command-guard.mjs` | `PreToolUse` for shell commands | `PreToolUse` for `Bash` | Blocks the documented deterministic destructive-command subset, after walking off every shell `cmd_prefix` that can precede a command name and reaching into `-c`/`eval` payloads and command substitutions. The walk is depth- and budget-bounded and widens to a coarse linear scan past the bound. The prefix set is closed by the shell grammar; the wrapper list is an open-ended deny-list. |
 | `scan-write-codex.mjs` | Not wired | `PreToolUse` for `Bash\|apply_patch` | Blocks high-confidence secrets in recognized literal writes. |
 | `flow-order-guard-codex.mjs` | Not wired | `PreToolUse` for `Bash\|apply_patch` | With `AGENTIC_FLOW_ORDER_BLOCK=true`, requires this-session spec/plan or test-run ordering evidence. |
 | `flow-order-guard.mjs` | `PreToolUse` for `Write`/`Edit`/`MultiEdit` | Not wired | Checks current-turn pre-edit evidence for active implementation flows before source edits; can deny with `AGENTIC_FLOW_GATE_BLOCK=true`. |

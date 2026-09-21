@@ -13,6 +13,8 @@ marketplace entry to VERSION instead. A version bump that forgets the ZCode
 files fails this test loudly rather than drifting silently.
 """
 import json
+import subprocess
+import shutil
 import re
 import unittest
 from pathlib import Path
@@ -117,9 +119,10 @@ class TestZcodeMarketplace(unittest.TestCase):
         # local directory source must not fabricate them.
         entry = self.market["plugins"][0]
         self.assertNotIn("_artifact", entry)
-        source = entry["source"]
-        if isinstance(source, dict):
-            self.assertNotIn("sha256", source)
+        # `source` is a plain path string for a local marketplace; assert that directly rather
+        # than behind an `isinstance(dict)` arm that the "./" assertion above makes unreachable.
+        self.assertIsInstance(entry["source"], str)
+        self.assertNotIn("sha256", entry)
 
 
 class TestZcodeHookWire(unittest.TestCase):
@@ -129,7 +132,9 @@ class TestZcodeHookWire(unittest.TestCase):
     def test_only_verified_events_are_wired(self):
         events = set(self.wire["hooks"])
         self.assertEqual(events, {"PreToolUse", "PostToolUse", "SessionStart"})
-        self.assertLessEqual(events, ZCODE_HOOK_EVENTS)
+        # The literal above is the contract; this pins it to the documented event vocabulary so a
+        # typo in the literal is caught rather than silently redefining what "verified" means.
+        self.assertLessEqual({"PreToolUse", "PostToolUse", "SessionStart"}, ZCODE_HOOK_EVENTS)
 
     def test_matchers_use_only_observed_tool_and_event_names(self):
         for groups in self.wire["hooks"].values():
@@ -151,10 +156,13 @@ class TestZcodeHookWire(unittest.TestCase):
             self.assertTrue((REPO / "hooks" / name).is_file(), name)
 
     def test_unverified_runtime_readers_stay_unwired(self):
-        for hook in wired_hooks(self.wire):
-            basename = hook["args"][0].rsplit("/", 1)[-1]
+        # This cannot merely re-derive the wired set: `wired == WIRED_SCRIPTS` above already
+        # implies it. Assert the property on the CONSTANT instead, so widening WIRED_SCRIPTS to
+        # admit a Claude-transcript or Codex-rollout reader fails here even if the wire matches.
+        self.assertTrue(WIRED_SCRIPTS, "the verified set must not be empty")
+        for name in WIRED_SCRIPTS:
             for token in UNVERIFIED_SCRIPT_TOKENS:
-                self.assertNotIn(token, basename)
+                self.assertNotIn(token, name, f"{name} carries unverified-reader token {token}")
 
 
 class TestAdapterFilesKeepHouseContracts(unittest.TestCase):
@@ -179,6 +187,162 @@ class TestAdapterFilesKeepHouseContracts(unittest.TestCase):
         self.assertIn("ZCode", adapter)
         self.assertIn("experimental", adapter.lower())
         self.assertIn("not a 0.4.3 release target", adapter)
+
+
+class TestZcodeSkillAdapters(unittest.TestCase):
+    """Skill-level ZCode runtime adapter locks (docs/zcode-runtime-adapter.md)."""
+
+    def test_runtime_adapter_doc_records_the_capability_map(self):
+        text = (REPO / "docs" / "zcode-runtime-adapter.md").read_text(encoding="utf-8")
+        for fact in (
+            # NOT "CreateWorkflow": that name appears in no shipped source and in no Z.ai
+            # document. Pinning it here made an unverified API name harder to delete.
+            "Goal Mode",
+            "${ZCODE_PLUGIN_ROOT}",
+            "spec-plan-draft",
+            "agents/*.md",
+            "not a 0.4.3 release target",
+        ):
+            self.assertIn(fact, text)
+
+    def test_router_carries_a_zcode_platform_note(self):
+        text = (REPO / "skills" / "using-agentic-sdlc" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("ZCode", text)
+        self.assertIn("${ZCODE_PLUGIN_ROOT}", text)
+        self.assertIn("docs/zcode-runtime-adapter.md", text)
+
+    def test_dispatch_strategy_maps_zcode_mechanisms(self):
+        text = (REPO / "skills" / "dispatch-strategy" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("docs/zcode-runtime-adapter.md", text)
+        # The ZCode row must state the tier is unavailable rather than naming an unpublished API.
+        zcode_line = next(ln for ln in text.splitlines() if "ZCode (experimental adapter)" in ln)
+        self.assertIn("unavailable", zcode_line)
+        self.assertNotIn("CreateWorkflow", text)
+
+    def test_pipeline_names_the_zcode_adapter_gate(self):
+        text = (REPO / "skills" / "agentic-sdlc-pipeline" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("ZCode Adapter Gate", text)
+        self.assertIn("workflows/zcode/spec-plan-draft.dwf.ts", text)
+
+    def test_exactly_one_zcode_workflow_script_exists(self):
+        # A second copy under .zcode/workflows/ was orphaned (referenced nowhere) and had already
+        # drifted from this one within minutes. One file, one source of truth.
+        found = sorted(
+            path.relative_to(REPO).as_posix()
+            for path in REPO.rglob("*.dwf.ts")
+            if "tests/artifacts" not in path.as_posix()
+        )
+        self.assertEqual(found, ["workflows/zcode/spec-plan-draft.dwf.ts"])
+
+    def test_spec_plan_draft_workflow_port_is_present(self):
+        text = (REPO / "workflows" / "zcode" / "spec-plan-draft.dwf.ts").read_text(encoding="utf-8")
+        self.assertIn("zcode-workflow", text)
+        self.assertIn("agent(", text)
+        self.assertIn("phase(", text)
+        self.assertIn("world.run(", text)
+        self.assertIn("validate_artifacts.py", text)
+        # Fresh-context critic and the revise ceiling are the contract, not decoration.
+        self.assertIn("spec-critic", text)
+        self.assertIn("rounds < 2", text)
+        # Negative lock: the Claude JS facade must not leak into the ZCode port. Without this a
+        # copy of workflows/spec-plan-draft.js would satisfy every positive assertion above.
+        for claude_token in ("export const meta", "agentType:", "isolation:", "pipeline("):
+            self.assertNotIn(claude_token, text, f"Claude facade token {claude_token} in a ZCode port")
+        # The header declares the args the body reads; a rename in one half must fail here.
+        header = text.split("*/", 1)[0]
+        for arg in ("workId", "requirement", "mode"):
+            self.assertIn(f"{arg}:", header, f"{arg} missing from the zcode-workflow header")
+            self.assertIn(f"args.{arg}", text, f"{arg} declared but never read")
+
+
+class TestZcodeWorkflowClaimSweep(unittest.TestCase):
+    """The contradiction must be gone from TRACKED files, in EVERY language.
+
+    Four tracked files carried "ZCode has no Workflow runtime", one of them in Chinese - so an
+    English-only sweep found three of four and would have shipped the contradiction. These
+    assertions run over `git ls-files`, not over a hand-listed set, so a fifth file carrying the
+    claim fails here instead of being missed.
+    """
+
+    #: Negative forms, in every language the adapter docs are written in.
+    STALE_CLAIM = ("has no Workflow runtime", "\u6ca1\u6709 Workflow")
+    #: An API name that appears in no shipped workflow script and in no vendor document.
+    UNSOURCED_API = "CreateWorkflow"
+
+    def _tracked_text_files(self):
+        git = shutil.which("git")
+        if git is None:
+            self.skipTest("git not available - cannot enumerate the tracked set")
+        proc = subprocess.run(
+            [git, "ls-files", "--", "*.md", "*.json", "*.mjs", "*.ts", "*.py"],
+            cwd=str(REPO), capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        for rel in proc.stdout.split("\n"):
+            rel = rel.strip()
+            if not rel or rel == "tests/test_zcode_packaging.py":
+                continue  # this file states the forbidden strings in order to forbid them
+            path = REPO / rel
+            try:
+                yield rel, path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+
+    def test_no_tracked_file_still_says_zcode_has_no_workflow_runtime(self):
+        # Subject-aware. The bare phrase is also a TRUE statement about other runtimes -
+        # "Codex has no Workflow runtime" is correct and appears in a test comment on another
+        # branch - so matching it without checking who it is about flags a correct sentence as
+        # stale documentation. The claim counts only when ZCode is the subject of the line that
+        # carries it.
+        offenders = []
+        for rel, text in self._tracked_text_files():
+            for line in text.splitlines():
+                for claim in self.STALE_CLAIM:
+                    if claim in line and "zcode" in line.lower():
+                        offenders.append((rel, claim))
+        self.assertEqual(offenders, [], "stale ZCode workflow claim still tracked: %r" % offenders)
+
+    def test_no_tracked_file_asserts_the_unsourced_api_name(self):
+        offenders = [
+            rel for rel, text in self._tracked_text_files() if self.UNSOURCED_API in text
+        ]
+        self.assertEqual(
+            offenders, [],
+            "%s names no API in either workflow script and has no vendor source; "
+            "it must not be written into a tracked file: %r" % (self.UNSOURCED_API, offenders),
+        )
+
+class TestZcodeFilesAreTracked(unittest.TestCase):
+    """Every repository path this suite reads must be COMMITTED, not merely present here.
+
+    The trap this catches: a tracked test that reads an untracked file passes in the authoring
+    working tree and fails on a clean clone and in CI with FileNotFoundError - and the release
+    archive is built from the commit tree, so the file would be missing there too. Staging
+    everything instead is the opposite trap: it sweeps in orphans. This test makes the required
+    set explicit.
+    """
+
+    REQUIRED = (
+        "docs/zcode-runtime-adapter.md",
+        "workflows/zcode/spec-plan-draft.dwf.ts",
+        "hooks/hooks-zcode.json",
+        ".zcode-plugin/plugin.json",
+        "marketplace.json",
+    )
+
+    def test_paths_this_suite_reads_are_tracked(self):
+        git = shutil.which("git")
+        if git is None:
+            self.skipTest("git not available - cannot check the tracked set")
+        proc = subprocess.run(
+            [git, "ls-files", "--error-unmatch", "--"] + sorted(self.REQUIRED),
+            cwd=str(REPO), capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(
+            proc.returncode, 0,
+            "untracked path read by a tracked test (commit it, or the clean clone fails): "
+            + (proc.stderr or proc.stdout).strip(),
+        )
 
 
 if __name__ == "__main__":

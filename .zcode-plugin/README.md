@@ -60,10 +60,15 @@ and Codex hook files (`hooks-claude.json`, `hooks-codex.json`) are not shared wi
 
 ## Orchestration fallback
 
-ZCode has no Workflow runtime. Where Claude Code would run the `spec-plan-draft`
-workflow and Codex its embedded adapter, a ZCode session runs the same
-**author → critic → revise** discipline in the main loop with saved artifacts and
-`scripts/validate_artifacts.py` evidence.
+ZCode added dynamic workflows in client 3.14.0 (official changelog, 2026-09-19),
+started from the input-box plus menu or `/workflow`. Z.ai publishes no script API,
+file format, or storage path for them, and `plugin.json` has no `workflows`
+component key — so **this plugin cannot ship you one**. Where Claude Code would run
+the `spec-plan-draft` workflow and Codex its embedded adapter, a ZCode session runs
+the same **author → critic → revise** discipline in the main loop with saved
+artifacts and `scripts/validate_artifacts.py` evidence. The unverified port kept at
+`workflows/zcode/spec-plan-draft.dwf.ts` is a starting point for a live run, not a
+supported path.
 
 ## Versioning
 

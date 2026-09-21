@@ -142,6 +142,7 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_validator_cli_unchanged.py` | script unit | Characterization of the validator CLI: two specs with equal content under different layouts must produce the same verdict. |
 | `tests/test_strict_flow_evidence.py` | flow evidence | Offline strict flow-evidence derivation: what counts as a step having run, and the characterization pairs that separate a real signal from a jointly-empty comparison. |
 | `tests/test_br6_case_table.py` | guard regression | The shared shell-attribution case table: schema, row coverage, and parity between the Node and Python implementations that read it. |
+| `tests/test_grok_rhai_workflows.py` | runtime adapter | The experimental Grok adapter's Rhai workflow scripts: each shipped script parses, declares the metadata the runtime reads, and dispatches only agent types that exist. |
 
 ---
 
