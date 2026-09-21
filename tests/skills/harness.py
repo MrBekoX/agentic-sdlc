@@ -461,10 +461,11 @@ def check_doc_consistency():
         txt = hooks_readme.read_text(encoding="utf-8")
         # The hooks are wired in hooks.json, not a settings.json (none exists in the tree).
         # Was `"settings.json" in txt and not list(REPO.rglob("settings.json"))`. Both conjuncts
-    # were false in practice - the README names no settings.json, and one exists in the tree -
-    # so this error could never fire even with the documentation bug present. The rglob also
-    # reached archived run output under tests/artifacts/, which is not a shipped file.
-    if "settings.json" in txt and not _shipped(REPO, "settings.json"):
+        # were false in practice - the README names no settings.json, and one exists in the
+        # tree - so this error could never fire even with the documentation bug present. The
+        # rglob also reached archived run output under tests/artifacts/, which is not a
+        # shipped file.
+        if "settings.json" in txt and not _shipped(REPO, "settings.json"):
             errors.append("hooks_readme_references_missing_settings_json")
     return errors, warnings
 
