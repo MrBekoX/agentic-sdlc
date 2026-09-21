@@ -24,6 +24,19 @@ ALLOWED_KEYS = {
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
+
+# The suites this script runs, named rather than discovered. `validator_tests=` reports these
+# and nothing else; the rest of the suite is the documented gate's fourth command. A pattern
+# that matches no file is a failing test (tests/test_gate_composition.py), so this list cannot
+# quietly shrink to nothing.
+VALIDATOR_TEST_PATTERNS = (
+    "test_validate_artifacts.py",          # the artifact validator itself
+    "test_validator_cli_unchanged.py",     # its CLI characterization
+    "test_validator_resolver_parity.py",   # it must agree with resolve_work_package.py
+    "test_work_package_resolution.py",     # the resolver that consumes what it validates
+)
+
+
 def split_frontmatter(text):
     """Return (frontmatter, body) or (None, None) if no leading --- block."""
     if not text.startswith("---"):
@@ -88,20 +101,38 @@ def main():
         check_skill(d, errors, warnings)
         checked += 1
 
-    # Run the deterministic-validator unit tests.
-    res = subprocess.run(
-        [sys.executable, "-m", "unittest", "discover", "-s", str(TESTS_DIR)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    tests_ok = res.returncode == 0
+    # Run the deterministic-validator unit tests - and ONLY those.
+    #
+    # This used to be an unrestricted `discover -s tests`, which collects all ~49 suites. The
+    # key it reports is `validator_tests=`, AGENTS.md documents this script as "skill
+    # frontmatter + validator tests", and the documented gate's fourth command already runs the
+    # whole suite - so the unrestricted form both mislabelled its result and made a gate run
+    # execute ~1300 tests twice (440 s against 1.3 s here). `.pre-commit-config.yaml` runs this
+    # script, so every commit silently paid that full run, and a guard that blocks routine safe
+    # work for minutes is one that gets switched off.
+    #
+    # Coverage is unchanged: everything dropped here is collected by
+    # `python3 -m unittest discover -s tests`, and tests/test_gate_composition.py fails if any
+    # suite stops being covered by a documented gate command.
+    tests_ok = True
+    for pattern in VALIDATOR_TEST_PATTERNS:
+        res = subprocess.run(
+            [sys.executable, "-m", "unittest", "discover", "-s", str(TESTS_DIR), "-p", pattern],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        if res.returncode != 0:
+            tests_ok = False
+            # Surface the captured unittest output so CI/logs can name the failing test.
+            dumped = (res.stderr or "").strip() or (res.stdout or "").strip()
+            if dumped:
+                sys.stderr.write(dumped + "\n")
     if not tests_ok:
         errors.append("validator_tests_failed")
-        # Surface the captured unittest output so CI/logs can name the failing test.
-        dumped = (res.stderr or "").strip() or (res.stdout or "").strip()
-        if dumped:
-            sys.stderr.write(dumped + "\n")
 
     fields = {
+        # Named so a contributor reading only this output is not misled about coverage: this
+        # script is the FAST subset, and the rest of the suite is the gate's fourth command.
+        "suites_not_run_here": "python3 -m unittest discover -s tests",
         "skills_checked": checked,
         "validator_tests": "pass" if tests_ok else "fail",
         "check_all": "failed" if errors else "passed",
