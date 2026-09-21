@@ -32,6 +32,8 @@ Each entry includes:
 
 ---
 
+---
+
 ## 2026-09-21 — Two consumers of one input can need OPPOSITE things from it; parity belongs where their needs coincide
 
 - **Task / context:** Giving the git resolver (`git-invocation.mjs`, behind `scan-commit.mjs` and `branch-guard.mjs`) the same command-prefix coverage the destructive guard had just received. Seventeen shapes — reserved words, redirections, `!`, `time`, `setsid`, inner `-c`/`eval` payloads — were measured SILENT on both git guards. One of the seventeen, a `case` arm, needed the statement splitter to break at `)`. So the splitter was brought "to parity" with its sibling by adding `(`, `)`, `{` and `}` as separators, because the sibling has split on those for months.
@@ -41,6 +43,32 @@ Each entry includes:
 - **A fifth defect in the same package, and the subtlest one this repository has recorded.** The fixed `&`-is-a-redirect check scanned BACKWARD over the accumulating segment. Its loop body is genuinely O(1) - it stops at the first non-blank character - and it still made the splitter quadratic: `segment[i]` and `segment.length` INDEX a string built with `cur += c`, which V8 represents as a ConsString rope. Indexing forces a flatten, and the next `+=` rebuilds the rope, so a shape where every `&` runs the check pays a flatten per character. Measured end-to-end on `git commit -m ok; ` + `> & ` x N: 256 KB 3.3 s, 512 KB 13.6 s, 1 MB 39.7 s - past both wired hook budgets, where a killed hook renders no decision. The fix carries the two values the check needs in SCALARS updated by the forward scan, so nothing indexes the accumulator: 1 MB went from 39 659 ms to 384 ms with an identical decision. **Reading an O(1) loop body and concluding the loop is O(1) is not enough when the thing being read is an accumulator** - measure at four doublings, and assert a RATIO rather than a threshold, because the absolute numbers move with the host and the exponent does not.
 - **Preventive rule / automated check:** Before sharing a transformation between two consumers, write down what each one needs from it and check that the needs POINT THE SAME WAY. Where they do not, share the layer where they agree and let each keep its own above that — and say in the module header which layer is shared and why. A second, independent signal that the layer is wrong: when one change produces defects in BOTH directions at once (a fail-open and a false block from the same line), the line is not miscalibrated, it is misplaced; re-plan rather than tuning it. Pin the shared layer with one checked-in construct table driven through every consumer, so a divergence is a failing test rather than a review finding.
 - **Related files & tests:** `hooks/shell-prefix.mjs` (shared grammar, `case` arm), `hooks/git-invocation.mjs` (`splitStatements`, `ampersandIsRedirect`, `innerShellPayload`, the two budgets), `hooks/scan-commit.mjs`; `tests/test_secret_guard_bypasses.py::TestRoundFourteenGitPathResiduals`, `::TestPrefixGrammarParity`.
+
+---
+
+---
+
+## 2026-09-20 — An anchored assertion written from the current output pins whatever it finds, defect included
+
+- **Task / context:** Auditing a third-party-authored runtime adapter. Its three PreToolUse hook handlers ran `node ${PLUGIN_ROOT}/hooks/<guard>.mjs` with the expansion unquoted, while the sibling adapter for another runtime quoted the same expression.
+- **Symptom:** On an install path containing a space the command word-splits, `node` receives a truncated path and exits non-zero. That runtime documents hook failures as **fail-open**, so the secret scanner, the destructive-command guard and the branch guard all go silently inert while still appearing wired — no error surfaces anywhere. Reproduced: the unquoted form expands to four argv entries (`node`, `/c/Program`, `Files/agentic`, `sdlc/...`); quoted, two.
+- **Root cause:** Two layers. The wiring bug is ordinary. What made it durable is that `tests/test_grok_packaging.py` asserted `assertRegex(hook["command"], r"^node \$\{GROK_PLUGIN_ROOT\}/hooks/[a-z-]+\.mjs$")` — anchored at both ends, so the **quoted** form is rejected. The test was written by reading the config and describing it, not by deciding which form is correct. A later fix therefore turns the test red and reads as a regression, which is exactly backwards.
+- **Correct fix:** Quote the expansion in all three handlers, and rewrite the assertion to *require* the quoted form with the rationale inline, so the lock now pins the fix. Separately, state the sourcing honestly: the vendor's hook page documents fail-open and `${VAR}` expansion but defers load-time expansion to an unpublished reference and says nothing about shell-vs-direct spawn for a hook `command`; the shell rule appears only for the status-line command. The quoting is therefore a defensive measure against an **inferred** failure mode, labelled unverified — not a cited vendor behavior.
+- **Preventive rule / automated check:** An anchored assertion (`^...$`, an exact-set equality, a recorded digest) is a *decision about which form is correct*, not a description of what is there. Before writing one, ask "is the thing I am about to freeze right?" — and when a fix turns such an assertion red, the first question is whether the assertion or the code is wrong. Never quietly widen it to make both pass. Where a value is copied from another adapter that already does it correctly, diff the two before pinning either.
+- **Related files & tests:** `hooks/hooks-grok.json`, `docs/runtime-adapter.md`; `tests/test_grok_packaging.py::TestGrokHookWire::test_executors_are_command_strings_with_plugin_root_and_second_timeouts`.
+
+---
+
+---
+
+## 2026-09-20 — A guard that emits on a channel its runtime does not have is not a guard
+
+- **Task / context:** Auditing a second third-party-authored adapter. `hooks/scan-write.mjs` — the post-write secret scanner — is wired on Claude Code and on that adapter's runtime, and had exactly one output path: `process.stdout.write(JSON.stringify({ systemMessage }))`.
+- **Symptom:** That runtime's documented hook protocol has no `systemMessage` field, and states that unknown fields are ignored. It is the **only** PostToolUse hook this plugin wires there, so the guard detected a secret written to disk, serialized the warning into a field the runtime discards, and exited 0. Neither the model nor the user ever saw it. The repo's own notes had recorded the channel as merely "unverified"; the vendor page makes it a documented negative.
+- **Root cause:** Portability was checked at the level of *wiring* (event names, matchers, executor form, payload field names — all correct) and not at the level of the **return channel**. A wired handler that cannot speak is indistinguishable, in every static test, from one that works: the config is valid, the script runs, the exit code is 0.
+- **Correct fix:** Emit both `systemMessage` and `hookSpecificOutput.additionalContext`; each runtime ignores the field it does not know. Two further points that only reading the primary docs settles: the advisory must be **nested** inside `hookSpecificOutput` (a top-level field is silently dropped), and `additionalContext` is *not* a neutral addition on Claude Code — it is injected into the model's context on `PostToolUse` while `systemMessage` is shown to the user, so this is a deliberate behavior change on the supported runtime and belongs in the data-handling documentation. On `PreToolUse` the same field is debug-log output only, so the equivalent change for the command guards is runtime-specific rather than universal.
+- **Preventive rule / automated check:** For every runtime a handler is wired to, verify the **output** contract as well as the input one, and name the documented field that carries each decision and each advisory. A warn-only handler must also ship a block containing only the event name and the advisory text — never a decision key — so a runtime that defaults a bare block to an implicit decision cannot turn a warning into a gate. Pin it with a behavior test, not a byte lock: a digest proves the file did not move, not that its output reaches anyone.
+- **Related files & tests:** `hooks/scan-write.mjs`, `docs/data-handling.md`, `docs/zcode-runtime-adapter.md`; `tests/test_codex_write_guard.py::TestScanWriteAdvisoryChannels`.
 
 ---
 

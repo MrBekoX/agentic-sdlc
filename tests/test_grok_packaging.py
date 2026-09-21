@@ -13,6 +13,8 @@ marketplace entry to VERSION instead. A version bump that forgets the Grok
 files fails this test loudly rather than drifting silently.
 """
 import json
+import subprocess
+import shutil
 import re
 import unittest
 from pathlib import Path
@@ -82,8 +84,9 @@ def wired_hooks(wire):
 
 
 def command_script_basename(command):
-    text = str(command)
-    return text.replace("\\", "/").rsplit("/", 1)[-1].split()[0]
+    # The wired command quotes its expanded path (see the executor test for why), so strip the
+    # closing quote before taking the basename — otherwise every name ends up as `x.mjs"`.
+    return str(command).replace("\\", "/").rsplit("/", 1)[-1].split()[0].strip('"')
 
 
 class TestGrokManifest(unittest.TestCase):
@@ -161,11 +164,24 @@ class TestGrokHookWire(unittest.TestCase):
                 self.assertLessEqual(tokens, ALLOWED_MATCHER_TOKENS)
 
     def test_executors_are_command_strings_with_plugin_root_and_second_timeouts(self):
+        # The expanded path MUST be quoted. Sourcing, stated precisely because the vendor docs
+        # are incomplete here: 10-hooks.md documents ${VAR} expansion and that hook failures are
+        # FAIL-OPEN, but it defers load-time-vs-runtime expansion to a custom-hooks reference that
+        # is not published, and it says nothing about shell-vs-direct-spawn for a hook `command`.
+        # The shell rule is documented for the STATUS-LINE command (25-status-line.md): "a path is
+        # run directly when it names an executable, and through `sh -c` otherwise ... Quote a path
+        # containing spaces as you would at a prompt." Applying it to hooks is an INFERENCE.
+        # The quoting is correct under every reading (it is also safe when spawned directly and
+        # under the documented PowerShell $VAR rewrite), and the downside if the inference is
+        # right is severe: an install path with a space would word-split, node would exit
+        # non-zero, and fail-open means all three command guards go silently inert while still
+        # appearing wired. This assertion previously anchored the UNQUOTED form and so pinned the
+        # defect in place; it now pins the fix. hooks/hooks-codex.json has always quoted.
         for hook in wired_hooks(self.wire):
             self.assertEqual(hook["type"], "command")
             self.assertRegex(
                 hook["command"],
-                r"^node \$\{GROK_PLUGIN_ROOT\}/hooks/[a-z-]+\.mjs$",
+                r'^node "\$\{GROK_PLUGIN_ROOT\}/hooks/[a-z-]+\.mjs"$',
             )
             self.assertIsInstance(hook["timeout"], int)
             self.assertGreater(hook["timeout"], 0)
@@ -228,6 +244,59 @@ class TestAdapterFilesKeepHouseContracts(unittest.TestCase):
         self.assertIn("GROK_PLUGIN_ROOT", adapter)
         self.assertIn("toolInput", adapter)
         self.assertIn("run_terminal_command", adapter)
+
+
+class TestGrokVendorValidator(unittest.TestCase):
+    """The vendor's own manifest check, when the vendor CLI is installed.
+
+    Opt-in by presence, never a silent pass: absent CLI skips with a named reason. This is the
+    same check xAI's tooling runs, so it catches a manifest defect the house tests do not model.
+    `grok plugin validate` is read-only and offline.
+    """
+
+    def test_vendor_validate_accepts_the_manifest(self):
+        grok = shutil.which("grok")
+        if grok is None:
+            self.skipTest("grok CLI not installed - vendor manifest validation not run")
+        proc = subprocess.run(
+            [grok, "plugin", "validate", str(REPO)],
+            cwd=str(REPO), capture_output=True, text=True, encoding="utf-8", timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, (proc.stdout or "") + (proc.stderr or ""))
+        self.assertIn("valid", (proc.stdout or "").lower())
+
+class TestGrokFilesAreTracked(unittest.TestCase):
+    """Every repository path this suite reads must be COMMITTED, not merely present here.
+
+    The trap this catches: a tracked test that reads an untracked file passes in the authoring
+    working tree and fails on a clean clone and in CI with FileNotFoundError - and the release
+    archive is built from the commit tree, so the file would be missing there too. Staging
+    everything instead is the opposite trap: it sweeps in orphans. This test makes the required
+    set explicit.
+    """
+
+    REQUIRED = (
+        ".grok/workflows/spec-plan-draft.rhai",
+        ".grok/workflows/multi-lens-review.rhai",
+        ".grok/workflows/skill-draft.rhai",
+        "hooks/hooks-grok.json",
+        ".grok-plugin/plugin.json",
+        ".grok-plugin/marketplace.json",
+    )
+
+    def test_paths_this_suite_reads_are_tracked(self):
+        git = shutil.which("git")
+        if git is None:
+            self.skipTest("git not available - cannot check the tracked set")
+        proc = subprocess.run(
+            [git, "ls-files", "--error-unmatch", "--"] + sorted(self.REQUIRED),
+            cwd=str(REPO), capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(
+            proc.returncode, 0,
+            "untracked path read by a tracked test (commit it, or the clean clone fails): "
+            + (proc.stderr or proc.stdout).strip(),
+        )
 
 
 if __name__ == "__main__":
