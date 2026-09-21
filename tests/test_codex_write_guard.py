@@ -21,7 +21,18 @@ REPO = Path(__file__).resolve().parents[1]
 # tautology. Values, normalization and assertion are unchanged.
 LOCK_DIGESTS = {
     # LF-normalized (working-tree CRLF on Windows must not fail a Linux checkout).
-    "hooks/scan-write.mjs": "8e4fd3225c3cf096498adeedebb8a9e4a36b19bc09267d067fe4aa66a1c02e90",
+    # Rebaselined 2026-09-20 by the ZCode adapter-correctness work. The guard emitted only
+    # `systemMessage`, which is not a field in ZCode's documented hook protocol — and that
+    # protocol ignores unknown fields. Since this is the only PostToolUse hook wired on
+    # ZCode, a secret written to disk produced no observable output there at all. The
+    # guard now also emits `hookSpecificOutput.additionalContext`, ZCode's documented
+    # model-visible channel. This is NOT inert on Claude Code: `systemMessage` is shown
+    # to the USER, while `hookSpecificOutput.additionalContext` is injected into the
+    # MODEL's context, so the model now also learns it wrote a secret — a deliberate
+    # behavior change on the supported runtime, and the half of the audience that can
+    # act on it. The sibling command guards' deny paths already ship this dual shape.
+    # Covered by TestScanWriteAdvisoryChannels below.
+    "hooks/scan-write.mjs": "d59c34a1b672deb289bc19d42440dcdbfa5bad24646f841093c195551d8fe6b0",
     # Refreshed by the 2026-08-22 guard-bypass fix: the Bash-only matcher and the
     # `if: Bash(git commit*)` filters were removed (a Bash-only matcher is inert on a
     # Windows host with no Git Bash, and a subcommand-level `if` never starts the hook
@@ -326,6 +337,78 @@ class TestCodexWriteGuardDocs(unittest.TestCase):
         self.assertRegex(ra, r"scans? .*(literal|added) content")  # scanned-clean side
         self.assertIn("fail-open", ra)                              # not-checkable side
         self.assertIn("expansion", ra)
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestScanWriteAdvisoryChannels(unittest.TestCase):
+    """hooks/scan-write.mjs must be OBSERVABLE on every runtime it is wired to.
+
+    It is wired on Claude Code (hooks-claude.json) and ZCode (hooks-zcode.json). Claude Code reads
+    the advisory `systemMessage`; ZCode's documented hook protocol has no such field and ignores
+    unknown fields, so a `systemMessage`-only payload was discarded there. As this is the ONLY
+    PostToolUse hook wired on ZCode, a secret written to disk produced no output at all. The guard
+    now emits both channels; each runtime ignores the one it does not know.
+    """
+
+    WRITE_GUARD = REPO / "hooks" / "scan-write.mjs"
+
+    def _run(self, payload):
+        proc = subprocess.run(
+            [NODE, str(self.WRITE_GUARD)], cwd=str(REPO),
+            input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+    def _write(self, content, event="PostToolUse"):
+        return {"hook_event_name": event, "tool_name": "Write",
+                "tool_input": {"file_path": "notes.txt", "content": content}}
+
+    def test_secret_write_emits_both_advisory_channels(self):
+        out = self._run(self._write("TOKEN = " + SECRET))
+        self.assertTrue(out.get("systemMessage"), "Claude Code advisory channel lost")
+        hso = out.get("hookSpecificOutput") or {}
+        self.assertTrue(hso.get("additionalContext"), "ZCode model-visible channel missing")
+        self.assertEqual(hso["additionalContext"], out["systemMessage"],
+                         "the two channels must carry the same warning")
+
+    def test_event_name_is_the_single_wired_event_not_the_payload(self):
+        # This guard is wired to exactly ONE event on every runtime that wires it: PostToolUse,
+        # in hooks-claude.json and hooks-zcode.json. The name is therefore a constant. Echoing a
+        # runtime-supplied string into a field that must match the firing event would replace a
+        # value that is always right with one that is right only when the payload is honest.
+        for claimed in ("PostToolUse", "PreToolUse", "Nonsense"):
+            with self.subTest(claimed=claimed):
+                out = self._run(self._write("TOKEN = " + SECRET, event=claimed))
+                self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
+
+    def test_missing_event_name_still_emits_the_constant(self):
+        out = self._run({"tool_name": "Write",
+                         "tool_input": {"file_path": "notes.txt", "content": "TOKEN = " + SECRET}})
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
+
+    def test_advisory_block_carries_no_decision_key(self):
+        # A warn-only guard must never ship a hookSpecificOutput that a runtime could read as a
+        # gate. Claude Code treats a decision-less block as no decision; that is NOT verified for
+        # ZCode, Grok or Codex, so the block stays exactly {hookEventName, additionalContext}.
+        out = self._run(self._write("TOKEN = " + SECRET))
+        self.assertEqual(set(out["hookSpecificOutput"]), {"hookEventName", "additionalContext"})
+
+    def test_clean_write_stays_silent_on_both_channels(self):
+        # CONTROL: the added channel must not turn a warn-only guard into a chatty one.
+        out = self._run(self._write("const greeting = 'hello world';"))
+        self.assertEqual(out, {}, "a clean write must produce no advisory at all")
+
+    def test_skipped_path_stays_silent(self):
+        # CONTROL: the SKIP list still short-circuits before any scanning or output.
+        payload = self._write("TOKEN = " + SECRET)
+        payload["tool_input"]["file_path"] = "hooks/whatever.mjs"
+        self.assertEqual(self._run(payload), {})
+
+    def test_never_emits_a_permission_decision(self):
+        # CONTROL: this guard WARNS. A PostToolUse advisory must not start denying writes.
+        out = self._run(self._write("TOKEN = " + SECRET))
+        self.assertNotIn("permissionDecision", json.dumps(out))
 
 
 if __name__ == "__main__":
