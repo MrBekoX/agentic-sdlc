@@ -63,6 +63,38 @@ def tearDownModule():
         raise AssertionError("source repository changed: " + ", ".join(changed))
 
 
+# The workflow has two legitimate trigger states, and both must stay checkable.
+#
+# RESTORED is the real gate: `push` filtered to main (an unfiltered `push` fires on the PR
+# branch too, so every PR commit ran the whole matrix twice) plus `pull_request`.
+#
+# BYPASSED is the temporary state while GitHub Actions cannot start jobs on this account -
+# every run failed in about two seconds with zero steps, and a gate that cries wolf on every
+# commit discredits the real one. Accepting it is NOT the same as accepting any trigger change:
+# the bypass only counts when the file still carries the instructions for putting the triggers
+# back, so a deliberate pause cannot quietly become a gate someone switched off.
+RESTORED_TRIGGERS = "on:\n  push:\n    branches: [main]\n  pull_request:\n"
+BYPASSED_TRIGGERS = "on:\n  workflow_dispatch:\n"
+BYPASS_RESTORE_MARKER = "TO RESTORE"
+
+
+def assert_triggers_are_a_known_state(case, text):
+    """Fail unless the workflow is either fully gated or documentedly bypassed."""
+    if RESTORED_TRIGGERS in text:
+        return "restored"
+    case.assertIn(
+        BYPASSED_TRIGGERS, text,
+        "the workflow triggers are neither the gated form nor the documented bypass; an "
+        "unfiltered `push` runs the whole matrix twice per pull-request commit",
+    )
+    case.assertIn(
+        BYPASS_RESTORE_MARKER, text,
+        "the workflow is bypassed but carries no instructions for restoring the triggers, so "
+        "nothing distinguishes a deliberate pause from a gate someone quietly switched off",
+    )
+    return "bypassed"
+
+
 class ScratchRepo:
     """A git repository in a temporary directory, isolated from host git configuration."""
 
@@ -1917,7 +1949,7 @@ class TestCiArchiveSteps(unittest.TestCase):
         self.names = [name for name, _run, _block in self.steps]
 
     def test_source_steps_and_triggers_unchanged(self):
-        self.assertIn("on:\n  push:\n    branches: [main]\n  pull_request:\n", self.text)
+        assert_triggers_are_a_known_state(self, self.text)
         self.assertIn("os: [ubuntu-latest, windows-latest]", self.text)
         source = [(name, run) for name, run, _block in self.steps if name in dict(SOURCE_STEPS)]
         self.assertEqual(source, SOURCE_STEPS)
@@ -1984,9 +2016,14 @@ class TestCiWorkflowHygiene(unittest.TestCase):
         self.jobs = re.findall(r"^  ([A-Za-z0-9_-]+):$", self.text.split("\njobs:\n", 1)[1], re.M)
 
     def test_push_gates_main_only_so_a_pull_request_is_not_gated_twice(self):
-        # `push:` with no branch filter fires on the PR branch as well, so every PR commit ran the
-        # whole matrix twice, once per event.
-        self.assertIn("on:\n  push:\n    branches: [main]\n  pull_request:\n", self.text)
+        # `push:` with no branch filter fires on the PR branch as well, so every PR commit
+        # ran the whole matrix twice, once per event. While the workflow is bypassed there
+        # is no push trigger at all, which cannot double-gate anything - but the bypass has
+        # to be the documented one, not simply an absent trigger.
+        state = assert_triggers_are_a_known_state(self, self.text)
+        if state == "restored":
+            self.assertNotIn("on:\n  push:\n  pull_request:\n", self.text,
+                             "`push` must stay filtered to main")
 
     def test_superseded_runs_are_cancelled_except_on_main(self):
         self.assertIn("group: ${{ github.workflow }}-${{ github.ref }}", self.text)
