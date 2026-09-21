@@ -295,21 +295,26 @@ def validate_skill_integration(skill_dir, golden_entry, reg):
     return errors, warnings
 
 
-def validate_plugin_root_refs():
+def validate_plugin_root_refs(root=None):
     """Every ${CLAUDE_PLUGIN_ROOT}/<path> in skills+hooks must resolve to a real repo file.
 
     These are runtime shell/exec paths (e.g. detect_context.py, the hook .mjs files); a
     dangling one breaks the flow silently at runtime. (errors, warnings)
+
+    `root` selects the tree to read; omitting it is exactly the previous behaviour. It exists so
+    a negative control can hand this check a broken tree - without it the check could only ever
+    be run against a healthy repository, which cannot tell a working check from a no-op.
     """
     errors, warnings = [], []
-    sources = list(SKILLS_DIR.rglob("*.md")) + [HOOKS_DIR / name for name in HOOK_CONFIGS]
+    root = root or REPO
+    sources = list((root / "skills").rglob("*.md")) + [root / "hooks" / n for n in HOOK_CONFIGS]
     for src in sources:
         if not src.exists():
             continue
         text = src.read_text(encoding="utf-8")
         for rel in PLUGIN_ROOT_REF_RE.findall(text):
-            if not (REPO / rel).exists():
-                errors.append(f"plugin_root_ref_missing:{src.relative_to(REPO).as_posix()}:{rel}")
+            if not (root / rel).exists():
+                errors.append(f"plugin_root_ref_missing:{src.relative_to(root).as_posix()}:{rel}")
     return errors, warnings
 
 
@@ -324,10 +329,15 @@ def _json_strings(value):
             yield from _json_strings(item)
 
 
-def validate_hooks_json():
-    """Hook JSON files must be valid JSON and every referenced plugin-root path must exist. (errors, warnings)."""
+def validate_hooks_json(root=None):
+    """Hook JSON files must be valid JSON and every referenced plugin-root path must exist. (errors, warnings).
+
+    `root` selects the tree to read; omitting it is the previous behaviour. See
+    validate_plugin_root_refs for why it exists.
+    """
     errors, warnings = [], []
-    for hj in (HOOKS_DIR / name for name in HOOK_CONFIGS):
+    root = root or REPO
+    for hj in (root / "hooks" / name for name in HOOK_CONFIGS):
         if not hj.exists():
             errors.append(f"hooks_json_missing:{hj.name}")
             continue
@@ -340,7 +350,7 @@ def validate_hooks_json():
         for text in _json_strings(data):
             refs += PLUGIN_ROOT_REF_RE.findall(text)
         for rel in refs:
-            if not (REPO / rel).exists():
+            if not (root / rel).exists():
                 errors.append(f"hook_script_missing:{hj.name}:{rel}")
     return errors, warnings
 
@@ -399,14 +409,18 @@ def load_trigger_evalset(skill):
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def validate_safety_guardrails():
+def validate_safety_guardrails(root=None, data=None):
     """Each safety scenario's guardrail evidence must actually exist in the repo. (errors, warnings).
 
     This proves the guardrail is WIRED (the contract/skill/hook text is present), not that the
     model will obey it at runtime — that is a live behavioral eval.
+
+    `root` and `data` are injectable so a negative control can supply a scenario whose evidence
+    is missing or whose needle is absent; omitting both is exactly the previous behaviour.
     """
     errors, warnings = [], []
-    data = load_safety()
+    root = root or REPO
+    data = load_safety() if data is None else data
     for scenario in data.get("scenarios", []):
         sid = scenario["id"]
         evid = scenario.get("guardrail_evidence", [])
@@ -415,7 +429,7 @@ def validate_safety_guardrails():
             continue
         for ev in evid:
             rel, needle = ev["file"], ev["contains"]
-            fp = REPO / rel
+            fp = root / rel
             if not fp.exists():
                 errors.append(f"safety_evidence_file_missing:{sid}:{rel}")
             elif needle.lower() not in fp.read_text(encoding="utf-8").lower():
@@ -446,17 +460,18 @@ def _shipped(root, name):
             and ".claude" not in p.parts]
 
 
-def check_doc_consistency():
+def check_doc_consistency(root=None):
     """Surface README/doc claims that contradict the real tree. (errors, warnings)."""
     errors, warnings = [], []
-    readme = REPO / "README.md"
+    root = root or REPO
+    readme = root / "README.md"
     if readme.exists():
         txt = readme.read_text(encoding="utf-8")
-        if ".claude-plugin/plugin.json" in txt and not (REPO / ".claude-plugin" / "plugin.json").exists():
+        if ".claude-plugin/plugin.json" in txt and not (root / ".claude-plugin" / "plugin.json").exists():
             warnings.append("readme_claims_missing_plugin_manifest:.claude-plugin/plugin.json")
-        if "marketplace.json" in txt and not list(REPO.rglob("marketplace.json")):
+        if "marketplace.json" in txt and not _shipped(root, "marketplace.json"):
             warnings.append("readme_claims_missing_marketplace_json")
-    hooks_readme = HOOKS_DIR / "README.md"
+    hooks_readme = root / "hooks" / "README.md"
     if hooks_readme.exists():
         txt = hooks_readme.read_text(encoding="utf-8")
         # The hooks are wired in hooks.json, not a settings.json (none exists in the tree).
@@ -465,7 +480,7 @@ def check_doc_consistency():
         # tree - so this error could never fire even with the documentation bug present. The
         # rglob also reached archived run output under tests/artifacts/, which is not a
         # shipped file.
-        if "settings.json" in txt and not _shipped(REPO, "settings.json"):
+        if "settings.json" in txt and not _shipped(root, "settings.json"):
             errors.append("hooks_readme_references_missing_settings_json")
     return errors, warnings
 
@@ -474,11 +489,16 @@ def check_doc_consistency():
 # Aggregation + CLI
 # ---------------------------------------------------------------------------
 
-def run_all():
-    """Run every deterministic check; return (errors, warnings, metrics)."""
+def run_all(golden=None):
+    """Run every deterministic check; return (errors, warnings, metrics).
+
+    `golden` is injectable so `no_golden_entry` - emitted only here, not by any separately
+    callable validator - can be given a negative control. Omitting it is exactly the previous
+    behaviour.
+    """
     errors, warnings = [], []
     reg = registries()
-    golden = load_golden()["skills"]
+    golden = load_golden()["skills"] if golden is None else golden
     skills = sorted(reg["skill"])
 
     for name in skills:

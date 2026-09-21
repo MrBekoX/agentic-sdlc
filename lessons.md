@@ -20,6 +20,17 @@ Each entry includes:
 
 ---
 
+## 2026-09-21 — A check whose only exercise is a healthy tree is indistinguishable from a no-op
+
+- **Task / context:** `tests/skills/harness.py` is one of four documented gate commands. It prints `skills_eval=passed` and can emit 35 distinct failure keys - dangling references, golden drift, safety-evidence wiring, hook-script paths, frontmatter rules.
+- **Symptom:** Measured, only 7 of the 35 keys appeared anywhere under `tests/`, and most of those were comments or partial matches. Every other check was exercised solely against the live, healthy repository with `assertEqual(errors, [])`. That assertion holds whether the check works or does nothing at all. And one check in that same file HAD silently done nothing since it was written: its gating error sat behind `"settings.json" in txt and not rglob("settings.json")`, and both conjuncts were false in practice, so it could not fire whatever the documentation claimed.
+- **Root cause:** Not neglect - impossibility. The repo-wide validators resolved every input from module globals, and `main(argv=None)` ignored `argv` and always ran over the live repository. There was no way to hand any of them a broken tree, so a negative control could not be WRITTEN, only wished for. Testability was a structural property the module did not have, and its absence was invisible because the green bar looked the same either way.
+- **Correct fix:** Four validators take an optional root and one takes optional data; `run_all` takes an optional golden map for the one key only it emits. Every default is exactly the previous behaviour, proven by diffing the live output before and after - byte-identical. Then a control per key, each doing two things: a fixture tree with ONE deliberate defect produces that key, and the same validator on the clean fixture produces nothing. Without the second half a check that always fires looks correct; without the first it might be a no-op. An inventory test reads the harness source for every key it can emit and fails on any key with neither a control nor a recorded reason - mutation-verified by adding a new `errors.append` and requiring red.
+- **Preventive rule / automated check:** When a check is only ever run against known-good input, you have tested the input, not the check. Ask what it would take to hand it bad input; if the answer is "there is no way to", that is the finding - fix the testability first, because everything downstream of it is unverifiable by construction. Then require each check to fire on a defect AND stay silent on its absence, and make the inventory itself a test so a newly added check cannot arrive uncontrolled.
+- **Related files & tests:** `tests/skills/harness.py` (injectable `root`/`data`/`golden`), `tests/test_harness_negative_controls.py`, `docs/testing.md` (what the harness pass line does and does not prove).
+
+---
+
 ## 2026-09-21 — "Some error was recorded" is a weaker claim than "this error was recorded", and the mutation is what tells you which one you wrote
 
 - **Task / context:** Strengthening ten assertions that an audit found could not fail - whole-file keyword greps, a floor of 40 over 72 rows, a JSON round-trip of a value against itself, a `git ls-files` in a repo where nothing was ever staged, a substring that another word satisfied.
