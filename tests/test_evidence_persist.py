@@ -78,7 +78,12 @@ class TestAuditorStaysReadOnly(unittest.TestCase):
 
 
 class TestEvidenceRerunOverwrites(unittest.TestCase):
-    def test_evidence_rerun_overwrites_in_place(self):
+    def test_evidence_path_is_the_same_canonical_file_on_a_rerun(self):
+        # Renamed. The old name claimed to pin rerun-OVERWRITE behaviour, but the overwrite was
+        # performed by this test's own two `write_text` calls - no writer is under test here.
+        # What it actually pins, and all it can pin, is that `evidence_path()` resolves to one
+        # canonical path with no timestamp or run id, so a second run lands on the same file.
+        # The finalize step that does the writing is covered by the pipeline suites.
         mod = _load_resolver()
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

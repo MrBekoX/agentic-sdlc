@@ -11,6 +11,7 @@ Asserts the wiring between skills/agents/workflows/commands/hooks/scripts is int
 """
 
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -82,7 +83,46 @@ class TestSkillCrossReferences(unittest.TestCase):
                 self.assertIn(phrase, skill)
                 self.assertIn(phrase, codex_readme)
 
+    # The runtime feature is a capital-W `Workflow`. Lowercase "workflow" and
+    # "dynamic-workflow" name the general concept and appear in prose that is not about the
+    # runtime at all, so matching them makes the check fire on the wrong text.
+    WORKFLOW_FEATURE = re.compile(r"\bWorkflow\b")
+    # Codex has no Workflow runtime, so every mention of the feature has to say what happens
+    # there. Measured on the tree: all ten mentions carry one of these in their own section.
+    RUNTIME_CAVEAT = re.compile(
+        r"Claude Code|Codex|runtime|adapter|unavailable|degraded|fall ?back", re.IGNORECASE)
+
+    @staticmethod
+    def _sections(lines):
+        """(start, end) for each `##`-delimited section; index 0 covers the preamble."""
+        starts = [0] + [i for i, line in enumerate(lines) if line.startswith("## ")]
+        return [(s, starts[n + 1] if n + 1 < len(starts) else len(lines))
+                for n, s in enumerate(starts)]
+
+    def _uncaveated_workflow_mentions(self, text):
+        """Lines naming the runtime Workflow whose own section carries no runtime caveat."""
+        lines = text.splitlines()
+        bounds = self._sections(lines)
+        offenders = []
+        for index, line in enumerate(lines):
+            if not self.WORKFLOW_FEATURE.search(line):
+                continue
+            start, end = next((s, e) for s, e in bounds if s <= index < e)
+            if not self.RUNTIME_CAVEAT.search("\n".join(lines[start:end])):
+                offenders.append((index + 1, line.strip()))
+        return offenders
+
     def test_adapter_dependent_skills_do_not_make_workflow_unconditional(self):
+        # Was a whole-file keyword grep with no positional link to the mention. Deleting every
+        # line containing "workflow" from these seven skills still left 2-12 matches of the old
+        # alternation in each, so every subTest passed regardless - and
+        # `implementation-control`, which contains no "workflow" at all, was never checked
+        # because the `if` guard was false.
+        #
+        # The window is the SECTION rather than the line: dispatch-strategy names a `Workflow`
+        # in its fan-out section and carries the "Degrade: ... runtime without parallel agents"
+        # three lines below. A tighter window would demand an edit to a skill that is already
+        # correct.
         skills = [
             "dispatch-strategy",
             "spec-authoring",
@@ -92,11 +132,23 @@ class TestSkillCrossReferences(unittest.TestCase):
             "code-quality-review",
             "implementation-control",
         ]
+        checked = 0
         for skill in skills:
             text = (h.SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+            mentions = self.WORKFLOW_FEATURE.findall(text)
+            checked += len(mentions)
             with self.subTest(skill=skill):
-                if "Workflow" in text or "workflow" in text:
-                    self.assertRegex(text, r"Claude Code|runtime|adapter|unavailable|degraded")
+                offenders = self._uncaveated_workflow_mentions(text)
+                self.assertEqual(
+                    offenders, [],
+                    "%s names the runtime Workflow with no runtime caveat in the same section, "
+                    "so the instruction reads as unconditional on Codex: %s" % (skill, offenders),
+                )
+        # Without this, a rename that made every mention vanish would leave the loop asserting
+        # nothing - the silent-coverage-loss shape this package exists to remove.
+        self.assertGreater(checked, 0,
+                           "no skill names the runtime Workflow any more; this check has "
+                           "stopped covering anything and should be re-aimed or removed")
 
     def test_implementation_control_references_auditor_agent(self):
         text = (h.SKILLS_DIR / "implementation-control" / "SKILL.md").read_text(encoding="utf-8")

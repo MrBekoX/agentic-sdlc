@@ -424,7 +424,13 @@ class TestBR6CaseTable(unittest.TestCase):
                   and not i.startswith(D25_FORGED_PREFIXES + D27_FORGED_PREFIXES + D28_FORGED_PREFIXES
                                       + D29_FORGED_PREFIXES)
                   and not i.startswith("edge-forged-oror-")]
-        self.assertGreaterEqual(len(forged), 40)
+        # Was `assertGreaterEqual(len(forged), 40)` over 72 real rows, so 32 of them - 44% of
+        # this negative-grammar coverage - could have been renamed or prefix-typo'd out of the
+        # filter without the loop noticing. Every sibling test in this file uses an exact
+        # count; this one was the outlier. Bump it deliberately when rows are added.
+        self.assertEqual(len(forged), 72,
+                         "the forged-row set changed size; update this count in the same commit "
+                         "that adds or removes rows, so a row cannot leave the filter silently")
         for row_id in forged:
             with self.subTest(id=row_id):
                 self.assertIs(rows[row_id]["inSafeGrammar"], False)
