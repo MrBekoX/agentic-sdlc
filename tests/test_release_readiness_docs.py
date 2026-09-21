@@ -182,6 +182,7 @@ class TestReleaseReadinessDocs(unittest.TestCase):
                 "!docs/publication/",
                 "!docs/publication/*.md",
                 "!docs/publication/link-checks.json",
+                "!docs/zcode-runtime-adapter.md",
             },
         )
 

@@ -103,7 +103,13 @@ const messageText = (info.calls || []).flatMap((call) => {
       try { return readFileSync(resolvePath(cwd, f), 'utf8'); } catch { return ''; }
     }),
   ]);
-}).join('\n');
+}).concat(
+  // A git call found INSIDE an inner shell payload (`bash -c "git commit -m ..."`). Its
+  // message is scanned; its `-F`/`--file` is deliberately NOT read and its `-C` deliberately
+  // does not redirect anything, so reaching into the payload does not widen what this hook
+  // opens on disk. See the payload notes in hooks/git-invocation.mjs.
+  (info.calls || []).flatMap((call) => (call.payloadTexts || []).flatMap(commitMessages)),
+).join('\n');
 
 const contentFindings = scanLines(added, HIGH);
 const messageFindings = scanLines(messageText, HIGH).map((f) => ({ ...f, inMessage: true }));
