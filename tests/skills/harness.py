@@ -25,6 +25,8 @@ Two severities, like check_all.py:
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -485,6 +487,56 @@ def check_doc_consistency(root=None):
     return errors, warnings
 
 
+# Only the two distinctive forms. `=======` is also a Markdown heading underline, so gating on
+# it would fire on ordinary documents - including this repository's own.
+CONFLICT_MARKERS = ("<" * 7, ">" * 7)
+
+
+def validate_no_conflict_markers(root=None):
+    """No TRACKED file may carry an unresolved conflict marker. (errors, warnings).
+
+    Merging ten branches left markers in two committed files and both survived a full
+    1445-test gate run. One was `docs/testing.md`, whose own suite-map test reads that file and
+    passed: it matches table rows with a regex, and the rows either side of the marker still
+    matched. In Python or JS a marker usually breaks the syntax and something fails for an
+    unrelated reason; in Markdown, or in a test file whose broken region is not executed,
+    nothing does.
+
+    This runs in the harness rather than as a unit test because the harness is wired into
+    `.pre-commit-config.yaml`: the marker is caught before the commit that would carry it,
+    which is prevention rather than detection.
+
+    Reports PATHS only. A marker can sit in a file that also holds sensitive text, and a gate
+    that printed the surrounding region would turn a merge slip into a disclosure.
+    """
+    errors, warnings = [], []
+    root = root or REPO
+    git = shutil.which("git")
+    if git is None:
+        # A check that cannot enumerate its input has verified nothing. Saying so is the same
+        # honesty rule this repository applies to a missing `node`.
+        warnings.append("conflict_marker_scan_skipped:no_git")
+        return errors, warnings
+    proc = subprocess.run([git, "ls-files", "-z"], cwd=str(root), capture_output=True)
+    if proc.returncode != 0:
+        warnings.append("conflict_marker_scan_skipped:not_a_repository")
+        return errors, warnings
+    for rel in proc.stdout.decode("utf-8", "replace").split("\0"):
+        if not rel:
+            continue
+        path = root / rel
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue                                  # absent, or not text; nothing to read
+        for line in text.splitlines():
+            if line.startswith(CONFLICT_MARKERS):
+                errors.append("conflict_marker:%s" % rel)
+                break
+    return errors, warnings
+
+
+
 # ---------------------------------------------------------------------------
 # Aggregation + CLI
 # ---------------------------------------------------------------------------
@@ -523,7 +575,8 @@ def run_all(golden=None):
 
     for fn in (validate_plugin_root_refs, validate_hooks_json,
                lambda: validate_workflow_agent_types(reg),
-               validate_safety_guardrails, check_doc_consistency):
+               validate_safety_guardrails, check_doc_consistency,
+               validate_no_conflict_markers):
         e, w = fn()
         errors += e
         warnings += w
