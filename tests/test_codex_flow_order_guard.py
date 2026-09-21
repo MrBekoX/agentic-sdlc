@@ -15,6 +15,7 @@ Key divergence under test (DP-EVID/AC17): the gate must NOT reuse AP2b deriveFlo
 validates a partner role from on-disk presence; the mixed-origin case (in-session spec write +
 committed-only plan) must DENY naming the half not written this session.
 """
+import hashlib
 import json
 import os
 import shutil
@@ -27,6 +28,75 @@ REPO = Path(__file__).resolve().parents[1]
 ROLLOUT = REPO / "hooks" / "codex-rollout.mjs"
 HOOK = REPO / "hooks" / "flow-order-guard-codex.mjs"
 CODEX_CFG = REPO / "hooks" / "hooks-codex.json"
+
+# LF-normalized sha256 of each locked file, as checked out from main when this lock was
+# converted. A digest fails on ANY change to the file - committed or not - and its only escape
+# is editing the literal below, which is greppable and shows up in review. What this replaces
+# re-read its expected value from `git show HEAD:`, so on a clean checkout it compared the file
+# against itself: commit c173b99 changed two of these four files and the lock never fired.
+#
+# Releasing a file: delete its entry here WITH the reason, and give the file its own
+# behavioural regression test. That is the convention the comments in BYTE_LOCKED already
+# describe; the digest is what makes skipping it visible.
+LOCK_DIGESTS = {
+    # The pre-edit ordering gate: whether required evidence exists before a source edit.
+    "hooks/flow-order-guard.mjs":
+        "f584b0c25d1b6a8a655b2bc37fbad37350ee9c80545b412d2bd49e30d6a3b646",
+    # The Stop-time flow-step gate: whether a flow's required steps actually ran.
+    "hooks/flow-step-guard.mjs":
+        "6b99513e833d83509ac6d166012ca970a9a8b1e8b88abc89422a645efd8aaade",
+    # The completion-claim backstop.
+    "hooks/completion-claim-guard.mjs":
+        "f44a4ed33209852f97582055c055097ea9803e72dde04741db091176a99fae5d",
+    # The Codex flow-step equivalent.
+    "hooks/flow-step-guard-codex.mjs":
+        "b6d05a7d8358647c2245386a8f98b19e99abcc3f0fb291d2b04b36c8317c446f",
+}
+
+# The Codex wiring this suite pins, as literals rather than as whatever HEAD happens to hold.
+# Small enough to read, which is the point: a reviewer sees which guards are wired, in which
+# order, with which timeouts. Removing a handler now fails - the shape these replace filtered
+# two lists by name and compared the results, so deleting the guarded handler made both sides
+# empty and the assertion passed.
+PINNED_CODEX_BASH_BLOCK = {
+    "matcher": "Bash",
+    "hooks": [
+        {"type": "command", "command": 'node "${PLUGIN_ROOT}/hooks/scan-commit.mjs"',
+         "timeout": 20, "statusMessage": "Secret scan (commit)..."},
+        {"type": "command",
+         "command": 'node "${PLUGIN_ROOT}/hooks/destructive-command-guard.mjs"',
+         "timeout": 15, "statusMessage": "Destructive command guard..."},
+        {"type": "command", "command": 'node "${PLUGIN_ROOT}/hooks/branch-guard.mjs"',
+         "timeout": 15, "statusMessage": "Branch guard (commit/push)..."},
+    ],
+}
+
+PINNED_CODEX_SESSION_START = [
+    {"matcher": "startup|resume|clear|compact",
+     "hooks": [{"type": "command",
+                "command": 'node "${PLUGIN_ROOT}/hooks/session-start-codex.mjs"',
+                "timeout": 15, "statusMessage": "AGENTIC-SDLC startup context"}]},
+]
+
+PINNED_CODEX_STOP = [
+    {"hooks": [
+        {"type": "command",
+         "command": 'node "${PLUGIN_ROOT}/hooks/completion-claim-guard-codex.mjs"',
+         "timeout": 20, "statusMessage": "Completion-claim gate (marker)..."},
+        {"type": "command",
+         "command": 'node "${PLUGIN_ROOT}/hooks/flow-step-guard-codex.mjs"',
+         "timeout": 20, "statusMessage": "Flow-step evidence gate (codex)..."},
+    ]},
+]
+
+# The Codex write guard the Codex suites pin by NAME and by VALUE, with presence asserted first.
+PINNED_CODEX_SCAN_WRITE_HANDLER = {
+    "type": "command",
+    "command": 'node "${PLUGIN_ROOT}/hooks/scan-write-codex.mjs"',
+    "timeout": 20,
+    "statusMessage": "Secret scan (write)...",
+}
+
 
 # ---- artifact bodies (must pass/fail validate_artifacts.py --strict for the RIGHT reason) ----
 # Reused from the AP2b harness, calibrated so a valid body clears --strict and a stub fails it.
@@ -253,12 +323,6 @@ def _run_hook(stdin, env_extra=None):
                        capture_output=True, text=True, encoding="utf-8", env=env)
     assert r.returncode == 0, r.stderr  # fail-open: always exit 0
     return r.stdout
-
-
-def _git_show(rel):
-    r = subprocess.run(["git", "show", f"HEAD:{rel}"], cwd=str(REPO),
-                       capture_output=True, text=True, encoding="utf-8")
-    return r.stdout if r.returncode == 0 else None
 
 
 def _deny_reason(stdout):
@@ -617,17 +681,21 @@ class TestOrderWiring(unittest.TestCase):
         self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", self.cfg_text)
         self.assertFalse((REPO / "hooks" / "hooks.json").exists())
 
-    def test_command_block_and_stop_unchanged_vs_head(self):  # additive-regression guarantee
-        head = json.loads(_git_show("hooks/hooks-codex.json"))
+    def test_command_block_and_stop_match_the_pinned_wiring(self):  # additive-regression guarantee
+        # Pinned literals, not `git show HEAD:`. Against HEAD this compared the file to itself
+        # on any clean checkout, so an additive-regression "guarantee" guaranteed nothing. The
+        # blocks are small enough to read, which is the point: a reviewer sees which guards are
+        # wired, in which order, with which timeouts.
         cur = self.cfg
-        head_first = [b for b in head["hooks"]["PreToolUse"] if b.get("matcher") == "Bash"][0]
         cur_first = [b for b in cur["hooks"]["PreToolUse"] if b.get("matcher") == "Bash"][0]
-        self.assertEqual(cur_first, head_first)
-        self.assertEqual(cur["hooks"]["SessionStart"], head["hooks"]["SessionStart"])
-        self.assertEqual(cur["hooks"]["Stop"], head["hooks"]["Stop"])
+        self.assertEqual(cur_first, PINNED_CODEX_BASH_BLOCK)
+        self.assertEqual(cur["hooks"]["SessionStart"], PINNED_CODEX_SESSION_START)
+        self.assertEqual(cur["hooks"]["Stop"], PINNED_CODEX_STOP)
 
 
-# ---- BR8/§7: the FULL regression surface stays byte-identical ---------------
+# ---- BR8/§7: the named regression surface stays byte-identical --------------
+# "Named", not "full": the list below is what is locked, and it has shrunk as files
+# became fix targets. Each release is recorded in place with its reason.
 class TestRegressionSurfaceUntouched(unittest.TestCase):
     BYTE_LOCKED = [
         # RELEASED by the 2026-08-22 guard-bypass fix (same convention as codex-rollout.mjs above:
@@ -676,15 +744,19 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # prevent release hardening.
     ]
 
-    def test_locked_files_byte_identical_to_head(self):  # BR8
-        for rel in self.BYTE_LOCKED:
+    def test_locked_files_byte_identical(self):  # BR8
+        for rel, want in sorted(LOCK_DIGESTS.items()):
             with self.subTest(file=rel):
-                head = _git_show(rel)
-                self.assertIsNotNone(head, f"{rel} not in HEAD")
-                # The public skill-ID migration is the only permitted delta. After the rename is
-                # committed, the replacement is a no-op and this returns to an exact HEAD lock.
-                expected = head.replace("implementasyon-control", "implementation-control")
-                self.assertEqual((REPO / rel).read_text(encoding="utf-8"), expected)
+                path = REPO / rel
+                # Existence first, so a deleted or renamed file fails by name rather than
+                # raising. The old shape got this half right and it is kept.
+                self.assertTrue(path.exists(), f"{rel} is missing from the tree")
+                # CRLF-normalized: a Windows working tree must not fail a Linux checkout, and
+                # a pure line-ending change is out of scope by design.
+                got = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+                self.assertEqual(got, want,
+                                 f"{rel} changed; bump the digest in LOCK_DIGESTS in the same "
+                                 f"commit, with the reason, or release the file from the lock")
 
     def test_released_completion_guard_not_locked_and_rationale_present(self):  # AC48
         self.assertNotIn("hooks/completion-claim-guard-codex.mjs", self.BYTE_LOCKED)

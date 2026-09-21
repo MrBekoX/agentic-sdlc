@@ -20,6 +20,20 @@ Each entry includes:
 
 ---
 
+## 2026-09-21 — A lock that re-reads its expected value from the moving baseline is not a lock
+
+- **Task / context:** Auditing the test suite for assertions that cannot fail. Seven of them claimed to pin a regression surface byte-for-byte by comparing a working-tree file against `git show HEAD:<path>`. Four covered guard files; three covered hook-wiring JSON. The surrounding prose was emphatic - a heading reading `the FULL regression surface stays byte-identical`, a class named `TestRegressionSurfaceUntouched`, and a comment asserting that a named rename was `the only permitted delta`.
+- **Symptom:** On a clean checkout the working tree IS `HEAD`, so the content half of every one of those assertions reduced to `content == content`. `.github/workflows/ci.yml` checks out and runs nothing that writes into the tree before `unittest discover`, so in CI they were in the always-passing state by construction. Demonstrated in a scratch repository: clean checkout passes; an uncommitted edit fails - the ONLY window the shape fires; the same edit, once committed, passes again with a `BACKDOOR` line sitting inside the locked guard. And it had already happened here: commit `c173b99` changed `hooks/flow-step-guard.mjs` and `hooks/completion-claim-guard.mjs`, both locked, and in the SAME commit added a string-replacement hatch to neutralise the lock it had just tripped. That string now occurs nowhere, so the hatch became a permanent no-op wrapped around a tautology.
+- **A second shape in the same cluster:** three of the seven filtered a handler list by name on BOTH sides and compared the results. Deleting the handler they guard made both sides `[]`, so `assertEqual([], [])` passed. Removing the thing a lock protects made the lock green.
+- **Root cause:** The expected value was DERIVED at run time from a baseline that moves with the thing being checked. A lock is only a lock when its expected value is fixed independently - and when changing it is a visible act. The repository already contained the correct shape a few files away (`tests/test_codex_write_guard.py` pins two files by LF-normalized sha256 literal, and commit `c043c31` was forced to bump that literal in the same commit that changed the file), so this was not missing knowledge; the two shapes simply never got compared.
+- **Correct fix:** Whole-file locks became LF-normalized sha256 literals with a per-entry rationale; structural locks became pinned literals with PRESENCE asserted before the comparison, so removal fails. The escape hatch went with them. Every converted lock was then mutation-verified - 13 expectations, each file mutated with a behaviour-preserving byte change, the row required to go red, the file restored and the restoration checked by digest. A meta-test now pins the property rather than any file: no live test may resolve an expected value from `git show HEAD:`, and every locked path's expected value must appear as a literal in the test source, so a digest recomputed at run time cannot quietly reintroduce the tautology.
+- **Preventive rule / automated check:** For any assertion described as a lock, pin, golden or "unchanged", ask ONE question: where does the expected value come from, and does it move when the thing under test moves? If it is read from HEAD, from the same function under test, or recomputed from the same input, it is a tautology however emphatic the comment beside it. The check is cheap and mechanical - assert that the expected value is a literal in the source. And never accept a lock nobody has watched fail: mutate the file it names, require red, restore by digest.
+- **Related files & tests:** `tests/test_byte_lock_integrity.py` (the property); `tests/test_codex_flow_order_guard.py`, `tests/test_codex_flow_step_guard.py`, `tests/test_codex_completion_claim_guard.py` (converted locks and pinned wiring literals); `tests/test_codex_write_guard.py` (the working reference, digests hoisted to module scope so the meta-test can see them).
+
+---
+
+---
+
 ## 2026-09-21 — A number carried out of a deferred item is stale evidence; re-derive it at the moment you publish it
 
 - **Task / context:** While closing seventeen command-prefix bypasses on the git path, a cost problem was found in `resolveGitCommands` and deliberately NOT fixed in that package - bundling it would have blurred which change earned the green gate. It was filed as a recorded follow-up, with a severity: *"roughly 14.5 s at 149 KB, crossing the 20 s budget at around 200 KB."* That sentence was then copied into the commit message and the pull-request description of the package that shipped.
@@ -29,6 +43,8 @@ Each entry includes:
 - **The underlying defect, for the record:** `dirs.includes(d)` over a growing array at two sites, so every new `-C` directory was compared against every one already collected. Replaced with a `Set` carried beside the ordered array - a `Set` rather than a plain object, because `-C constructor` and `-C __proto__` must be data and not properties. 927 KB went from 71 240 ms to 137 ms with an identical `dirs` array on all seven equivalence inputs.
 - **Preventive rule / automated check:** A performance number inside a deferred item is a HYPOTHESIS, not a finding. Before it enters anything durable - a commit message, a PR description, a report - re-run it and publish the curve, not the point. Two properties make the claim checkable by someone else: state the exact shape that produced it (this one failed precisely because nobody could tell what shape "149 KB" meant), and assert a RATIO in the regression test, because the absolute numbers move with the host and the exponent does not.
 - **Related files & tests:** `hooks/git-invocation.mjs` (both `-C` aggregation sites); `tests/test_secret_guard_bypasses.py::TestRoundFourteenGitPathResiduals::test_collecting_c_directories_is_not_quadratic` and `::test_collected_c_directories_are_unchanged_by_the_set`; the correction note in pull request #44.
+
+---
 
 ---
 
@@ -48,6 +64,8 @@ Each entry includes:
 
 ---
 
+---
+
 ## 2026-09-20 — An anchored assertion written from the current output pins whatever it finds, defect included
 
 - **Task / context:** Auditing a third-party-authored runtime adapter. Its three PreToolUse hook handlers ran `node ${PLUGIN_ROOT}/hooks/<guard>.mjs` with the expansion unquoted, while the sibling adapter for another runtime quoted the same expression.
@@ -56,6 +74,8 @@ Each entry includes:
 - **Correct fix:** Quote the expansion in all three handlers, and rewrite the assertion to *require* the quoted form with the rationale inline, so the lock now pins the fix. Separately, state the sourcing honestly: the vendor's hook page documents fail-open and `${VAR}` expansion but defers load-time expansion to an unpublished reference and says nothing about shell-vs-direct spawn for a hook `command`; the shell rule appears only for the status-line command. The quoting is therefore a defensive measure against an **inferred** failure mode, labelled unverified — not a cited vendor behavior.
 - **Preventive rule / automated check:** An anchored assertion (`^...$`, an exact-set equality, a recorded digest) is a *decision about which form is correct*, not a description of what is there. Before writing one, ask "is the thing I am about to freeze right?" — and when a fix turns such an assertion red, the first question is whether the assertion or the code is wrong. Never quietly widen it to make both pass. Where a value is copied from another adapter that already does it correctly, diff the two before pinning either.
 - **Related files & tests:** `hooks/hooks-grok.json`, `docs/runtime-adapter.md`; `tests/test_grok_packaging.py::TestGrokHookWire::test_executors_are_command_strings_with_plugin_root_and_second_timeouts`.
+
+---
 
 ---
 
@@ -72,6 +92,8 @@ Each entry includes:
 
 ---
 
+---
+
 ## 2026-09-20 — A backstop that stops where the thing it backs up stopped is not a backstop
 
 - **Task / context:** Bounding the exponential shell-payload walk in `hooks/destructive-command-guard.mjs`. The fix added `MAX_PAYLOAD_DEPTH`, a work budget, and `MAX_INPUT_CHARS` past which the precise tokenizer bails and marks the input unresolved; an unresolved input then falls through to a linear widened scan so the guard never reports clean on a parse it did not finish.
@@ -82,7 +104,6 @@ Each entry includes:
 - **Test discipline this round changed.** Three of the tests written for this fix could not fail for the reason they named: one claimed to isolate a fallback path that the precise path reached first, one locked a defect that a later bound had already made unreachable, and one took a ratio against a process whose startup time dominated the work being measured. Every timing assertion now subtracts a baseline run that does no walking, and every regression row was mutation-tested — the mechanism it names is deleted, the row must go red, and the file is restored byte-for-byte. A row that stays green under that deletion is relabelled to say what it actually holds, not quietly kept.
 - **Preventive rule / automated check:** When a guard has a precise path and a fallback, give them SEPARATE limits and write down what each limit is for. A fallback may be coarser than the path it backs up, never narrower — narrower means the fallback has a blind spot exactly where it was supposed to see. Test every bound at its boundary AND past it, with the hazard positioned so the bound is what decides: a hazard placed before the cutoff proves nothing about a cap. And keep running the adversarial round against the FIX — this defect existed only on the fix branch, was invisible to the whole existing suite, and was found by the round whose brief was "find what this change broke", not by the round that audited the original code.
 - **Related files & tests:** `hooks/destructive-command-guard.mjs` (`widenedFindingLabel`, `MAX_INPUT_CHARS`); `tests/test_secret_guard_bypasses.py::TestSegmenterBounds::test_padding_past_the_input_cap_does_not_hide_the_verb`, `::test_padding_past_the_input_cap_still_allows_benign_work`, `::test_a_bound_hit_in_one_segment_does_not_hide_its_siblings`.
-
 
 ## 2026-09-18 — A patched seam the code no longer uses makes a test assert the environment
 

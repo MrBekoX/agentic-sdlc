@@ -11,6 +11,7 @@ Cross-cutting fixture rule (BR5): every "reported missing"/block fixture include
 NON-test production source patch (`_src_patch`, default src/app.py); without it `sourceEdited=false`
 neutralizes the obligation and derivation is silent (AC14) regardless of stub artifacts.
 """
+import hashlib
 import json
 import os
 import shutil
@@ -25,6 +26,27 @@ EVID = REPO / "hooks" / "codex-flow-evidence.mjs"
 FLOW_EVID = REPO / "hooks" / "flow-evidence.mjs"
 HOOK = REPO / "hooks" / "flow-step-guard-codex.mjs"
 CODEX_CFG = REPO / "hooks" / "hooks-codex.json"
+
+# LF-normalized sha256 of the two files this suite locks. The longer rationale sits beside
+# LOCK_DIGESTS in tests/test_codex_flow_order_guard.py: a lock that re-reads its expected value
+# from the moving HEAD cannot fail on a committed change.
+LOCK_DIGESTS = {
+    "hooks/flow-step-guard.mjs":
+        "6b99513e833d83509ac6d166012ca970a9a8b1e8b88abc89422a645efd8aaade",
+    "hooks/completion-claim-guard.mjs":
+        "f44a4ed33209852f97582055c055097ea9803e72dde04741db091176a99fae5d",
+}
+
+# The Codex Stop handler this suite pins by NAME and by VALUE. Presence is asserted before the
+# comparison, because the shape this replaces compared two name-filtered lists and passed when
+# both were empty.
+PINNED_CODEX_COMPLETION_STOP_HANDLER = {
+    "type": "command",
+    "command": 'node "${PLUGIN_ROOT}/hooks/completion-claim-guard-codex.mjs"',
+    "timeout": 20,
+    "statusMessage": "Completion-claim gate (marker)...",
+}
+
 
 MARKER = "<!-- agentic-sdlc:gate:completion-claim:verified -->"
 FLOW_LABEL = "an artifact-bearing SDLC flow (spec/plan/tests)"
@@ -277,12 +299,6 @@ def _run_hook(stop_input, env_extra=None):
                        capture_output=True, text=True, encoding="utf-8", env=env)
     assert r.returncode == 0, r.stderr  # fail-open: always exit 0
     return r.stdout
-
-
-def _git_show(rel):
-    r = subprocess.run(["git", "show", f"HEAD:{rel}"], cwd=str(REPO),
-                       capture_output=True, text=True, encoding="utf-8")
-    return r.stdout if r.returncode == 0 else None
 
 
 # ---- BR6 exit attribution (publication-readiness Tasks 15, 16, 18) ------------
@@ -919,7 +935,9 @@ class TestStopWiring(unittest.TestCase):
         self.assertFalse((REPO / "hooks" / "hooks.json").exists())
 
 
-# ---- AC18: §10 regression surface untouched --------------------------------
+# ---- AC18: the named §10 regression surface stays byte-identical -----------
+# Pinned by LOCK_DIGESTS above, not by a comparison against HEAD: on a clean checkout
+# the working tree IS HEAD, so the shape this replaces compared each file to itself.
 class TestRegressionSurfaceUntouched(unittest.TestCase):
     BYTE_LOCKED = [
         "hooks/flow-step-guard.mjs",
@@ -954,15 +972,19 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
                               "hooks/completion-claim-guard.mjs", "hooks/flow-step-guard-codex.mjs"},
                              set(order_suite.TestRegressionSurfaceUntouched.BYTE_LOCKED))
 
-    def test_locked_files_byte_identical_to_head(self):  # AC18
-        for rel in self.BYTE_LOCKED:
+    def test_locked_files_byte_identical(self):  # AC18
+        for rel, want in sorted(LOCK_DIGESTS.items()):
             with self.subTest(file=rel):
-                head = _git_show(rel)
-                self.assertIsNotNone(head, f"{rel} not in HEAD")
-                # The public skill-ID migration is the only permitted delta. After the rename is
-                # committed, the replacement is a no-op and this returns to an exact HEAD lock.
-                expected = head.replace("implementasyon-control", "implementation-control")
-                self.assertEqual((REPO / rel).read_text(encoding="utf-8"), expected)
+                path = REPO / rel
+                # Existence first, so a deleted or renamed file fails by name rather than
+                # raising. The old shape got this half right and it is kept.
+                self.assertTrue(path.exists(), f"{rel} is missing from the tree")
+                # CRLF-normalized: a Windows working tree must not fail a Linux checkout, and
+                # a pure line-ending change is out of scope by design.
+                got = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+                self.assertEqual(got, want,
+                                 f"{rel} changed; bump the digest in LOCK_DIGESTS in the same "
+                                 f"commit, with the reason, or release the file from the lock")
 
     def test_codex_pretooluse_sessionstart_unchanged(self):  # AC18 (additive-only since AP2c)
         # AP2c additively appends flow-order-guard-codex.mjs to the Bash|apply_patch PreToolUse
@@ -970,12 +992,13 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         # SessionStart unchanged, the Bash command-guard block unchanged, and the scan-write-codex
         # handler dict unchanged (the new flow-order handler is the only permitted addition, asserted
         # positively by tests/test_codex_flow_order_guard.py::test_pretooluse_array_has_both_guards).
+        import test_codex_flow_order_guard as order_suite
         cur = json.loads(CODEX_CFG.read_text(encoding="utf-8"))
-        head = json.loads(_git_show("hooks/hooks-codex.json"))
-        self.assertEqual(cur["hooks"]["SessionStart"], head["hooks"]["SessionStart"])
+        # Pinned literals, not `git show HEAD:`. Against HEAD both sides came from the same
+        # bytes on any clean checkout, so "unchanged" was true by construction.
+        self.assertEqual(cur["hooks"]["SessionStart"], order_suite.PINNED_CODEX_SESSION_START)
         cur_bash = [b for b in cur["hooks"]["PreToolUse"] if b.get("matcher") == "Bash"]
-        head_bash = [b for b in head["hooks"]["PreToolUse"] if b.get("matcher") == "Bash"]
-        self.assertEqual(cur_bash, head_bash)
+        self.assertEqual(cur_bash, [order_suite.PINNED_CODEX_BASH_BLOCK])
 
         def _scan_handler(cfg):
             for b in cfg["hooks"]["PreToolUse"]:
@@ -983,16 +1006,37 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
                     return [h for h in b["hooks"] if "scan-write-codex.mjs" in h["command"]]
             return []
 
-        self.assertEqual(_scan_handler(cur), _scan_handler(head))
+        # PRESENCE first: the previous form compared this list against the same list derived
+        # from HEAD, so removing the handler - or the whole Bash|apply_patch block - made both
+        # sides `[]` and the assertion passed.
+        found = _scan_handler(cur)
+        self.assertTrue(found, "the Codex write guard is not wired at all")
+        self.assertEqual(found, [order_suite.PINNED_CODEX_SCAN_WRITE_HANDLER])
+
+    def _stop_handlers_named(self, cfg, needle):
+        return [h for blk in cfg["hooks"]["Stop"] for h in blk["hooks"]
+                if needle in h["command"]]
 
     def test_existing_completion_claim_stop_handler_unchanged(self):  # AC18
         cur = json.loads(CODEX_CFG.read_text(encoding="utf-8"))
-        head = json.loads(_git_show("hooks/hooks-codex.json"))
-        head_handlers = [h for blk in head["hooks"]["Stop"] for h in blk["hooks"]]
-        cur_handlers = [h for blk in cur["hooks"]["Stop"] for h in blk["hooks"]]
-        head_cc = [h for h in head_handlers if "completion-claim-guard-codex.mjs" in h["command"]]
-        cur_cc = [h for h in cur_handlers if "completion-claim-guard-codex.mjs" in h["command"]]
-        self.assertEqual(cur_cc, head_cc)
+        found = self._stop_handlers_named(cur, "completion-claim-guard-codex.mjs")
+        # PRESENCE first. The previous form filtered HEAD and the working tree by the same
+        # name and compared the results, so removing the handler made both sides empty and
+        # the assertion passed - a lock that went green when the thing it guards was deleted.
+        self.assertTrue(found, "the completion-claim Stop handler is not wired at all")
+        self.assertEqual(found, [PINNED_CODEX_COMPLETION_STOP_HANDLER])
+
+    def test_removing_the_stop_handler_would_fail_this_lock(self):  # AC18 discriminator
+        # The mutation the old shape could not see, applied to an in-memory copy so nothing
+        # on disk changes. If this ever passes, the lock above has gone vacuous again.
+        cur = json.loads(CODEX_CFG.read_text(encoding="utf-8"))
+        for blk in cur["hooks"]["Stop"]:
+            blk["hooks"] = [h for h in blk["hooks"]
+                            if "completion-claim-guard-codex.mjs" not in h["command"]]
+        found = self._stop_handlers_named(cur, "completion-claim-guard-codex.mjs")
+        self.assertEqual(found, [], "the fixture did not actually remove the handler")
+        self.assertNotEqual(found, [PINNED_CODEX_COMPLETION_STOP_HANDLER],
+                            "an empty handler list must not satisfy the pinned literal")
 
 
 # ---- B5-AC18 (DP-XCONSUMER): the multi-file completeness fix's cross-consumer effect ----
