@@ -4,6 +4,7 @@ Parser unit tests drive `hooks/codex-rollout.mjs` via `node` over synthetic roll
 behavioral tests drive the real Stop hook `hooks/completion-claim-guard-codex.mjs` as a subprocess.
 All text-mode subprocess calls pin encoding='utf-8' (locale-independent, house rule from PR #10/#11).
 """
+import hashlib
 import json
 import os
 import re
@@ -19,6 +20,14 @@ HOOK = REPO / "hooks" / "completion-claim-guard-codex.mjs"
 CLAUDE_GUARD = REPO / "hooks" / "completion-claim-guard.mjs"
 SKILL = REPO / "skills" / "completion-claim-gate" / "SKILL.md"
 CODEX_CFG = REPO / "hooks" / "hooks-codex.json"
+
+# LF-normalized sha256 of the Claude completion-claim guard. Replaces a comparison against
+# `git show HEAD:`, which on a clean checkout compared the file against itself.
+LOCK_DIGESTS = {
+    "hooks/completion-claim-guard.mjs":
+        "f44a4ed33209852f97582055c055097ea9803e72dde04741db091176a99fae5d",
+}
+
 
 MARKER = "<!-- agentic-sdlc:gate:completion-claim:verified -->"
 # A claim that matches CLAIM and not NEGATED; distinctive so AC10 can assert its absence from output.
@@ -218,12 +227,6 @@ def _run_hook(stop_input, env_extra=None):
                        capture_output=True, text=True, encoding="utf-8", env=env)
     assert r.returncode == 0, r.stderr  # fail-open: always exit 0
     return r.stdout
-
-
-def _git_show(rel):
-    r = subprocess.run(["git", "show", f"HEAD:{rel}"], cwd=str(REPO),
-                       capture_output=True, text=True, encoding="utf-8")
-    return r.stdout if r.returncode == 0 else None
 
 
 # ---- AC1, AC16: the pure rollout reader ------------------------------------
@@ -864,11 +867,15 @@ class TestClaudeParity(unittest.TestCase):
                 self.assertEqual(self._extract(strict_name, rollout), self._extract(hook_name, codex),
                                  f"{strict_name} drifted from the Codex completion hook's {hook_name}")
 
-    def test_claude_guard_matches_head_except_approved_skill_rename(self):  # AC11 / §10
-        head = _git_show("hooks/completion-claim-guard.mjs")
-        self.assertIsNotNone(head, "completion-claim-guard.mjs not in HEAD")
-        expected = head.replace("implementasyon-control", "implementation-control")
-        self.assertEqual(CLAUDE_GUARD.read_text(encoding="utf-8"), expected)
+    def test_claude_guard_bytes_are_pinned(self):  # AC11 / §10
+        # Was a comparison against `git show HEAD:`, plus a replacement for a skill-ID rename
+        # that has since completed - so the hatch became a permanent no-op wrapped around an
+        # assertion that compared the file to itself.
+        rel = "hooks/completion-claim-guard.mjs"
+        self.assertTrue(CLAUDE_GUARD.exists(), f"{rel} is missing from the tree")
+        got = hashlib.sha256(CLAUDE_GUARD.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+        self.assertEqual(got, LOCK_DIGESTS[rel],
+                         f"{rel} changed; bump the digest in LOCK_DIGESTS in the same commit")
 
 
 # ---- AC12, AC13: Codex-only Stop wiring, AP1 untouched ----------------------
@@ -894,11 +901,12 @@ class TestWiring(unittest.TestCase):
         # slice does not touch the AP1 PreToolUse surface or SessionStart — is preserved as
         # additive-only: SessionStart unchanged, the Bash command-guard block unchanged, and the
         # scan-write-codex handler dict unchanged.
-        head = json.loads(_git_show("hooks/hooks-codex.json"))
-        self.assertEqual(self.cfg["hooks"]["SessionStart"], head["hooks"]["SessionStart"])
+        import test_codex_flow_order_guard as order_suite
+        # Pinned literals, not `git show HEAD:`; see the note beside PINNED_CODEX_BASH_BLOCK.
+        self.assertEqual(self.cfg["hooks"]["SessionStart"],
+                         order_suite.PINNED_CODEX_SESSION_START)
         cur_bash = [b for b in self.cfg["hooks"]["PreToolUse"] if b.get("matcher") == "Bash"]
-        head_bash = [b for b in head["hooks"]["PreToolUse"] if b.get("matcher") == "Bash"]
-        self.assertEqual(cur_bash, head_bash)
+        self.assertEqual(cur_bash, [order_suite.PINNED_CODEX_BASH_BLOCK])
 
         def _scan_handler(cfg):
             for b in cfg["hooks"]["PreToolUse"]:
@@ -906,7 +914,12 @@ class TestWiring(unittest.TestCase):
                     return [h for h in b["hooks"] if "scan-write-codex.mjs" in h["command"]]
             return []
 
-        self.assertEqual(_scan_handler(self.cfg), _scan_handler(head))
+        # PRESENCE first: the previous form compared this list against the same list derived
+        # from HEAD, so removing the handler - or the whole Bash|apply_patch block - made both
+        # sides `[]` and the assertion passed.
+        found = _scan_handler(self.cfg)
+        self.assertTrue(found, "the Codex write guard is not wired at all")
+        self.assertEqual(found, [order_suite.PINNED_CODEX_SCAN_WRITE_HANDLER])
 
 
 if __name__ == "__main__":

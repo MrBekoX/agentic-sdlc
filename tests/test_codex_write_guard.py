@@ -13,6 +13,21 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+
+# The Claude-side files this suite locks. Moved here from inside the test body so
+# tests/test_byte_lock_integrity.py can confirm each expected value is a LITERAL in the source
+# rather than something recomputed at runtime - the shape that turns a lock back into a
+# tautology. Values, normalization and assertion are unchanged.
+LOCK_DIGESTS = {
+    # LF-normalized (working-tree CRLF on Windows must not fail a Linux checkout).
+    "hooks/scan-write.mjs": "8e4fd3225c3cf096498adeedebb8a9e4a36b19bc09267d067fe4aa66a1c02e90",
+    # Refreshed by the 2026-08-22 guard-bypass fix: the Bash-only matcher and the
+    # `if: Bash(git commit*)` filters were removed (a Bash-only matcher is inert on a
+    # Windows host with no Git Bash, and a subcommand-level `if` never starts the hook
+    # for a git alias).
+    "hooks/hooks-claude.json": "e50dbe053f4cc59a1b2ce23fc1cc6b96581a1f0f28048b1bc31aa544c0e3ed39",
+}
+
 NODE = shutil.which("node")
 
 # Synthetic high-confidence token: matches the github-token HIGH pattern; no <, >, or ${ .
@@ -272,16 +287,7 @@ class TestCodexWriteGuardWiring(unittest.TestCase):
             self.assertIn(g, joined)
 
     def test_claude_side_byte_identical(self):  # AC12
-        digests = {
-            # LF-normalized (working-tree CRLF on Windows must not fail a Linux checkout).
-            "hooks/scan-write.mjs": "8e4fd3225c3cf096498adeedebb8a9e4a36b19bc09267d067fe4aa66a1c02e90",
-            # Refreshed by the 2026-08-22 guard-bypass fix: the Bash-only matcher and the
-            # `if: Bash(git commit*)` filters were removed (a Bash-only matcher is inert on a
-            # Windows host with no Git Bash, and a subcommand-level `if` never starts the hook
-            # for a git alias).
-            "hooks/hooks-claude.json": "e50dbe053f4cc59a1b2ce23fc1cc6b96581a1f0f28048b1bc31aa544c0e3ed39",
-        }
-        for rel, want in digests.items():
+        for rel, want in LOCK_DIGESTS.items():
             payload = (REPO / rel).read_bytes().replace(b"\r\n", b"\n")
             got = hashlib.sha256(payload).hexdigest()
             self.assertEqual(got, want, f"{rel} changed (must be byte-identical)")
