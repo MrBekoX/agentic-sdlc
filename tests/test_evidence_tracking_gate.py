@@ -143,13 +143,24 @@ class TestPerPackageChangeDetectability(unittest.TestCase):
             self.assertEqual(result.source, "changed-plan")
             self.assertEqual(result.plan, plan.resolve())
 
-            # AC21 untracked half: evidence is absent, so no <slug>/evidence/ path is in
-            # git's tracked-file set (nothing was added; the spec/plan stay untracked too).
+            # AC21 untracked half: no <slug>/evidence/ path is in git's tracked-file set.
+            #
+            # This used to run `git ls-files` in a repo where nothing had ever been staged, so
+            # the output was empty and `offenders == []` held whatever the code did. Stage a
+            # real file first: now the command HAS something to report, and the assertion is
+            # that what it reports contains no evidence path.
+            (root / "tracked-marker.txt").write_text("marker", encoding="utf-8")
+            subprocess.run(["git", "add", "--", "tracked-marker.txt"], cwd=root,
+                           check=True, capture_output=True)
             ls = subprocess.run(
                 ["git", "ls-files"],
                 cwd=root, capture_output=True, text=True, encoding="utf-8",
             )
-            offenders = [p for p in ls.stdout.splitlines() if p.strip() and matcher(p)]
+            tracked = [p for p in ls.stdout.splitlines() if p.strip()]
+            self.assertIn("tracked-marker.txt", tracked,
+                          "the probe did not stage anything, so this assertion would hold "
+                          "regardless of the code under test")
+            offenders = [p for p in tracked if matcher(p)]
             self.assertEqual(offenders, [])
 
 

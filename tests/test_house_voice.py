@@ -36,6 +36,23 @@ def _surface_files(paths):
             yield p
 
 
+
+def _skill_markdown(name):
+    """Every .md under a skill, failing loudly when the skill directory is gone.
+
+    `rglob` over a missing directory yields nothing, so a renamed or removed skill silently
+    dropped its coverage here while the sibling checks - which call `read_text()` on the same
+    skills - hard-failed on the same rename. A guard that disappears without failing is
+    indistinguishable from one that passes.
+    """
+    root = REPO / "skills" / name
+    if not root.is_dir():
+        raise AssertionError(
+            "skills/%s does not exist; this check silently covered nothing. Update the list in "
+            "the same commit that renames or removes a skill." % name)
+    return sorted(root.rglob("*.md"))
+
+
 class TestBannedTermsAbsent(unittest.TestCase):
     def test_no_borrowed_headings_on_product_surface(self):
         hits = []
@@ -84,7 +101,7 @@ class TestRuntimeScopeTrim(unittest.TestCase):
     def test_trimmed_skills_have_no_other_runtimes(self):
         bad = []
         for name in TRIMMED_SKILLS:
-            for f in (REPO / "skills" / name).rglob("*.md"):
+            for f in _skill_markdown(name):
                 text = f.read_text(encoding="utf-8")
                 for term in OTHER_RUNTIMES:
                     if term in text:

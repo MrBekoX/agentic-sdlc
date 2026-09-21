@@ -29,7 +29,15 @@ NODE = shutil.which("node")
 
 
 def _node_check(path):
-    """Return (returncode, stderr) from `node --check <path>`."""
+    """Return (returncode, stderr) from `node --check <path>`.
+
+    Raises `SkipTest` when no interpreter is available. The class decorators below skip without
+    paying a subprocess, but the guarantee belongs HERE: a class added later that forgets the
+    decorator degrades to the skip this file's docstring promises instead of raising TypeError
+    on `[None, "--check", ...]` and turning a missing interpreter into a red gate.
+    """
+    if NODE is None:
+        raise unittest.SkipTest("node not available - static JS check skipped (not passed)")
     proc = subprocess.run([NODE, "--check", str(path)], capture_output=True, text=True, encoding="utf-8")
     return proc.returncode, proc.stderr
 
@@ -44,7 +52,8 @@ class TestHookSyntax(unittest.TestCase):
             self.assertEqual(rc, 0, f"{p.name} failed node --check:\n{err}")
 
 
-@unittest.skipIf(NODE is None, "node not available — static JS check skipped (not passed)")
+# NOT decorated: this class only reads bytes. It was skipped when `node` was missing, which
+# lost real coverage for a reason that does not apply to it.
 class TestHookSourcesAreText(unittest.TestCase):
     """A hook source must stay TEXT, or git stores it as a binary blob and its diffs become
     unreviewable — the worst possible property for a security guard.
@@ -66,6 +75,7 @@ class TestHookSourcesAreText(unittest.TestCase):
                 )
 
 
+@unittest.skipIf(NODE is None, "node not available — static JS check skipped (not passed)")
 class TestWorkflowSyntax(unittest.TestCase):
     def test_every_workflow_js_parses_in_runtime_wrapper(self):
         js = sorted(WORKFLOWS_DIR.glob("*.js"))
@@ -110,6 +120,30 @@ class TestWorkflowUntrustedFencing(unittest.TestCase):
         for name in ["spec-plan-draft.js", "skill-draft.js"]:
             with self.subTest(workflow=name):
                 self.assertNotIn("Context: ${ctxStr}", self._src(name), f"{name}: raw ctx interpolation remains")
+
+
+class TestMissingNodeIsASkipNotAnError(unittest.TestCase):
+    """The docstring above, docs/testing.md:42, :100 and :585 all promise the same thing: with
+    no `node` on PATH these checks SKIP, reported as skipped and never counted as passed.
+
+    They did not. `TestWorkflowSyntax` carried no skip decorator and calls `_node_check`, which
+    ran `subprocess.run([NODE, ...])`; with `NODE is None` that raises `TypeError`, so a
+    missing interpreter turned a promised skip into a red gate. A decorator on every class is
+    not enough on its own - the next class added can forget it - so the guarantee lives in the
+    helper, where forgetting is impossible.
+    """
+
+    def test_node_check_skips_when_no_interpreter_is_available(self):
+        import test_static_node as module
+
+        original = module.NODE
+        module.NODE = None
+        try:
+            with self.assertRaises(unittest.SkipTest):
+                module._node_check(Path(__file__))
+        finally:
+            module.NODE = original
+        self.assertEqual(module.NODE, original, "the probe must restore the module state")
 
 
 if __name__ == "__main__":

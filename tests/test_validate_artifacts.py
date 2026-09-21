@@ -48,6 +48,11 @@ def run_cli(*args):
 # A complete, scanner-clean spec fixture. Deliberately contains NO TODO/TBD/FIXME/XXX
 # tokens and NO secret-shaped lines, so the placeholder/secret scanner stays silent.
 COMPLETE_SPEC = """\
+---
+work_id: sample-spec
+status: draft
+---
+
 # Sample Spec
 
 ## 1. Problem
@@ -276,6 +281,11 @@ class TestScanner(unittest.TestCase):
 # A full-coverage plan fixture: every AC in COMPLETE_SPEC (none here) — we use a
 # dedicated mini spec for plan tests so AC ids are deterministic.
 PLAN_SPEC = """\
+---
+work_id: mini
+status: draft
+---
+
 # Mini Spec
 ## Acceptance criteria
 - AC1: given a refund, then the total is reduced once.
@@ -283,6 +293,13 @@ PLAN_SPEC = """\
 """
 
 PLAN_FULL = """\
+---
+work_id: mini
+spec: ../specs/mini.md
+branch: feat/mini
+status: draft
+---
+
 # Mini Plan
 
 ## Task 1 — Reduce total once (AC1)
@@ -295,6 +312,13 @@ Run: pytest tests/test_ledger.py
 """
 
 PLAN_UNCOVERED = """\
+---
+work_id: mini
+spec: ../specs/mini.md
+branch: feat/mini
+status: draft
+---
+
 # Mini Plan
 
 ## Task 1 — Reduce total once (AC1)
@@ -304,6 +328,13 @@ Create `src/ledger.py`. Write a failing test (RED) first, then the minimal fix.
 # A plan with 2 real tasks plus noise that a naive detector over-counts: a numbered
 # decision-point list and a coverage line full of prose task-id references.
 PLAN_NOISY = """\
+---
+work_id: mini
+spec: ../specs/mini.md
+branch: feat/mini
+status: draft
+---
+
 # Mini Plan
 
 ## Task 1 — Reduce total once (AC1)
@@ -319,6 +350,102 @@ Modify `src/ledger.py`. TDD: failing test then GREEN.
 ## Coverage
 AC1->T1 and AC2->T2 (prose task-id refs, not task starts).
 """
+
+
+# ---- frontmatter: the keys resolve_work_package.py rejects an artifact for ------------
+# `validate_artifacts.py` is what the skills run as the deterministic gate
+# (plan-authoring/SKILL.md:55; agentic-sdlc-pipeline/SKILL.md:130 calls a non-zero exit a
+# blocked gate). `resolve_work_package.py` runs later, at implementation time, and rejects a
+# plan with no `branch:`. The gate used to parse no frontmatter at all, so it returned
+# `artifacts_validation=passed` on a plan the suite then failed with `plan_missing:branch` -
+# which happened while writing another package in this repository.
+#
+# These are ERRORS, not warnings promoted by --strict: a key whose absence is unconditionally
+# fatal downstream is not a style preference.
+
+
+def _body_only(text):
+    """The artifact WITHOUT its leading frontmatter block.
+
+    The fixtures carry real frontmatter now, so a row that wants to test the absent-block case
+    has to remove it explicitly rather than rely on the fixture not having one - which is how
+    these two rows silently stopped testing anything the moment the fixtures were fixed.
+    """
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return text
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            return "".join(lines[index + 1:]).lstrip("\n")
+    return text
+
+
+def _with_frontmatter(body, **keys):
+    lines = ["---"]
+    lines += ["{}: {}".format(k, v) for k, v in keys.items() if v is not None]
+    lines += ["---", ""]
+    return "\n".join(lines) + body
+
+
+class TestFrontmatterRequirements(unittest.TestCase):
+    def _write(self, tmp, text, name):
+        p = Path(tmp) / name
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def test_plan_missing_branch_is_an_error_without_strict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self._write(tmp, _with_frontmatter(
+                _body_only(PLAN_FULL), work_id="w1", spec="../specs/w1.md", status="draft"),
+                "plan.md")
+            spec = self._write(tmp, _with_frontmatter(
+                _body_only(PLAN_SPEC), work_id="w1", status="draft"), "spec.md")
+            rc, out, err = run_cli("--mode", "plan", "--file", str(plan), "--spec", str(spec))
+            self.assertNotEqual(rc, 0, out + err)
+            self.assertIn("error=missing_frontmatter_key:branch", out)
+
+    def test_spec_missing_work_id_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = self._write(
+                tmp, _with_frontmatter(_body_only(COMPLETE_SPEC), status="draft"), "spec.md")
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec))
+            self.assertNotEqual(rc, 0, out + err)
+            self.assertIn("error=missing_frontmatter_key:work_id", out)
+
+    def test_no_frontmatter_block_names_every_required_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = self._write(tmp, _body_only(COMPLETE_SPEC), "spec.md")
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec))
+            self.assertNotEqual(rc, 0, out + err)
+            self.assertIn("error=missing_frontmatter_key:work_id", out)
+            self.assertIn("error=missing_frontmatter_key:status", out)
+
+    def test_invalid_status_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = self._write(tmp, _with_frontmatter(
+                _body_only(COMPLETE_SPEC), work_id="w1", status="nearly-done"), "spec.md")
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec))
+            self.assertNotEqual(rc, 0, out + err)
+            self.assertIn("error=invalid_status:nearly-done", out)
+
+    def test_an_empty_value_counts_as_missing(self):
+        # The resolver tests truthiness, not presence: `status:` with no value is not a status.
+        with tempfile.TemporaryDirectory() as tmp:
+            text = "---\nwork_id: w1\nstatus:\n---\n" + _body_only(COMPLETE_SPEC)
+            spec = self._write(tmp, text, "spec.md")
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec))
+            self.assertNotEqual(rc, 0, out + err)
+            self.assertIn("error=missing_frontmatter_key:status", out)
+
+    def test_a_block_that_is_not_first_is_not_frontmatter(self):
+        # A fenced example or a quoted block later in a document must not satisfy the check -
+        # otherwise a document that merely DISCUSSES frontmatter would validate as having it.
+        with tempfile.TemporaryDirectory() as tmp:
+            text = _body_only(COMPLETE_SPEC) + "\n\n---\nwork_id: w1\nstatus: draft\n---\n"
+            spec = self._write(tmp, text, "spec.md")
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec))
+            self.assertNotEqual(rc, 0, out + err)
+            self.assertIn("error=missing_frontmatter_key:work_id", out)
 
 
 class TestPlanChecks(unittest.TestCase):

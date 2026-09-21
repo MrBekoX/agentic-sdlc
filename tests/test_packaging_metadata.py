@@ -393,11 +393,41 @@ class TestPackagingMetadata(unittest.TestCase):
             )
 
     def test_runtime_adapter_records_codex_hook_live_proof_drift(self):
+        # Five independent whole-document `assertIn`s used to stand here - "0.142.0",
+        # "0.154.0", "historical", "current binary", "transcript_path". Co-occurrence was all
+        # they checked, so INVERTING the claim (calling 0.142.0 the current binary and 0.154.0
+        # the historical probe) satisfied every one of them, and so did scattering the two
+        # version numbers into unrelated sections.
+        #
+        # The claim is directional, so the check is too: the version next to "current binary"
+        # must not be the version next to "Historical", and each must be the expected one.
+        # Bump both literals deliberately when the observed binary changes - that edit is the
+        # point, the same way a digest lock is bumped in the commit that changes the file.
         text = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
-        self.assertIn("0.142.0", text)
-        self.assertIn("0.154.0", text)
-        self.assertIn("historical", text.lower())
-        self.assertIn("current binary", text.lower())
+        # Scoped by the QUALIFIER, not by the line. Two line-based attempts were wrong: the
+        # first line mentioning "current binary" is the section heading and carries no version,
+        # and the sentence that does carry it states BOTH claims - so the first version on the
+        # "historical" line was the current one.
+        def version_after(word):
+            match = re.search(word + r".{0,120}?(\d+\.\d+\.\d+)", text, re.IGNORECASE)
+            return match.group(1) if match else None
+
+        current = version_after(r"current binary")
+        historical = version_after(r"historical\b")
+        self.assertIsNotNone(current, "runtime-adapter.md names no current binary version")
+        self.assertIsNotNone(historical, "runtime-adapter.md names no historical probe version")
+
+        self.assertNotEqual(
+            current, historical,
+            "the current binary and the historical probe are recorded as the same version, so "
+            "the drift this row exists to pin is not stated",
+        )
+        self.assertEqual(current, "0.154.0",
+                         "current binary drifted; update this literal in the same commit")
+        self.assertEqual(historical, "0.142.0",
+                         "historical probe version drifted; update this literal in the same "
+                         "commit")
+        self.assertIn("transcript_path", text)
         self.assertIn("transcript_path", text)
 
     def test_claude_plugin_declares_display_name(self):
