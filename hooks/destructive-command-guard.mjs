@@ -28,6 +28,7 @@
 // The permission prompt remains the primary control; this guard only catches the common cases.
 import { readStdin } from './secret-patterns.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
+import { skipCommandPrefix } from './shell-prefix.mjs';
 
 const BLOCKED = [
   {
@@ -478,64 +479,9 @@ function shellPayloads(segment, unescapeUnquoted) {
 // half is a positive grammar rather than another deny-list -- unlike WRAPPERS above, which
 // is open-ended and stays a deny-list. Every bypass this closes was the same mechanical
 // failure: tokens[0] was a prefix construct, so the real command was never examined.
-
-// Reserved words that may legally precede a command word.
-const RESERVED_WORDS = new Set([
-  'if', 'then', 'elif', 'else', 'fi',
-  'for', 'while', 'until', 'select', 'do', 'done',
-  'case', 'esac', 'function', 'coproc', 'exec',
-  '{', '}', '!', '[[', ']]',
-]);
-
-// An ASSIGNMENT_WORD: NAME=value with a portable shell NAME. One linear scan -- deliberately
-// not a regex with a quantifier before an anchor (see lessons.md 2026-07-01 / 2026-08-22).
-function isAssignmentWord(token) {
-  const eq = token.indexOf('=');
-  if (eq <= 0) return false;
-  for (let i = 0; i < eq; i += 1) {
-    const c = token[i];
-    if (i === 0 && c >= '0' && c <= '9') return false;
-    const ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-      || (c >= '0' && c <= '9') || c === '_';
-    if (!ok) return false;
-  }
-  return true;
-}
-
-// Length of the io_redirect OPERATOR at the head of a token, or 0. Covers `>`, `>>`, `<`,
-// `<>`, `>|`, `>&`, a leading fd (`2>`), and the `&>` family. A return value shorter than
-// the token means the target is attached (`>/tmp/x`, `2>&1`) and no following word is
-// consumed; equal to the token length means the target is the next word (`> /tmp/x`).
-function redirectOperatorLength(token) {
-  let i = 0;
-  while (i < token.length && token[i] >= '0' && token[i] <= '9') i += 1;
-  if (i === 0 && token[0] === '&' && token[1] === '>') i = 1;
-  if (i >= token.length) return 0;
-  if (token[i] !== '>' && token[i] !== '<') return 0;
-  let j = i + 1;
-  if (token[j] === '>' || token[j] === '<' || token[j] === '|' || token[j] === '&') j += 1;
-  return j;
-}
-
-// Walk off one run of cmd_prefix tokens. Returns the index of the first token that is not a
-// prefix construct. Linear in the number of tokens examined.
-function skipCommandPrefix(tokens, start) {
-  let i = start;
-  while (i < tokens.length) {
-    const raw = tokens[i];
-    if (RESERVED_WORDS.has(raw.toLowerCase())) { i += 1; continue; }
-    if (isAssignmentWord(raw)) { i += 1; continue; }
-    const op = redirectOperatorLength(raw);
-    if (op > 0) {
-      // Attached target (`>/tmp/x`, `2>&1`) consumes only this token; a bare operator
-      // (`>`, `2>`) consumes the following word as its target.
-      i += op < raw.length ? 1 : 2;
-      continue;
-    }
-    break;
-  }
-  return i;
-}
+//
+// The grammar itself lives in `shell-prefix.mjs` because the git resolver needs exactly the
+// same answers about it; what stays here is the alternation with the wrapper table below.
 
 function unwrapCommand(tokens) {
   let i = 0;
