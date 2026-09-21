@@ -39,7 +39,9 @@ The command guards `hooks/branch-guard.mjs`, `hooks/scan-commit.mjs` and `hooks/
 
 ### Written content
 
-`hooks/scan-write.mjs` (Claude Code, `PostToolUse` for `Write`, `Edit`, `MultiEdit`) reads the new text from the tool input (`new_string`, `edits[].new_string` or `content`). When none of those fields is present, it reads the file named by `tool_input.file_path`. `hooks/scan-write-codex.mjs` (Codex, `PreToolUse`) reads the content of a recognized literal write before it runs.
+`hooks/scan-write.mjs` (Claude Code and ZCode, `PostToolUse` for `Write`, `Edit`, `MultiEdit`) reads the new text from the tool input (`new_string`, `edits[].new_string` or `content`). When none of those fields is present, it reads the file named by `tool_input.file_path`. `hooks/scan-write-codex.mjs` (Codex, `PreToolUse`) reads the content of a recognized literal write before it runs.
+
+When `hooks/scan-write.mjs` finds something, it emits its advisory on two channels: `systemMessage`, which the user sees, and `hookSpecificOutput.additionalContext`, which Claude Code documents as visible to the MODEL in the transcript for `PostToolUse`. The model therefore also sees the file path and the pattern label. This is the same content the user-visible message already carried — the matched value is masked on both channels — but it is a new audience, added because the advisory-only field is absent from ZCode's documented hook protocol, where unknown fields are ignored and the warning would otherwise reach nobody. The command guards `hooks/branch-guard.mjs` and `hooks/scan-commit.mjs` are wired to `PreToolUse`, an event for which Claude Code documents that field as debug-log output only, so nothing extra reaches the model there.
 
 ### Working tree
 
