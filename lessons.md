@@ -20,6 +20,18 @@ Each entry includes:
 
 ---
 
+## 2026-09-21 — A gate that is weaker than the check downstream is a false green, not a gate
+
+- **Task / context:** Authoring a plan for another package in this repository. `skills/plan-authoring/SKILL.md:55` tells the author to run `scripts/validate_artifacts.py --mode plan ... --strict`, and `skills/agentic-sdlc-pipeline/SKILL.md:130` states that a non-zero exit from it BLOCKS the gate. The plan validated clean.
+- **Symptom:** Minutes later the full suite failed on that same file with `plan_missing:branch`. `scripts/resolve_work_package.py`, which runs later at implementation time, requires `work_id`, `spec`, `branch` and `status` on a plan and rejects the artifact outright when one is absent. `validate_artifacts.py` parsed no frontmatter AT ALL - it had no such code - so the tool advertised as the deterministic gate was blind to a rule the pipeline enforces unconditionally a step later.
+- **Root cause:** The rule existed in three places and was enforced in one. `plan-authoring/SKILL.md:54` documents the four keys in prose; the resolver enforces them; the gate did not. Nobody had compared the two tools' notions of "valid", because each looked correct on its own. The failure only appears at the seam, and the seam is exactly where a workflow says "this check means you may proceed".
+- **Correct fix:** Teach the gate the same frontmatter, as ERRORS rather than warnings promoted by `--strict` - a key whose absence is unconditionally fatal downstream is not a style preference, and labelling it a warning is the same mislabelling in a smaller font. The validator still does not IMPORT the resolver: it is invoked standalone from the skills on both runtimes and must not acquire the resolver's git and filesystem behaviour, so the constants are mirrored and `tests/test_validator_resolver_parity.py` pins them equal - mutation-verified by dropping one key from one script and requiring red. Path semantics stayed with the resolver on purpose: checking where `spec:` POINTS needs a repository root the validator does not take.
+- **A second lesson inside the first:** the fixtures carried no frontmatter, so fixing the validator turned six of them red. Giving them real frontmatter - rather than exempting them - then silently broke two of the NEW rows, which had been written on the assumption that a fixture had no frontmatter block. A fixture change can invalidate the premise of a test that reads it; after changing shared fixtures, re-read every test that depends on the property you changed, not just the ones that go red.
+- **Preventive rule / automated check:** When a workflow advertises one tool as the gate for a rule that another tool enforces later, compare their notions of valid and pin them with a test. The gate must be at least as strict as the downstream check, or it is a false green that only defers the failure to a point where the work is already done. Where the two tools cannot share code - a standalone CLI that must not take on a heavier dependency - mirror the constant and let a parity test carry the guarantee.
+- **Related files & tests:** `scripts/validate_artifacts.py` (`FRONTMATTER_REQUIRED`, `parse_frontmatter`, `check_frontmatter`), `scripts/resolve_work_package.py` (unchanged - it was already right); `tests/test_validate_artifacts.py::TestFrontmatterRequirements`, `tests/test_validator_resolver_parity.py`.
+
+---
+
 ## 2026-09-21 — A claim with no mechanism drifts until it is false; bind the claim, not the prose
 
 - **Task / context:** Auditing `docs/testing.md`, the document a contributor reads to learn what the gate proves. Two defects turned out to share one cause.

@@ -132,6 +132,65 @@ def _section_body(text, start_lineno):
     return "\n".join(body)
 
 
+# Frontmatter the pipeline gates on. These MIRROR scripts/resolve_work_package.py, which
+# rejects an artifact outright when one of its keys is missing or its status is unknown.
+#
+# Mirrored rather than imported: this validator is invoked standalone from the skills on both
+# runtimes, and importing the resolver would pull its git and filesystem behaviour into a
+# check that should only read one file. tests/test_validator_resolver_parity.py is what keeps
+# the two copies equal - a divergence there is a failing test rather than a false green.
+#
+# They are ERRORS, not warnings promoted by --strict: a key whose absence is unconditionally
+# fatal downstream is not a style preference. This gate used to parse no frontmatter at all,
+# so it reported `artifacts_validation=passed` on a plan the suite then rejected with
+# `plan_missing:branch`.
+#
+# Path semantics stay with the resolver: presence of `spec:` is checked here, where it points
+# is not, because resolving it needs a repository root this tool does not take.
+FRONTMATTER_REQUIRED = {
+    "spec": ("work_id", "status"),
+    "plan": ("work_id", "spec", "branch", "status"),
+}
+FRONTMATTER_STATUSES = {"draft", "reviewed", "in_progress", "ready_for_audit", "complete"}
+
+
+def parse_frontmatter(text):
+    """Return the leading `---` block as a dict, or {} when there is none.
+
+    Only a block that OPENS ON THE FIRST LINE counts. Scanning for `---` anywhere would let a
+    fenced example, a horizontal rule, or a document that merely discusses frontmatter satisfy
+    the check from outside the block.
+
+    Deliberately not a YAML parser: `key: value` on one line, matching what the resolver reads
+    and what the skills tell authors to write. A nested or multi-line value is not frontmatter
+    this pipeline uses.
+    """
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    meta = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return meta
+        key, sep, value = line.partition(":")
+        if sep and key.strip():
+            meta[key.strip()] = value.strip()
+    return {}                                    # unterminated block: not frontmatter
+
+
+def check_frontmatter(text, mode):
+    """Errors for the required keys of `mode`. An empty value counts as missing."""
+    required = FRONTMATTER_REQUIRED.get(mode)
+    if not required:
+        return []
+    meta = parse_frontmatter(text)
+    errors = [f"missing_frontmatter_key:{key}" for key in required if not meta.get(key)]
+    status = meta.get("status")
+    if status and status not in FRONTMATTER_STATUSES:
+        errors.append(f"invalid_status:{status}")
+    return errors
+
+
 def check_spec(text):
     """Validate a spec artifact. Returns {'errors': [...], 'warnings': [...]}.
 
@@ -366,6 +425,9 @@ def run(mode, file_path, spec_path, strict):
     scan = scan_placeholders_and_secrets(file_text)
     errors += scan["errors"]
     warnings += scan["warnings"]
+
+    # Frontmatter first: it is the cheapest check and the one the resolver will apply later.
+    errors += check_frontmatter(file_text, mode)
 
     if mode in ("spec", "all"):
         spec_res = check_spec(file_text)
