@@ -79,14 +79,23 @@ rollouts; Grok Stop fields `lastAssistantMessage` / `stopHookActive` /
 `reason == "end_turn"` were not captured), SessionStart, and the working-tree
 Stop scan. The Claude, Codex, and ZCode hook files are not shared with Grok.
 
-## Orchestration fallback
+## Orchestration (project-catalog Rhai)
 
-Grok workflows are Rhai scripts under `.grok/workflows/*.rhai`. This plugin
-does **not** convert `workflows/*.js` (Claude Code Workflow). Where Claude
-Code would run `spec-plan-draft` and Codex its embedded adapter, a Grok
-session uses `spawn_subagent` plus the same **author → critic → revise**
-discipline in the main loop, with saved artifacts and
-`scripts/validate_artifacts.py` evidence.
+Grok discovers workflows from `.grok/workflows/*.rhai` (project) and
+`~/.grok/workflows/*.rhai` (user), not from the plugin package. This clone
+ships Rhai ports of the three Claude JS loops at
+`.grok/workflows/spec-plan-draft.rhai`, `multi-lens-review.rhai`, and
+`skill-draft.rhai`. Claude `workflows/*.js` stay the Claude runtime source;
+Grok does not load them. `grok plugin details` still inventories
+skills/commands/agents/hooks only — installing the plugin on another machine
+does not deliver these project-catalog scripts.
+
+When the named script is in the catalog and workflows are enabled, invoke
+`/workflow spec-plan-draft` (or `multi-lens-review` / `skill-draft`) or the
+`workflow` tool with that name. If Grok workflows are disabled or the named
+script is missing, fall back to `spawn_subagent` plus **author → critic →
+revise**, with saved artifacts and `scripts/validate_artifacts.py` evidence.
+Do not call Claude JS `Workflow` on Grok.
 
 ## Versioning
 

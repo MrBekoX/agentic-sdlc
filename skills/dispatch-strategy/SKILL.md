@@ -47,8 +47,10 @@ Use the portable capability matrix in `docs/runtime-adapter.md`.
 
 - **Claude Code:** `Dynamic-workflow` means the native JavaScript Workflow runtime. Use it only when its scale/repeatability properties matter.
 - **Codex:** map `Dynamic-workflow` to subagent fan-out, parallel local tools, cloud delegation, or a sequential degraded path with an explicit note. Do not invent a workflow script requirement when the runtime lacks a Workflow tool.
+- **ZCode (experimental adapter):** subagents run through the `Agent` tool with the plugin `agents/*.md` roles; ZCode 3.14.0 added a dynamic-workflow tier, but Z.ai publishes no script API for it and a plugin cannot ship one, so treat `Dynamic-workflow` as **unavailable** and use the documented degraded path; agent-team is unavailable too. Details in `docs/zcode-runtime-adapter.md`.
+- **Grok CLI (experimental adapter):** `Dynamic-workflow` means Grok's Rhai `workflow` tool (`/workflow <name>` or the `workflow` tool with a catalog name). Named loops live in the project catalog `.grok/workflows/*.rhai` (`spec-plan-draft`, `multi-lens-review`, `skill-draft`), not as a plugin component. Plugin install does not deliver those scripts. If Grok workflows are disabled or the named script is not in the catalog, map to `spawn_subagent` fan-out. Do not call Claude JS `Workflow` on Grok.
 - **Agent-team:** runtime-specific. If unavailable, use subagents or a documented degraded path.
-- **Spec/plan inside agentic-sdlc-pipeline:** Claude Code uses `spec-plan-draft`; Codex uses the embedded author/critic adapter. Standalone `spec-authoring` and `plan-authoring` remain prompt-level entry skills, not agentic-sdlc-pipeline substeps.
+- **Spec/plan inside agentic-sdlc-pipeline:** Claude Code uses `spec-plan-draft`; Grok CLI uses `/workflow spec-plan-draft` when that catalog script is present; Codex uses the embedded author/critic adapter. Standalone `spec-authoring` and `plan-authoring` remain prompt-level entry skills, not agentic-sdlc-pipeline substeps.
 
 ## Decision tree
 1. Is it **interdependent code** or a design/sequencing decision? → **Main loop**. (But hand independent sub-parts — exploration, fixed-pattern generation — to a **sub-agent**.)
@@ -85,6 +87,7 @@ The common in-skill shape: the work splits into 2+ **independent read-only slice
 - **code-quality-review:** one `code-reviewer` per changed layer/file-group (fresh-context, so the reviewer isn't the author); add a `software-architect` lens for a structural change. You synthesize.
 - **safe-refactor:** characterize per module via `software-architect` / `context-analyst`; large parallel *edits* run worktree-isolated. **test-authoring:** coverage-gap analysis per behavior-area via `test-engineer`; test-writing stays serial.
 - Spec/plan drafting in Claude Code flows → `spec-plan-draft` workflow (author → critic), not shallow main-loop writing.
+- Spec/plan drafting on Grok CLI → `/workflow spec-plan-draft` (or the `workflow` tool with name `spec-plan-draft`) when `.grok/workflows/spec-plan-draft.rhai` is in the catalog; otherwise `spawn_subagent` author → critic → revise.
 - Spec/plan drafting inside `agentic-sdlc-pipeline` on Codex runs the embedded author/critic adapter with a fresh-context critic when available. Standalone `spec-authoring` and `plan-authoring` remain independent prompt routes.
 
 ## Quick mapping (example → mechanism)

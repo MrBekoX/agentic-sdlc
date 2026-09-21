@@ -220,6 +220,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 When `agentic-sdlc-pipeline` needs spec and plan artifacts:
 
 - **Claude Code:** use the named `Workflow` `spec-plan-draft` (author → critic → revise, ≤2 rounds + closing audit).
+- **Grok CLI (experimental):** use `/workflow spec-plan-draft` when `.grok/workflows/spec-plan-draft.rhai` is in the project catalog; otherwise `spawn_subagent` author → critic → revise. Not a plugin-shipped workflow.
 - **Codex:** use `agentic-sdlc-pipeline`'s **embedded author/critic adapter** as described in [`runtime-adapter.md`](./runtime-adapter.md). Do **not** call standalone `spec-authoring` or `plan-authoring` from inside the pipeline. Other non-Claude runtimes are deferred adapter targets, not supported release runtimes.
 
 Standalone `spec-authoring` / `plan-authoring` may still use `spec-plan-draft` and the same validator (`validate_artifacts.py`), but they are entry points for single-artifact requests, not phases of a full pipeline run.
@@ -234,7 +235,8 @@ Standalone `spec-authoring` / `plan-authoring` may still use `spec-plan-draft` a
 | `hooks/` | Deterministic runtime enforcement and warnings (secret scan, branch guard, destructive-command guard, session start, completion claim, active-flow evidence guards). |
 | `skills/` | Procedure and agentic workflow surface; one directory per skill. |
 | `agents/` | Fresh-context specialist roles (context-analyst, code-reviewer, security-reviewer, implementation-auditor, spec-plan-author, spec-plan-critic, …). |
-| `workflows/` | Deterministic multi-agent loops: `spec-plan-draft.js`, `skill-draft.js`, and higher-rigor `multi-lens-review.js`. |
+| `workflows/` | Claude Code deterministic multi-agent loops: `spec-plan-draft.js`, `skill-draft.js`, and higher-rigor `multi-lens-review.js`. |
+| `.grok/workflows/` | Grok CLI project-catalog Rhai ports of those three loops (not a plugin component). |
 | `commands/` | Explicit manual checks such as `/agentic-sdlc:git-safety-check`. |
 | `scripts/` | Machine-checkable helpers (`check_all.py`, `validate_artifacts.py`, `detect_context.py`, eval runners, packaging tools). |
 | `tests/` | Deterministic test, fixture, golden, and procedure-eval infrastructure. |
