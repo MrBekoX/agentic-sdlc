@@ -39,7 +39,7 @@ Use the repository-mandated `python3` entry point on both platforms; verify it i
 | `python3 scripts/bump_version.py --check` | `VERSION`, all shipped plugin manifests, and Claude marketplace metadata agree, and so do the visible version declarations: the README `Version` token and README current-version sentence, the `docs/plugin-readme.md` version line, and the `docs/release-readiness.md` publish-gate sentence and verdict-template `version=` line. |
 | `python3 scripts/check_all.py` | A regex-based frontmatter check, not a full YAML parser or Agent Skills specification validator. Official Agent Skills fields: only the six keys `name`, `description`, `license`, `allowed-tools`, `metadata` and `compatibility` may appear, and `name` matches the directory. House-only rules, checked separately: third-person description framing, enforced only as rejection of the known leading-Use imperative regression (description meaning and trigger intent still need review); the angle-bracket ban; and a description length check. It also runs the discovered `tests/test_*.py` suites. |
 | `python3 tests/skills/harness.py` | Skill/agent/workflow/hook/skill-contract references resolve; golden cross-references have not drifted; safety-fixture evidence is wired to real files; `${CLAUDE_PLUGIN_ROOT}` and `${PLUGIN_ROOT}` paths plus Claude/Codex hook configs resolve. |
-| `python3 -m unittest discover -s tests -v` | `detect_context.py` classifies workspaces correctly; `validate_artifacts.py` enforces spec/plan structure and scans for placeholders/secrets; hook and workflow JavaScript parses under `node --check` (skipped if `node` is missing). |
+| `python3 -m unittest discover -s tests -v` | The whole local unittest layer — roughly fifty suites, enumerated in the **Test suite map** below, which a test keeps complete. Among them: `detect_context.py` classifies workspaces correctly; `validate_artifacts.py` enforces spec/plan structure and scans for placeholders/secrets; the secret, commit, branch and destructive-command guards are driven through their confirmed bypass shapes; the Codex adapters are driven through real rollout records; and hook and workflow JavaScript parses under `node --check` (skipped, never passed, if `node` is missing). Read the map rather than this cell for the inventory. |
 
 ### What the gate does NOT prove
 
@@ -54,7 +54,7 @@ Use live evals for those claims.
 
 ## Automation / CI policy
 
-`.github/workflows/ci.yml` runs on `push` and `pull_request`, on `ubuntu-latest` and `windows-latest`. The source steps run:
+`.github/workflows/ci.yml` runs on `pull_request`, and on `push` **only to `main`**, across `ubuntu-latest` and `windows-latest`. A push to a feature branch therefore gets no CI until a pull request exists for it — open the PR early if you want the matrix to run. The source steps run:
 
 ```bash
 python3 scripts/bump_version.py --release-check
@@ -63,7 +63,7 @@ python3 tests/skills/harness.py
 python3 -m unittest discover -s tests -v
 ```
 
-The archive steps (DP16) then run on every push and pull request. They build the release archive with `python3 scripts/build_release.py --output`, verify it with `python3 scripts/build_release.py --verify`, extract it to a clean directory without creating a commit, and run all five local gate commands there, including `python3 scripts/bump_version.py --check`. A coverage comparison against the source run counts named skips, and the archive-run logs are named `archive-*`.
+The archive steps (DP16) then run under the same triggers (pull requests, and pushes to `main`). They build the release archive with `python3 scripts/build_release.py --output`, verify it with `python3 scripts/build_release.py --verify`, extract it to a clean directory without creating a commit, and run all five local gate commands there, including `python3 scripts/bump_version.py --check`. A coverage comparison against the source run counts named skips, and the archive-run logs are named `archive-*`.
 
 Publishing, release creation, pushing generated commits, and marketplace/plugin publication must remain **manual and explicitly requested**. Do not automate those steps from an eval or a script.
 
@@ -112,6 +112,35 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_skill_creator_resolver.py` | helper unit | Official toolkit identity, requested capabilities, candidate fallback, and explicit-path trust diagnostics without hidden installs. |
 | `tests/test_runtime_documentation.py` | doc consistency unit | Current runtime evidence limits, test-result versus ordering semantics, coexistence restoration, and installed-trust proof requirements. |
 | `tests/test_handoff_scripts.py` | script unit | `task_brief.py` extracts a single plan task into a handoff file. |
+| `tests/test_secret_guard_bypasses.py` | guard regression | RED regression coverage for every confirmed bypass of the secret, commit and branch guards - prefix and wrapper forms, inner shell payloads, git aliases, statement splitting, and the cost bounds that keep a guard inside its hook budget. Each closed bypass is paired with a control case proving the guard did not simply start blocking everything. |
+| `tests/test_codex_write_guard.py` | Codex adapter | The Codex secret-write guard: which write forms it recognizes (apply_patch, printf/echo redirects, literal heredocs), which it documents as out of reach, and an LF-normalized sha256 lock on the Claude-side files the slice must not touch. |
+| `tests/test_codex_flow_step_guard.py` | Codex adapter | The Codex evidence-only Stop adapter: active-flow derivation from in-session artifact writes, runner/exit correlation, same-work-id spec/plan pairing, warn-default vs flag-block, and the wiring this slice must leave alone. |
+| `tests/test_codex_flow_order_guard.py` | Codex adapter | The Codex env-gated pre-edit ordering gate: recognized edit forms, the evidence it accepts before a source edit, default silence, and the byte-locked regression surface. |
+| `tests/test_codex_completion_claim_guard.py` | Codex adapter | The Codex completion-claim guard and its marker mechanism, including parity of the claim/negation patterns with the Claude guard and the exact house message bytes. |
+| `tests/test_codex_current_rollout.py` | Codex adapter | Parsing of real Codex rollout records captured from a native WSL run - success and denial carriers - so the evidence readers are pinned against actual transcripts rather than synthetic ones. |
+| `tests/test_check_codex_hook_trust.py` | Codex adapter | The hook-trust checker: hermetic tests for its probe, its timeout and process-tree kill path, and the reports it produces for a trusted and an untrusted profile. |
+| `tests/test_codex_hook_trust_docs.py` | docs | That the per-environment Codex hook-trust steps are documented where an operator will find them. |
+| `tests/test_effect_layer_guards.py` | guard regression | Effect-layer enforcement: the repo git hooks the installer writes (prevention) and the Stop-time working-tree scan (detection), which sees the bytes that landed regardless of the write form used. |
+| `tests/test_install_git_hooks.py` | script unit | The git-hook installer: the scanner path is emitted as one POSIX shell literal, a modified managed hook is never overwritten or deleted, installs are idempotent and reversible, a foreign hook is left alone, and an external hooksPath needs explicit opt-in. |
+| `tests/test_byte_lock_integrity.py` | meta | The byte locks themselves: no live test may resolve an expected value from `git show HEAD:`, and every locked path's expected value must be a literal in the test source - a digest recomputed at run time is a tautology wearing a hash. |
+| `tests/test_testing_doc_map.py` | meta | This map: every suite has a row, no row names a deleted file, and every deliberate exclusion carries a reason. A drift gate, not a truth gate - it cannot judge whether a row's description is accurate. |
+| `tests/test_subprocess_encoding.py` | house rule | Every text-mode subprocess call in tests and scripts pins `encoding='utf-8'`, so a locale does not decide what a test reads. |
+| `tests/test_repo_scripts_no_deprecated_utcnow.py` | house rule | No shipped Python script calls the deprecated `datetime.utcnow()`. |
+| `tests/test_shared_skill_contract.py` | harness unit | The shared skill contract, driven through the harness with deliberately broken fixture skills - the only negative controls the harness currently has. |
+| `tests/test_sensitive_redaction.py` | safety | Redaction: vendor tokens and private-key blocks are masked in both plain text and JSON, the structure and key context survive, an unterminated key block is masked through end-of-file, and no path echoes the secret it masked. |
+| `tests/test_review_package.py` | script unit | The review-package builder: refs that start with a dash or contain a separator cannot inject a file or create a directory, and a persisted diff has high-confidence secrets redacted. |
+| `tests/test_eval_path_safety.py` | safety | Path traversal across the eval runners: slugs, fixture trees and frontmatter names reject parent and separator forms, absolute paths, and nested symlinks. |
+| `tests/test_release_distribution.py` | release | Release and skills-only archives: contents, the verify path, the archive gate log, the golden archive digest, and that the shipped manifest is the committed one rather than a synthesized copy. |
+| `tests/test_release_ledger_docs.py` | release | The release-evidence ledger format and the historical rows it must keep byte-exact (skipped where the historical blob is absent, as in a shallow clone). |
+| `tests/test_grok_packaging.py` | runtime adapter | The experimental Grok CLI adapter: manifest, local marketplace entry, and hook wiring narrow enough that a failure cannot silently widen. |
+| `tests/test_zcode_packaging.py` | runtime adapter | The experimental ZCode adapter: manifest, root marketplace entry, and hook wiring, including the claims its README is allowed to make. |
+| `tests/test_process_owner_policy.py` | process | The coexistence context actually delivered to a session - not model compliance and not hook installation, which are separate concerns. |
+| `tests/test_evidence_persist.py` | process | Where the Final Implementation Report is persisted for a per-package work item, and that a re-run resolves to the same single canonical path. |
+| `tests/test_evidence_tracking_gate.py` | process | The evidence-tracking gate and the filesystem detectability of a new per-package plan, which `git status` alone cannot show for a gitignored artifact tree. |
+| `tests/test_artifact_path_prose.py` | docs | That the doc set describes the dual artifact layout and the evidence role consistently, and claims no detection route that does not exist. |
+| `tests/test_validator_cli_unchanged.py` | script unit | Characterization of the validator CLI: two specs with equal content under different layouts must produce the same verdict. |
+| `tests/test_strict_flow_evidence.py` | flow evidence | Offline strict flow-evidence derivation: what counts as a step having run, and the characterization pairs that separate a real signal from a jointly-empty comparison. |
+| `tests/test_br6_case_table.py` | guard regression | The shared shell-attribution case table: schema, row coverage, and parity between the Node and Python implementations that read it. |
 
 ---
 
@@ -547,7 +576,7 @@ not masked by a lucky single draw.
 - **10/16 clean** on the command-shim smoke. Flagged skills were re-checked with `--no-command-shim --plugin-dir .` (real plugin) before any conclusion.
 - `feature-build` q1: command-shim 0.00 but **real-plugin 1.00** → command-shim artifact, not a defect.
 - `safe-refactor`, `skill-authoring`, `completion-claim-gate`: added activation guards ("first action; announcing/inlining is not invoking"). Marginal lift on Haiku; **Sonnet 0.80–1.00** confirms the descriptions are sound.
-- `completion-claim-gate` is weakest on Haiku (~0.13); under weak models it relies on the deterministic Stop hook `hooks/completion-claim-guard.mjs` backstop (12 policy tests).
+- `completion-claim-gate` is weakest on Haiku (~0.13); under weak models it relies on the deterministic Stop hook `hooks/completion-claim-guard.mjs` backstop (12 policy tests in `tests/test_hooks_policy.py` at the time of this 2026-06-18 finding; that file now holds 45, of which 5 are the completion-claim class — the figure is left as the snapshot it was rather than re-pointed).
 
 ### Pipeline run-time procedure (`run_procedure_eval.py --live`, `bypassPermissions`, isolated fixture)
 
