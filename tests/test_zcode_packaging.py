@@ -289,12 +289,17 @@ class TestZcodeWorkflowClaimSweep(unittest.TestCase):
                 continue
 
     def test_no_tracked_file_still_says_zcode_has_no_workflow_runtime(self):
-        offenders = [
-            (rel, claim)
-            for rel, text in self._tracked_text_files()
-            for claim in self.STALE_CLAIM
-            if claim in text
-        ]
+        # Subject-aware. The bare phrase is also a TRUE statement about other runtimes -
+        # "Codex has no Workflow runtime" is correct and appears in a test comment on another
+        # branch - so matching it without checking who it is about flags a correct sentence as
+        # stale documentation. The claim counts only when ZCode is the subject of the line that
+        # carries it.
+        offenders = []
+        for rel, text in self._tracked_text_files():
+            for line in text.splitlines():
+                for claim in self.STALE_CLAIM:
+                    if claim in line and "zcode" in line.lower():
+                        offenders.append((rel, claim))
         self.assertEqual(offenders, [], "stale ZCode workflow claim still tracked: %r" % offenders)
 
     def test_no_tracked_file_asserts_the_unsourced_api_name(self):

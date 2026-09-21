@@ -112,6 +112,7 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_skill_creator_resolver.py` | helper unit | Official toolkit identity, requested capabilities, candidate fallback, and explicit-path trust diagnostics without hidden installs. |
 | `tests/test_runtime_documentation.py` | doc consistency unit | Current runtime evidence limits, test-result versus ordering semantics, coexistence restoration, and installed-trust proof requirements. |
 | `tests/test_handoff_scripts.py` | script unit | `task_brief.py` extracts a single plan task into a handoff file. |
+| `tests/test_grok_rhai_workflows.py` | runtime adapter | The experimental Grok adapter's Rhai workflow scripts: each shipped script parses, declares the metadata the runtime reads, and dispatches only agent types that exist. |
 
 ---
 
