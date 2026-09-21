@@ -29,6 +29,7 @@ import importlib.util
 import json
 import re
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -357,6 +358,79 @@ class TestDocConsistencyControls(NegativeControl):
         (self.root / "hooks").mkdir(parents=True)
         (self.root / "hooks" / "README.md").write_text("No settings here.\n", encoding="utf-8")
         self.assertSilent(h.check_doc_consistency(self.root))
+
+
+class TestConflictMarkerControls(NegativeControl):
+    """A committed conflict marker must fail something.
+
+    Merging ten branches left unresolved markers in two committed files, and BOTH survived a
+    full 1445-test gate run. One of them was `docs/testing.md`, whose suite-map test read that
+    exact file and passed - it matches table rows with a regex, and the rows on both sides of
+    the marker still matched.
+    """
+
+    def _repo(self, files, track=True):
+        """A scratch git repository containing `files`, staged unless `track` is False."""
+        git = shutil.which("git")
+        if git is None:
+            self.skipTest("git not available - cannot build a tracked fixture set")
+        run = lambda *a: subprocess.run([git, *a], cwd=self.root, check=True,
+                                        capture_output=True)
+        run("init", "-q", "-b", "main", ".")
+        run("config", "user.email", "t@example.invalid")
+        run("config", "user.name", "T")
+        for rel, text in files.items():
+            path = self.root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        if track:
+            run("add", "-A")
+        return self.root
+
+    def test_conflict_marker(self):
+        marker = "<" * 7 + " HEAD"
+        self._repo({"docs/note.md": "# Note\n" + marker + "\nleft\n"})
+        result = h.validate_no_conflict_markers(self.root)
+        self.assertFires("conflict_marker", result)
+        # The path is named; the line is NOT echoed - a marker can sit in a file that also
+        # holds sensitive text, and a gate that prints the region turns a slip into a leak.
+        self.assertTrue(any("docs/note.md" in e for e in result[0]), result[0])
+        self.assertFalse(any("left" in e for e in result[0]),
+                         "the check echoed file contents: %s" % result[0])
+
+    def test_prose_about_markers_is_not_a_marker(self):
+        # This spec, this docstring and this repository's own lessons all discuss the strings.
+        # A check that fired on them would be unusable in the repository that needs it.
+        marker = "<" * 7
+        self._repo({"docs/note.md":
+                    "# Note\n\nA merge writes `" + marker + " HEAD` at the top of the region.\n"})
+        self.assertSilent(h.validate_no_conflict_markers(self.root))
+
+    def test_an_untracked_file_is_not_checked(self):
+        marker = "<" * 7 + " HEAD"
+        self._repo({"docs/note.md": "# Note\n"}, track=True)
+        (self.root / "scratch.md").write_text(marker + "\n", encoding="utf-8")
+        self.assertSilent(h.validate_no_conflict_markers(self.root))
+
+    def test_a_heading_underline_is_not_a_marker(self):
+        # `=======` is a Markdown heading underline. Gating on it would fire on ordinary docs,
+        # so only the two distinctive forms count.
+        self._repo({"docs/note.md": "Title\n" + "=" * 7 + "\n\nBody.\n"})
+        self.assertSilent(h.validate_no_conflict_markers(self.root))
+
+    def test_conflict_marker_scan_skipped(self):
+        # A check that cannot enumerate its input has verified nothing; saying so is the same
+        # honesty rule this repository applies to a missing `node`. A WARNING rather than a
+        # raise, because the harness is a CLI - a unittest exception escaping it would be a
+        # crash, not a report.
+        original = h.shutil.which
+        h.shutil.which = lambda name: None if name == "git" else original(name)
+        try:
+            result = h.validate_no_conflict_markers(self.root)
+            self.assertFires("conflict_marker_scan_skipped", result, where="warnings")
+            self.assertEqual(result[0], [], "a check that could not run must report no errors")
+        finally:
+            h.shutil.which = original
 
 
 class TestAggregatorControls(unittest.TestCase):

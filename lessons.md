@@ -20,6 +20,17 @@ Each entry includes:
 
 ---
 
+## 2026-09-21 — A merge can commit a conflict marker and pass every gate the repository has
+
+- **Task / context:** Merging ten open branches. Most pairs conflicted on the same file, so the resolutions were driven from a loop that resolved the known-shaped one (`lessons.md`, a union of appended entries) and then ran `git add -A; git commit`.
+- **Symptom:** That loop committed conflict markers in two files. `tests/test_codex_write_guard.py` kept a `<<<<<<< HEAD` block because `git add -A` stages a partially-resolved merge exactly as happily as a resolved one. `docs/testing.md` kept one in the middle of a table. Both then passed the FULL gate - `check_all`, the skill harness, the version check and 1445 unit tests. The second is the sharper half: `docs/testing.md` has a test that reads that very file and asserts every suite has a map row, and it passed, because it matches rows with a regex and the rows on both sides of the marker still matched.
+- **Root cause:** Two independent gaps that only meet during a merge. First, `git add -A` has no notion of "resolved"; it is a staging verb, and using it to conclude a merge converts an unfinished decision into a commit. Second, nothing in the repository looked for conflict markers at all. In Python or JavaScript a marker usually breaks the syntax and something fails for an unrelated reason, which is what makes the gap invisible; in Markdown, or in a test file whose broken region is never executed, nothing fails.
+- **Correct fix:** A `validate_no_conflict_markers` check in `tests/skills/harness.py`, not a unit test - the harness is wired into `.pre-commit-config.yaml`, so the marker is caught before the commit that would carry it. It reads the TRACKED set only (a marker in a scratch file is not a defect), gates on the two distinctive forms (`=======` is also a Markdown heading underline and would fire on ordinary documents), and reports PATHS only, because a marker can sit in a file that also holds sensitive text and a gate that printed the region would turn a merge slip into a disclosure. Without git it reports a warning rather than raising or silently passing, since a check that cannot enumerate its input has verified nothing.
+- **Preventive rule / automated check:** Never let a bulk stage conclude a merge: resolve each conflicted file deliberately, and before committing, grep for the markers. Where a resolution has a known shape - an append-only list, say - a script may resolve THAT file, but a file whose resolution is a decision (which digest is current, which rows survive) has to be read. And when a defect class is invisible to every existing check because some OTHER failure usually masks it, that masking is the reason to add the direct check, not a reason to skip it.
+- **Related files & tests:** `tests/skills/harness.py` (`validate_no_conflict_markers`), `tests/test_harness_negative_controls.py::TestConflictMarkerControls`, `docs/testing.md`.
+
+---
+
 ## 2026-09-21 — A check whose only exercise is a healthy tree is indistinguishable from a no-op
 
 - **Task / context:** `tests/skills/harness.py` is one of four documented gate commands. It prints `skills_eval=passed` and can emit 35 distinct failure keys - dangling references, golden drift, safety-evidence wiring, hook-script paths, frontmatter rules.
