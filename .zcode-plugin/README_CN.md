@@ -53,9 +53,13 @@ ZCode 上未接线（已记录的缺口，见 `docs/runtime-adapter.md`）：Sto
 
 ## 编排回退
 
-ZCode 没有 Workflow 运行时。Claude Code 会运行 `spec-plan-draft` 工作流、Codex 使用其
-内嵌适配器的地方，ZCode 会话在主循环中以相同的**作者 → 评审 → 修订**纪律运行，并保存
-工件和 `scripts/validate_artifacts.py` 证据。
+ZCode 在客户端 3.14.0 中新增了动态工作流（官方更新日志，2026-09-19），可从输入框加号
+菜单或 `/workflow` 启动。但 Z.ai 尚未公开其脚本 API、文件格式或存储路径，且 `plugin.json`
+没有 `workflows` 组件键——因此**本插件无法为你分发工作流**。Claude Code 会运行
+`spec-plan-draft` 工作流、Codex 使用其内嵌适配器的地方，ZCode 会话在主循环中以相同的
+**作者 → 评审 → 修订**纪律运行，并保存工件和 `scripts/validate_artifacts.py` 证据。
+保留在 `workflows/zcode/spec-plan-draft.dwf.ts` 的移植版尚未验证，仅作为实机运行的起点，
+不是受支持的路径。
 
 ## 版本
 

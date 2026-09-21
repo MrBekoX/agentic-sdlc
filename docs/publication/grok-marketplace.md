@@ -16,7 +16,8 @@ Grok CLI is an experimental adapter, not a supported 0.4.3 release target.
 - `.grok-plugin/marketplace.json` (`name=mrbekox`, `plugins[]` entry with
   `name`/`version`/`source="./"`). No zip `sha256` or `_artifact` fields.
 - `.grok-plugin/README.md` documenting `marketplace add`, `install --trust`,
-  `enable`, `details`, `inspect`, side effects, and Workflow degradation.
+  `enable`, `details`, `inspect`, side effects, and project-catalog Rhai
+  workflows (not a plugin component).
 - Version binding via `tests/test_grok_packaging.py`.
 - Optional catalog `.grok-plugin/plugin-index.json` is **not** shipped;
   `09-plugins.md` says installs work without it.

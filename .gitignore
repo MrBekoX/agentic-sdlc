@@ -27,6 +27,7 @@ docs/codex-plugin-runtime-debug-report/
 !docs/troubleshooting.md
 !docs/skill-boundaries.md
 !docs/runtime-adapter.md
+!docs/zcode-runtime-adapter.md
 !docs/release-readiness.md
 !docs/release-evidence-0.4.3.md
 !docs/data-handling.md
@@ -62,6 +63,10 @@ mcps/
 
 # Claude Code local / runtime
 .claude/
+# ZCode local workspace. NOT .grok/: that is the project workflow catalog Grok loads from the
+# repo (.grok/workflows/*.rhai), so it is tracked and shared. ZCode publishes no such catalog
+# path, and an untracked .zcode/ copy of a tracked workflow silently drifted once already.
+.zcode/
 # OpenCode local tool workspace (node_modules + config; local tooling, not distributed)
 .opencode/
 # Omo local run-continuation state (per-session tool state, not distributed)
