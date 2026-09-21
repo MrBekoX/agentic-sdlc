@@ -21,8 +21,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # The gate runs the suite twice (source tree, then inside the extracted archive). The GitHub
-    # default is 360 minutes; a hung job should not burn six hours of the account's minutes.
+    # The gate runs the suite twice per OS: once over the source tree, once inside the extracted
+    # archive. It used to be FOUR - check_all.py also ran an unrestricted `discover -s tests`, so
+    # each explicit `Unit tests` step was shadowed by an implicit one, and this comment
+    # undercounted by 2x. check_all.py now runs only the validator suites it names.
+    # The GitHub default timeout is 360 minutes; a hung job should not burn six hours of the
+    # account's minutes.
     timeout-minutes: 60
     steps:
       # Actions are pinned to a full commit SHA: a tag can be moved, a SHA cannot. Dependabot keeps
@@ -32,6 +36,11 @@ jobs:
           # The gate only reads the tree; leaving the token in .git/config would hand it to every
           # command the gate runs, including the suite's own git invocations.
           persist-credentials: false
+          # Full history. The default depth-1 clone has no historical blobs, so
+          # tests/test_release_ledger_docs.py SKIPPED its byte-exact ledger pin on every CI job -
+          # a check that ran only on a maintainer's local clone. The archive job below keeps its
+          # deliberate --depth=1 fetch; this is the source job only.
+          fetch-depth: 0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"

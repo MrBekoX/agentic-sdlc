@@ -32,6 +32,8 @@ python3 -m unittest discover -s tests -v
 
 Use the repository-mandated `python3` entry point on both platforms; verify it is on `PATH` before running the gate. Hook-internal interpreter fallbacks are separate from these contributor commands.
 
+**All four, in full.** `check_all.py` runs the frontmatter lint and the validator suites it names, and nothing else — it prints `suites_not_run_here` pointing at the fourth command for exactly that reason. It used to run the whole suite itself, which made a gate run collect ~1300 tests twice (440 s against 3 s here) and made `validator_tests=` report something far wider than it named. The fourth command is what runs everything; no other command is a substitute for it.
+
 ### What each command proves
 
 | Command | Proves |
@@ -82,6 +84,8 @@ python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-
 ```
 
 Optional: `pre-commit run --all-files` (wired in `.pre-commit-config.yaml` to run `check_all.py` + the harness).
+
+That pair is the **fast subset**, not the gate: together they finish in seconds and cover the frontmatter lint, the reference/golden/safety-wiring checks and the validator suites. They do not run the unit-test layer. Before claiming the repo is healthy, run all four commands above — `pre-commit` passing is not the same claim. (It used to run the full suite on every commit, which took about eight minutes; a guard that blocks routine safe work that long is one that gets switched off. If you want the suite on every commit anyway, add it to `.pre-commit-config.yaml` deliberately.)
 
 ---
 
@@ -138,6 +142,7 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_evidence_persist.py` | process | Where the Final Implementation Report is persisted for a per-package work item, and that a re-run resolves to the same single canonical path. |
 | `tests/test_evidence_tracking_gate.py` | process | The evidence-tracking gate and the filesystem detectability of a new per-package plan, which `git status` alone cannot show for a gitignored artifact tree. |
 | `tests/test_artifact_path_prose.py` | docs | That the doc set describes the dual artifact layout and the evidence role consistently, and claims no detection route that does not exist. |
+| `tests/test_gate_composition.py` | meta | Each suite runs once in a gate run and each reported key names what was measured: `check_all.py` collects only the validator suites it names, those patterns match real files, and every `tests/test_*.py` is still covered by a documented gate command - so narrowing one command can never orphan a file. |
 | `tests/test_validator_resolver_parity.py` | meta | The two tools that validate a work package agree on what a valid one is: `validate_artifacts.py` (the gate the skills run) and `resolve_work_package.py` (which rejects the artifact later) must require the same frontmatter keys and accept the same statuses. The validator mirrors rather than imports the resolver, so this test is what stops the two copies drifting. |
 | `tests/test_validator_cli_unchanged.py` | script unit | Characterization of the validator CLI: two specs with equal content under different layouts must produce the same verdict. |
 | `tests/test_strict_flow_evidence.py` | flow evidence | Offline strict flow-evidence derivation: what counts as a step having run, and the characterization pairs that separate a real signal from a jointly-empty comparison. |
@@ -599,7 +604,7 @@ Question: do the pipeline's feeder skills fire at the right step, and does it ru
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| `check_all=failed` with `validator_tests_failed` | A unit test in `tests/` is failing. | Run `python3 -m unittest discover -s tests -v` to see the failing test. |
+| `check_all=failed` with `validator_tests_failed` | One of the validator suites named in `check_all.py` (`VALIDATOR_TEST_PATTERNS`) is failing. | The failing test name is printed to stderr; re-run that suite with `python3 -m unittest discover -s tests -p <file> -v`. A failure elsewhere in `tests/` surfaces in the gate's fourth command, not here. |
 | `name_dir_mismatch` or `name_not_kebab` | A skill directory name does not match the `name:` frontmatter value, or the name is not kebab-case. | Rename the directory or edit `SKILL.md` frontmatter. |
 | `dangling_reference` | A skill's `must_reference` entry points to a missing component. | Add the missing skill/agent/workflow/etc., or update the golden entry. |
 | `safety_evidence_absent` | A safety scenario's `guardrail_evidence` substring is not found in the cited file. | Restore the guardrail text in the cited contract/skill/hook, or update the fixture if the guardrail moved. |
