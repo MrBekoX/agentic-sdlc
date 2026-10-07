@@ -4,19 +4,19 @@ This packet prepares an `agentic-sdlc` upload to the OpenAI public plugin direct
 
 ## Archive definition
 
-- The skills-only archive holds exactly the committed files under `.codex-plugin/`, `skills/`, `hooks/`, `contracts/skills/`, `scripts/` and `assets/`, plus `LICENSE` (BR24).
+- The skills-only archive is a deterministic public projection of committed source (BR24), separate from the unchanged manual Claude/Codex distribution. It contains `.codex-plugin/plugin.json`, source `skills/`, `contracts/skills/`, `assets/`, `LICENSE`, and three stdlib Python helpers: `scripts/detect_context.py`, `scripts/validate_artifacts.py`, `scripts/resolve_work_package.py`.
 - It is built with `python3 scripts/build_release.py --output <zip> --skills-only` and checked with `python3 scripts/build_release.py --verify <zip>`, which reports `archive_kind=skills-only`. It is a separate archive from the general release ZIP.
 - The governing manifest is `.codex-plugin/plugin.json` (DP11).
-- It has no `.claude-plugin/`, `commands/`, `agents/`, `workflows/`, `docs/` or `tests/` member and no MCP configuration.
-- The OpenAI guide requires that no skill relies on commands or agents ([submit a Claude plugin](https://developers.openai.com/plugins/guides/submit-claude-plugin), observed 2026-09-14).
-- GAP: `agentic-sdlc-pipeline` step 16 (`SKILL.md` and `playbook.md`) tells the agent to run the read-only `git-safety-check` command, which lives in `commands/` and is not in this archive.
-- Owner: the maintainer. Follow-up after 0.4.3: give `agentic-sdlc-pipeline` step 16 a skills-only fallback; until then this path stays GAP.
-- GAP: skills name `agents/` roles (`code-reviewer`, `context-analyst`, `debugger`, `implementation-auditor`, `security-reviewer`, `software-architect`, `spec-plan-author`, `spec-plan-critic`, `test-engineer`) that are not in this archive; there those roles run only through each skill's degraded inline fallback.
-- The OpenAI path stays GAP until pipeline step 16 has a skills-only fallback.
+- It has no lifecycle hook files, `.claude-plugin/`, `commands/`, `agents/`, `workflows/`, root `docs/` or `tests/` member and no MCP configuration. The public manifest has no `hooks` field. General release and manual install hooks remain unchanged.
+- The OpenAI guide requires reusable command/agent procedures to become skills and lifecycle hooks to be removed for public submission ([submit a Claude plugin](https://developers.openai.com/plugins/guides/submit-claude-plugin), checked 2026-10-06). This projection merges the procedures into skill references without adding routing descriptions or altering source Claude behavior.
+- `skills/using-agentic-sdlc/references/public-runtime.md` maps all nine bundled role instructions to native subagent dispatch. Each public skill requires loading this guide; the actual role body must be supplied to a specialist before delegation. Inline review is allowed only when native delegation is unavailable and must be labelled degraded.
+- `skills/using-agentic-sdlc/references/git-safety-check.md` supplies pipeline step 16's read-only review procedure. It preserves status/diff/history/test review and requires redaction before printing values; it does not commit or push.
+- Required source runtime/plugin/testing/boundary/troubleshooting documents are relocated under that same skill's `references/docs/`. Exact package references are mapped, while target-project outputs under `docs/agentic-sdlc/` remain unchanged. Optional source-only test/eval runners are explicitly unavailable unless a separate source checkout supplies them.
+- Owner: the maintainer reviews local preparation evidence and controls external publication. Preparing or verifying an archive does not upload it.
 
 ## Listing fields
 
-The `interface` block of `.codex-plugin/plugin.json`, as pinned by `tests/test_packaging_metadata.py`:
+The public `interface` retains the source listing fields/assets validated by `tests/test_packaging_metadata.py`, while its `longDescription` states procedural guidance and no automatic hook enforcement. Optional `homepage` and `repository` URLs for the private source checkout are omitted from the public manifest; `author` and stable package identity remain unchanged.
 
 | Field | Value |
 |---|---|
@@ -31,7 +31,7 @@ The `interface` block of `.codex-plugin/plugin.json`, as pinned by `tests/test_p
 
 ## Guard statement
 
-Installs through ChatGPT get no guard enforcement from this package. The guards are local Codex and Claude Code hook behavior, and they run only after the user reviews and trusts the hooks in that runtime.
+This public package provides procedural guidance and no lifecycle hook enforcement on any surface. Manual Codex and Claude Code distributions retain their runtime hooks. Codex skips non-managed plugin hooks until the user reviews and trusts their current definitions; installation does not grant trust ([package hooks](https://developers.openai.com/plugins/build/plugins#hooks), checked 2026-10-06).
 
 ## Prerequisites
 
@@ -49,10 +49,9 @@ The portal resets `author.name` and `interface.developerName` to defaults when t
 
 ## Other items
 
-- Privacy link: the DP10 record. `docs/data-handling.md` is linked only through a URL whose `docs/publication/link-checks.json` entry records 200; GAP today.
-- Security-report mechanism: GAP, because the GitHub private vulnerability reporting API returns 404 while the repository is private.
-- DP24 top-level URLs: `homepage` and `repository` point at the repository URL, recorded as 404, so both are GAP until 200; `author.url` has a recorded 200 entry.
-- Ledger rows: `skills_only_archive` and `portal_normalized_manifest` in `## Required release rows` of [`../release-evidence-0.4.3.md`](../release-evidence-0.4.3.md). They stay not-run or BLOCKED until a maintainer-approved upload.
+- The current submission field reference requires website/support/privacy/terms URLs for MCP review; skills-only metadata validation does not require all four. This plugin has no MCP server; do not invent account or link prerequisites for its skills-only format ([submission reference](https://developers.openai.com/plugins/deploy/submission#listing-metadata), checked 2026-10-06).
+- Public source links and a GitHub security-report mechanism remain maintainer distribution decisions for a future public repository. The public ZIP does not advertise the currently private repository URLs.
+- Historical ledger rows `skills_only_archive` and `portal_normalized_manifest` remain historical/not-run or BLOCKED. New local build/verify/native evidence is recorded separately in [current readiness](codex-0.160.1-readiness.md); local verification is not portal acceptance.
 
 ## Maintainer-evening items (D24)
 
@@ -61,3 +60,13 @@ These maintainer-evening items happen outside agent execution:
 - The public repository is a new, clean repository created together with the maintainer (option C).
 - The portal upload is done together with the maintainer. The agent submits nothing.
 - The listing and top-level URLs are re-checked against that new repository at that time.
+
+## Validation and provenance
+
+`--verify` reconstructs the same public projection from the archive's recorded source commit, then checks member set, bytes, modes, deterministic rebuild and secrets. A missing role/reference/helper stops preparation; tampering or restored lifecycle files fails verification. Never submit an archive whose verification failed.
+
+An uncommitted preparation run may use an explicitly labelled isolated Git source snapshot, preserving that snapshot for reconstruction. It is not a commit in the development repository. Build both distributions and run native discovery against that same immutable snapshot. A final maintainer release must rebuild from the intended committed revision.
+
+Current native discovery, direct script checks, transcript replay and authenticated installed-hook execution are separate evidence levels. Missing current execution evidence remains an explicit limitation; successful discovery alone does not prove hook effects or skill routing.
+
+The 2026-10-07 public critic component check supplied four packaged instruction bodies through a trusted harness and observed real native delegation on GPT-5.6 Luna/Low. This supports that bounded instruction/delegation path only. The original shell-read case was infrastructure-inconclusive, so no equal-harness improvement or model-side file-read claim is made. A `read-only`/`never` host policy can deny shell-based inspection before execution; phase helpers require approved command execution or a host-supported read/input mechanism. Do not weaken user permissions or hook trust to make a preparation check pass.

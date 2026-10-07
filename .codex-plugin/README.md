@@ -24,18 +24,20 @@ The `interface` block supplies display metadata, capabilities, default prompts a
 
 ![Agentic SDLC workflow overview](../assets/workflow-overview.png)
 
-The [official packaging guide](https://developers.openai.com/plugins/build/plugins) recommends a portable root `plugin.json` for new packages and still supports this compatibility manifest. This package deliberately retains the compatibility format: Codex **0.154.0** suppresses portable-package hooks in its [released loader](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/core-plugins/src/loader.rs#L954). A native comparison with identical files discovered 16 skills in both formats, but **0 portable hooks versus 8 compatibility-format hooks**. Do not add a portable root manifest until a new native probe proves hook parity; otherwise it silently disables the backstops. See [runtime evidence and limits](../docs/runtime-adapter.md).
+The [official packaging guide](https://developers.openai.com/plugins/build/plugins) supports a standalone compatibility manifest as well as portable root `plugin.json`. This package retains its existing format; no migration is required for the current local contract. An isolated **0.160.1** installation discovered 16 skills and eight untrusted hooks. The **0.154.0** portable comparison (16 skills, zero portable hooks versus eight compatibility hooks) is historical evidence, not a current portable-loader claim. See [current preparation evidence](../docs/publication/codex-0.160.1-readiness.md) and [runtime evidence and limits](../docs/runtime-adapter.md).
 
 ## Distribution paths
 
-Four paths exist; each has its own go condition and state. The per-path verdicts are in [release readiness](../docs/release-readiness.md#distribution-paths-and-gono-go), and a state is a snapshot bound to the [release evidence ledger](../docs/release-evidence-0.4.3.md). Codex 0.154.0 has no `codex plugin validate` command, so no Codex-native validation step is listed.
+Four paths exist; each has its own go condition and state. Historical per-path verdicts are bound to the [release evidence ledger](../docs/release-evidence-0.4.3.md); new preparation results are recorded separately. `codex plugin --help` on 0.160.1 still lists no validate command, so use native discovery, the local gate and archive verification without inventing that subcommand.
+
+Public directory distribution uses a separate `--skills-only` projection: the manifest has no hooks; reusable specialist and git-review instructions live in skill references; only required stdlib helpers ship. Public installation provides procedural guidance. Manual local distribution retains hooks and requires native review/trust. See the [public packet](../docs/publication/openai-skills-only.md).
 
 | Path | Prerequisites | Steps | Go condition | State |
 |---|---|---|---|---|
 | Claude own marketplace | Claude Code; see [`../.claude-plugin/README.md`](../.claude-plugin/README.md). | `/plugin marketplace add MrBekoX/agentic-sdlc`, then `/plugin install agentic-sdlc@mrbekox`. | Go condition: a public repository, both strict Claude manifest validations passing, and a recorded clean install. | State: BLOCKED. The repository is private and its unauthenticated URL returns 404. |
 | Claude community marketplace submission | A public repository, a clean-package validation result and maintainer form access. | Submit through the Anthropic form; packet [`docs/publication/claude-community.md`](../docs/publication/claude-community.md). | Go condition: public repository and a passing `claude plugin validate` on the submitted root; acceptance is not guaranteed. | State: BLOCKED. Needs a public repository, validation and form access. |
 | Codex personal marketplace | Codex CLI 0.154.0; `node` on `PATH`; plugin at `~/plugins/agentic-sdlc`. | `codex plugin add agentic-sdlc@personal`; open `/hooks` in Codex and trust each agentic-sdlc hook; run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal` and expect `codex_hook_trust=trusted` ([Codex hook trust](../docs/troubleshooting.md#codex-hook-trust)). | Go condition: catalog `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`; native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; hook trust granted through the native `/hooks` protocol as a required step. | State: GAP. Final-package discovery and real-profile trust are not yet recorded. |
-| OpenAI public directory | Maintainer-verified identity and Apps Management Write (`api.apps.write`). | Build the BR24 skills-only archive (members `.codex-plugin/`, `skills/`, `hooks/`, `contracts/skills/`, `scripts/`, `assets/` and `LICENSE`) with `python3 scripts/build_release.py --output <zip> --skills-only`, verify it with `--verify`, then upload; packet [`docs/publication/openai-skills-only.md`](../docs/publication/openai-skills-only.md). | Go condition: a verified skills-only archive (`archive_kind=skills-only`); submission, acceptance and publication are three separate stages; after publication the listing changes only through a newly reviewed version ([app review](https://developers.openai.com/plugins/deploy/app-review)). | State: BLOCKED. Needs verified identity, `api.apps.write` and a verified skills-only archive. |
+| OpenAI public directory | Maintainer-verified identity and Apps Management Write (`api.apps.write`). | Build the deterministic skills-only projection (Codex manifest, skills and merged references, three required stdlib helpers, contracts, assets and `LICENSE`; lifecycle hooks are excluded) with `python3 scripts/build_release.py --output <zip> --skills-only`, verify it with `--verify`, then upload; packet [`docs/publication/openai-skills-only.md`](../docs/publication/openai-skills-only.md). | Go condition: a verified skills-only archive (`archive_kind=skills-only`); submission, acceptance and publication are three separate stages; after publication the listing changes only through a newly reviewed version ([app review](https://developers.openai.com/plugins/deploy/app-review)). | State: BLOCKED. Needs verified identity, `api.apps.write` and a verified skills-only archive. |
 
 ## Install
 
@@ -70,7 +72,7 @@ Example `~/.agents/plugins/marketplace.json`:
 codex plugin add agentic-sdlc@personal
 ```
 
-`@personal` is the supported local install. Codex 0.153.0+ also has `codex plugin marketplace add`, but this repo's `.claude-plugin/marketplace.json` is Claude's marketplace schema and not the supported Codex install path. Codex 0.154.0 can read it as a legacy-compatible layout, and `codex plugin marketplace add MrBekoX/agentic-sdlc` surfacing the `mrbekox` marketplace has been observed, but that route is unsupported. Installing both routes can list the plugin twice, once from `mrbekox` and once from `personal`.
+`@personal` is this repository's supported local example. `.claude-plugin/marketplace.json` uses Claude's marketplace schema; current Codex recognizes that legacy layout as well as native `.agents/plugins/marketplace.json` and supports `codex plugin marketplace add owner/repo`. Repository visibility/authentication still governs Git installation. Avoid installing the same plugin from both sources.
 
 Start a new Codex thread after install or reinstall so the runtime reloads plugin skills and hooks. If Codex reports bundled hooks pending review, open `/hooks` and review the plugin commands before relying on them.
 
@@ -138,7 +140,7 @@ The Codex manifest declares `"hooks": "./hooks/hooks-codex.json"`. It wires bloc
 
 ## Requirements
 
-- Codex CLI/runtime with plugin marketplace support. Versions re-captured on 2026-09-15: Codex 0.154.0 on Windows and 0.154.0 on WSL Ubuntu 24.04 (`~/.local/bin/codex`). Codex 0.154.0 has no `codex plugin validate` command. See [CLI versions by platform](../docs/runtime-adapter.md#cli-versions-by-platform).
+- Codex CLI/runtime with plugin marketplace support. Current Windows native discovery: 0.160.1, checked 2026-10-06. Historical 0.154.0 live captures retain their original platform and scope. Neither the captured historical CLI nor current 0.160.1 exposes `codex plugin validate`.
 - Node.js on `PATH` for manual hook-script checks and local gates.
 - Python 3 for validators, probes, and local gates.
 - Git for branch, diff, commit, PR, and worktree flows.

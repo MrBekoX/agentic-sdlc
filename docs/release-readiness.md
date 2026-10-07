@@ -2,6 +2,8 @@
 
 This file is the publish gate for `agentic-sdlc` version `0.4.3`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex. The current release decision and sanitized observations are in [release evidence](release-evidence-0.4.3.md); preparation or a metadata-only pass cannot replace its required results.
 
+The 2026-10-06 preparation fixes public hook removal and packaged instruction/helper closure; current native Codex 0.160.1 discovery is recorded in [current readiness](publication/codex-0.160.1-readiness.md). The historical ledger below is preserved. New local preparation does not erase historical failed/not-run live evaluations or claim portal acceptance. No upload, publication, commit, push, PR or merge is part of this preparation.
+
 ## Supported Release Scope
 
 | Runtime | Status | Evidence requirement |

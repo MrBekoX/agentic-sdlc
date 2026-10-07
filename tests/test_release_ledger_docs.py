@@ -428,7 +428,7 @@ def identity_check_violations(text):
     return violations
 
 
-def packet_dependency_violations(packet, skill_texts, command_names, agent_names):
+def packet_dependency_violations(packet, skill_texts, command_names, agent_names, packaged=None):
     """The OpenAI packet states the no-commands/agents rule as a guide requirement and names each GAP."""
     violations = []
     for line in packet.splitlines():
@@ -436,11 +436,15 @@ def packet_dependency_violations(packet, skill_texts, command_names, agent_names
             violations.append("dependency_claim_as_fact")
     gap_lines = [line for line in packet.splitlines() if "GAP" in line]
     joined = "\n".join(skill_texts)
+    reference_root = "skills/using-agentic-sdlc/references"
+    guide = "" if packaged is None else packaged.get(f"{reference_root}/public-runtime.md", (None, b""))[1].decode("utf-8")
     for name in command_names:
-        if name in joined and not any(name in line for line in gap_lines):
+        resolved = packaged is not None and f"{reference_root}/{name}.md" in packaged and f"{reference_root}/{name}.md" in guide
+        if name in joined and not resolved and not any(name in line for line in gap_lines):
             violations.append("missing_command_gap:" + name)
     for name in agent_names:
-        if name in joined and not any(name in line for line in gap_lines):
+        resolved = packaged is not None and f"{reference_root}/roles/{name}.md" in packaged and f"{reference_root}/roles/{name}.md" in guide
+        if name in joined and not resolved and not any(name in line for line in gap_lines):
             violations.append("missing_agent_gap:" + name)
     return violations
 
@@ -656,6 +660,12 @@ class TestOpenAIPacketDependencies(unittest.TestCase):
     )
     SKILLS = ["Run the read-only git-safety-check command.", "Delegate to the code-reviewer agent."]
 
+    def test_public_packet_documents_projected_dependency_closure(self):
+        text = _real("docs/publication/openai-skills-only.md")
+        for expected in ("no lifecycle hook files", "public-runtime.md", "git-safety-check.md", "role instructions"):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, text)
+
     def test_packet_dependency_rule_synthetic_cases(self):
         args = (self.SKILLS, ["git-safety-check"], ["code-reviewer"])
         self.assertEqual(packet_dependency_violations(self.GOOD, *args), [])
@@ -670,16 +680,36 @@ class TestOpenAIPacketDependencies(unittest.TestCase):
                 self.assertIn(name, packet_dependency_violations(text, *args))
         self.assertEqual(packet_dependency_violations("no GAP needed", ["plain skill"], ["git-safety-check"], ["code-reviewer"]), [])
 
-    def test_real_openai_packet_names_command_and_agent_gaps(self):
+    def test_real_openai_packet_resolves_projected_command_and_agent_dependencies(self):
+        from scripts import build_release
+        paths = [p for root in ("skills", "agents", "commands", "docs", "contracts", "scripts", "assets", ".codex-plugin")
+                 for p in (REPO / root).rglob("*") if p.is_file() and "__pycache__" not in p.parts]
+        paths.append(REPO / "LICENSE")
+        members = {p.relative_to(REPO).as_posix(): ("100644", p.read_bytes()) for p in paths}
+        packaged = build_release._select_skills_only(members)
         violations = packet_dependency_violations(
-            _real("docs/publication/openai-skills-only.md"), _skill_texts(), _names("commands"), _names("agents")
+            _real("docs/publication/openai-skills-only.md"), _skill_texts(), _names("commands"), _names("agents"), packaged
         )
         self.assertEqual(violations, [])
+        guide_path = "skills/using-agentic-sdlc/references/public-runtime.md"
+        # Negative controls: an instruction naming a role is not proof of its packaged body.
+        for path, expected in (
+            ("skills/using-agentic-sdlc/references/git-safety-check.md", "missing_command_gap:git-safety-check"),
+            ("skills/using-agentic-sdlc/references/roles/code-reviewer.md", "missing_agent_gap:code-reviewer"),
+            (guide_path, "missing_agent_gap:code-reviewer"),
+        ):
+            with self.subTest(missing=path):
+                broken = {p: entry for p, entry in packaged.items() if p != path}
+                result = packet_dependency_violations(
+                    _real("docs/publication/openai-skills-only.md"), _skill_texts(),
+                    _names("commands"), _names("agents"), broken
+                )
+                self.assertIn(expected, result)
 
-    def test_packet_names_skills_only_follow_up_owner(self):
+    def test_packet_names_preparation_and_publication_owner(self):
         lines = _real("docs/publication/openai-skills-only.md").splitlines()
-        owners = [line for line in lines if all(token in line for token in ("Owner:", "maintainer", "step 16"))]
-        self.assertTrue(owners, "the OpenAI packet names no owner for the step 16 skills-only follow-up")
+        owners = [line for line in lines if all(token in line for token in ("Owner:", "maintainer", "publication"))]
+        self.assertTrue(owners, "the OpenAI packet names no maintainer owner for external publication")
 
 
 if __name__ == "__main__":

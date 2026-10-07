@@ -374,7 +374,7 @@ class TestPackagingMetadata(unittest.TestCase):
             violations += personal_path_violations(rel, path.read_text(encoding="utf-8"), install_doc=rel in install_docs)
         self.assertEqual(violations, [])
 
-    def test_codex_docs_keep_personal_install_and_reject_claude_marketplace(self):
+    def test_codex_docs_keep_personal_install_and_identify_claude_schema(self):
         docs = [
             REPO / "README.md",
             REPO / ".codex-plugin" / "README.md",
@@ -422,9 +422,9 @@ class TestPackagingMetadata(unittest.TestCase):
             "the current binary and the historical probe are recorded as the same version, so "
             "the drift this row exists to pin is not stated",
         )
-        self.assertEqual(current, "0.154.0",
+        self.assertEqual(current, "0.160.1",
                          "current binary drifted; update this literal in the same commit")
-        self.assertEqual(historical, "0.142.0",
+        self.assertEqual(historical, "0.154.0",
                          "historical probe version drifted; update this literal in the same "
                          "commit")
         self.assertIn("transcript_path", text)
