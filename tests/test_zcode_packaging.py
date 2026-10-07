@@ -16,11 +16,27 @@ import json
 import subprocess
 import shutil
 import re
+import os
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def workflow_port_sources(root):
+    """Source ports, including accidental .zcode copies, excluding generated archive/cache trees."""
+    found = []
+    for directory, dirs, files in os.walk(root):
+        relative = Path(directory).relative_to(root)
+        dirs[:] = [name for name in dirs if name not in {".git", "node_modules", "__pycache__"}
+                   and not (relative == Path(".") and name in {"dist", "build"})
+                   and not (relative == Path("tests") and name == "artifacts")]
+        found.extend((relative / name).as_posix() for name in files if name.endswith(".dwf.ts"))
+    return sorted(found)
+
 ZCODE_MANIFEST = REPO / ".zcode-plugin" / "plugin.json"
 ZCODE_MARKETPLACE = REPO / "marketplace.json"
 ZCODE_HOOKS = REPO / "hooks" / "hooks-zcode.json"
@@ -227,12 +243,25 @@ class TestZcodeSkillAdapters(unittest.TestCase):
     def test_exactly_one_zcode_workflow_script_exists(self):
         # A second copy under .zcode/workflows/ was orphaned (referenced nowhere) and had already
         # drifted from this one within minutes. One file, one source of truth.
-        found = sorted(
-            path.relative_to(REPO).as_posix()
-            for path in REPO.rglob("*.dwf.ts")
-            if "tests/artifacts" not in path.as_posix()
-        )
+        found = workflow_port_sources(REPO)
         self.assertEqual(found, ["workflows/zcode/spec-plan-draft.dwf.ts"])
+
+    def test_source_port_inventory_ignores_build_copies_but_rejects_orphans(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for relative in ("workflows/zcode/spec-plan-draft.dwf.ts",
+                             "dist/cache/workflows/zcode/spec-plan-draft.dwf.ts",
+                             "build/package/workflows/zcode/spec-plan-draft.dwf.ts"):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("// fixture\n", encoding="utf-8")
+            with mock.patch.dict(globals(), {"REPO": root}):
+                self.test_exactly_one_zcode_workflow_script_exists()
+                orphan = root / ".zcode/workflows/spec-plan-draft.dwf.ts"
+                orphan.parent.mkdir(parents=True)
+                orphan.write_text("// orphan\n", encoding="utf-8")
+                with self.assertRaises(AssertionError):
+                    self.test_exactly_one_zcode_workflow_script_exists()
 
     def test_spec_plan_draft_workflow_port_is_present(self):
         text = (REPO / "workflows" / "zcode" / "spec-plan-draft.dwf.ts").read_text(encoding="utf-8")

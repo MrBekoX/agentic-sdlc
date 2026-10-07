@@ -163,8 +163,26 @@ class TestSkillCreatorResolver(unittest.TestCase):
             root = Path(tmp) / "skill-creator"
             make_skill_creator_root(root)
             (root / "SKILL.md").write_text("---\nname: impostor\n---\n", encoding="utf-8")
-            with mock.patch.dict("os.environ", {"SKILL_CREATOR_ROOT": str(root)}, clear=True):
+            with (
+                mock.patch.object(resolver, "home", return_value=Path(tmp) / "home"),
+                mock.patch.dict("os.environ", {"SKILL_CREATOR_ROOT": str(root)}, clear=True),
+            ):
                 self.assertIsNone(resolver.discover())
+
+    def test_wrong_explicit_identity_preserves_official_cache_fallback(self):
+        resolver = load_resolver()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "wrong-skill"
+            make_skill_creator_root(root)
+            (root / "SKILL.md").write_text("---\nname: impostor\n---\n", encoding="utf-8")
+            fixture_home = Path(tmp) / "home"
+            official = fixture_home / ".claude/plugins/cache/claude-plugins-official/skill-creator/fixture/skills/skill-creator"
+            make_skill_creator_root(official)
+            with (
+                mock.patch.object(resolver, "home", return_value=fixture_home),
+                mock.patch.dict("os.environ", {"SKILL_CREATOR_ROOT": str(root)}, clear=True),
+            ):
+                self.assertEqual(resolver.discover(), ("claude-official-cache:fixture", official.resolve()))
 
     def test_does_not_recursively_scan_arbitrary_cache(self):
         resolver = load_resolver()

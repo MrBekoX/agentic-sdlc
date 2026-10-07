@@ -20,6 +20,7 @@ import hashlib
 import io
 import json
 import os
+import posixpath
 import re
 import stat
 import subprocess
@@ -171,9 +172,21 @@ ARCHIVE_COMMENT_PREFIX = b"agentic-sdlc-archive source_commit="
 # The versioned ledger name follows the VERSION file next to scripts/ (QUAL-8).
 _RELEASE_VERSION = (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8").strip()
 RUNTIME_PAYLOAD_EXCLUDE = frozenset({f"docs/release-evidence-{_RELEASE_VERSION}.md", "docs/release-readiness.md"})
-# BR24: the skills-only archive holds exactly these committed roots plus LICENSE.
+# BR24 input roots; public output is a deterministic projection, never the local hook payload.
 SKILLS_ONLY_ROOTS = (".codex-plugin/", "skills/", "hooks/", "contracts/skills/", "scripts/", "assets/")
 CODEX_MANIFEST = ".codex-plugin/plugin.json"
+PUBLIC_REFERENCE_ROOT = "skills/using-agentic-sdlc/references"
+PUBLIC_RUNTIME_HELPERS = frozenset({
+    "scripts/detect_context.py", "scripts/validate_artifacts.py", "scripts/resolve_work_package.py",
+})
+PUBLIC_ROLES = (
+    "code-reviewer", "context-analyst", "debugger", "implementation-auditor",
+    "security-reviewer", "software-architect", "spec-plan-author", "spec-plan-critic", "test-engineer",
+)
+PUBLIC_DOCS = (
+    "runtime-adapter", "zcode-runtime-adapter", "plugin-readme", "testing",
+    "skill-boundaries", "troubleshooting",
+)
 
 
 class ReleaseError(Exception):
@@ -345,8 +358,147 @@ def _write_atomic(output: Path, data: bytes) -> None:
         raise
 
 
+def _public_references(text: str, source: str, destination: str, mapping: dict, source_paths: set) -> str:
+    """Rewrite known package references; workspace output paths are deliberately not mapped."""
+    def link(match):
+        label, raw_target = match.group(1), match.group(2)
+        if raw_target.startswith(("https://", "http://", "#")):
+            return match.group(0)
+        target, separator, anchor = raw_target.partition("#")
+        resolved = posixpath.normpath(posixpath.join(posixpath.dirname(source), target))
+        key = target if target in mapping else resolved
+        if key not in mapping:
+            if key in source_paths or resolved in source_paths:
+                # Source-only manual-runtime/test links are information, not public dependencies.
+                return label + " (source checkout only)"
+            return match.group(0)
+        relative = posixpath.relpath(mapping[key], posixpath.dirname(destination))
+        return "[" + label + "](" + relative + (separator + anchor if separator else "") + ")"
+
+    text = re.sub(r"\[([^\]\n]+)\]\(([^()\s]+)\)", link, text)
+    # Do not rewrite already-relocated paths or relative Markdown links a second time.
+    for old, new in sorted(mapping.items(), key=lambda item: -len(item[0])):
+        text = re.sub(r"(?<![\w/.-])" + re.escape(old) + r"(?![\w/.-])", lambda _m: new, text)
+    return text
+
+
+def _without_frontmatter(text: str) -> str:
+    return re.sub(r"\A---\r?\n.*?\r?\n---(?:\r?\n)?", "", text, count=1, flags=re.DOTALL)
+
+
+def _public_house_payload(members: dict, selected: dict) -> dict:
+    """Merge reusable house procedures into skill references without modifying their source."""
+    mapping = {f"agents/{name}.md": f"{PUBLIC_REFERENCE_ROOT}/roles/{name}.md" for name in PUBLIC_ROLES}
+    mapping.update({f"docs/{name}.md": f"{PUBLIC_REFERENCE_ROOT}/docs/{name}.md" for name in PUBLIC_DOCS})
+    mapping["commands/git-safety-check.md"] = f"{PUBLIC_REFERENCE_ROOT}/git-safety-check.md"
+    required = set(mapping) | PUBLIC_RUNTIME_HELPERS | {CODEX_MANIFEST}
+    missing = sorted(required - set(members))
+    if missing:
+        raise ReleaseError([f"error=public_dependency_missing:{path}" for path in missing])
+    guide_path = f"{PUBLIC_REFERENCE_ROOT}/public-runtime.md"
+    generated = set(mapping.values()) | {guide_path}
+    collisions = [f"error=public_projection_collision:{path}" for path in sorted(generated & set(members))]
+    collisions += _collisions(set(members) | generated)
+    if collisions:
+        raise ReleaseError(collisions)
+    selected = {p: v for p, v in selected.items() if not p.startswith("scripts/") or p in PUBLIC_RUNTIME_HELPERS}
+    for source, destination in mapping.items():
+        mode, data = members[source]
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ReleaseError([f"error=public_dependency_unreadable:{source}"]) from None
+        if source.startswith(("agents/", "commands/")):
+            text = _without_frontmatter(text)
+        if not text.strip():
+            raise ReleaseError([f"error=public_dependency_empty:{source}"])
+        selected[destination] = (mode, text.encode("utf-8"))
+
+    review_path = mapping["commands/git-safety-check.md"]
+    review = selected[review_path][1].decode("utf-8").replace("\r\n", "\n")
+    # The original Claude command remains unchanged. Its grep would print secret values before
+    # the following masking instruction; the public procedure requires redaction before output.
+    review = re.sub(r"```bash\ngit diff --cached \| grep -nEi[^\n]*\n```",
+                    "Inspect staged and unstaged changes in memory before printing any diff.\n"
+                    "Use a redacting scanner when available; report only file:line and risk type.\n"
+                    "Replace any sensitive value with ***MASKED*** before printing it.", review)
+    review = re.sub(r"```bash\ngit status\n.*?\n```",
+                    "Use fixed Git argument arrays with Python `subprocess.run(..., capture_output=True)`\n"
+                    "to collect `git status`, `git diff --stat`, `git diff`, `git diff --cached`, and\n"
+                    "`git log --oneline -n 10` in memory. Review all output and changes; redact sensitive\n"
+                    "values before printing any status, diff or history. Never stream raw output.",
+                    review, flags=re.DOTALL)
+    if "git diff --cached | grep" in review:
+        raise ReleaseError(["error=public_command_unconverted:commands/git-safety-check.md"])
+    selected[review_path] = ("100644", review.encode("utf-8"))
+
+    role_lines = "\n".join(f"- `{name}`: `{mapping['agents/' + name + '.md']}`" for name in PUBLIC_ROLES)
+    guide = (
+        "# Public runtime adapter\n\n"
+        "This package supplies procedural SDLC guidance. It ships no lifecycle hooks, native agent\n"
+        "registry, slash commands or Claude Workflow runtime. Installing it does not enforce guards.\n"
+        "Use the host's native skill and native subagent capabilities; never invent an unavailable tool.\n\n"
+        "Before delegating a named specialist, read its bundled role instructions below and pass the\n"
+        "actual body, explicit scope, read-only/file ownership constraints and success criteria to the\n"
+        "native subagent. Require a completed result and check its evidence. Use inline review only\n"
+        "if native delegation is unavailable, with `Delegation Degraded: fresh-context specialist unavailable`.\n"
+        "The pipeline owns spec/plan author -> critic -> revise and artifact validation; preserve its\n"
+        "fresh-context critic and independent implementation audit when native subagents are available.\n\n"
+        + role_lines + "\n\n"
+        "Read and follow `" + review_path + "` for the git-safety-check phase; this is a read-only\n"
+        "procedure, not an installed slash command. Never commit, push or merge without user authorization.\n\n"
+        "Required runtime helpers are `scripts/detect_context.py`, `scripts/validate_artifacts.py`,\n"
+        "and `scripts/resolve_work_package.py` (Python 3 standard library; Git for work-package matching).\n"
+        "The optional `scripts/check_all.py` and companion eval runners belong to a source checkout\n"
+        "with tests and are not included here. Run those only when that source tooling is present.\n"
+        "Skill authoring discovers an external toolkit and records missing capabilities explicitly.\n\n"
+        "References describing Claude, manual hook installation or experimental runtimes document\n"
+        "the source distribution. Those components are unavailable in this public package. Follow the\n"
+        "Codex embedded adapter here; use native Claude workflows only in the separate Claude install.\n"
+        "Generated `docs/agentic-sdlc/` artifacts belong in the target project, never in this package.\n"
+    )
+    selected[guide_path] = ("100644", guide.encode("utf-8"))
+    reference_map = {path: path for path in selected}
+    for path in selected:
+        parent = posixpath.dirname(path)
+        while parent:
+            reference_map.setdefault(parent, parent)
+            parent = posixpath.dirname(parent)
+    reference_map.update(mapping)
+    source_paths = set(members)
+    for path in members:
+        parent = posixpath.dirname(path)
+        while parent:
+            source_paths.add(parent)
+            parent = posixpath.dirname(parent)
+    for path, (mode, data) in list(selected.items()):
+        if not path.endswith(".md"):
+            continue
+        # Find the original location of moved references for relative Markdown link resolution.
+        source = next((old for old, new in mapping.items() if new == path), path)
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ReleaseError([f"error=public_dependency_unreadable:{source}"]) from None
+        text = _public_references(text, source, path, reference_map, source_paths)
+        if path.endswith("/SKILL.md"):
+            notice = ("\nPreserve any required skill activation or dispatch-strategy-first gate below before reading other files.\n"
+                      "After that gate, read `${PLUGIN_ROOT}/" + guide_path + "`\n"
+                      "before substantive phase work or named-role delegation. It defines packaged role instructions,\n"
+                      "native delegation and public-runtime limits; it does not override the skill's first-action order.\n")
+            match = re.match(r"\A---\r?\n.*?\r?\n---(?:\r?\n)?", text, re.DOTALL)
+            if match:
+                text = text[:match.end()] + notice + text[match.end():]
+        if path in ("skills/agentic-sdlc-pipeline/SKILL.md", "skills/agentic-sdlc-pipeline/playbook.md"):
+            text = text.replace("Run the read-only **git-safety-check** command.",
+                                f"Read and follow the read-only `{review_path}` procedure.")
+            text = text.replace("**git-safety-check** command", f"`{review_path}` procedure")
+        selected[path] = (mode, text.encode("utf-8"))
+    return selected
+
+
 def _select_skills_only(members: dict) -> dict:
-    """BR24: the committed members under the skills-only roots plus LICENSE, with no MCP configuration."""
+    """Project committed source into a dependency-complete public package with no lifecycle hooks."""
     selected = {p: v for p, v in members.items() if p == "LICENSE" or p.startswith(SKILLS_ONLY_ROOTS)}
     # SEC-4: compare the NORMALIZED basename, as the credential-filename path in this file already does.
     # A case-insensitive, trailing-dot-stripping filesystem opens '.MCP.JSON' and '.mcp.json.' as
@@ -354,18 +506,44 @@ def _select_skills_only(members: dict) -> dict:
     errors = [f"error=mcp_configuration:{p}" for p in _utf8_order(selected)
               if unicodedata.normalize("NFC", p).rsplit("/", 1)[-1].casefold().rstrip(". ") == ".mcp.json"]
     manifest = selected.get(CODEX_MANIFEST)
+    declared = None
     if manifest is not None:
         try:
             declared = json.loads(manifest[1].decode("utf-8"))
         except ValueError:
             errors.append(f"error=manifest_unreadable:{CODEX_MANIFEST}")
         else:
-            if isinstance(declared, dict) and "mcpServers" in declared:
+            if not isinstance(declared, dict):
+                errors.append(f"error=manifest_unreadable:{CODEX_MANIFEST}")
+            elif any(field in declared for field in ("mcpServers", "apps")):
                 errors.append(f"error=mcp_configuration:{CODEX_MANIFEST}")
     if "LICENSE" not in selected:
         errors.append("error=missing_br24_member:LICENSE")
     if errors:
         raise ReleaseError(errors)
+    selected = {p: v for p, v in selected.items() if not p.startswith("hooks/")
+                and (not p.startswith(".codex-plugin/") or p == CODEX_MANIFEST)}
+    house = "skills/agentic-sdlc-pipeline/SKILL.md" in members or (
+        isinstance(declared, dict) and declared.get("name") == "agentic-sdlc")
+    if house:
+        selected = _public_house_payload(members, selected)
+    if declared is not None:
+        had_hooks = "hooks" in declared
+        declared.pop("hooks", None)
+        if house:
+            if not isinstance(declared.get("interface"), dict):
+                raise ReleaseError([f"error=manifest_unreadable:{CODEX_MANIFEST}"])
+            # These optional URLs identify the private source checkout, not a public product page.
+            declared.pop("homepage", None)
+            declared.pop("repository", None)
+            declared["interface"]["longDescription"] = (
+                "Procedural SDLC skills for spec, planning, TDD, security review and evidence-backed delivery. "
+                "Use native subagents with bundled reviewer instructions when available. "
+                "This public package has no lifecycle hooks or automatic guard enforcement; "
+                "manual Claude Code and Codex installs provide separate trusted hook support."
+            )
+        if had_hooks or house:
+            selected[CODEX_MANIFEST] = (manifest[0], (json.dumps(declared, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
     return selected
 
 
