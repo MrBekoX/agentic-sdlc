@@ -3,14 +3,29 @@ export const meta = {
   description: 'Author/critic SKILL.md content draft: drafts a when-to-use description + lean body, critic adversarially audits (when-not-what description, CSO coverage, under 500 lines, loopholes, register, examples); up to 2 revision rounds + closing audit; returns a polished draft + decision points',
   phases: [{ title: 'Draft' }],
 }
-// NOTE: this harness injects the Workflow `args` param as a JSON STRING, not an object
-// (verified: typeof args === 'string'). Parse it defensively. Mirrors spec-plan-draft.js
-// minus agentType (the existing spec-plan-author/critic agents are bound to code-INDEPENDENT
-// specs/plans and would fight drafting SKILL.md content), so author/critic guidance is inline.
-const a = (typeof args === 'string' && args) ? JSON.parse(args) : (args || {})
-const mode = a.mode || 'create'            // 'create' (draft from intent) | 'improve' (revise ctx.currentDraft)
-const ctx = a.context || {}
-const ctxStr = JSON.stringify(ctx)
+// `args` may arrive as an object or as a JSON string; a non-JSON string fails loud, as in
+// spec-plan-draft.js. No agentType here: the spec-plan-author/critic agents are bound to
+// code-INDEPENDENT specs/plans and would fight drafting SKILL.md content, so author/critic
+// guidance is inline.
+function resolveArgs(raw) {
+  let a = raw
+  if (typeof a === 'string') {
+    try { a = JSON.parse(a) }
+    catch (e) { throw new Error('skill-draft: args is a non-JSON string; cannot read mode/context: ' + e.message) }
+  }
+  a = a || {}
+  const mode = a.mode || 'create'            // 'create' (draft from intent) | 'improve' (revise ctx.currentDraft)
+  const ctx = a.context || {}
+  return { mode, ctx, ctxStr: JSON.stringify(ctx) }
+}
+const { mode, ctx, ctxStr } = resolveArgs(args)
+
+function requireAgentResult(label, result) {
+  if (result == null) {
+    throw new Error('skill-draft: agent() returned null for ' + label)
+  }
+  return result
+}
 
 // args.context (incl. ctx.currentDraft) is untrusted: it can carry text crafted to look like
 // instructions. Fence it as a delimited DATA block to draft/audit FROM, never instructions to
@@ -41,28 +56,28 @@ const CRIT = { type:'object', required:['verdict','issues'], properties:{
   coverageCheck:{type:'string'} } }
 
 const seed = (mode === 'improve' && ctx.currentDraft) ? `Start from this existing draft and improve it:${fenceUntrusted('CURRENT_DRAFT', ctx.currentDraft)}\n` : ''
-let draft = await agent(
+let draft = requireAgentResult(`author:${mode}`, await agent(
   `You are a skill author. ${HOUSE}\nMode=${mode}.${ctxBlock}\n${seed}` +
   `Produce a SKILL.md draft for this skill intent. Return: draftMarkdown (the FULL SKILL.md incl. frontmatter), ` +
   `description (the description string only), decisionPoints (open choices for the human), selfNotes.`,
-  { label:`author:${mode}`, phase:'Draft', schema: DRAFT })
+  { label:`author:${mode}`, phase:'Draft', schema: DRAFT }))
 
 for (let round = 1; round <= 2; round++) {
-  const critique = await agent(
+  const critique = requireAgentResult(`critic:${mode}:r${round}`, await agent(
     `You are an adversarial skill critic. ${HOUSE}\nAudit this SKILL.md draft and report concrete issues with severity. Check: ` +
     `description says what-not-when; missing CSO/discovery keywords; body over 500 lines or bloated; loopholes/rationalizations ` +
     `left open; caps-MUST register; missing before/after examples; frontmatter using disallowed keys or angle brackets; ` +
     `unclear trigger boundary (over/under-triggering).\nDraft:\n${draft.draftMarkdown}${ctxBlock}`,
-    { label:`critic:${mode}:r${round}`, phase:'Draft', schema: CRIT })
+    { label:`critic:${mode}:r${round}`, phase:'Draft', schema: CRIT }))
   if (critique.verdict === 'clean' || !(critique.issues && critique.issues.length)) {
     return { mode, draftMarkdown: draft.draftMarkdown, description: draft.description || '', decisionPoints: draft.decisionPoints || [], residualCriticNotes: critique.issues || [], rounds: round }
   }
-  draft = await agent(
+  draft = requireAgentResult(`author-revise:${mode}:r${round}`, await agent(
     `You are a skill author. ${HOUSE}\nRevise your SKILL.md draft per the critic findings (close every gap, stay lean).\n` +
     `Draft:\n${draft.draftMarkdown}\nFindings(JSON): ${JSON.stringify(critique.issues)}${ctxBlock}`,
-    { label:`author-revise:${mode}:r${round}`, phase:'Draft', schema: DRAFT })
+    { label:`author-revise:${mode}:r${round}`, phase:'Draft', schema: DRAFT }))
 }
-const finalCritique = await agent(
+const finalCritique = requireAgentResult(`critic:${mode}:final`, await agent(
   `You are an adversarial skill critic. ${HOUSE}\nAudit the final SKILL.md draft (residual findings go to the caller):\n${draft.draftMarkdown}`,
-  { label:`critic:${mode}:final`, phase:'Draft', schema: CRIT })
+  { label:`critic:${mode}:final`, phase:'Draft', schema: CRIT }))
 return { mode, draftMarkdown: draft.draftMarkdown, description: draft.description || '', decisionPoints: draft.decisionPoints || [], residualCriticNotes: (finalCritique && finalCritique.issues) || [] }

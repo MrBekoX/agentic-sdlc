@@ -91,7 +91,7 @@ For an explicit automated smoke eval only, pass `depth:"smoke"` and `maxRevision
 ## At kickoff (always)
 1. **Mode select.** Full vs **Lite Mode** (see playbook). Lite is **forbidden** for auth / payment / security / DB migration / production bug / API contract / permission-role / user-data / token-session / RLS — those are always Full.
 2. **Work-type → core work-flow:** bug/broken behavior → `root-cause-fix` · new feature/endpoint → `feature-build` · behavior-preserving restructure → `safe-refactor` · test coverage only → `test-authoring`.
-3. **Create the task list.** Use the runtime task tracker (`TodoWrite`, `update_plan`, or equivalent) when available; otherwise write an explicit checklist. Mark a step `in_progress` on entry, `completed` only when its gate passes. **Never** complete a gated step while its gate is red. This is how the human follows progress.
+3. **Create the task list.** On Claude Code use `TaskCreate`, `TaskGet`, `TaskList` and `TaskUpdate` when the session has them (`TodoWrite` only if `CLAUDE_CODE_ENABLE_TASKS=0`; [tools-reference](https://code.claude.com/docs/en/tools-reference), fetched 2026-10-07). On Codex use `update_plan` or the native tracker. Otherwise write an explicit checklist. Mark a step `in_progress` on entry, `completed` only when its gate passes. **Never** complete a gated step while its gate is red. This is how the human follows progress.
 4. **Invoke `dispatch-strategy` through the runtime skill mechanism** for every heavy/independent/parallel step — it picks the mechanism (main loop / sub-agent / dynamic-workflow / agent-team). Never run independent work serially in the main loop.
 
 ## Companion discipline skills (auto-trigger; cross-cutting)

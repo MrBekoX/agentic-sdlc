@@ -2075,8 +2075,9 @@ class TestCiWorkflowHygiene(unittest.TestCase):
     def test_plugin_validate_pins_the_cli_and_names_both_manifests(self):
         block = job_block(self.text, "plugin-validate")
         # A floating CLI install would make an unrelated upstream release fail an unrelated PR.
-        self.assertRegex(block, r"npm install -g @anthropic-ai/claude-code@\d+\.\d+\.\d+")
-        # `validate .` reads the marketplace manifest only; the plugin manifest is a second target.
+        self.assertIn("npm install -g @anthropic-ai/claude-code@2.1.293", block)
+        self.assertIn("2.1.289+", self.text)
+        # On 2.1.289+ `validate .` also checks the plugin; the plugin manifest stays a named target.
         self.assertIn("claude plugin validate . --strict --json", block)
         self.assertIn("claude plugin validate .claude-plugin/plugin.json --strict --json", block)
 

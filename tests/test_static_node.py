@@ -15,6 +15,7 @@ If `node` is unavailable the tests SKIP (reported as skipped, never counted as p
 the same honesty rule the live trigger eval follows for a missing `claude` CLI.
 """
 
+import json
 import shutil
 import subprocess
 import tempfile
@@ -26,6 +27,103 @@ REPO = HERE.parent
 HOOKS_DIR = REPO / "hooks"
 WORKFLOWS_DIR = REPO / "workflows"
 NODE = shutil.which("node")
+
+
+def _runtime_wrap(src):
+    """De-export `meta` and wrap the workflow body the way the Workflow runtime does."""
+    src = src.replace("export const meta", "const meta", 1)
+    return (
+        "async function __wf(args, agent, parallel, pipeline, log, phase, "
+        "budget, workflow) {\n" + src + "\n}\n"
+    )
+
+
+def _role_of(label):
+    text = str(label or "")
+    if ":final" in text:
+        return "final-critic"
+    if text.startswith("author-revise:"):
+        return "reviser"
+    if text.startswith("critic:"):
+        return "critic"
+    if text.startswith("author:"):
+        return "author"
+    return "other"
+
+
+def _run_workflow(name, args, null_role=None):
+    """Execute one workflow body under the runtime wrapper with a stubbed `agent`.
+
+    `null_role` is author / critic / reviser / final-critic; that role's `agent()`
+    returns null. Other roles return a valid draft or critique so the body can reach
+    the targeted call. The driver prints one JSON object: ok, name, message, result, calls.
+    """
+    if NODE is None:
+        raise unittest.SkipTest("node not available - static JS check skipped (not passed)")
+    src = (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
+    driver = (
+        _runtime_wrap(src)
+        + "\nconst NULL_ROLE = "
+        + json.dumps(null_role)
+        + ";\nconst ARGS = "
+        + json.dumps(args)
+        + ";\n"
+        + """
+function roleOf(label) {
+  const text = String(label || '');
+  if (text.includes(':final')) return 'final-critic';
+  if (text.startsWith('author-revise:')) return 'reviser';
+  if (text.startsWith('critic:')) return 'critic';
+  if (text.startsWith('author:')) return 'author';
+  return 'other';
+}
+const calls = [];
+async function stubAgent(prompt, opts) {
+  const label = (opts && opts.label) || '';
+  calls.push({ label, prompt: String(prompt) });
+  if (NULL_ROLE && roleOf(label) === NULL_ROLE) return null;
+  if (roleOf(label) === 'critic' || roleOf(label) === 'final-critic') {
+    if (NULL_ROLE === 'reviser' || NULL_ROLE === 'final-critic') {
+      return {
+        verdict: 'issues',
+        issues: [{ category: 'gap', severity: 'high', whatsMissing: 'x', where: 'body', fix: 'y' }],
+        coverageCheck: 'n',
+      };
+    }
+    return { verdict: 'clean', issues: [], coverageCheck: 'y' };
+  }
+  return { draftMarkdown: '# Draft', description: 'when to use it', decisionPoints: [], selfNotes: '' };
+}
+__wf(ARGS, stubAgent, null, null, () => {}, null, null, null)
+  .then((result) => {
+    process.stdout.write(JSON.stringify({ ok: true, result, calls }) + '\\n');
+  })
+  .catch((err) => {
+    const name = err && err.name ? err.name : 'Error';
+    const message = err && err.message ? String(err.message) : String(err);
+    process.stdout.write(JSON.stringify({ ok: false, name, message, calls }) + '\\n');
+  });
+"""
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False, encoding="utf-8") as tf:
+        tf.write(driver)
+        tmp = Path(tf.name)
+    try:
+        proc = subprocess.run(
+            [NODE, str(tmp)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=15,
+        )
+    finally:
+        tmp.unlink(missing_ok=True)
+    lines = [line for line in (proc.stdout or "").splitlines() if line.strip()]
+    if not lines:
+        raise AssertionError(
+            f"{name} produced no JSON stdout (rc={proc.returncode}):\n{proc.stderr}"
+        )
+    return json.loads(lines[-1])
 
 
 def _node_check(path):
@@ -84,11 +182,7 @@ class TestWorkflowSyntax(unittest.TestCase):
             src = p.read_text(encoding="utf-8")
             # Mirror the Workflow runtime: de-export meta, wrap the body in an async fn so
             # the script's top-level await/return are legal.
-            src = src.replace("export const meta", "const meta", 1)
-            wrapped = (
-                "async function __wf(args, agent, parallel, pipeline, log, phase, "
-                "budget, workflow) {\n" + src + "\n}\n"
-            )
+            wrapped = _runtime_wrap(src)
             with tempfile.NamedTemporaryFile(
                 "w", suffix=".mjs", delete=False, encoding="utf-8"
             ) as tf:
@@ -144,6 +238,83 @@ class TestMissingNodeIsASkipNotAnError(unittest.TestCase):
         finally:
             module.NODE = original
         self.assertEqual(module.NODE, original, "the probe must restore the module state")
+
+
+@unittest.skipIf(NODE is None, "node not available — static JS check skipped (not passed)")
+class TestWorkflowNullAgentResults(unittest.TestCase):
+    """AC12: agent() returning null for author/critic/reviser/final critic rejects with Error."""
+
+    WORKFLOWS = ("spec-plan-draft.js", "skill-draft.js")
+    ROLES = ("author", "critic", "reviser", "final-critic")
+
+    def _args_for(self, workflow, role):
+        if workflow == "spec-plan-draft.js":
+            rounds = 0 if role == "final-critic" else 1
+            return {
+                "mode": "spec",
+                "context": {"intent": "ac12-null-agent"},
+                "depth": "full",
+                "maxRevisionRounds": rounds,
+            }
+        return {"mode": "create", "context": {"intent": "ac12-null-agent"}}
+
+    def test_ac12_null_agent_rejects_with_named_error(self):
+        for workflow in self.WORKFLOWS:
+            for role in self.ROLES:
+                with self.subTest(workflow=workflow, role=role):
+                    payload = _run_workflow(workflow, self._args_for(workflow, role), null_role=role)
+                    workflow_name = workflow[:-3]
+                    self.assertFalse(
+                        payload.get("ok"),
+                        f"{workflow} {role}: null agent must reject, never residualCriticNotes: [] "
+                        f"(payload={payload})",
+                    )
+                    notes = (payload.get("result") or {}).get("residualCriticNotes")
+                    self.assertNotEqual(
+                        notes, [],
+                        f"{workflow} {role}: null final critic must not report residualCriticNotes: []",
+                    )
+                    self.assertNotEqual(
+                        payload.get("name"), "TypeError",
+                        f"{workflow} {role}: must not crash with TypeError ({payload.get('message')})",
+                    )
+                    self.assertEqual(payload.get("name"), "Error", payload)
+                    message = payload.get("message") or ""
+                    self.assertIn(workflow_name, message)
+                    null_calls = [
+                        call for call in payload.get("calls") or []
+                        if _role_of(call.get("label")) == role
+                    ]
+                    self.assertTrue(null_calls, f"{workflow} {role}: stub never returned null")
+                    self.assertIn(null_calls[0]["label"], message)
+
+
+@unittest.skipIf(NODE is None, "node not available — static JS check skipped (not passed)")
+class TestSkillDraftArgs(unittest.TestCase):
+    """AC13: skill-draft args parse like spec-plan-draft (object, JSON string, named Error)."""
+
+    SAMPLE = {"mode": "improve", "context": {"intent": "ac13-args", "currentDraft": "# draft"}}
+
+    def test_ac13_object_and_equivalent_json_string_agree(self):
+        from_object = _run_workflow("skill-draft.js", self.SAMPLE)
+        from_json = _run_workflow("skill-draft.js", json.dumps(self.SAMPLE))
+        self.assertTrue(from_object.get("ok"), from_object)
+        self.assertTrue(from_json.get("ok"), from_json)
+        self.assertEqual(from_object["result"]["mode"], from_json["result"]["mode"])
+        self.assertEqual(from_object["result"]["mode"], "improve")
+        first_object = from_object["calls"][0]["prompt"]
+        first_json = from_json["calls"][0]["prompt"]
+        self.assertEqual(first_object, first_json)
+        self.assertIn("Mode=improve", first_object)
+        self.assertIn("ac13-args", first_object)
+
+    def test_ac13_non_json_string_rejects_with_named_error(self):
+        payload = _run_workflow("skill-draft.js", "not-json{")
+        self.assertFalse(payload.get("ok"), payload)
+        self.assertNotEqual(payload.get("name"), "SyntaxError", payload)
+        self.assertNotEqual(payload.get("name"), "TypeError", payload)
+        self.assertEqual(payload.get("name"), "Error", payload)
+        self.assertIn("skill-draft", payload.get("message") or "")
 
 
 if __name__ == "__main__":

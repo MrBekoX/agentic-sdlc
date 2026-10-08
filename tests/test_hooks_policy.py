@@ -609,6 +609,22 @@ class TestScanCommitSecretScan(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(out))
 
 
+@unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")
+class TestScanCommitReason(unittest.TestCase):
+    """AC11: the deny reason is runtime-neutral and names no suppression path (BR10)."""
+
+    def test_ac11_reason_is_runtime_neutral_and_names_no_suppression(self):
+        helper = TestScanCommitSecretScan("test_blocks_modern_provider_tokens_in_content")
+        out = helper._assert_blocked({"config.txt": "TOKEN = " + "ghp_" + "a1B2" * 9 + "\n"})
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        for banned in ("/hooks", "allow-secret", "gitleaks:allow"):
+            self.assertNotIn(banned, reason)
+        lowered = reason.lower()
+        self.assertTrue(any(token in lowered for token in ("move", "remove", "unstage")))
+        self.assertIn("false positive", lowered)
+        self.assertIn("ask", lowered)
+
+
 def _codex_bash_payload(command, cwd="/repo"):
     """A realistic Codex v0.142.0 PreToolUse(Bash) hook input (verified live, codex-cli 0.142.0):
     tool_name='Bash', tool_input.command carries the command, plus Codex's richer top-level keys.

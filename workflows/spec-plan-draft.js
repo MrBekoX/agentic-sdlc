@@ -42,6 +42,13 @@ function fenceUntrusted(label, s) {
 }
 const ctxBlock = fenceUntrusted('CONTEXT', ctxStr)
 
+function requireAgentResult(label, result) {
+  if (result == null) {
+    throw new Error('spec-plan-draft: agent() returned null for ' + label)
+  }
+  return result
+}
+
 function smokeDraft(mode) {
   if (mode === 'plan') {
     return {
@@ -106,23 +113,23 @@ const CRIT = { type:'object', required:['verdict','issues'], properties:{
     whatsMissing:{type:'string'}, where:{type:'string'}, fix:{type:'string'} }}},
   coverageCheck:{type:'string'} } }
 
-let draft = await agent(
+let draft = requireAgentResult(`author:${mode}`, await agent(
   `Mode=${mode}.${ctxBlock}\nProduce a DEEP ${mode} draft for this context (acceptance criteria / affected-layer completeness / decision points / test strategy — per the rules in your system prompt).`,
-  { label:`author:${mode}`, phase:'Draft', schema: DRAFT, agentType:'agentic-sdlc:spec-plan-author' })
+  { label:`author:${mode}`, phase:'Draft', schema: DRAFT, agentType:'agentic-sdlc:spec-plan-author' }))
 
 for (let round = 1; round <= maxRevisionRounds; round++) {
-  const critique = await agent(
+  const critique = requireAgentResult(`critic:${mode}:r${round}`, await agent(
     `Mode=${mode}. Adversarially audit this draft (missing layer/criterion/edge-case/contradiction):\n${draft.draftMarkdown}${ctxBlock}`,
-    { label:`critic:${mode}:r${round}`, phase:'Draft', schema: CRIT, agentType:'agentic-sdlc:spec-plan-critic' })
+    { label:`critic:${mode}:r${round}`, phase:'Draft', schema: CRIT, agentType:'agentic-sdlc:spec-plan-critic' }))
   if (critique.verdict === 'clean' || !(critique.issues && critique.issues.length)) {
     return { mode, draftMarkdown: draft.draftMarkdown, decisionPoints: draft.decisionPoints || [], residualCriticNotes: (critique.issues) || [], rounds: round }
   }
-  draft = await agent(
+  draft = requireAgentResult(`author-revise:${mode}:r${round}`, await agent(
     `Mode=${mode}. REVISE your previous draft per the critic findings (close gaps, make concrete).\nDraft:\n${draft.draftMarkdown}\nFindings(JSON): ${JSON.stringify(critique.issues)}${ctxBlock}`,
-    { label:`author-revise:${mode}:r${round}`, phase:'Draft', schema: DRAFT, agentType:'agentic-sdlc:spec-plan-author' })
+    { label:`author-revise:${mode}:r${round}`, phase:'Draft', schema: DRAFT, agentType:'agentic-sdlc:spec-plan-author' }))
 }
 // max revision rounds reached: audit the revised draft one last time (residual findings go to the main loop)
-const finalCritique = await agent(
+const finalCritique = requireAgentResult(`critic:${mode}:final`, await agent(
   `Mode=${mode}. Audit the final draft (residual findings will be reported to the main loop):\n${draft.draftMarkdown}`,
-  { label:`critic:${mode}:final`, phase:'Draft', schema: CRIT, agentType:'agentic-sdlc:spec-plan-critic' })
+  { label:`critic:${mode}:final`, phase:'Draft', schema: CRIT, agentType:'agentic-sdlc:spec-plan-critic' }))
 return { mode, draftMarkdown: draft.draftMarkdown, decisionPoints: draft.decisionPoints || [], residualCriticNotes: (finalCritique && finalCritique.issues) || []}

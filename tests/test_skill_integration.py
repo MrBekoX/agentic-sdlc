@@ -335,5 +335,34 @@ class TestDocConsistency(unittest.TestCase):
         )
 
 
+class TestPowerShellToolLists(unittest.TestCase):
+    """AC22: git-safety-check pre-approves PowerShell git reads; debugger and test-engineer list it."""
+
+    def test_ac22_git_safety_check_preapproves_powershell_git_reads(self):
+        text = (h.REPO / "commands" / "git-safety-check.md").read_text(encoding="utf-8")
+        for rule in (
+            "Bash(git status:*)",
+            "Bash(git diff:*)",
+            "Bash(git log:*)",
+            "PowerShell(git status *)",
+            "PowerShell(git diff *)",
+            "PowerShell(git log *)",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, text)
+
+    def test_ac22_debugger_and_test_engineer_list_powershell_beside_bash(self):
+        for name in ("debugger", "test-engineer"):
+            with self.subTest(agent=name):
+                text = (h.REPO / "agents" / f"{name}.md").read_text(encoding="utf-8")
+                tools_lines = [
+                    line for line in text.splitlines() if line.startswith("tools:")
+                ]
+                self.assertEqual(len(tools_lines), 1, f"{name}: expected one tools: line")
+                tools = tools_lines[0]
+                self.assertIn("Bash", tools)
+                self.assertIn("PowerShell", tools)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,10 +7,12 @@ faithful drop-in: same command-file planting and same stream-json trigger-detect
 but it reads the subprocess output with `subprocess.run(capture_output=True, timeout=...)` (which
 drains pipes via threads on Windows) instead of `select` — so it runs everywhere.
 
-For each query it plants a `commands/<skill>-skill-<uuid>.md` (so the description under test
+For each query it plants a `.claude/commands/<skill>-skill-<uuid>.md` (so the description under test
 appears in available skills), runs `claude -p <query> --output-format stream-json --verbose
 --include-partial-messages`, and detects whether the FIRST tool action is a Skill/Read invocation of
 this skill (matched by the unique command name OR the real skill name, so a registered skill counts).
+`--bare` is rejected (exit 2): since 2.1.286 bare mode sends no system reminders, so triggering
+cannot be measured. `--plugin-dir` disables the shim so it does not duplicate the installed plugin.
 
 Usage:
   python run_trigger_eval.py --skill-path <dir> --eval-set <json> [--runs N] [--threshold 0.5] [--model M]
@@ -289,8 +291,14 @@ def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_bu
     uid = uuid.uuid4().hex[:8]
     clean = f"{skill_name}-skill-{uid}" if command_shim else f"{skill_name}-live-{uid}"
     cf = None
+    created_dirs = []
     if command_shim:
-        cdir = Path(project_root) / "commands"
+        claude_dir = Path(project_root) / ".claude"
+        cdir = claude_dir / "commands"
+        if not claude_dir.exists():
+            created_dirs.append(claude_dir)
+        if not cdir.exists():
+            created_dirs.append(cdir)
         cdir.mkdir(parents=True, exist_ok=True)
         cf = resolve_under(cdir, f"{clean}.md", "command shim")
         indented = "\n  ".join(skill_desc.split("\n"))
@@ -312,7 +320,7 @@ def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_bu
             cmd += ["--max-budget-usd", str(max_budget_usd)]
         if plugin_dir:
             cmd += ["--plugin-dir", str(plugin_dir)]
-        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_SIMPLE")}
         transcript_path = None
         if transcript_dir:
             transcript_path = resolve_under(Path(transcript_dir), f"{clean}.jsonl", "transcript filename")
@@ -320,6 +328,11 @@ def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_bu
     finally:
         if cf and cf.exists():
             cf.unlink()
+        for directory in reversed(created_dirs):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
 
 
 def main(argv=None):
@@ -335,8 +348,8 @@ def main(argv=None):
     p.add_argument("--smoke", action="store_true", help="Run one query once with safe cleanup.")
     p.add_argument("--plugin-dir", default=None)
     p.add_argument("--transcript-dir", default=None)
-    p.add_argument("--bare", action="store_true", help="Run Claude Code in bare mode to isolate plugin trigger behavior from project context; requires ANTHROPIC_API_KEY or apiKeyHelper auth.")
-    p.add_argument("--no-command-shim", action="store_true", help="Do not plant commands/<skill>-skill-*.md; use real plugin skills only. Prefer with --plugin-dir when testing this repo's installed plugin.")
+    p.add_argument("--bare", action="store_true", help="Rejected: since 2.1.286 bare mode sends no system reminders, so skill triggering cannot be measured. Exits 2 without spawning claude.")
+    p.add_argument("--no-command-shim", action="store_true", help="Do not plant .claude/commands/<skill>-skill-*.md; use real plugin skills only. Prefer with --plugin-dir when testing this repo's installed plugin.")
     p.add_argument("--project-root", type=Path)
     p.add_argument(
         "--allow-writable-project",
@@ -346,6 +359,10 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     skill_name, skill_desc = read_skill(args.skill_path)
+    if args.bare:
+        print("error=bare_rejected:since 2.1.286 bare mode sends no skill listing; triggering cannot be measured")
+        print("trigger_eval=failed")
+        return 2
     if args.project_root and not args.allow_writable_project:
         p.error("--project-root requires --allow-writable-project")
     if args.plugin_dir:
@@ -359,11 +376,14 @@ def main(argv=None):
         queries = queries[:args.query_limit]
 
     errors, fields = [], {"skill": skill_name, "runs_per_query": args.runs}
+    use_shim = not args.no_command_shim and not args.plugin_dir
+    if args.plugin_dir:
+        fields["command_shim"] = "disabled:plugin-dir"
     passed = 0
     with tempfile.TemporaryDirectory(prefix="agentic-sdlc-trigger-") as td:
         project_root = args.project_root.resolve() if args.project_root else Path(td)
         for i, q in enumerate(queries):
-            triggers = sum(run_once(q["query"], skill_name, skill_desc, project_root, args.timeout, args.model, args.max_budget_usd, args.plugin_dir, args.transcript_dir, args.bare, not args.no_command_shim)
+            triggers = sum(run_once(q["query"], skill_name, skill_desc, project_root, args.timeout, args.model, args.max_budget_usd, args.plugin_dir, args.transcript_dir, False, use_shim)
                            for _ in range(args.runs))
             rate = triggers / args.runs
             ok = (rate >= args.threshold) if q["should_trigger"] else (rate < args.threshold)

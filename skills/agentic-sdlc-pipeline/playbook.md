@@ -134,5 +134,5 @@ Lite steps (own short track, not the Full 1–21): branch check · short analysi
 
 ## Parallel-execution rules (how the ⇉ steps run)
 - Genuinely-independent steps run **concurrently**; gated/dependent steps stay ordered. `dispatch-strategy` chooses the mechanism each time.
-- Keep one TodoWrite item per active step; a fanned-out step may spawn its own sub-items but the parent stays `in_progress` until all branches return and the gate passes.
+- Keep one task-tracker item per active step. On Claude Code use `TaskCreate`, `TaskList` and `TaskUpdate` (`TodoWrite` only when `CLAUDE_CODE_ENABLE_TASKS=0`). On Codex use `update_plan` or the native tracker. A fanned-out step may spawn its own sub-items but the parent stays `in_progress` until all branches return and the gate passes.
 - Fan-out examples: Context7 across libraries (6), security lenses (11/14), quality gates (15), multi-file generation in 9. Sequence 4→5→8→9→10 is **never** parallelized.

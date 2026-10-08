@@ -43,7 +43,13 @@ Run `/plugin`, open the Installed tab, and disable or uninstall `agentic-sdlc`, 
 
 `.claude-plugin/plugin.json` keeps its top-level `homepage`, `repository` and `author.url` fields. `homepage` and `repository` point at the repository URL, whose `docs/publication/link-checks.json` entry records 404, so both are GAP until that entry shows 200. `author.url` has a recorded 200 entry.
 
+## Current submission route
+
+Fetched 2026-10-07 from [plugins/publish](https://code.claude.com/docs/en/plugins/publish): Anthropic's directory is browsed at claude.ai/directory. Submitting needs a paid claude.ai plan. On Pro and Max the maintainer submits from their own account; on Team and Enterprise an Owner submits, and on Enterprise an Owner can grant the Directory permission. Validate with `claude plugin validate ./plugin --strict`, then submit at [claude.ai/directory/manage](https://claude.ai/directory/manage). `claude-plugins-official` does not take directory submissions. This is not a live test on 2.1.293.
+
 ## Form access
+
+Recorded 2026-09-14, before the developer-portal route above:
 
 - The claude.ai submission form needs a Team/Enterprise plan with directory management; the unauthenticated page returned 403.
 - The Console submission form needs a Developer/Admin/Owner role. Only its login page was seen, so its fields are unverified.

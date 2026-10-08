@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from argparse import Namespace
@@ -199,6 +200,48 @@ class TestRoutingEval(unittest.TestCase):
             command = popen.call_args.args[0]
             self.assertEqual(command[command.index("--plugin-dir") + 1], str(source))
             self.assertEqual(popen.call_args.kwargs["cwd"], Path(td))
+
+
+class TestSubagentRoutes(unittest.TestCase):
+    """AC20: a Skill invoked only by a subagent is not a route."""
+
+    def test_ac20_subagent_only_skill_is_not_a_route(self):
+        lines = [json.dumps({
+            "type": "assistant",
+            "parent_tool_use_id": "agent-1",
+            "message": {"content": [{"type": "tool_use", "name": "Skill",
+                                     "input": {"skill": "feature-build"}}]},
+        })]
+        self.assertEqual(runner.collect_claude_routes(lines), [])
+
+    def test_ac20_main_session_skill_is_unchanged(self):
+        lines = [json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "name": "Skill",
+                                     "input": {"skill": "feature-build"}}]},
+        })]
+        self.assertEqual(runner.collect_claude_routes(lines), ["feature-build"])
+
+
+class TestClaudeChildEnvironment(unittest.TestCase):
+    """AC18: CLAUDE_CODE_SIMPLE is stripped from the routing runner child environment."""
+
+    def test_ac18_strips_claude_code_simple_from_child_env(self):
+        with tempfile.TemporaryDirectory() as td:
+            args = Namespace(
+                project_root=Path(td),
+                plugin_dir=REPO,
+                model="haiku",
+                max_turns=1,
+                max_budget_usd="0.01",
+                timeout=1,
+            )
+            with mock.patch.dict(os.environ, {"CLAUDE_CODE_SIMPLE": "1"}), \
+                    mock.patch.object(runner.subprocess, "Popen", side_effect=FileNotFoundError) as popen:
+                runner.run_claude("route", args, None)
+            self.assertTrue(popen.called)
+            env = popen.call_args.kwargs["env"]
+            self.assertNotIn("CLAUDE_CODE_SIMPLE", env)
 
 
 if __name__ == "__main__":

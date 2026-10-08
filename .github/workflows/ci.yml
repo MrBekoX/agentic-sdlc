@@ -136,12 +136,12 @@ jobs:
         with:
           node-version: "22"
       - name: Install the pinned Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code@2.1.278
+        run: npm install -g @anthropic-ai/claude-code@2.1.293
       - name: Validate the marketplace and plugin manifests
         shell: bash
         run: |
-          # `validate .` reads the marketplace manifest; the plugin manifest and its components are
-          # a separate target, so both are named. --strict fails on warnings the runtime tolerates.
+          # On 2.1.289+ `validate .` checks the marketplace manifest and the plugin beside it; the
+          # plugin manifest stays a named target too. --strict fails on warnings the runtime tolerates.
           rc=0
           claude plugin validate . --strict --json > marketplace-validation.json || rc=1
           claude plugin validate .claude-plugin/plugin.json --strict --json > plugin-validation.json || rc=1

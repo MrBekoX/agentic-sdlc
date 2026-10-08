@@ -33,7 +33,11 @@ try {
 
   const req = loadRequirements();
   const trace = parseTranscript(tpath);
-  const ctx = { cwd: process.cwd(), req, validate: true }; // Stop = thorough: re-validate artifacts
+  const lastAssistant = input?.last_assistant_message;
+  const ctx = {
+    cwd: process.cwd(), req, validate: true,
+    backgroundTasks: input?.background_tasks,
+  }; // Stop = thorough: re-validate artifacts
 
   const flows = activeFlowNames(trace, req);
 
@@ -58,7 +62,7 @@ try {
   // Heuristic only when no flow was active: source edits + a completion claim but no flow skill.
   const heuristic = flows.length === 0
     && trace.edits.some((e) => isSourceFile(e, req))
-    && completionClaimPresent(trace, req);
+    && completionClaimPresent(trace, req, lastAssistant);
 
   const block = missing.filter((m) => m.mode === 'block');
   const warn = missing.filter((m) => m.mode === 'warn');
