@@ -93,7 +93,9 @@ The publication decision block in the [release ledger](release-evidence-0.4.3.md
 
 ## Current binary and historical hook evidence
 
-The current binary observed on 2026-09-12 is Codex CLI **0.154.0**; Claude Code is **2.1.269**. Historical Codex CLI **0.142.0** probes established blocking PreToolUse, Stop continuation, and the `patch_apply_end` carrier. Current native probes now establish startup/resume/manual-compact context, allowed and refused tool effects, production Stop blocking, continued execution, and delivered `stop_hook_active=true`. The Claude chain ran on Windows; the successful Codex read/write chain ran in WSL Ubuntu after the Windows isolated fixture's sandbox permissions prevented allowed execution. They use Sonnet 5/Low and GPT-5.3-Codex-Spark/Low respectively. Claude exposes the exact model in messages/modelUsage but does not echo response-side effective effort; Low is verified as CLI and child-environment configuration. Codex records both model and Low in native turn_context.
+The current binary observed on 2026-10-06 is Codex CLI **0.160.1** on Windows. The [official changelog](https://learn.chatgpt.com/docs/changelog#october-2026) lists its 2026-10-05 release. Its generated stable schemas and isolated native installation discovered 16 local skills/eight untrusted hooks and 16 public skills/zero hooks. No user-profile trust was granted. See [current preparation evidence](publication/codex-0.160.1-readiness.md); discovery does not prove execution.
+
+The historical binary observed on 2026-09-12 was Codex CLI **0.154.0**; Claude Code was **2.1.269**. Historical Codex CLI **0.142.0** probes established blocking PreToolUse, Stop continuation, and the `patch_apply_end` carrier. The 0.154.0 native probes established startup/resume/manual-compact context, allowed and refused tool effects, production Stop blocking, continued execution, and delivered `stop_hook_active=true`. The Claude chain ran on Windows; the successful Codex read/write chain ran in WSL Ubuntu after the Windows isolated fixture's sandbox permissions prevented allowed execution. They use Sonnet 5/Low and GPT-5.3-Codex-Spark/Low respectively. Claude exposes the exact model in messages/modelUsage but does not echo response-side effective effort; Low is verified as CLI and child-environment configuration. Codex records both model and Low in native turn_context.
 
 Native captures and snapshot identities live under `tests/artifacts/dual-runtime-remediation/claude-lifecycle/` and `codex-lifecycle-wsl/run-02/`. The WSL capture exposed the two current reader gaps above; the corrected reader is replayed against that unchanged capture and regression-tested separately. These bounded lifecycle results are not broad skill-trigger, procedure-compliance, or future-version guarantees. Model-access preflights and direct-handler replays remain distinct from native lifecycle evidence.
 
@@ -101,7 +103,7 @@ Current [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) describ
 
 ### CLI versions by platform
 
-The versions below were re-captured from `--version` output on 2026-09-18 and the outputs are retained under `tests/artifacts/publication/cli/{windows,wsl}/versions.txt`, so every value in this table can be checked against a file. The currently documented version is that re-capture. The last live-tested version is the CLI of the most recent recorded live run on that platform, taken from the evidence above and the release ledger.
+The historical versions below were re-captured from `--version` output on 2026-09-18 and the outputs are retained under `tests/artifacts/publication/cli/{windows,wsl}/versions.txt`. The table preserves that dated snapshot; it is not the latest-version claim. Current 0.160.1 discovery is recorded above. The last live-tested version remains the CLI of the most recent recorded live model run on that platform.
 
 | Platform | Claude Code | Codex | python3 | node | Capture date and time (UTC) | Last live-tested version | Currently documented version |
 |---|---|---|---|---|---|---|---|
@@ -116,6 +118,8 @@ The versions below were re-captured from `--version` output on 2026-09-18 and th
 - Gap: `codex plugin --help` lists only the `add`, `list`, `marketplace`, `remove` and `help` subcommands on both platforms. It shows no validate subcommand, and no fallback is named.
 
 ### Codex protocol schema source
+
+On 2026-10-06, current 0.160.1 `generate-json-schema` and a native stdio exchange confirmed `initialize`, `plugin/read`, `plugin/install` and `hooks/list` with `experimentalApi=false`. `hooks/list` returned eight local `untrusted` entries. The probe never called `config/batchWrite` or any trust mutation. The fields/commands below retain their 0.154.0 capture provenance; supported current hook inputs/outputs were checked against [the official hook reference](https://learn.chatgpt.com/docs/hooks), including untrusted-hook skipping, `permissionDecision: deny`, `stop_hook_active` and Stop continuation. Transcript formats remain unstable; current discovery cannot attest current rollout-reader execution.
 
 The Codex method and field names in this file come from the JSON schema that the installed Codex 0.154.0 binary generates with `codex app-server generate-json-schema`. It was captured on Windows on 2026-09-15 once without `--experimental` (the stable schema) and once with `--experimental`.
 

@@ -32,6 +32,17 @@ Each entry includes:
 
 ---
 
+## 2026-10-06 — A source package is not automatically a valid public runtime package
+
+- **Task / context:** Preparing the existing Claude/Codex plugin for the current OpenAI public skills directory without changing local runtime semantics.
+- **Symptom:** The old skills-only ZIP passed committed-byte verification but shipped lifecycle hooks, omitted referenced specialist/runtime/git-review instructions, and included development scripts requiring excluded files. The new public regression suite reproduced the missing dependencies and unsupported components before the fix.
+- **Root cause:** Archive selection was only a root allowlist. It verified source integrity, not the destination's component contract or dependency closure. Copying text to new reference paths also requires rebasing retained file/directory links and reserving generated destinations; a dictionary assignment otherwise hides an overwrite before ZIP duplicate checks can see it.
+- **Correct fix:** Deterministically project the public artifact, merge reusable role/command procedures into skill references, ship only the required helper closure, remove lifecycle hooks only from the public output, and reconstruct that projection during verification. Preserve local source behavior and routing fields. Reject missing/empty/unreadable dependencies and exact/normalized generated-target collisions. Require capture/redaction before git output, including CRLF source commands.
+- **Preventive rule / automated check:** Test the built artifact's supported components and every required dependency, including negative controls and clean extraction. Keep source-byte integrity, current native discovery, live model behavior and publication approval as separate evidence levels; one cannot substitute for another.
+- **Related files & tests:** `scripts/build_release.py`, `tests/test_public_plugin_projection.py`, `tests/test_release_distribution.py`, `tests/test_release_ledger_docs.py`, `docs/publication/openai-skills-only.md`.
+
+---
+
 ## 2026-09-21 — A merge can commit a conflict marker and pass every gate the repository has
 
 - **Task / context:** Merging ten open branches. Most pairs conflicted on the same file, so the resolutions were driven from a loop that resolved the known-shaped one (`lessons.md`, a union of appended entries) and then ran `git add -A; git commit`.

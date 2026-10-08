@@ -717,8 +717,8 @@ class TestDeterministicLayout(ScratchTestCase):
         self.assertEqual(hashlib.sha256(out.read_bytes()).hexdigest(), GOLDEN_ARCHIVE_SHA256)
 
 
-BR24_ROOTS = (".codex-plugin/", "skills/", "hooks/", "contracts/skills/", "scripts/", "assets/")
-FORBIDDEN_SKILLS_ONLY_ROOTS = ("commands", "agents", "workflows", ".claude-plugin", "docs", "tests")
+BR24_ROOTS = (".codex-plugin/", "skills/", "contracts/skills/", "scripts/", "assets/")
+FORBIDDEN_SKILLS_ONLY_ROOTS = ("hooks", "commands", "agents", "workflows", ".claude-plugin", "docs", "tests")
 
 
 class TestSkillsOnlyBuild(ScratchTestCase):
@@ -751,7 +751,8 @@ class TestSkillsOnlyBuild(ScratchTestCase):
         result, text, out = self.build(repo.root, skills_only=True)
         self.assertEqual(result.exit_code, 0, text)
         with zipfile.ZipFile(out) as zf:
-            self.assertEqual(sorted(zf.namelist()), sorted(self.br24_files()))
+            expected = {p for p in self.br24_files() if not p.startswith("hooks/")}
+            self.assertEqual(set(zf.namelist()), expected)
         self.assertIn("archive_kind=skills-only", text.splitlines())
 
         bare = self.scratch("no-license")
@@ -817,10 +818,21 @@ class TestSkillsOnlyBuild(ScratchTestCase):
         self.assertEqual([n for n in names if n.split("/")[0] in FORBIDDEN_SKILLS_ONLY_ROOTS], [])
         self.assertEqual([n for n in names if n.rsplit("/", 1)[-1] == ".mcp.json"], [])
         committed = _git_bytes(REPO, "ls-tree", "-r", "-z", "--name-only", "--full-tree", "HEAD").decode("utf-8")
-        expected = {p for p in committed.split("\0") if p and (p == "LICENSE" or p.startswith(BR24_ROOTS))}
+        base = {p for p in committed.split("\0") if p and (
+            p == "LICENSE" or p.startswith(("skills/", "contracts/skills/", "assets/"))
+            or p in {".codex-plugin/plugin.json", "scripts/detect_context.py",
+                     "scripts/validate_artifacts.py", "scripts/resolve_work_package.py"})}
+        references = "skills/using-agentic-sdlc/references"
+        expected = base | {f"{references}/roles/{role}.md" for role in (
+            "code-reviewer", "context-analyst", "debugger", "implementation-auditor", "security-reviewer",
+            "software-architect", "spec-plan-author", "spec-plan-critic", "test-engineer")}
+        expected |= {f"{references}/docs/{name}.md" for name in (
+            "runtime-adapter", "zcode-runtime-adapter", "plugin-readme", "testing", "skill-boundaries", "troubleshooting")}
+        expected |= {f"{references}/public-runtime.md", f"{references}/git-safety-check.md"}
         self.assertEqual(names, expected)
         self.assertTrue(any(n.startswith(manifest["skills"].removeprefix("./")) for n in names))
-        for referenced in (manifest["hooks"], manifest["interface"]["logo"], manifest["interface"]["composerIcon"]):
+        self.assertNotIn("hooks", manifest)
+        for referenced in (manifest["interface"]["logo"], manifest["interface"]["composerIcon"]):
             with self.subTest(referenced=referenced):
                 self.assertIn(referenced.removeprefix("./"), names)
 
@@ -2180,11 +2192,19 @@ class TestSkillsOnlyListingManifest(ScratchTestCase):
         self.assertEqual(result.exit_code, 0, text)
         return out
 
-    def test_archive_codex_manifest_is_committed_manifest(self):
+    def test_archive_codex_manifest_is_public_projection_of_committed_manifest(self):
         out = self.skills_only_archive()
         with zipfile.ZipFile(out) as zf:
             member = zf.read(".codex-plugin/plugin.json")
-        self.assertEqual(member, _git_bytes(REPO, "cat-file", "blob", "HEAD:.codex-plugin/plugin.json"))
+        source = json.loads(_git_bytes(REPO, "cat-file", "blob", "HEAD:.codex-plugin/plugin.json"))
+        public = json.loads(member)
+        for key in ("name", "version", "author", "license", "skills", "keywords"):
+            self.assertEqual(public[key], source[key])
+        self.assertIn("hooks", source)
+        self.assertNotIn("hooks", public)
+        self.assertNotIn("homepage", public)
+        self.assertNotIn("repository", public)
+        self.assertIn("no lifecycle hooks", public["interface"]["longDescription"])
 
     def test_archive_codex_manifest_meets_listing_rules(self):
         out = self.skills_only_archive()
@@ -2198,7 +2218,8 @@ class TestSkillsOnlyListingManifest(ScratchTestCase):
         self.assertEqual(listing_violations(manifest, record, extract_dir), [])
         self.assertEqual(asset_violations(manifest["interface"], extract_dir), [])
         self.assertEqual(manifest["skills"], "./skills/")
-        self.assertEqual(manifest["hooks"], "./hooks/hooks-codex.json")
+        self.assertNotIn("hooks", manifest)
+        self.assertFalse((extract_dir / "hooks").exists())
 
 
 class TestVerifyOutsideCheckout(ScratchTestCase):

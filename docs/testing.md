@@ -113,6 +113,7 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_flow_guards.py` | hook policy unit | `flow-order-guard.mjs` and `flow-step-guard.mjs` re-derive evidence, fail open outside active flows, and warn/block according to `AGENTIC_FLOW_GATE_BLOCK`. |
 | `tests/test_hooks_policy.py` | policy unit | Hook wiring policy (block vs warn, fail-open, secret-pattern coverage, Claude/Codex hook-config separation). |
 | `tests/test_packaging_metadata.py` | metadata unit | Plugin manifests, publishable Codex schema keys, marketplace version consistency, and `bump_version.py` behavior. |
+| `tests/test_public_plugin_projection.py` | public packaging regression | Public lifecycle exclusion, role/command/doc dependency closure, clean helper invocation, unchanged routing/source bytes, CRLF redaction instructions, missing/empty/invalid dependencies, generated-target collisions, resolved local links and tamper rejection. |
 | `tests/test_release_readiness_docs.py` | doc consistency unit | Release-readiness docs and documented helper counts match the repository. |
 | `tests/test_house_voice.py` | product-surface unit | Runtime scope, house-voice markers, depth-forcing blocks, and maintenance files remain present. |
 | `tests/test_skill_creator_resolver.py` | helper unit | Official toolkit identity, requested capabilities, candidate fallback, and explicit-path trust diagnostics without hidden installs. |
@@ -136,7 +137,7 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_sensitive_redaction.py` | safety | Redaction: vendor tokens and private-key blocks are masked in both plain text and JSON, the structure and key context survive, an unterminated key block is masked through end-of-file, and no path echoes the secret it masked. |
 | `tests/test_review_package.py` | script unit | The review-package builder: refs that start with a dash or contain a separator cannot inject a file or create a directory, and a persisted diff has high-confidence secrets redacted. |
 | `tests/test_eval_path_safety.py` | safety | Path traversal across the eval runners: slugs, fixture trees and frontmatter names reject parent and separator forms, absolute paths, and nested symlinks. |
-| `tests/test_release_distribution.py` | release | Release and skills-only archives: contents, the verify path, the archive gate log, the golden archive digest, and that the shipped manifest is the committed one rather than a synthesized copy. |
+| `tests/test_release_distribution.py` | release | General committed-source archives and deterministic public projections: members, byte/mode/rebuild verification, archive gate logs, golden general digest, preserved identity/listing rules, and public lifecycle exclusion. |
 | `tests/test_release_ledger_docs.py` | release | The release-evidence ledger format and the historical rows it must keep byte-exact (skipped where the historical blob is absent, as in a shallow clone). |
 | `tests/test_grok_packaging.py` | runtime adapter | The experimental Grok CLI adapter: manifest, local marketplace entry, and hook wiring narrow enough that a failure cannot silently widen. |
 | `tests/test_zcode_packaging.py` | runtime adapter | The experimental ZCode adapter: manifest, root marketplace entry, and hook wiring, including the claims its README is allowed to make. |
@@ -151,6 +152,8 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_strict_flow_evidence.py` | flow evidence | Offline strict flow-evidence derivation: what counts as a step having run, and the characterization pairs that separate a real signal from a jointly-empty comparison. |
 | `tests/test_br6_case_table.py` | guard regression | The shared shell-attribution case table: schema, row coverage, and parity between the Node and Python implementations that read it. |
 | `tests/test_grok_rhai_workflows.py` | runtime adapter | The experimental Grok adapter's Rhai workflow scripts: each shipped script parses, declares the metadata the runtime reads, and dispatches only agent types that exist. |
+
+Source inventory tests must exclude generated `dist/`/`build/` archive and installed-cache copies while retaining controls for accidental source copies. External-toolkit negative fixtures must isolate the user's home: a legitimate already-installed fallback is runtime behavior, not a failed identity check. The source gate never installs a toolkit to make a fixture pass.
 
 ---
 
