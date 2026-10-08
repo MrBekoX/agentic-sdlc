@@ -43,11 +43,13 @@ LOCK_DIGESTS = {
     "hooks/flow-order-guard.mjs":
         "f584b0c25d1b6a8a655b2bc37fbad37350ee9c80545b412d2bd49e30d6a3b646",
     # The Stop-time flow-step gate: whether a flow's required steps actually ran.
+    # Rebased for Claude Code 2.1.293: last_assistant_message + background_tasks on Stop.
     "hooks/flow-step-guard.mjs":
-        "6b99513e833d83509ac6d166012ca970a9a8b1e8b88abc89422a645efd8aaade",
+        "e5f66136c69096748375ea1fb357b1f6282d478f9857ddca974a29853595e165",
     # The completion-claim backstop.
+    # Rebased for Claude Code 2.1.293: prefer last_assistant_message; block only when caught up.
     "hooks/completion-claim-guard.mjs":
-        "f44a4ed33209852f97582055c055097ea9803e72dde04741db091176a99fae5d",
+        "ad454dd5f68c2ba08583c283b444318c24892d9c3305161b913dea3bcf317c9b",
     # The Codex flow-step equivalent.
     "hooks/flow-step-guard-codex.mjs":
         "b6d05a7d8358647c2245386a8f98b19e99abcc3f0fb291d2b04b36c8317c446f",

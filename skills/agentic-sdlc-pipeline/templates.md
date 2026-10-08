@@ -63,7 +63,7 @@ Verification plan:
 Main Goal · Non-Goals · Acceptance Criteria · Constraints · Risk Areas · Next Step
 ```
 
-## Loop Iteration (/loop — test or security loop)
+## Loop Iteration (scheduled `/loop`, or a manual fail-fix-retest)
 ```md
 # Loop Iteration
 Trigger · Failed Check · Root Cause · Fix Plan · Applied Fix · Verification · Continue or Exit

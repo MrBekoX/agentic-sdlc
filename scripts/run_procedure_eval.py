@@ -349,6 +349,22 @@ def _assistant_text(trace: Trace, text: str) -> None:
     trace.timeline.append({"kind": "assistant_text", "text": text})
 
 
+LAUNCH_STATUSES = frozenset({"async_launched", "remote_launched"})
+
+
+def _status_of(value: Any) -> str | None:
+    return value.get("status") if isinstance(value, dict) and isinstance(value.get("status"), str) else None
+
+
+def _is_launch_receipt(record: dict[str, Any]) -> bool:
+    return record.get("status") in LAUNCH_STATUSES
+
+
+def _parent_id(value: Any) -> str | None:
+    parent = value.get("parent_tool_use_id") if isinstance(value, dict) else None
+    return parent if isinstance(parent, str) and parent else None
+
+
 def _record_claude_user(trace: Trace, event: dict[str, Any]) -> None:
     """Claude `user` events: tool_result blocks and user text fill the timeline only."""
     message = event.get("message")
@@ -356,7 +372,10 @@ def _record_claude_user(trace: Trace, event: dict[str, Any]) -> None:
     if isinstance(content, str):
         trace.timeline.append({"kind": "user_text", "text": content})
         return
-    for block in content if isinstance(content, list) else []:
+    blocks = content if isinstance(content, list) else []
+    tool_results = [block for block in blocks if isinstance(block, dict) and block.get("type") == "tool_result"]
+    event_status = _status_of(event.get("tool_use_result")) if len(tool_results) == 1 else None
+    for block in blocks:
         if not isinstance(block, dict):
             continue
         if block.get("type") == "tool_result":
@@ -365,10 +384,14 @@ def _record_claude_user(trace: Trace, event: dict[str, Any]) -> None:
             is_error = block.get("is_error") is True
             if tool_id:
                 _call_counts(trace, tool_id)["outputs"] += 1
-            trace.timeline.append({
+            status = _status_of(block.get("tool_use_result")) or event_status
+            entry = {
                 "kind": "tool_result", "id": tool_id, "is_error": is_error,
                 "text": _text_of(block.get("content")), "exit": 1 if is_error else 0,
-            })
+            }
+            if status:
+                entry["status"] = status
+            trace.timeline.append(entry)
         elif block.get("type") == "text" and isinstance(block.get("text"), str):
             trace.timeline.append({"kind": "user_text", "text": block["text"]})
 
@@ -582,11 +605,17 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
         at = next(i for i, entry in enumerate(trace.timeline) if entry is old["entries"][0])
         trace.timeline[at:at + len(old["entries"])] = entries
 
-    def record_once(tool_id: Any, name: str, input_obj: Any, carrier: str) -> None:
+    def record_once(tool_id: Any, name: str, input_obj: Any, carrier: str,
+                    parent_tool_use_id: str | None = None) -> None:
         has_id = isinstance(tool_id, str) and bool(tool_id)
         if has_id:
             _call_counts(trace, tool_id)[carrier] += 1
         record, entries = tool_record(tool_id, name, input_obj)
+        if parent_tool_use_id:
+            if entries:
+                entries[0]["parent_tool_use_id"] = parent_tool_use_id
+            entries = [entry for entry in entries if entry["kind"] != "write"]
+            record = Trace()
         if has_id and tool_id in recorded_ids:
             if carrier == "full" and tool_id in streamed_records:
                 replace_streamed(streamed_records.pop(tool_id), record, entries)
@@ -610,12 +639,14 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
         etype = event.get("type")
         if etype == "assistant":
             set_runtime("claude")
+            parent = _parent_id(event)
             for item in event.get("message", {}).get("content", []):
                 if item.get("type") == "text":
                     trace.text += "\n" + item.get("text", "")
                     trace.timeline.append({"kind": "assistant_text", "text": item.get("text", "")})
                 elif item.get("type") == "tool_use":
-                    record_once(item.get("id"), item.get("name", ""), item.get("input", {}), "full")
+                    record_once(item.get("id"), item.get("name", ""), item.get("input", {}), "full",
+                                _parent_id(item) or parent)
         elif etype == "user":
             set_runtime("claude")
             _record_claude_user(trace, event)
@@ -625,16 +656,27 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
                 for source, key in (("model", "model"), ("claude_code_version", "cli_version")):
                     if isinstance(event.get(source), str):
                         trace.meta[key] = event[source]
+            elif event.get("subtype") == "task_notification":
+                set_runtime("claude")
+                tool_use_id = event.get("tool_use_id")
+                status = event.get("status")
+                trace.timeline.append({
+                    "kind": "task_notification",
+                    "id": tool_use_id if isinstance(tool_use_id, str) and tool_use_id else None,
+                    "status": status if isinstance(status, str) else None,
+                })
         elif etype == "stream_event":
             se = event.get("event", {})
+            parent = _parent_id(event) or _parent_id(se)
             stype = se.get("type")
             index = int(se.get("index", 0))
             if stype == "content_block_start":
                 block = se.get("content_block", {})
                 if block.get("type") == "tool_use":
-                    partial[index] = {"name": block.get("name", ""), "json": "", "id": block.get("id")}
+                    partial[index] = {"name": block.get("name", ""), "json": "", "id": block.get("id"),
+                                      "parent": _parent_id(block) or parent}
                 elif block.get("type") == "text":
-                    partial[index] = {"name": "__text__", "json": ""}
+                    partial[index] = {"name": "__text__", "json": "", "parent": parent}
             elif stype == "content_block_delta":
                 delta = se.get("delta", {})
                 if delta.get("type") == "text_delta":
@@ -653,7 +695,7 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
                         input_obj = json.loads(pending["json"] or "{}")
                     except json.JSONDecodeError:
                         input_obj = {"_raw": pending["json"]}
-                    record_once(pending.get("id"), pending["name"], input_obj, "streamed")
+                    record_once(pending.get("id"), pending["name"], input_obj, "streamed", pending.get("parent"))
         elif etype == "result":
             result = event.get("result")
             if isinstance(result, str):
@@ -1606,6 +1648,8 @@ def attributable_test_runs(trace: Trace, test_re: re.Pattern[str]) -> list[Attri
     for index, record in enumerate(trace.timeline):
         call_id = record.get("id")
         command = record.get("input", {}).get("command") if record["kind"] == "tool_call" else None
+        if record.get("parent_tool_use_id"):
+            continue
         if not call_id or not isinstance(command, str) or not in_safe_br6_grammar(command):
             continue
         operands = br6_trailing_or_run(command)
@@ -1701,28 +1745,80 @@ def _last_verdict(records: list[dict[str, Any]]) -> tuple[str | None, str | None
     return status, decision
 
 
-def latest_auditor_verdict(trace: Trace) -> tuple[str | None, str | None]:
-    """The last overall status and the last final decision among the runtime's carriers (D21), in timeline order.
-
-    Codex: only assistant_text records. Claude and unknown (a mixed transcript): the results of Agent/Task dispatches
-    whose subagent_type is implementation-auditor (or its house prefix) when any holds a documented verdict, so the
-    model under test cannot override an audit; otherwise main-loop assistant_text (the self-authored AC39 limit). A
-    Skill result, any other sub-agent result, write content, tool inputs and user text never count.
-    """
-    assistant = [record for record in trace.timeline if record["kind"] == "assistant_text"]
-    if _is_codex_trace(trace):
-        return _last_verdict(assistant)
-    auditor_calls = {
+def _auditor_dispatch_ids(trace: Trace) -> set[str]:
+    return {
         record["id"] for record in trace.timeline
         if record["kind"] == "tool_call" and record.get("id")
         and _agent_type_matches(_dispatch_agent_type(record), AUDITOR_AGENT)
     }
-    auditor_results = [
-        record for record in trace.timeline if record["kind"] == "tool_result" and record.get("id") in auditor_calls
-    ]
-    if any(auditor_verdict_occurrences(record.get("text") or "") for record in auditor_results):
-        return _last_verdict(auditor_results)
+
+
+def _auditor_carrier_records(trace: Trace, auditor_calls: set[str]) -> list[dict[str, Any]]:
+    """Hand-back inputs and non-receipt auditor Agent results, in timeline order."""
+    results_by_id: dict[str, list[dict[str, Any]]] = {}
+    for record in trace.timeline:
+        if record["kind"] == "tool_result" and record.get("id"):
+            results_by_id.setdefault(record["id"], []).append(record)
+    carriers: list[dict[str, Any]] = []
+    for record in trace.timeline:
+        if record["kind"] == "tool_call" and record.get("name") == "SubagentHandback":
+            if record.get("parent_tool_use_id") not in auditor_calls:
+                continue
+            payload = record.get("input")
+            if not isinstance(payload, dict) or "_raw" in payload:
+                continue
+            hid = record.get("id")
+            if hid and any(result.get("is_error") for result in results_by_id.get(hid, [])):
+                continue
+            carriers.append({"text": json.dumps(payload, ensure_ascii=False)})
+        elif record["kind"] == "tool_result" and record.get("id") in auditor_calls and not _is_launch_receipt(record):
+            carriers.append(record)
+    return carriers
+
+
+def _auditor_receipts_only(trace: Trace, auditor_calls: set[str]) -> bool:
+    if not auditor_calls:
+        return False
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for record in trace.timeline:
+        if record["kind"] == "tool_result" and record.get("id") in auditor_calls:
+            by_id.setdefault(record["id"], []).append(record)
+    if any(call_id not in by_id for call_id in auditor_calls):
+        return False
+    return all(_is_launch_receipt(record) for entries in by_id.values() for record in entries)
+
+
+def latest_auditor_verdict(trace: Trace) -> tuple[str | None, str | None]:
+    """The last overall status and the last final decision among the runtime's carriers (D21), in timeline order.
+
+    Codex: only assistant_text records. Claude and unknown (a mixed transcript): SubagentHandback inputs whose parent
+    is an auditor dispatch (parsed, non-error) and non-receipt Agent/Task results of implementation-auditor when any
+    holds a documented verdict, so the model under test cannot override an audit; otherwise main-loop assistant_text
+    (the self-authored AC39 limit). Launch receipts and `_raw` stream reconstructions never count.
+    """
+    assistant = [record for record in trace.timeline if record["kind"] == "assistant_text"]
+    if _is_codex_trace(trace):
+        return _last_verdict(assistant)
+    auditor_calls = _auditor_dispatch_ids(trace)
+    carriers = _auditor_carrier_records(trace, auditor_calls)
+    if any(auditor_verdict_occurrences(record.get("text") or "") for record in carriers):
+        return _last_verdict(carriers)
+    if _auditor_receipts_only(trace, auditor_calls):
+        return (None, None)
     return _last_verdict(assistant)
+
+
+def auditor_verdict_unobservable(trace: Trace) -> bool:
+    """Every auditor dispatch returned only a launch receipt and no hand-back carries a verdict."""
+    if _is_codex_trace(trace):
+        return False
+    auditor_calls = _auditor_dispatch_ids(trace)
+    if not auditor_calls:
+        return False
+    carriers = _auditor_carrier_records(trace, auditor_calls)
+    if any(auditor_verdict_occurrences(record.get("text") or "") for record in carriers):
+        return False
+    return _auditor_receipts_only(trace, auditor_calls)
 
 
 # --- Strict reviewer results and step order (AC70). The case `strict` object is inert without --strict-evidence.
@@ -1815,16 +1911,37 @@ def reviewer_step(trace: Trace, reviewer: dict[str, Any]) -> tuple[int | None, s
         return (index, "cleared") if index is not None else (None, "missing")  # errored is not observable on Codex
     members = {
         record["id"] for record in trace.timeline
-        if record["kind"] == "tool_call" and record.get("id") and _names_reviewer_member(record, reviewer)
+        if record["kind"] == "tool_call" and record.get("id") and not record.get("parent_tool_use_id")
+        and _names_reviewer_member(record, reviewer)
     }
     results: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    notifications: list[tuple[int, dict[str, Any]]] = []
     for index, record in enumerate(trace.timeline):
         if record["kind"] == "tool_result" and record.get("id") in members:
             results.setdefault(record["id"], []).append((index, record))
-    clearing = [entries[0][0] for entries in results.values() if len(entries) == 1 and not entries[0][1].get("is_error")]
+        elif record["kind"] == "task_notification" and record.get("id"):
+            notifications.append((index, record))
+    clearing = [
+        entries[0][0] for entries in results.values()
+        if len(entries) == 1 and not entries[0][1].get("is_error") and not _is_launch_receipt(entries[0][1])
+    ]
+    completed_ids: set[str] = set()
+    failed_ids: set[str] = set()
+    for index, note in notifications:
+        nid = note.get("id")
+        if nid not in members:
+            continue
+        if note.get("status") == "completed":
+            clearing.append(index)
+            completed_ids.add(nid)
+        elif note.get("status") in ("failed", "stopped"):
+            failed_ids.add(nid)
     if clearing:
         return min(clearing), "cleared"
-    correlated = [record for entries in results.values() for _index, record in entries]
+    if failed_ids - completed_ids:
+        return None, "errored"
+    correlated = [record for entries in results.values() for _index, record in entries
+                  if not _is_launch_receipt(record)]
     if correlated and all(record.get("is_error") for record in correlated):
         return None, "errored"
     return None, "missing"
@@ -1844,7 +1961,7 @@ def _gate_member_index(trace: Trace, expected: str) -> int | None:
     short = expected.rsplit(":", 1)[-1]
     agents = SKILL_AGENT_EQUIVALENTS.get(short, [])
     for index, record in enumerate(trace.timeline):
-        if record["kind"] != "tool_call":
+        if record["kind"] != "tool_call" or record.get("parent_tool_use_id"):
             continue
         payload = json.dumps(record.get("input", {}), ensure_ascii=False)
         name = str(record.get("name", "")).lower()
@@ -1893,7 +2010,8 @@ def step_order_errors(trace: Trace, strict_config: dict[str, Any], runs: list[At
         elif step == "core-skill":
             candidates.append(next(
                 (index for index, record in enumerate(trace.timeline)
-                 if record["kind"] == "tool_call" and str(record.get("name", "")).lower() == "skill"
+                 if record["kind"] == "tool_call" and not record.get("parent_tool_use_id")
+                 and str(record.get("name", "")).lower() == "skill"
                  and any(core in json.dumps(record.get("input", {}), ensure_ascii=False) for core in CORE_WORKFLOW_SKILLS)),
                 None,
             ))
@@ -1967,11 +2085,14 @@ def evaluate_case(
         # strict.check_artifact_depth runs the depth check whatever the case-level flag says (never twice).
         if strict_config.get("check_artifact_depth") and not case.get("check_artifact_depth", False):
             errors += evaluate_artifact_depth(trace, cwd)
-        status, decision = latest_auditor_verdict(trace)
-        if status in ("PARTIAL", "FAIL"):
-            errors.append(f"strict_critical_audit:overallStatus={status}")
-        if decision == "block-final":
-            errors.append("strict_critical_audit:finalDecision=block-final")
+        if auditor_verdict_unobservable(trace):
+            errors.append("strict_auditor_verdict_unobservable")
+        else:
+            status, decision = latest_auditor_verdict(trace)
+            if status in ("PARTIAL", "FAIL"):
+                errors.append(f"strict_critical_audit:overallStatus={status}")
+            if decision == "block-final":
+                errors.append("strict_critical_audit:finalDecision=block-final")
         errors += list(trace.strict_errors)
     return errors
 
@@ -2060,9 +2181,11 @@ def run_live_case(case: dict[str, Any], args: argparse.Namespace, tmp_root: Path
         cmd += ["--model", args.model]
     if args.permission_mode:
         cmd += ["--permission-mode", args.permission_mode]
+    env = {key: value for key, value in os.environ.items() if key != "CLAUDE_CODE_SIMPLE"}
     proc = subprocess.run(
         cmd,
         cwd=cwd,
+        env=env,
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,

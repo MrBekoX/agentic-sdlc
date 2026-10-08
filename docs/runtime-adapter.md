@@ -10,10 +10,10 @@ AGENTIC-SDLC currently supports **Claude Code** and **Codex** as release targets
 | Run spec-plan author/critic | `Workflow` -> `agentic-sdlc:spec-plan-draft` | embedded `agentic-sdlc-pipeline` adapter | main-loop author pass plus main-loop critic pass |
 | Fresh-context specialist | `Agent` / `Task` | Codex subagent when available | main-loop pass marked `Delegation Degraded: fresh context unavailable` |
 | Parallel fan-out | Workflow, agent-team, or multiple agents | subagent fan-out, parallel local tools, or best available native mechanism | sequential execution with explicit degraded note |
-| Task tracking | `TodoWrite` | `update_plan` or native task tracker | explicit checklist in the response |
+| Task tracking | `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate` ([tools-reference](https://code.claude.com/docs/en/tools-reference), fetched 2026-10-07). `TodoWrite` only when `CLAUDE_CODE_ENABLE_TASKS=0` | `update_plan` or native task tracker | explicit checklist in the response |
 | Ask user | `AskUserQuestion` | direct user question or available input tool | stop at decision point |
 | Goal lock | `/goal` | active goal tool if available; otherwise manual lock | `# Goal Lock` artifact |
-| Loop fail-fix-retest | `/loop` | manual loop with command evidence | `# Loop Iteration` artifact |
+| Scheduled re-run | `/loop` re-runs a prompt on an interval ([scheduled-tasks](https://code.claude.com/docs/en/scheduled-tasks), fetched 2026-10-07). Fail-fix-retest is `/goal` or a Stop hook, not `/loop` | manual loop with command evidence | `# Loop Iteration` artifact |
 | Deterministic hook guardrails | `hooks/hooks-claude.json`: command/write guards, bootstrap, and Stop checks | `hooks/hooks-codex.json`: command/write guards, bootstrap, and Codex Stop adapters after review/trust | run the explicit checks; record missing native enforcement |
 | Active-flow evidence enforcement | Skill/tool, artifact, and command evidence from Claude transcripts | In-session artifact writes, recognized source edits, and recorded test commands; see limits below | validators, real test output, and procedure review |
 | Runtime plugin root | `${CLAUDE_PLUGIN_ROOT}` | `${PLUGIN_ROOT}` | current repo root |

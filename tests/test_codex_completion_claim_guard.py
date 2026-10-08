@@ -24,8 +24,9 @@ CODEX_CFG = REPO / "hooks" / "hooks-codex.json"
 # LF-normalized sha256 of the Claude completion-claim guard. Replaces a comparison against
 # `git show HEAD:`, which on a clean checkout compared the file against itself.
 LOCK_DIGESTS = {
+    # Rebased for Claude Code 2.1.293: prefer last_assistant_message; block only when caught up.
     "hooks/completion-claim-guard.mjs":
-        "f44a4ed33209852f97582055c055097ea9803e72dde04741db091176a99fae5d",
+        "ad454dd5f68c2ba08583c283b444318c24892d9c3305161b913dea3bcf317c9b",
 }
 
 

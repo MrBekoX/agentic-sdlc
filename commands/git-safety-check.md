@@ -1,6 +1,6 @@
 ---
 description: Read-only pre-commit git safety check (status, diff, log, secret scan). Never commits or pushes.
-allowed-tools: ["Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Read", "Grep"]
+allowed-tools: ["Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "PowerShell(git status *)", "PowerShell(git diff *)", "PowerShell(git log *)", "Read", "Grep"]
 ---
 
 # git-safety-check — Git Safety Check

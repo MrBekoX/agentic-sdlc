@@ -1,4 +1,4 @@
-// PreToolUse (Bash, if: git commit) — scans secrets ADDED in the commit; BLOCKS if found.
+// PreToolUse (shell commit) — scans secrets ADDED in the commit; BLOCKS if found.
 // Only scans lines ADDED to the diff -> doesn't trigger on already-committed secrets.
 // On error, fail-open (does not break the commit).
 import { execFileSync, } from 'node:child_process';
@@ -128,7 +128,7 @@ if (contentFindings.length || fileFindings.length || messageFindings.length) {
   ].join('\n');
   const reason =
     `Commit blocked: possible secret found in added diff lines (values masked).\n${list}\n` +
-    `→ If it is a real secret, move it to env / secret store and remove it from code. If intentional/false-positive, disable temporarily via /hooks.`;
+    `→ If it is a real secret, move it to an env var or secret store (or unstage a flagged credential file) and remove it from the commit. If you believe this is a false positive, stop and ask the user.`;
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',

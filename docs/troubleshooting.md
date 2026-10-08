@@ -32,7 +32,7 @@ Check:
 2. `hooks/hooks-claude.json` is present in the plugin root.
 3. `node` is on `PATH`.
 4. `${CLAUDE_PLUGIN_ROOT}` resolves in the Claude Code plugin runtime.
-5. The hook event matches the tool invocation. For example, `scan-commit.mjs` only runs for `git commit*`.
+5. The hook event matches the tool. `scan-commit.mjs` is wired on `Bash` and `PowerShell` and then decides for itself whether the command is a commit, including a git alias.
 
 ## Codex Hooks Are Not Running
 
@@ -106,7 +106,7 @@ The scanners never print secret values. If a warning is false positive:
 
 1. Confirm the value is not a real credential.
 2. Prefer environment variables or secret stores.
-3. If you must bypass a hook temporarily, use runtime hook controls and document why.
+3. If the finding still looks wrong, stop and ask the maintainer. Do not look for a way to silence the scanner.
 
 ## Destructive Command Blocked
 

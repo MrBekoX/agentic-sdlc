@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -57,9 +58,11 @@ def run_claude(prompt: str, cwd: Path, timeout: int, model: str | None) -> str:
     cmd = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose"]
     if model:
         cmd += ["--model", model]
+    env = {key: value for key, value in os.environ.items() if key != "CLAUDE_CODE_SIMPLE"}
     proc = subprocess.run(
         cmd,
         cwd=cwd,
+        env=env,
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -70,13 +73,38 @@ def run_claude(prompt: str, cwd: Path, timeout: int, model: str | None) -> str:
     return (proc.stdout or "") + "\n" + (proc.stderr or "")
 
 
+def behavior_text(transcript: str) -> str:
+    """Main-session assistant text and result.result only; system/init, stderr and subagents are ignored."""
+    parts: list[str] = []
+    for raw in transcript.split("\n"):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            event = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("parent_tool_use_id"):
+            continue
+        etype = event.get("type")
+        if etype == "assistant":
+            content = event.get("message", {}).get("content") if isinstance(event.get("message"), dict) else None
+            for item in content if isinstance(content, list) else []:
+                if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+        elif etype == "result" and isinstance(event.get("result"), str):
+            parts.append(event["result"])
+    return "\n".join(parts)
+
+
 def check_case(case: dict, transcript: str) -> list[str]:
     errors = []
+    text = behavior_text(transcript)
     for pattern in case.get("required_patterns", []):
-        if not re.search(pattern, transcript, re.IGNORECASE | re.MULTILINE):
+        if not re.search(pattern, text, re.IGNORECASE | re.MULTILINE):
             errors.append(f"{case['id']}:missing:{pattern}")
     for pattern in case.get("forbidden_patterns", []):
-        if re.search(pattern, transcript, re.IGNORECASE | re.MULTILINE):
+        if re.search(pattern, text, re.IGNORECASE | re.MULTILINE):
             errors.append(f"{case['id']}:forbidden:{pattern}")
     return errors
 

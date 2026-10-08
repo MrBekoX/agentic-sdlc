@@ -4,7 +4,7 @@
 //   - artifact : the file exists AND validate_artifacts.py re-validates it (Stop, thorough) or
 //                merely exists (PreToolUse, cheap). If the validator cannot run, fail-open.
 //   - toolUse  : a real tool_use event of the named tool whose input contains the marker.
-//   - command  : a real Bash command in the transcript matching the named regex.
+//   - command  : a real Bash or PowerShell command in the transcript matching the named regex.
 //   - branch   : the Stop-time working-directory branch is not main/master (warn-level step).
 //   - reviewResult : a dispatched reviewer returned a correlated non-error tool_result (warn-level).
 // Every reader fails OPEN (treats as allowed / satisfied) on its own error, matching the other guards.
@@ -107,8 +107,67 @@ export function outputHasTestSignature(text) {
 }
 
 // Parse a transcript JSONL into a trace of observable facts. Fail-open to an empty trace.
+const RECEIPT_STATUSES = new Set(['async_launched', 'remote_launched']);
+const HEADER_TAGS = ['task-id', 'tool-use-id', 'output-file', 'status'];
+const MAX_HEADER_VALUE = 256;
+
+function userRecordText(e) {
+  const content = e?.message?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  let out = '';
+  for (const c of content) {
+    if (c?.type === 'text' && typeof c.text === 'string') out += c.text;
+  }
+  return out;
+}
+
+// BR8/BR9: index-based header walk. Stops at <summary>/<result>; never scans a padded body.
+export function parseTaskNotificationHeader(text) {
+  if (typeof text !== 'string' || !text) return null;
+  const start = text.indexOf('<task-notification>');
+  if (start === -1) return null;
+  let i = start + '<task-notification>'.length;
+  const seen = Object.create(null);
+  let toolUseId = null;
+  let status = null;
+  while (i < text.length) {
+    while (i < text.length) {
+      const ch = text.charCodeAt(i);
+      if (ch === 32 || ch === 9 || ch === 10 || ch === 13) i += 1;
+      else break;
+    }
+    if (text.startsWith('<summary>', i) || text.startsWith('<result>', i)) {
+      return toolUseId && status ? { toolUseId, status } : null;
+    }
+    let matched = false;
+    for (const tag of HEADER_TAGS) {
+      const open = `<${tag}>`;
+      const close = `</${tag}>`;
+      if (!text.startsWith(open, i)) continue;
+      if (seen[tag]) return null;
+      const valStart = i + open.length;
+      const valEnd = text.indexOf(close, valStart);
+      if (valEnd === -1 || (valEnd - valStart) > MAX_HEADER_VALUE) return null;
+      const value = text.slice(valStart, valEnd);
+      if (value.includes('<')) return null;
+      seen[tag] = true;
+      if (tag === 'tool-use-id') toolUseId = value;
+      if (tag === 'status') status = value;
+      i = valEnd + close.length;
+      matched = true;
+      break;
+    }
+    if (!matched) return null;
+  }
+  return null;
+}
+
 export function parseTranscript(transcriptPath) {
-  const empty = { tools: [], commands: [], edits: [], lastText: '', raw: '', results: new Map() };
+  const empty = {
+    tools: [], commands: [], edits: [], lastText: '', raw: '',
+    results: new Map(), receipts: new Map(), completions: new Map(),
+  };
   if (!transcriptPath) return empty;
   let raw = '';
   try { raw = readFileSync(transcriptPath, 'utf8'); } catch { return empty; }
@@ -116,14 +175,38 @@ export function parseTranscript(transcriptPath) {
   const commands = [];
   const edits = [];
   const results = new Map(); // tool_use id -> { nonError } from native user tool_result records
+  const receipts = new Map(); // tool_use id -> { status, error } for a single-result user record
+  const completions = new Map(); // tool_use id -> Set of BR8 notification statuses
   let lastText = '';
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let e;
     try { e = JSON.parse(line); } catch { continue; }
-    if (e?.type === 'user' && Array.isArray(e?.message?.content)) {
-      for (const r of e.message.content) {
-        if (r?.type !== 'tool_result' || typeof r.tool_use_id !== 'string') continue;
+    if (e?.type === 'user') {
+      const origin = e.origin;
+      if (origin && origin.kind === 'task-notification' && origin.subkind == null) {
+        const header = parseTaskNotificationHeader(userRecordText(e));
+        if (header) {
+          let set = completions.get(header.toolUseId);
+          if (!set) { set = new Set(); completions.set(header.toolUseId, set); }
+          set.add(header.status);
+        }
+      }
+      const content = e?.message?.content;
+      const resultItems = Array.isArray(content)
+        ? content.filter((r) => r?.type === 'tool_result' && typeof r.tool_use_id === 'string')
+        : [];
+      const tus = e.toolUseResult;
+      if (resultItems.length === 1 && tus && typeof tus === 'object') {
+        const id = resultItems[0].tool_use_id;
+        const status = tus.status;
+        const error = tus.error;
+        if (RECEIPT_STATUSES.has(status) || (error != null && error !== '')) {
+          receipts.set(id, { status, error });
+        }
+      }
+      for (const r of resultItems) {
+        if (RECEIPT_STATUSES.has(receipts.get(r.tool_use_id)?.status)) continue;
         // is_error absent counts as non-error; any non-error result for an id marks it non-error.
         const nonError = r.is_error !== true || Boolean(results.get(r.tool_use_id)?.nonError);
         results.set(r.tool_use_id, { nonError });
@@ -138,18 +221,43 @@ export function parseTranscript(transcriptPath) {
       else if (c?.type === 'tool_use') {
         const inputStr = JSON.stringify(c.input || {});
         tools.push({ name: c.name || '', inputStr, id: typeof c.id === 'string' ? c.id : null });
-        if (c.name === 'Bash' && c.input?.command) commands.push(String(c.input.command));
+        if ((c.name === 'Bash' || c.name === 'PowerShell') && c.input?.command) {
+          commands.push(String(c.input.command));
+        }
         if (['Edit', 'Write', 'MultiEdit'].includes(c.name) && c.input?.file_path) {
           edits.push(String(c.input.file_path));
         }
       }
     }
   }
-  return { tools, commands, edits, lastText, raw, results };
+  return { tools, commands, edits, lastText, raw, results, receipts, completions };
+}
+
+function receiptHasError(trace, id) {
+  const rec = trace.receipts?.get(id);
+  return rec != null && rec.error != null && rec.error !== '';
+}
+
+function notificationCompleted(trace, id) {
+  return Boolean(trace.completions?.get(id)?.has('completed'));
+}
+
+function inFlightReviewer(ctx, members) {
+  const tasks = ctx.backgroundTasks;
+  if (!Array.isArray(tasks)) return false;
+  return tasks.some((task) => {
+    if (task?.type !== 'subagent') return false;
+    const agentType = String(task.agent_type || '');
+    return (members || []).some((m) => agentType.includes(m.contains));
+  });
 }
 
 function toolUsePresent(trace, tool, contains) {
-  return trace.tools.some((t) => t.name === tool && t.inputStr.includes(contains));
+  return trace.tools.some((t) => {
+    if (t.name !== tool || !t.inputStr.includes(contains)) return false;
+    if (t.id && receiptHasError(trace, t.id)) return false;
+    return true;
+  });
 }
 
 // Flows whose activeWhen.skill marker appears in a real Skill tool_use.
@@ -302,11 +410,15 @@ function evidenceSatisfied(item, trace, ctx) {
       return trace.commands.some((c) => isRealRunnerInvocation(c, re));
     }
     case 'reviewResult':
-      // Warn-level only: a reviewer group (control, security) fails when a member was dispatched and no
-      // dispatched member has a correlated non-error result. Dispatch matching is toolUsePresent's test.
+      // Warn-level only: a reviewer group fails when a member was dispatched and no dispatched
+      // member has a completed result. Launch receipts stay pending; a BR8 completed notification
+      // or an in-flight background_tasks subagent naming the reviewer is not missing.
       return Object.values(item.reviewers || {}).every((members) => {
         const dispatched = trace.tools.filter((t) => (members || []).some((m) => t.name === m.tool && t.inputStr.includes(m.contains)));
-        return !dispatched.length || dispatched.some((t) => t.id && trace.results?.get(t.id)?.nonError);
+        if (!dispatched.length) return true;
+        if (dispatched.some((t) => t.id && notificationCompleted(trace, t.id))) return true;
+        if (dispatched.some((t) => t.id && trace.results?.get(t.id)?.nonError)) return true;
+        return inFlightReviewer(ctx, members);
       });
     case 'branch':
       // Warn-level only (flow-requirements.json): satisfied unless the Stop-time cwd is on main/master.
@@ -399,9 +511,10 @@ export function isSourceFile(filePath, req) {
   return (req.sourceGlobs || []).includes(ext);
 }
 
-export function completionClaimPresent(trace, req) {
-  if (!req.completionClaim || !trace.lastText) return false;
-  try { return new RegExp(req.completionClaim, 'i').test(trace.lastText); } catch { return false; }
+export function completionClaimPresent(trace, req, lastAssistantMessage) {
+  const text = typeof lastAssistantMessage === 'string' ? lastAssistantMessage : (trace.lastText || '');
+  if (!req.completionClaim || !text) return false;
+  try { return new RegExp(req.completionClaim, 'i').test(text); } catch { return false; }
 }
 
 // Flush stdout, then exit — avoids truncation on a piped stdout under Windows (same as the other guards).

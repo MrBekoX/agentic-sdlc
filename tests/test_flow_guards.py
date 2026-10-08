@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -19,6 +20,7 @@ REPO = Path(__file__).resolve().parents[1]
 NODE = shutil.which("node")
 STEP_GUARD = REPO / "hooks" / "flow-step-guard.mjs"
 ORDER_GUARD = REPO / "hooks" / "flow-order-guard.mjs"
+CLAIM_GUARD = REPO / "hooks" / "completion-claim-guard.mjs"
 FLOW_EVID = REPO / "hooks" / "flow-evidence.mjs"
 GIT = shutil.which("git")
 RCF = "agentic-sdlc:root-cause-fix"
@@ -49,6 +51,10 @@ def workflow(n):
 
 def bash(c):
     return ev_tool("Bash", {"command": c})
+
+
+def powershell(c):
+    return ev_tool("PowerShell", {"command": c})
 
 
 def edit(fp):
@@ -216,7 +222,8 @@ SATISFIED = with_results([
 
 @unittest.skipIf(NODE is None, "node not available")
 class TestFlowStepGuard(unittest.TestCase):
-    def run_guard(self, events, *, block=False, stop_active=False, cwd=None, env_extra=None):
+    def run_guard(self, events, *, block=False, stop_active=False, cwd=None, env_extra=None,
+                  last_assistant_message=None, background_tasks=None):
         with tempfile.TemporaryDirectory() as td:
             run_cwd = cwd or td
             tpath = Path(td) / "transcript.jsonl"
@@ -229,9 +236,14 @@ class TestFlowStepGuard(unittest.TestCase):
                 env["AGENTIC_FLOW_GATE_BLOCK"] = "true"
             if env_extra:
                 env.update(env_extra)
+            payload = {"transcript_path": str(tpath), "stop_hook_active": stop_active}
+            if last_assistant_message is not None:
+                payload["last_assistant_message"] = last_assistant_message
+            if background_tasks is not None:
+                payload["background_tasks"] = background_tasks
             proc = subprocess.run(
                 [NODE, str(STEP_GUARD)],
-                input=json.dumps({"transcript_path": str(tpath), "stop_hook_active": stop_active}),
+                input=json.dumps(payload),
                 capture_output=True, text=True, encoding="utf-8", cwd=run_cwd, env=env,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -876,6 +888,291 @@ class TestFlowOrderGuard(unittest.TestCase):
                   edit("docs/agentic-sdlc/plan/plan/x.md")]  # reserved slugs -> not recognized
         out = self.run_guard("src/app.py", events, block=True)
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
+CLAIM_TEXT = "Feature complete. All tests passing."
+CLAIM_SPLIT_A = "Feature complete. "
+CLAIM_SPLIT_B = "All tests passing."
+AUDITOR_ID = "toolu_async_auditor"
+WORKFLOW_ID = "toolu_wf_error"
+
+
+def launch_receipt(tool_id, status="async_launched", *, include_tool_result=True, error=None):
+    """A native launch receipt. include_tool_result=True is today's satisfier; False is pending-only."""
+    rec = {"type": "user", "toolUseResult": {"status": status}}
+    if error is not None:
+        rec["toolUseResult"]["error"] = error
+    if include_tool_result:
+        rec["message"] = {"content": [{
+            "type": "tool_result", "tool_use_id": tool_id, "content": "launched", "is_error": False,
+        }]}
+    return rec
+
+
+def task_notification(tool_use_id, status="completed", *, body="", origin=True, subkind=None,
+                      as_blocks=False, extra_header_tag=None, omit_terminator=False,
+                      tags_only_in_body=False, pad_bytes=0):
+    """A user record whose body may carry a BR8 task-notification header."""
+    header = (
+        f"<task-notification><task-id>task_1</task-id><tool-use-id>{tool_use_id}</tool-use-id>"
+        f"<output-file>/tmp/out.txt</output-file>"
+    )
+    if extra_header_tag:
+        header += extra_header_tag
+    header += f"<status>{status}</status>"
+    if not omit_terminator:
+        header += "<summary>"
+    if tags_only_in_body:
+        text = (
+            f"notes only\n<tool-use-id>{tool_use_id}</tool-use-id>"
+            f"<status>{status}</status><summary>\n{body}"
+        )
+    else:
+        text = header + body
+    if pad_bytes:
+        text += "X" * pad_bytes
+    content = [{"type": "text", "text": text}] if as_blocks else text
+    rec = {"type": "user", "message": {"content": content}}
+    if origin:
+        rec["origin"] = {"kind": "task-notification"}
+        if subkind is not None:
+            rec["origin"]["subkind"] = subkind
+    return rec
+
+
+def _async_control_events(*, receipt_result=True, receipt_status="async_launched", notification=None):
+    """RCF with every block step satisfied except the auditor, which is a launch receipt."""
+    events = with_results([
+        skill(RCF), edit("src/app.py"), workflow("agentic-sdlc:spec-plan-draft"),
+        bash("python -m pytest -q"), agent("agentic-sdlc:security-reviewer"),
+    ])
+    events.append(tool_with_id(
+        "Agent", {"subagent_type": "agentic-sdlc:implementation-auditor", "prompt": "do the audit"},
+        AUDITOR_ID,
+    ))
+    events.append(launch_receipt(AUDITOR_ID, receipt_status, include_tool_result=receipt_result))
+    if notification is not None:
+        events.append(notification)
+    events.append(ev_text("Done."))
+    return events
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestPowerShellCommandEvidence(unittest.TestCase):
+    """AC1: a PowerShell runner invocation satisfies tests / characterization exactly as Bash does."""
+
+    run_step = TestFlowStepGuard.run_guard
+    run_order = TestFlowOrderGuard.run_guard
+
+    def test_ac1_powershell_pytest_satisfies_tests_stop(self):
+        events = with_results([
+            skill(RCF), edit("src/app.py"), workflow("agentic-sdlc:spec-plan-draft"),
+            powershell("python -m pytest -q"),
+            agent("agentic-sdlc:security-reviewer"),
+            agent("agentic-sdlc:implementation-auditor"), ev_text("Done."),
+        ])
+        self.assertEqual(self.run_step(events, block=True), {})
+
+    def test_ac1_powershell_characterization_allows_safe_refactor_edit(self):
+        events = [skill(SR), powershell("py -3 -m unittest tests.test_characterization")]
+        self.assertEqual(self.run_order("src/app.py", events, block=True), {})
+
+    def test_ac1_powershell_echoed_pytest_does_not_satisfy(self):
+        events = with_results([
+            skill(RCF), edit("src/app.py"), workflow("agentic-sdlc:spec-plan-draft"),
+            powershell("echo pytest"),
+            agent("agentic-sdlc:security-reviewer"),
+            agent("agentic-sdlc:implementation-auditor"), ev_text("Done."),
+        ])
+        out = self.run_step(events, block=True)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("tests", _block_ids(out))
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestCompletionClaimGuard(unittest.TestCase):
+    """AC2-AC4: prefer last_assistant_message; block only when the transcript has caught up (BR11)."""
+
+    def run_hook(self, lines, *, block=False, last_assistant_message=None):
+        with tempfile.TemporaryDirectory() as td:
+            tpath = Path(td) / "transcript.jsonl"
+            tpath.write_text("\n".join(json.dumps(o) for o in lines), encoding="utf-8")
+            env = os.environ.copy()
+            if block:
+                env["AGENTIC_COMPLETION_GATE_BLOCK"] = "true"
+            payload = {"transcript_path": str(tpath)}
+            if last_assistant_message is not None:
+                payload["last_assistant_message"] = last_assistant_message
+            proc = subprocess.run(
+                [NODE, str(CLAIM_GUARD)], env=env, input=json.dumps(payload),
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = (proc.stdout or "").strip()
+            return json.loads(out) if out else {}
+
+    @staticmethod
+    def _assistant(text, message_id=None):
+        message = {"content": [{"type": "text", "text": text}]}
+        if message_id is not None:
+            message["id"] = message_id
+        return {"type": "assistant", "message": message}
+
+    def test_ac2_last_assistant_message_caught_up_warns_and_blocks(self):
+        lines = [self._assistant(CLAIM_TEXT)]
+        warn = self.run_hook(lines, last_assistant_message=CLAIM_TEXT)
+        self.assertIn("systemMessage", warn)
+        self.assertNotIn("decision", warn)
+        blocked = self.run_hook(lines, block=True, last_assistant_message=CLAIM_TEXT)
+        self.assertEqual(blocked.get("decision"), "block")
+
+    def test_ac3_lagging_transcript_warns_never_blocks(self):
+        out = self.run_hook(
+            [self._assistant("Still working through the remaining cases.")],
+            block=True, last_assistant_message=CLAIM_TEXT,
+        )
+        self.assertIn("systemMessage", out)
+        self.assertNotEqual(out.get("decision"), "block")
+
+    def test_ac3_split_records_sharing_message_id_block(self):
+        lines = [self._assistant(CLAIM_SPLIT_A, "msg_split"), self._assistant(CLAIM_SPLIT_B, "msg_split")]
+        out = self.run_hook(lines, block=True, last_assistant_message=CLAIM_SPLIT_A + CLAIM_SPLIT_B)
+        self.assertEqual(out.get("decision"), "block")
+
+    def test_ac3_whitespace_only_difference_still_blocks(self):
+        out = self.run_hook(
+            [self._assistant(CLAIM_TEXT)],
+            block=True, last_assistant_message="  Feature   complete.   All   tests passing.  ",
+        )
+        self.assertEqual(out.get("decision"), "block")
+
+    def test_ac4_field_without_claim_overrides_old_transcript_claim(self):
+        out = self.run_hook(
+            [self._assistant(CLAIM_TEXT)],
+            block=True, last_assistant_message="Still investigating the remaining failures.",
+        )
+        self.assertEqual(out, {})
+
+    def test_ac4_absent_field_keeps_transcript_decision(self):
+        blocked = self.run_hook([self._assistant(CLAIM_TEXT)], block=True)
+        self.assertEqual(blocked.get("decision"), "block")
+        silent = self.run_hook([self._assistant("A couple of tests still fail.")], block=True)
+        self.assertEqual(silent, {})
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestFlowStepLastAssistantMessage(unittest.TestCase):
+    """AC5: skipped-flow heuristic driven only by last_assistant_message when the field is a string."""
+
+    run_guard = TestFlowStepGuard.run_guard
+
+    def test_ac5_claim_only_in_last_assistant_message_warns(self):
+        events = [edit("src/app.py"), edit("src/two.py"), ev_text("Investigating the remaining cases.")]
+        out = self.run_guard(events, block=True, last_assistant_message=CLAIM_TEXT)
+        self.assertIn("systemMessage", out)
+        self.assertNotEqual(out.get("decision"), "block")
+        self.assertIn("skip", out.get("systemMessage", "").lower())
+
+    def test_ac5_absent_field_uses_transcript_text(self):
+        claimed = [edit("src/app.py"), edit("src/two.py"), ev_text(CLAIM_TEXT)]
+        out = self.run_guard(claimed, block=True)
+        self.assertIn("systemMessage", out)
+        self.assertNotEqual(out.get("decision"), "block")
+        silent = self.run_guard([edit("src/app.py"), ev_text("Investigating.")], block=True)
+        self.assertEqual(silent, {})
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestReviewResultAsyncReceipts(unittest.TestCase):
+    """AC6-AC9: launch receipts are pending; only a BR8 notification or in-flight reviewer clears."""
+
+    run_guard = TestFlowStepGuard.run_guard
+
+    def ids(self, events, **kw):
+        return _reminder_ids(self.run_guard(events, **kw))
+
+    def test_ac6_async_launched_receipt_lists_review_result(self):
+        events = _async_control_events(receipt_result=True, receipt_status="async_launched")
+        self.assertEqual(self.ids(events), ["review-result"])
+
+    def test_ac6_remote_launched_receipt_lists_review_result(self):
+        events = _async_control_events(receipt_result=True, receipt_status="remote_launched")
+        self.assertEqual(self.ids(events), ["review-result"])
+
+    def test_ac7_completed_notification_clears_review_result(self):
+        note = task_notification(AUDITOR_ID, "completed")
+        events = _async_control_events(receipt_result=False, notification=note)
+        self.assertNotIn("review-result", self.ids(events))
+
+    def test_ac7_completed_notification_as_text_blocks_clears(self):
+        note = task_notification(AUDITOR_ID, "completed", as_blocks=True)
+        events = _async_control_events(receipt_result=False, notification=note)
+        self.assertNotIn("review-result", self.ids(events))
+
+    def test_ac7_failed_killed_stopped_stay_missing(self):
+        for status in ("failed", "killed", "stopped"):
+            with self.subTest(status=status):
+                note = task_notification(AUDITOR_ID, status)
+                events = _async_control_events(receipt_result=False, notification=note)
+                self.assertEqual(self.ids(events), ["review-result"])
+
+    def test_ac7_spoofed_or_malformed_headers_do_not_clear(self):
+        cases = {
+            "tags-in-body": task_notification(AUDITOR_ID, tags_only_in_body=True),
+            "no-terminator": task_notification(AUDITOR_ID, omit_terminator=True),
+            "repeated-tag": task_notification(
+                AUDITOR_ID, extra_header_tag=f"<tool-use-id>{AUDITOR_ID}</tool-use-id>",
+            ),
+            "subkind": task_notification(AUDITOR_ID, subkind="user"),
+            "no-origin": task_notification(AUDITOR_ID, origin=False),
+        }
+        for name, note in cases.items():
+            with self.subTest(case=name):
+                events = _async_control_events(receipt_result=False, notification=note)
+                self.assertEqual(self.ids(events), ["review-result"])
+
+    def test_ac8_in_flight_background_reviewer_not_missing(self):
+        events = _async_control_events(receipt_result=False)
+        tasks = [{"type": "subagent", "agent_type": "agentic-sdlc:implementation-auditor"}]
+        self.assertNotIn("review-result", self.ids(events, background_tasks=tasks))
+
+    def test_ac9_one_megabyte_notification_matches_unpadded_and_is_bounded(self):
+        bare = task_notification(AUDITOR_ID, "completed")
+        padded = task_notification(AUDITOR_ID, "completed", pad_bytes=1024 * 1024)
+        t0 = time.perf_counter()
+        bare_ids = self.ids(_async_control_events(receipt_result=False, notification=bare))
+        baseline = time.perf_counter() - t0
+        t1 = time.perf_counter()
+        padded_ids = self.ids(_async_control_events(receipt_result=False, notification=padded))
+        padded_elapsed = time.perf_counter() - t1
+        self.assertEqual(padded_ids, bare_ids)
+        self.assertNotIn("review-result", padded_ids)
+        self.assertLess(padded_elapsed - baseline, 2.0)
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestWorkflowLaunchError(unittest.TestCase):
+    """AC10: a Workflow receipt with error does not satisfy spec/plan when no artifact exists."""
+
+    run_guard = TestFlowStepGuard.run_guard
+
+    def test_ac10_workflow_error_receipt_does_not_satisfy_spec_plan(self):
+        events = with_results([skill(RCF), edit("src/app.py")])
+        events.append(tool_with_id(
+            "Workflow", {"name": "agentic-sdlc:spec-plan-draft", "args": {"mode": "spec"}}, WORKFLOW_ID,
+        ))
+        events.append(launch_receipt(WORKFLOW_ID, include_tool_result=True, error="stopped"))
+        events.extend(with_results([
+            bash("python -m pytest -q"),
+            agent("agentic-sdlc:security-reviewer"),
+            agent("agentic-sdlc:implementation-auditor"),
+            ev_text("Done."),
+        ]))
+        out = self.run_guard(events, block=True)
+        self.assertEqual(out.get("decision"), "block")
+        missing = _block_ids(out)
+        self.assertIn("spec", missing)
+        self.assertIn("plan", missing)
 
 
 if __name__ == "__main__":

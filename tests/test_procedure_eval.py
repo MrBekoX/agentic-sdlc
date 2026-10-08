@@ -46,11 +46,14 @@ def stream_tool_use(tool_id, name, input_obj, index=0):
     ]
 
 
-def full_tool_use(tool_id, name, input_obj):
+def full_tool_use(tool_id, name, input_obj, parent_tool_use_id=None):
     block = {"type": "tool_use", "name": name, "input": input_obj}
     if tool_id is not None:
         block["id"] = tool_id
-    return {"type": "assistant", "message": {"content": [block]}}
+    event = {"type": "assistant", "message": {"content": [block]}}
+    if parent_tool_use_id is not None:
+        event["parent_tool_use_id"] = parent_tool_use_id
+    return event
 
 PER_PACKAGE_FIXTURE = (
     REPO / "tests" / "fixtures" / "transcripts"
@@ -993,9 +996,23 @@ def load_br6_rows():
     return json.loads(BR6_TABLE.read_bytes().decode("utf-8"))["rows"]
 
 
-def claude_result(tool_id, is_error, text):
-    return {"type": "user", "message": {"content": [
+def claude_result(tool_id, is_error, text, *, tool_use_result=None):
+    event = {"type": "user", "message": {"content": [
         {"type": "tool_result", "tool_use_id": tool_id, "is_error": is_error, "content": text}]}}
+    if tool_use_result is not None:
+        event["tool_use_result"] = tool_use_result
+    return event
+
+
+def launch_receipt(tool_id, status="async_launched", text="Agent launched"):
+    return claude_result(tool_id, False, text, tool_use_result={"status": status})
+
+
+def task_notification(status, tool_use_id=None):
+    event = {"type": "system", "subtype": "task_notification", "status": status}
+    if tool_use_id is not None:
+        event["tool_use_id"] = tool_use_id
+    return event
 
 
 def claude_run(tool_id, command, is_error, text):
@@ -2919,3 +2936,261 @@ class TestStrictMixedRuntime(unittest.TestCase):
         trace = procedure_eval.trace_events([CODEX_EXEC_MESSAGE] + claude_run("t1", "pytest", False, "1 passed"))
         self.assertEqual(trace.runtime, "codex-exec")
         self.assertEqual(trace.strict_errors, [])
+
+
+HANDBACK_PARTIAL = {"overallStatus": "PARTIAL", "finalDecision": "block-final"}
+HANDBACK_NOTE = "Subagent completed with a note."
+CLAUDE_WORKFLOW_FIXTURES = (
+    "agentic-sdlc-pipeline-procedure-pass.jsonl",
+    "agentic-sdlc-pipeline-procedure-per-package-pass.jsonl",
+    "agentic-sdlc-pipeline-procedure-permission-denied.jsonl",
+    "agentic-sdlc-pipeline-procedure-runtime-error.jsonl",
+    "procedure-strict-claude-complete-pass.jsonl",
+    "procedure-strict-claude-echo-hidden-red.jsonl",
+    "procedure-strict-claude-auditor-partial-overridden.jsonl",
+    "procedure-strict-claude-missing-core.jsonl",
+)
+
+
+def auditor_handback_stream(handback_input, *, parent="a1", handback_id="hb1", agent_result=HANDBACK_NOTE,
+                            agent_receipt=None, handback_error=False, parent_id=None):
+    """Auditor Agent dispatch, optional SubagentHandback, Agent result, then a main-loop PASS."""
+    parent_id = parent if parent_id is None else parent_id
+    events = [full_tool_use(parent, "Agent", {"subagent_type": "agentic-sdlc:implementation-auditor",
+                                              "prompt": "audit the flow"})]
+    if handback_input is not None:
+        events.append(full_tool_use(handback_id, "SubagentHandback", handback_input, parent_tool_use_id=parent_id))
+        events.append(claude_result(handback_id, handback_error, "handed back"))
+    if agent_receipt is not None:
+        events.append(launch_receipt(parent, status=agent_receipt))
+    else:
+        events.append(claude_result(parent, False, agent_result))
+    events.append(assistant_text_event(AUDITOR_PASS))
+    return events
+
+
+class TestSubagentHandback(unittest.TestCase):
+    """AC14, AC15: SubagentHandback is the post-2.1.271 auditor verdict carrier."""
+
+    def evaluate(self, events):
+        return procedure_eval.evaluate_case(AUDIT_CASE, procedure_eval.trace_events(events), REPO, strict=True)
+
+    def test_ac14_auditor_handback_grades_over_main_loop_pass(self):
+        errors = self.evaluate(auditor_handback_stream(HANDBACK_PARTIAL))
+        self.assertEqual(audit_errors(errors), BOTH_CRITICAL)
+
+    def test_ac14_handback_error_carries_no_verdict(self):
+        errors = self.evaluate(auditor_handback_stream(HANDBACK_PARTIAL, handback_error=True))
+        self.assertEqual(audit_errors(errors), [])
+        self.assertNotIn("strict_auditor_verdict_unobservable", errors)
+
+    def test_ac14_non_auditor_parent_carries_no_verdict(self):
+        events = [
+            full_tool_use("g1", "Agent", {"subagent_type": "general-purpose", "prompt": "act as auditor"}),
+            full_tool_use("hb1", "SubagentHandback", HANDBACK_PARTIAL, parent_tool_use_id="g1"),
+            claude_result("hb1", False, "handed back"),
+            claude_result("g1", False, HANDBACK_NOTE),
+            assistant_text_event(AUDITOR_PASS),
+        ]
+        self.assertEqual(audit_errors(self.evaluate(events)), [])
+
+    def test_ac14_stream_only_raw_input_carries_no_verdict(self):
+        raw = "overallStatus: PARTIAL\nfinalDecision: block-final"
+        events = [
+            full_tool_use("a1", "Agent", {"subagent_type": "agentic-sdlc:implementation-auditor",
+                                          "prompt": "audit the flow"}),
+            *stream_tool_use("hb1", "SubagentHandback", None),
+        ]
+        events[1] = {"type": "stream_event", "parent_tool_use_id": "a1", "event": {
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "tool_use", "id": "hb1", "name": "SubagentHandback"}}}
+        events[2] = {"type": "stream_event", "parent_tool_use_id": "a1", "event": {
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": raw}}}
+        events.append(claude_result("hb1", False, "handed back"))
+        events.append(claude_result("a1", False, HANDBACK_NOTE))
+        events.append(assistant_text_event(AUDITOR_PASS))
+        errors = self.evaluate(events)
+        self.assertEqual(audit_errors(errors), [])
+        trace = procedure_eval.trace_events(events)
+        handbacks = [r for r in trace.timeline if r["kind"] == "tool_call" and r.get("name") == "SubagentHandback"]
+        self.assertTrue(handbacks)
+        self.assertIn("_raw", handbacks[0].get("input") or {})
+
+    def test_ac14_pre_2_1_271_agent_tool_result_shape_unchanged(self):
+        errors = self.evaluate(auditor_result("a1", AUDITOR_PARTIAL) + [assistant_text_event(AUDITOR_PASS)])
+        self.assertEqual(audit_errors(errors), BOTH_CRITICAL)
+
+    def test_ac14_cli_reports_failed_for_handback_partial(self):
+        events = auditor_handback_stream(HANDBACK_PARTIAL)
+        with tempfile.TemporaryDirectory() as td:
+            eval_set = Path(td) / "eval.json"
+            eval_set.write_text(json.dumps({"cases": [AUDIT_CASE]}), encoding="utf-8")
+            transcript = write_jsonl(Path(td) / "t.jsonl", events)
+            code, stdout = run_main(["--eval-set", eval_set, "--transcript", transcript, "--strict-evidence"])
+        self.assertEqual(code, 1)
+        self.assertIn("strict_critical_audit:overallStatus=PARTIAL", stdout)
+        self.assertIn("strict_critical_audit:finalDecision=block-final", stdout)
+        self.assertIn("procedure_eval=failed", stdout)
+
+    def test_ac15_receipt_without_verdict_carrier_is_unobservable(self):
+        events = auditor_handback_stream(None, agent_receipt="async_launched")
+        events[-1] = assistant_text_event(AUDITOR_PARTIAL)
+        errors = self.evaluate(events)
+        self.assertIn("strict_auditor_verdict_unobservable", errors)
+        self.assertEqual(audit_errors(errors), [])
+
+    def test_ac15_ignores_main_loop_verdict_text(self):
+        events = [
+            full_tool_use("a1", "Agent", {"subagent_type": "agentic-sdlc:implementation-auditor",
+                                          "prompt": "audit the flow"}),
+            launch_receipt("a1"),
+            assistant_text_event("overallStatus: PASS\nfinalDecision: allow-final"),
+        ]
+        errors = self.evaluate(events)
+        self.assertIn("strict_auditor_verdict_unobservable", errors)
+        self.assertEqual(procedure_eval.latest_auditor_verdict(procedure_eval.trace_events(events)), (None, None))
+
+
+class TestAsyncReviewerResults(unittest.TestCase):
+    """AC16: a launch receipt is not a reviewer result; task_notification is."""
+
+    def evaluate(self, events):
+        return procedure_eval.evaluate_case(
+            reviewer_case(SECURITY_REVIEWER), procedure_eval.trace_events(events), REPO, strict=True)
+
+    def test_ac16_receipt_without_notification_is_missing(self):
+        events = [
+            full_tool_use("s1", "Agent", {"subagent_type": "agentic-sdlc:security-reviewer"}),
+            launch_receipt("s1"),
+        ]
+        self.assertEqual(reviewer_errors(self.evaluate(events)), ["strict_reviewer_result_missing:security"])
+
+    def test_ac16_completed_notification_clears_at_its_index(self):
+        events = [
+            full_tool_use("s1", "Agent", {"subagent_type": "agentic-sdlc:security-reviewer"}),
+            launch_receipt("s1"),
+            task_notification("completed", tool_use_id="s1"),
+        ]
+        trace = procedure_eval.trace_events(events)
+        index, state = procedure_eval.reviewer_step(trace, SECURITY_REVIEWER)
+        notify_at = [i for i, record in enumerate(trace.timeline) if record.get("kind") == "task_notification"]
+        self.assertTrue(notify_at, "task_notification must appear on the timeline")
+        self.assertEqual(state, "cleared")
+        self.assertEqual(index, notify_at[0])
+        self.assertEqual(reviewer_errors(self.evaluate(events)), [])
+
+    def test_ac16_failed_or_stopped_notification_is_errored(self):
+        for status in ("failed", "stopped"):
+            with self.subTest(status=status):
+                events = [
+                    full_tool_use("s1", "Agent", {"subagent_type": "agentic-sdlc:security-reviewer"}),
+                    launch_receipt("s1"),
+                    task_notification(status, tool_use_id="s1"),
+                ]
+                self.assertEqual(reviewer_errors(self.evaluate(events)),
+                                 ["strict_reviewer_result_errored:security"])
+
+    def test_ac16_notification_without_tool_use_id_is_ignored(self):
+        events = [
+            full_tool_use("s1", "Agent", {"subagent_type": "agentic-sdlc:security-reviewer"}),
+            launch_receipt("s1"),
+            task_notification("completed"),
+        ]
+        self.assertEqual(reviewer_errors(self.evaluate(events)), ["strict_reviewer_result_missing:security"])
+
+
+class TestSubagentAttribution(unittest.TestCase):
+    """AC17: only main-loop Skill, test and spec-write evidence satisfies a requirement."""
+
+    def test_ac17_subagent_skill_does_not_satisfy(self):
+        case = {"id": "skill-probe", "prompt": "p", "required_skills": ["agentic-sdlc:feature-build"]}
+        sub = [full_tool_use("k1", "Skill", {"skill": "agentic-sdlc:feature-build"}, parent_tool_use_id="agent-1"),
+               claude_result("k1", False, "ok")]
+        main = [full_tool_use("k1", "Skill", {"skill": "agentic-sdlc:feature-build"}),
+                claude_result("k1", False, "ok")]
+        self.assertIn("missing_skill:agentic-sdlc:feature-build",
+                      procedure_eval.evaluate_case(case, procedure_eval.trace_events(sub), REPO))
+        self.assertNotIn("missing_skill:agentic-sdlc:feature-build",
+                         procedure_eval.evaluate_case(case, procedure_eval.trace_events(main), REPO))
+
+    def test_ac17_subagent_spec_write_does_not_satisfy(self):
+        case = {"id": "spec-probe", "prompt": "p", "required_artifacts": ["docs/agentic-sdlc/specs/x.md"]}
+        payload = {"file_path": "docs/agentic-sdlc/specs/x.md", "content": DEEP_SPEC}
+        sub = [full_tool_use("w1", "Write", payload, parent_tool_use_id="agent-1")]
+        main = [full_tool_use("w1", "Write", payload)]
+        self.assertIn("missing_artifact:docs/agentic-sdlc/specs/x.md",
+                      procedure_eval.evaluate_case(case, procedure_eval.trace_events(sub), REPO))
+        self.assertNotIn("missing_artifact:docs/agentic-sdlc/specs/x.md",
+                         procedure_eval.evaluate_case(case, procedure_eval.trace_events(main), REPO))
+
+    def test_ac17_subagent_test_run_does_not_satisfy(self):
+        case = {"id": "test-probe", "prompt": "p", "strict": {"require_red_green": True}}
+        sub = [
+            full_tool_use("r1", "Bash", {"command": "python -m pytest -q"}, parent_tool_use_id="agent-1"),
+            claude_result("r1", True, "1 failed"),
+            full_tool_use("g1", "Bash", {"command": "python -m pytest -q"}, parent_tool_use_id="agent-1"),
+            claude_result("g1", False, "1 passed"),
+        ]
+        main = claude_run("r1", "python -m pytest -q", True, "1 failed") + claude_run(
+            "g1", "python -m pytest -q", False, "1 passed")
+        self.assertIn("strict_missing_green",
+                      procedure_eval.evaluate_case(case, procedure_eval.trace_events(sub), REPO, strict=True))
+        self.assertNotIn("strict_missing_green",
+                         procedure_eval.evaluate_case(case, procedure_eval.trace_events(main), REPO, strict=True))
+
+
+class TestClaudeChildEnvironment(unittest.TestCase):
+    """AC18: CLAUDE_CODE_SIMPLE is stripped from the procedure runner child environment."""
+
+    def test_ac18_strips_claude_code_simple_from_child_env(self):
+        tmp = Path(tempfile.mkdtemp(prefix="proc-env-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        cli = tmp / ("claude.exe" if sys.platform == "win32" else "claude")
+        cli.write_bytes(b"inert\n")
+        if sys.platform != "win32":
+            cli.chmod(0o755)
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            if not isinstance(cmd, list) or len(cmd) < 3 or cmd[1] != "-p":
+                raise AssertionError(f"unexpected subprocess argv: {cmd!r}")
+            captured["env"] = kwargs.get("env")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        args = types.SimpleNamespace(
+            transcript_dir=tmp / "transcripts", timeout=30, model=None, permission_mode="auto",
+            max_budget_usd="1.00", allow_fixture_commit=False, strict_evidence=False, claude=str(cli),
+        )
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_SIMPLE": "1"}), \
+                mock.patch.object(procedure_eval, "copy_fixture", lambda *a, **k: tmp), \
+                mock.patch.object(procedure_eval, "redact_text", lambda text: text), \
+                mock.patch.object(procedure_eval, "_program_on_absolute_path", lambda name: str(cli)), \
+                mock.patch.object(procedure_eval.subprocess, "run", fake_run):
+            procedure_eval.run_live_case({"id": "env-probe", "prompt": "hello",
+                                          "fixture_dir": "tests/fixtures"}, args, tmp)
+        self.assertIsNotNone(captured.get("env"))
+        self.assertNotIn("CLAUDE_CODE_SIMPLE", captured["env"])
+
+
+class TestFixtureWorkflowInput(unittest.TestCase):
+    """AC24: Claude fixtures model Workflow input as name, not workflow."""
+
+    def test_ac24_eight_claude_fixtures_use_name_not_workflow(self):
+        self.assertEqual(len(CLAUDE_WORKFLOW_FIXTURES), 8)
+        for name in CLAUDE_WORKFLOW_FIXTURES:
+            with self.subTest(fixture=name):
+                events = procedure_eval.load_json_lines(TRANSCRIPTS / name)
+                inputs = []
+                for event in events:
+                    for item in event.get("message", {}).get("content", []) if isinstance(
+                            event.get("message"), dict) else []:
+                        if isinstance(item, dict) and item.get("name") == "Workflow":
+                            payload = item.get("input") or {}
+                            inputs.append(payload)
+                            self.assertIn("name", payload)
+                            self.assertNotIn("workflow", payload)
+                self.assertTrue(inputs, f"{name} has no Workflow input")
+                data = (TRANSCRIPTS / name).read_bytes()
+                self.assertNotIn(b'"workflow":', data)
+                self.assertFalse(b"\r" in data)

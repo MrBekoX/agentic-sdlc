@@ -31,10 +31,12 @@ CODEX_CFG = REPO / "hooks" / "hooks-codex.json"
 # LOCK_DIGESTS in tests/test_codex_flow_order_guard.py: a lock that re-reads its expected value
 # from the moving HEAD cannot fail on a committed change.
 LOCK_DIGESTS = {
+    # Rebased for Claude Code 2.1.293: last_assistant_message + background_tasks on Stop.
     "hooks/flow-step-guard.mjs":
-        "6b99513e833d83509ac6d166012ca970a9a8b1e8b88abc89422a645efd8aaade",
+        "e5f66136c69096748375ea1fb357b1f6282d478f9857ddca974a29853595e165",
+    # Rebased for Claude Code 2.1.293: prefer last_assistant_message; block only when caught up.
     "hooks/completion-claim-guard.mjs":
-        "f44a4ed33209852f97582055c055097ea9803e72dde04741db091176a99fae5d",
+        "ad454dd5f68c2ba08583c283b444318c24892d9c3305161b913dea3bcf317c9b",
 }
 
 # The Codex Stop handler this suite pins by NAME and by VALUE. Presence is asserted before the

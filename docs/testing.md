@@ -241,7 +241,7 @@ Trigger evals measure whether a user prompt causes the runtime to select the int
 
 ### Claude Code: `run_trigger_eval.py`
 
-`scripts/run_trigger_eval.py` is a Windows-safe replacement for the external `skill-creator`'s `run_eval.py`. It plants a temporary `commands/<skill>-skill-<uuid>.md` command shim (unless disabled), runs `claude -p <query> --output-format stream-json --verbose --include-partial-messages`, and detects whether the first tool action is a `Skill` or `Read` invocation of the target skill.
+`scripts/run_trigger_eval.py` is a Windows-safe replacement for the external `skill-creator`'s `run_eval.py`. It plants a temporary `.claude/commands/<skill>-skill-<uuid>.md` shim for the query, removes that file and any directory the run created, runs `claude -p <query> --output-format stream-json --verbose --include-partial-messages`, and detects whether the first tool action is a `Skill` or `Read` invocation of the target skill. `--plugin-dir` disables the shim and the output reports `command_shim=disabled:plugin-dir`. `--bare` exits 2 before any `claude` process (`error=bare_rejected`), because since 2.1.286 bare mode sends no skill listing ([headless](https://code.claude.com/docs/en/headless), fetched 2026-10-07). The runner also drops `CLAUDE_CODE_SIMPLE` from the child environment.
 
 Default run:
 
@@ -266,17 +266,7 @@ python3 scripts/run_trigger_eval.py \
   --transcript-dir tests/artifacts/trigger
 ```
 
-Isolate plugin-trigger behavior from project-level agent instructions (`--bare` does not use OAuth/keychain auth — it requires `ANTHROPIC_API_KEY` or an `apiKeyHelper`-backed setting):
-
-```bash
-python3 scripts/run_trigger_eval.py \
-  --skill-path skills/spec-authoring \
-  --eval-set tests/skills/evals/spec-authoring.json \
-  --smoke --bare --model haiku --max-budget-usd 0.10 --timeout 60 \
-  --plugin-dir . --transcript-dir tests/artifacts/trigger
-```
-
-Use real plugin skills only (no command shim): `--no-command-shim`.
+`--bare` is rejected with exit 2 and does not start `claude`. Use real plugin skills only (no command shim): `--no-command-shim`, or pass `--plugin-dir` so the shim stays off.
 
 The Claude trigger runner uses a fresh temporary project by default. Running against a real writable
 checkout requires both `--project-root <path>` and `--allow-writable-project`. Relative
@@ -390,7 +380,7 @@ Behavior evals should move toward **transcript JSONL** checks for evidence such 
 | Transcript | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-pass.jsonl` | Evaluate a captured transcript deterministically. |
 | Live | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live --allow-fixture-commit --max-budget-usd 5.00` | Run the prompt through Claude Code in an isolated copied fixture and evaluate the resulting transcript. |
 
-Live mode defaults to `--permission-mode auto` so safe headless commands can run without an interactive prompt. Override it only when intentionally auditing permission behavior. `python3 scripts/run_procedure_eval.py --live` now requires `--allow-fixture-commit`, the consent for the baseline commit the harness creates inside the isolated fixture copy; without it the eval exits 2 before creating a temporary directory, running Git or starting a model.
+Live mode defaults to `--permission-mode auto` so safe headless commands can run without an interactive prompt. Override it only when intentionally auditing permission behavior. In `-p`, that mode still launches subagents in the background ([sub-agents](https://code.claude.com/docs/en/sub-agents), fetched 2026-10-07). Since 2.1.271 the strict grader reads an implementation-auditor verdict from a parsed `SubagentHandback` whose parent is that auditor, not from the main loop's later text ([tools-reference](https://code.claude.com/docs/en/tools-reference), fetched 2026-10-07). A launch receipt is not a verdict; with none, the grader reports `strict_auditor_verdict_unobservable`. A `Skill`, test run, or spec write that carries `parent_tool_use_id` does not satisfy a main-loop requirement. The runner drops `CLAUDE_CODE_SIMPLE` from the Claude child environment. `python3 scripts/run_procedure_eval.py --live` now requires `--allow-fixture-commit`, the consent for the baseline commit the harness creates inside the isolated fixture copy; without it the eval exits 2 before creating a temporary directory, running Git or starting a model.
 
 Live mode starts the agent CLI only from an absolute path found on an absolute `PATH` entry, the same rule `git` and `node` already follow (D25 model (5)), so a `claude` planted in the checked-out project is never run. When the CLI sits outside any absolute `PATH` entry — a WSL or nvm layout — name it explicitly with `--claude <path>`; an unresolvable CLI still fails with `claude CLI missing`.
 

@@ -179,6 +179,8 @@ def collect_claude_routes(lines: list[str]) -> list[str]:
         except json.JSONDecodeError:
             continue
         etype = event.get("type")
+        if event.get("parent_tool_use_id"):
+            continue
         if etype == "assistant":
             for item in event.get("message", {}).get("content", []):
                 if item.get("type") != "tool_use":
@@ -258,7 +260,7 @@ def run_claude(
         cmd += ["--max-budget-usd", str(args.max_budget_usd)]
 
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_SIMPLE")}
     try:
         proc = subprocess.Popen(
             cmd,

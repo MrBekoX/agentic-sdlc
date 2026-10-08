@@ -19,18 +19,48 @@ const CLAIM =
 // Phrases that signal the work is explicitly NOT finished — suppress to avoid false positives.
 const NEGATED = /\b(not\s+(yet\s+)?(done|complete|ready|passing)|still\s+(failing|broken|todo)|incomplete|do\s+not\s+claim)\b/i;
 
+function recordText(e) {
+  const content = e?.message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.filter((c) => c?.type === 'text').map((c) => c.text || '').join('\n');
+  }
+  return '';
+}
+
 function lastAssistantText(events) {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
     if (e?.type !== 'assistant') continue;
-    const content = e?.message?.content;
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-      const txt = content.filter((c) => c?.type === 'text').map((c) => c.text || '').join('\n');
-      if (txt) return txt;
-    }
+    const txt = recordText(e);
+    if (txt) return txt;
   }
   return '';
+}
+
+function collapseWs(s) {
+  return String(s).trim().replace(/\s+/g, ' ');
+}
+
+function lastAssistantCaughtUpText(events) {
+  let last = null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i]?.type === 'assistant') { last = events[i]; break; }
+  }
+  if (!last) return '';
+  const id = last?.message?.id;
+  if (typeof id === 'string' && id) {
+    let out = '';
+    for (const e of events) {
+      if (e?.type === 'assistant' && e?.message?.id === id) out += recordText(e);
+    }
+    return out;
+  }
+  return recordText(last);
+}
+
+function transcriptCaughtUp(events, lastAssistantMessage) {
+  return collapseWs(lastAssistantCaughtUpText(events)) === collapseWs(lastAssistantMessage);
 }
 
 // True if a Skill tool_use referencing completion-claim-gate appears anywhere in the transcript.
@@ -51,14 +81,16 @@ if (!tpath) process.exit(0);
 
 let text = '';
 let transcriptRaw = '';
+let events = [];
 try {
   transcriptRaw = readFileSync(tpath, 'utf8');
-  const events = transcriptRaw
+  events = transcriptRaw
     .split(/\r?\n/)
     .filter(Boolean)
     .map((l) => { try { return JSON.parse(l); } catch { return null; } })
     .filter(Boolean);
-  text = lastAssistantText(events);
+  const lam = input?.last_assistant_message;
+  text = typeof lam === 'string' ? lam : lastAssistantText(events);
 } catch {
   process.exit(0); // fail-open: cannot read transcript
 }
@@ -71,7 +103,9 @@ const msg =
   '(contract 00 — evidence before claim). Invoke agentic-sdlc:completion-claim-gate with the exact ' +
   'evidence (test/security/control output) before claiming done/fixed/passing/ready.';
 
-const out = BLOCK
+const lam = input?.last_assistant_message;
+const mayBlock = BLOCK && (typeof lam !== 'string' || transcriptCaughtUp(events, lam));
+const out = mayBlock
   ? { decision: 'block', reason: msg, systemMessage: '🚧 completion-claim-guard: blocked an unverified completion claim.' }
   : { systemMessage: `⚠️ completion-claim-guard: ${msg}` };
 // Write, then exit only after stdout has flushed (avoids truncation on a piped stdout under Windows).

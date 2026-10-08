@@ -41,7 +41,7 @@ The command guards `hooks/branch-guard.mjs`, `hooks/scan-commit.mjs` and `hooks/
 
 `hooks/scan-write.mjs` (Claude Code and ZCode, `PostToolUse` for `Write`, `Edit`, `MultiEdit`) reads the new text from the tool input (`new_string`, `edits[].new_string` or `content`). When none of those fields is present, it reads the file named by `tool_input.file_path`. `hooks/scan-write-codex.mjs` (Codex, `PreToolUse`) reads the content of a recognized literal write before it runs.
 
-When `hooks/scan-write.mjs` finds something, it emits its advisory on two channels: `systemMessage`, which the user sees, and `hookSpecificOutput.additionalContext`, which Claude Code documents as visible to the MODEL in the transcript for `PostToolUse`. The model therefore also sees the file path and the pattern label. This is the same content the user-visible message already carried — the matched value is masked on both channels — but it is a new audience, added because the advisory-only field is absent from ZCode's documented hook protocol, where unknown fields are ignored and the warning would otherwise reach nobody. The command guards `hooks/branch-guard.mjs` and `hooks/scan-commit.mjs` are wired to `PreToolUse`, an event for which Claude Code documents that field as debug-log output only, so nothing extra reaches the model there.
+When `hooks/scan-write.mjs` finds something, it emits its advisory on two channels: `systemMessage`, which the user sees, and `hookSpecificOutput.additionalContext`, which Claude Code documents as visible to the MODEL in the transcript for `PostToolUse`. The model therefore also sees the file path and the pattern label. This is the same content the user-visible message already carried — the matched value is masked on both channels — but it is a new audience, added because the advisory-only field is absent from ZCode's documented hook protocol, where unknown fields are ignored and the warning would otherwise reach nobody. The command guards `hooks/branch-guard.mjs` and `hooks/scan-commit.mjs` are wired to `PreToolUse`. On that event Claude Code adds `additionalContext` to the model's context beside the tool result ([hooks](https://code.claude.com/docs/en/hooks), fetched 2026-10-07). Those two guards do not emit the field; their deny text is `permissionDecisionReason`, which the model also sees, so that text names no way to silence the scanner.
 
 ### Working tree
 
@@ -50,6 +50,8 @@ When `hooks/scan-write.mjs` finds something, it emits its advisory on two channe
 ## What hooks write
 
 `hooks/worktree-scan.mjs:125-141` writes one per-session deduplication state file under the operating system's temporary directory, at `agentic-sdlc/worktree-scan-<session>.json`, or at the path set in the `AGENTIC_WORKTREE_SCAN_STATE` environment variable. The file holds finding keys only: the first 16 hexadecimal characters of a SHA-256 digest over a finding's pattern label and its location, which is a file path or, for a finding in the tracked diff, the literal `uncommitted change`.
+
+The Claude Stop hooks `hooks/completion-claim-guard.mjs` and `hooks/flow-step-guard.mjs` also read `last_assistant_message` and `background_tasks` from the Stop payload. Shell entries in `background_tasks` can carry command lines. `scripts/run_trigger_eval.py` writes a command shim into the selected project's `.claude/commands/` for the duration of a query when `--plugin-dir` is absent, then removes the file and any directory that run created.
 
 Hooks report their results to the runtime as JSON on standard output.
 
