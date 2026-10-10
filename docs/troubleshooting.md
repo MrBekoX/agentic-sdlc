@@ -14,15 +14,17 @@ Check:
 
 Check:
 
-1. The personal marketplace exists at `~/.agents/plugins/marketplace.json`.
-2. Its `agentic-sdlc` entry uses the source path `./plugins/agentic-sdlc`, which resolves under the home directory to `~/plugins/agentic-sdlc`.
-3. `~/plugins/agentic-sdlc` is a real copy or symlink/junction to this plugin root.
-4. The plugin was installed with `codex plugin add agentic-sdlc@personal`.
+1. The selected marketplace is discoverable; inspect `codex plugin marketplace list`.
+2. Its `agentic-sdlc` entry resolves to the intended source package.
+3. The installed package contains the shared root `skills/` tree and its declared hooks.
+4. The plugin was installed with `codex plugin add agentic-sdlc@<marketplace-name>`, using the actual marketplace name.
 5. The manifest contains `"skills": "./skills/"` and `"hooks": "./hooks/hooks-codex.json"`.
 6. Skills are under root `skills/`, not `.codex/skills/`.
 7. The runtime guide in [`../.codex-plugin/README.md`](../.codex-plugin/README.md) matches the installed path.
 
-`codex plugin add agentic-sdlc@personal` is the supported local install. Codex 0.153.0+ also has `codex plugin marketplace add`. This repo's `.claude-plugin/marketplace.json` is Claude's marketplace schema and not the supported Codex install path. Codex 0.154.0 can read it as a legacy-compatible layout, and `codex plugin marketplace add MrBekoX/agentic-sdlc` surfacing the `mrbekox` marketplace has been observed, but that route is unsupported. Installing both routes can list the plugin twice, once from `mrbekox` and once from `personal`.
+The `@personal` catalog in the [Codex guide](../.codex-plugin/README.md#install) is a local authoring example, not an install-path requirement. Current Codex supports Git/repo marketplace sources and the legacy `.claude-plugin/marketplace.json` layout ([packaging guide](https://developers.openai.com/plugins/build/plugins), checked 2026-10-08); Git access still depends on repository visibility and authentication. Installing the same plugin from two sources can list it twice. Hook paths come from the installed `PLUGIN_ROOT`, not the marketplace source path or this checkout.
+
+In that local example, `./plugins/agentic-sdlc` resolves under the home directory to `~/plugins/agentic-sdlc`, and installation uses `codex plugin add agentic-sdlc@personal`. Add a Git source with `codex plugin marketplace add owner/repo`. This repository's `.claude-plugin/marketplace.json` uses Claude's marketplace schema. These are catalog/source examples; hooks always use the installed package root.
 
 ## Claude Hooks Do Not Run
 
@@ -38,25 +40,25 @@ Check:
 
 Check:
 
-1. `hooks/hooks-codex.json` is valid Codex hook JSON and has only the top-level `hooks` object, and `.codex-plugin/plugin.json` declares `"hooks": "./hooks/hooks-codex.json"`.
+1. `hooks/hooks-codex.json` is valid Codex hook JSON with a top-level `hooks` object (optional `description` metadata is supported), and `.codex-plugin/plugin.json` declares `"hooks": "./hooks/hooks-codex.json"`.
 2. The plugin was reinstalled after hook config changes.
 3. Start a new Codex thread so the declared Codex hook config is reloaded.
 4. Open `/hooks` and review/trust the plugin-bundled commands if Codex marks them pending review; see [Codex hook trust](#codex-hook-trust) for each environment.
-5. `node` is on `PATH`.
-6. `${PLUGIN_ROOT}` resolves in the Codex plugin runtime.
+5. Node.js is on the hook process `PATH`: `node.exe` on native Windows, `node` on POSIX/WSL.
+6. Codex exports `PLUGIN_ROOT` pointing at the installed package. All eight handlers have fixed environment-root launch code and a `commandWindows` override; see the [launch contract](runtime-adapter.md#codex-marketplace-hook-launch-contract).
 
 Codex wires blocking `PreToolUse` guards, `SessionStart`, and advisory/env-gated `Stop` backstops. If startup context works but a command guard does not, compare the event/matcher in `hooks/hooks-codex.json`, confirm `node` is available, and run the hook script with a sanitized sample payload. Remember that unrecognized literal-write forms and internal parse errors deliberately fail open.
 
 ## Codex hook trust
 
-Codex runs a non-managed plugin-bundled hook only after that hook is trusted. Trust each agentic-sdlc hook in the Codex `/hooks` view, then run the read-only post-install check from the plugin root (or pass `--cwd <dir>`). A fully trusted install prints `codex_hook_trust=trusted`.
+Codex runs a non-managed plugin-bundled hook only after that hook is trusted. Trust each agentic-sdlc hook in the Codex `/hooks` view, then run the read-only post-install check from the installed plugin root and pass `--cwd <target-project>`, using the session project's path. Replace `agentic-sdlc@<marketplace-name>` below with your actual installed plugin ID. A fully trusted install prints `codex_hook_trust=trusted`.
 
 | Environment | Codex config location | Trust step | `node` requirement | Check command | Verification state |
 |---|---|---|---|---|---|
-| Windows | `%USERPROFILE%\.codex\config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node` on the `PATH` Codex runs hooks with | `py -3 scripts\check_codex_hook_trust.py --plugin agentic-sdlc@personal` (or `python3`); needs Python 3.12 or newer | see ledger row `hook_trust_list_records` |
-| macOS | `~/.codex/config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node` on the `PATH` Codex runs hooks with | `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal` | not live-tested |
-| Linux | `~/.codex/config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node` on the `PATH` Codex runs hooks with | `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal` | not live-tested; WSL run pending in ledger row `hook_trust_list_records` |
-| WSL | `~/.codex/config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node` on `PATH`; an nvm install must be added to `PATH` explicitly | `python3 scripts/check_codex_hook_trust.py --codex ~/.local/bin/codex --plugin agentic-sdlc@personal` (use `~/.local/bin/codex` rather than an older nvm copy) | see ledger row `hook_trust_list_records` |
+| Windows | `%USERPROFILE%\.codex\config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node.exe` on the `PATH` Codex runs hooks with | `py -3 scripts\check_codex_hook_trust.py --plugin agentic-sdlc@<marketplace-name> --cwd <target-project>` (or `python3`); needs Python 3.12 or newer | see ledger row `hook_trust_list_records` |
+| macOS | `~/.codex/config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node` on the `PATH` Codex runs hooks with | `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@<marketplace-name> --cwd <target-project>` | not live-tested |
+| Linux | `~/.codex/config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | `node` on the `PATH` Codex runs hooks with | `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@<marketplace-name> --cwd <target-project>` | not live-tested; WSL run pending in ledger row `hook_trust_list_records` |
+| WSL | `~/.codex/config.toml` | Open `/hooks` in Codex and trust each agentic-sdlc hook | Native WSL `node` on `PATH`; load nvm before starting Codex if needed | `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@<marketplace-name> --cwd <target-project>`; pass `--codex <absolute-codex-path>` if needed | see ledger row `hook_trust_list_records` |
 
 The check starts `codex app-server --stdio`, sends only `initialize`, `initialized` and `hooks/list`, writes no file, and prints five lines: `codex_hook_trust_plugin=`, `codex_hook_trust_counts=`, `codex_hook_trust_untrusted_events=`, `codex_hook_trust=` and `codex_hook_trust_next_step=`. It prints no hook key, hash or path.
 

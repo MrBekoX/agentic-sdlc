@@ -50,6 +50,10 @@ ALLOWED_SKILL_KEYS = {
 ALLOWED_AGENT_KEYS = {"name", "description", "tools", "model"}
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PLUGIN_ROOT_REF_RE = re.compile(r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}/([A-Za-z0-9_./-]+)")
+# Codex launchers read the installed root as data, avoiding raw shell interpolation.
+CODEX_HOOK_REF_RE = re.compile(
+    r"\.join\(process\.env\.PLUGIN_ROOT,'hooks','([a-z0-9-]+\.mjs)'\)"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +355,7 @@ def validate_hooks_json(root=None):
         refs = []
         for text in _json_strings(data):
             refs += PLUGIN_ROOT_REF_RE.findall(text)
+            refs += ["hooks/" + name for name in CODEX_HOOK_REF_RE.findall(text)]
         for rel in refs:
             if not (root / rel).exists():
                 errors.append(f"hook_script_missing:{hj.name}:{rel}")

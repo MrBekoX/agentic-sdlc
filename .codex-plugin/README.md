@@ -36,12 +36,14 @@ Public directory distribution uses a separate `--skills-only` projection: the ma
 |---|---|---|---|---|
 | Claude own marketplace | Claude Code; see [`../.claude-plugin/README.md`](../.claude-plugin/README.md). | `/plugin marketplace add MrBekoX/agentic-sdlc`, then `/plugin install agentic-sdlc@mrbekox`. | Go condition: a public repository, both strict Claude manifest validations passing, and a recorded clean install. | State: BLOCKED. The repository is private and its unauthenticated URL returns 404. |
 | Claude community marketplace submission | A public repository, a clean-package validation result and maintainer form access. | Submit through the Anthropic form; packet [`docs/publication/claude-community.md`](../docs/publication/claude-community.md). | Go condition: public repository and a passing `claude plugin validate` on the submitted root; acceptance is not guaranteed. | State: BLOCKED. Needs a public repository, validation and form access. |
-| Codex personal marketplace | Codex CLI 0.154.0; `node` on `PATH`; plugin at `~/plugins/agentic-sdlc`. | `codex plugin add agentic-sdlc@personal`; open `/hooks` in Codex and trust each agentic-sdlc hook; run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal` and expect `codex_hook_trust=trusted` ([Codex hook trust](../docs/troubleshooting.md#codex-hook-trust)). | Go condition: catalog `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`; native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; hook trust granted through the native `/hooks` protocol as a required step. | State: GAP. Final-package discovery and real-profile trust are not yet recorded. |
+| Codex personal marketplace | Codex with marketplace support; Node on the hook `PATH`; a discoverable marketplace source. | Install `agentic-sdlc@<marketplace-name>`; open `/hooks` and trust each hook; run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@<marketplace-name> --cwd <target-project>` from the installed plugin root and expect `codex_hook_trust=trusted` ([Codex hook trust](../docs/troubleshooting.md#codex-hook-trust)). | Go condition: discoverable catalog; native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; native `/hooks` trust review completed. `@personal` below is a local authoring example. | State: GAP. Final-package discovery and real-profile trust are not yet recorded. |
 | OpenAI public directory | Maintainer-verified identity and Apps Management Write (`api.apps.write`). | Build the deterministic skills-only projection (Codex manifest, skills and merged references, three required stdlib helpers, contracts, assets and `LICENSE`; lifecycle hooks are excluded) with `python3 scripts/build_release.py --output <zip> --skills-only`, verify it with `--verify`, then upload; packet [`docs/publication/openai-skills-only.md`](../docs/publication/openai-skills-only.md). | Go condition: a verified skills-only archive (`archive_kind=skills-only`); submission, acceptance and publication are three separate stages; after publication the listing changes only through a newly reviewed version ([app review](https://developers.openai.com/plugins/deploy/app-review)). | State: BLOCKED. Needs verified identity, `api.apps.write` and a verified skills-only archive. |
 
 ## Install
 
-Codex discovers the default personal marketplace at `~/.agents/plugins/marketplace.json`. Its `agentic-sdlc` entry points at `~/plugins/agentic-sdlc`, which can be a real copy or a symlink/junction to this clone. The personal catalog root is the home directory, so the `./plugins/agentic-sdlc` source path resolves to `~/plugins/agentic-sdlc`.
+Install `agentic-sdlc` from the selected marketplace with `codex plugin add agentic-sdlc@<marketplace-name>`, replacing the marketplace name. Codex installs a package copy and supplies its `PLUGIN_ROOT`; no maintainer checkout, fixed drive, home directory, or cache location is required. See the [marketplace launch contract](../docs/runtime-adapter.md#codex-marketplace-hook-launch-contract).
+
+For local authoring, Codex discovers the default personal marketplace at `~/.agents/plugins/marketplace.json`. The example below points at `~/plugins/agentic-sdlc`, which can be a real copy or a symlink/junction to this clone. The personal catalog root is the home directory, so its `./plugins/agentic-sdlc` source path resolves to `~/plugins/agentic-sdlc`. These paths describe the example source, not the installed hook location.
 
 Example `~/.agents/plugins/marketplace.json`:
 
@@ -72,7 +74,7 @@ Example `~/.agents/plugins/marketplace.json`:
 codex plugin add agentic-sdlc@personal
 ```
 
-`@personal` is this repository's supported local example. `.claude-plugin/marketplace.json` uses Claude's marketplace schema; current Codex recognizes that legacy layout as well as native `.agents/plugins/marketplace.json` and supports `codex plugin marketplace add owner/repo`. Repository visibility/authentication still governs Git installation. Avoid installing the same plugin from both sources.
+`@personal` is this repository's local authoring example. `.claude-plugin/marketplace.json` uses Claude's marketplace schema; current Codex recognizes that legacy layout as well as native `.agents/plugins/marketplace.json` and supports `codex plugin marketplace add owner/repo`. Repository visibility/authentication still governs Git installation. Avoid installing the same plugin from both sources.
 
 Start a new Codex thread after install or reinstall so the runtime reloads plugin skills and hooks. If Codex reports bundled hooks pending review, open `/hooks` and review the plugin commands before relying on them.
 
@@ -136,12 +138,12 @@ Focused skills are independently routable in Codex and also serve as pipeline bu
 
 ## Hooks In Codex
 
-The Codex manifest declares `"hooks": "./hooks/hooks-codex.json"`. It wires blocking `PreToolUse` guards for commit secrets, destructive shell commands, branch policy, literal writes, and opt-in flow ordering; `SessionStart` bootstrap context; and `Stop` continuation backstops for completion claims and flow evidence. Every path resolves through `${PLUGIN_ROOT}`. The config is deliberately NOT named `hooks/hooks.json`: Claude Code would auto-load that default filename with the wrong root variable. Non-managed plugin-bundled command hooks require Codex review/trust before they run. Several controls remain intentionally bounded: branch blocking and flow ordering are env-gated, Stop hooks continue the turn rather than undoing effects, and parser errors fail open.
+The Codex manifest declares `"hooks": "./hooks/hooks-codex.json"`. It wires blocking `PreToolUse` guards for commit secrets, destructive shell commands, branch policy, literal writes, and opt-in flow ordering; `SessionStart` bootstrap context; and `Stop` continuation backstops for completion claims and flow evidence. Every handler reads `process.env.PLUGIN_ROOT` inside fixed Node launch code, then imports its `pathToFileURL()` URL. `commandWindows` selects `node.exe`; POSIX/WSL select `node`. No installed-root bytes enter shell code; hook cwd remains the session project. The config is deliberately NOT named `hooks/hooks.json`: Claude Code would auto-load that default filename with the wrong root variable. Non-managed plugin-bundled command hooks require Codex review/trust before they run. Several controls remain intentionally bounded: branch blocking and flow ordering are env-gated, Stop hooks continue the turn rather than undoing effects, and parser errors fail open.
 
 ## Requirements
 
 - Codex CLI/runtime with plugin marketplace support. Current Windows native discovery: 0.160.1, checked 2026-10-06. Historical 0.154.0 live captures retain their original platform and scope. Neither the captured historical CLI nor current 0.160.1 exposes `codex plugin validate`.
-- Node.js on `PATH` for manual hook-script checks and local gates.
+- Node.js on the hook process `PATH`: `node.exe` on native Windows, `node` on POSIX/WSL. A marketplace install does not install Node.
 - Python 3 for validators, probes, and local gates.
 - Git for branch, diff, commit, PR, and worktree flows.
 

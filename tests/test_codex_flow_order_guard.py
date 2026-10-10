@@ -63,12 +63,15 @@ LOCK_DIGESTS = {
 PINNED_CODEX_BASH_BLOCK = {
     "matcher": "Bash",
     "hooks": [
-        {"type": "command", "command": 'node "${PLUGIN_ROOT}/hooks/scan-commit.mjs"',
+        {"type": "command", "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','scan-commit.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
+         "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','scan-commit.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
          "timeout": 20, "statusMessage": "Secret scan (commit)..."},
         {"type": "command",
-         "command": 'node "${PLUGIN_ROOT}/hooks/destructive-command-guard.mjs"',
+         "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','destructive-command-guard.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
+         "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','destructive-command-guard.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
          "timeout": 15, "statusMessage": "Destructive command guard..."},
-        {"type": "command", "command": 'node "${PLUGIN_ROOT}/hooks/branch-guard.mjs"',
+        {"type": "command", "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','branch-guard.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
+         "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','branch-guard.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
          "timeout": 15, "statusMessage": "Branch guard (commit/push)..."},
     ],
 }
@@ -76,17 +79,20 @@ PINNED_CODEX_BASH_BLOCK = {
 PINNED_CODEX_SESSION_START = [
     {"matcher": "startup|resume|clear|compact",
      "hooks": [{"type": "command",
-                "command": 'node "${PLUGIN_ROOT}/hooks/session-start-codex.mjs"',
+                "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','session-start-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
+                "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','session-start-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
                 "timeout": 15, "statusMessage": "AGENTIC-SDLC startup context"}]},
 ]
 
 PINNED_CODEX_STOP = [
     {"hooks": [
         {"type": "command",
-         "command": 'node "${PLUGIN_ROOT}/hooks/completion-claim-guard-codex.mjs"',
+         "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','completion-claim-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
+         "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','completion-claim-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
          "timeout": 20, "statusMessage": "Completion-claim gate (marker)..."},
         {"type": "command",
-         "command": 'node "${PLUGIN_ROOT}/hooks/flow-step-guard-codex.mjs"',
+         "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','flow-step-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
+         "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','flow-step-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
          "timeout": 20, "statusMessage": "Flow-step evidence gate (codex)..."},
     ]},
 ]
@@ -94,7 +100,8 @@ PINNED_CODEX_STOP = [
 # The Codex write guard the Codex suites pin by NAME and by VALUE, with presence asserted first.
 PINNED_CODEX_SCAN_WRITE_HANDLER = {
     "type": "command",
-    "command": 'node "${PLUGIN_ROOT}/hooks/scan-write-codex.mjs"',
+    "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','scan-write-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
+    "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','scan-write-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
     "timeout": 20,
     "statusMessage": "Secret scan (write)...",
 }
@@ -686,7 +693,8 @@ class TestOrderWiring(unittest.TestCase):
         # (closes the slight widening from relaxing the old strict PreToolUse == HEAD assertion).
         self.assertEqual(len(block["hooks"]), 2, "Bash|apply_patch block must hold exactly scan-write + flow-order")
         self.assertIsInstance(order[0], str)  # shell-string form (args-array does not run on Codex)
-        self.assertIn("${PLUGIN_ROOT}", order[0])
+        self.assertIn("process.env.PLUGIN_ROOT", order[0])
+        self.assertNotIn("${PLUGIN_ROOT}", order[0])
         self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", order[0])
         # the deferred Claude flow-order-guard.mjs is NOT a substring of -codex.mjs
         self.assertNotIn('"flow-order-guard.mjs"', self.cfg_text)

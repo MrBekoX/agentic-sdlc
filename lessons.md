@@ -20,6 +20,18 @@ Each entry includes:
 
 ---
 
+## 2026-10-08 — Installed plugin paths must stay data until the runtime opens them
+
+- **Date:** 2026-10-08
+- **Task / context:** Make Codex marketplace hook commands portable across installed roots and selected shells.
+- **Symptom:** Serialized hook commands from a relocated package failed with `MODULE_NOT_FOUND` when PowerShell interpreted a backtick in the installed path. The original regression produced 39 failures; the fixed commands passed all five portability tests.
+- **Root cause:** Codex replaces `${PLUGIN_ROOT}` in command text before shell execution. Double quotes prevent word splitting but do not prevent shell interpretation of the inserted path. Import-based launch also needs a file URL and the executable argv entry for handlers with an entrypoint guard.
+- **Correct fix:** Keep shell command text fixed, read `process.env.PLUGIN_ROOT` inside Node, join a fixed handler name, set `process.argv[1]`, and import `pathToFileURL()`; use `commandWindows` to select `node.exe` on native Windows. Preserve Node PATH and native trust prerequisites.
+- **Preventive rule / automated check:** Execute the actual shipped command strings from a copied package with an unrelated cwd and valid shell-sensitive path characters. Assert startup JSON and guard denials, not just exit 0. Mirror the executor's serialization: Codex uses raw cmd arguments, while Python list2cmdline adds quote escapes cmd interprets differently. Keep the harness's missing-handler check effective for both command fields.
+- **Related files & tests:** `hooks/hooks-codex.json`, `docs/runtime-adapter.md`, `tests/skills/harness.py`; `tests/test_codex_hook_portability.py`, `tests/test_harness_negative_controls.py`.
+
+---
+
 ## 2026-10-08 — A hook-field audience copied from an older page stays wrong after the page changes
 
 - **Date:** 2026-10-08

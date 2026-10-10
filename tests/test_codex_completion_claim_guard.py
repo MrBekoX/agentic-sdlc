@@ -890,7 +890,8 @@ class TestWiring(unittest.TestCase):
         target = [c for c in cmds if "completion-claim-guard-codex.mjs" in c]
         self.assertEqual(len(target), 1)
         self.assertIsInstance(target[0], str)  # shell-string form (args-array does not run on Codex)
-        self.assertIn("${PLUGIN_ROOT}", target[0])
+        self.assertIn("process.env.PLUGIN_ROOT", target[0])
+        self.assertNotIn("${PLUGIN_ROOT}", target[0])
 
     def test_no_claude_plugin_root_and_no_hooks_json(self):  # AC12
         self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", CODEX_CFG.read_text(encoding="utf-8"))

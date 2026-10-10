@@ -34,6 +34,18 @@ AGENTIC-SDLC currently supports **Claude Code** and **Codex** as release targets
 
 The Claude command guards match both shells without a subcommand-level `if` filter; each handler resolves Git aliases and self-gates. Codex receives shell/patch content in `tool_input.command`, not Claude's `file_path` / `new_string` fields. Paths use the runtime root above; executable commands follow that runtime's shell contract.
 
+### Codex marketplace hook launch contract
+
+The marketplace installs a copy of the plugin; neither the source checkout nor a maintainer's home path is a runtime dependency. Codex exports `PLUGIN_ROOT` for the installed copy, while hook cwd is the user's session project. The [official hook reference](https://learn.chatgpt.com/docs/hooks) documents these variables, session cwd and the Windows-only `commandWindows` override (checked 2026-10-08).
+
+All eight handlers use fixed `node -e` code that reads `process.env.PLUGIN_ROOT`, joins the named `hooks/<handler>.mjs`, sets `process.argv[1]` to preserve executable-entrypoint checks, and imports its `pathToFileURL()` URL. The installed path stays data throughout: spaces, Unicode, `$`, backticks, `&`, `#`, `%` and quotes valid on the host do not enter shell code or corrupt an ESM URL. `commandWindows` uses the same code with `node.exe`; POSIX and native WSL use `node`. This selects an executable name, not a shell or a WSL path conversion.
+
+This avoids Codex's raw `${PLUGIN_ROOT}` replacement before shell parsing, confirmed in [0.161.0 discovery source](https://github.com/openai/codex/blob/979011409de0a60b52f179721948e65531d26144/codex-rs/hooks/src/engine/discovery.rs#L569). Every command hook runs through the selected shell; Windows may use cmd, PowerShell or a configured shell ([command runner](https://github.com/openai/codex/blob/979011409de0a60b52f179721948e65531d26144/codex-rs/hooks/src/engine/command_runner.rs#L384)). Do not interpolate an installed path into a hook command or pin a drive, username, checkout, cache directory, or Node installation path.
+
+Node.js must be available on the hook process PATH (`node.exe` on native Windows, `node` on POSIX/WSL). Installation does not install Node or grant hook trust. Review the current hook definitions in `/hooks`; changing either command field requires re-review. The universal public-directory `--skills-only` projection still excludes lifecycle hooks; this launch contract applies to hook-bearing repo/local marketplace packages.
+
+`tests/test_codex_hook_portability.py` executes serialized commands from a relocated package and unrelated cwd, checks startup context and destructive/flow-order denials, and checks the handler/import/requirements/validator closure. `tests/skills/harness.py` also checks the fixed environment-loader references, including `commandWindows`. Windows cmd, Windows PowerShell and PowerShell 7, plus WSL `/bin/sh`, were checked on 2026-10-08: the five-test suite returned exit 0 with no skips on both hosts. A new reviewed Codex lifecycle run was not performed. These shell replays do not establish native discovery, trust or skill-trigger behavior.
+
 The Codex flow-order switch `AGENTIC_FLOW_ORDER_BLOCK` and flow-step switch `AGENTIC_FLOW_GATE_BLOCK` are independent: the first enables pre-edit denial; the second escalates the Stop advisory. On Claude, `AGENTIC_FLOW_GATE_BLOCK` controls both flow guards. `AGENTIC_COMPLETION_GATE_BLOCK` controls completion-claim blocking on both runtimes. `AGENTIC_BRANCH_GUARD_BLOCK` and `AGENTIC_WORKTREE_SCAN_BLOCK` control their separate guards. A wired guard can still be advisory, disabled by default, or skipped while trust is pending.
 
 ## ZCode adapter (experimental — not a 0.4.3 release target)

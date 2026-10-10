@@ -514,11 +514,12 @@ class TestRuntimeHookConfigSeparation(unittest.TestCase):
         self.assertEqual(codex.get("hooks"), "./hooks/hooks-codex.json")
 
     def test_codex_config_uses_no_claude_plugin_root(self):
-        # Symmetric to the Claude-side check: the Codex config resolves paths via ${PLUGIN_ROOT}
-        # and must never carry the Claude variable (which is undefined on Codex).
+        # Codex reads its installed root from the environment without shell interpolation.
+        # The Codex-specific config uses its own root, not the compatibility alias.
         text = (REPO / "hooks" / "hooks-codex.json").read_text(encoding="utf-8")
         self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", text)
-        self.assertIn("${PLUGIN_ROOT}", text)
+        self.assertIn("process.env.PLUGIN_ROOT", text)
+        self.assertNotIn("${PLUGIN_ROOT}", text)
 
 
 @unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")
@@ -646,7 +647,8 @@ def _codex_bash_payload(command, cwd="/repo"):
 class TestCodexHookWiring(unittest.TestCase):
     """Phase 1 (AC2): Codex v0.142.0 natively supports BLOCKING PreToolUse hooks (verified live).
     The three command guards must be wired into hooks-codex.json with the SHELL-STRING command form
-    (the args-array form does NOT run on Codex — verified), ${PLUGIN_ROOT} only, matcher 'Bash'."""
+    (the args-array form does NOT run on Codex — verified), an environment-root launcher,
+    and matcher 'Bash'."""
 
     WIRED = ["scan-commit.mjs", "destructive-command-guard.mjs", "branch-guard.mjs"]
 
@@ -675,7 +677,9 @@ class TestCodexHookWiring(unittest.TestCase):
                 self.assertIn("Bash", matcher or "")
                 self.assertNotIn("args", h, "Codex must use the shell-string form; args-array does not run")
                 self.assertIn("node", h.get("command", ""))
-                self.assertIn("${PLUGIN_ROOT}", h.get("command", ""))
+                self.assertIn("process.env.PLUGIN_ROOT", h.get("command", ""))
+                self.assertIn("process.env.PLUGIN_ROOT", h.get("commandWindows", ""))
+                self.assertNotIn("${PLUGIN_ROOT}", h.get("command", ""))
                 self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", h.get("command", ""))
 
 

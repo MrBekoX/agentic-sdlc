@@ -276,7 +276,7 @@ class TestCodexWriteGuardBehavior(unittest.TestCase):
 
 
 class TestCodexWriteGuardWiring(unittest.TestCase):
-    """AC11: wired for Bash + apply_patch, shell-string, ${PLUGIN_ROOT}."""
+    """AC11: wired for Bash + apply_patch, shell-string, process.env.PLUGIN_ROOT."""
 
     def _handlers(self):
         cfg = json.loads((REPO / "hooks" / "hooks-codex.json").read_text(encoding="utf-8"))
@@ -291,7 +291,8 @@ class TestCodexWriteGuardWiring(unittest.TestCase):
         self.assertIn("apply_patch", matchers)
         for m, h in wg:
             self.assertNotIn("args", h, "shell-string form only")
-            self.assertIn("${PLUGIN_ROOT}", h.get("command", ""))
+            self.assertIn("process.env.PLUGIN_ROOT", h.get("command", ""))
+            self.assertNotIn("${PLUGIN_ROOT}", h.get("command", ""))
             self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", h.get("command", ""))
         # the three command guards still present
         joined = json.dumps(handlers)

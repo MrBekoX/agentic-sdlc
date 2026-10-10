@@ -58,9 +58,9 @@ State: BLOCKED. The path needs a public repository, the clean-package validation
 
 ### Codex personal marketplace
 
-**Prerequisites.** Codex CLI with plugin marketplace support, `node` on `PATH`, and this plugin at `~/plugins/agentic-sdlc` (a real copy, or a symlink/junction to this clone). Current native discovery was checked on **0.160.1**; historical live hook captures remain versioned at 0.154.0. See [current preparation evidence](docs/publication/codex-0.160.1-readiness.md).
+**Prerequisites.** Codex with plugin marketplace support and Node.js on the hook process `PATH` (`node.exe` on native Windows, `node` on POSIX/WSL). Install from your selected marketplace with `codex plugin add agentic-sdlc@<marketplace-name>`, replacing the marketplace name. Codex supplies the installed `PLUGIN_ROOT`; hooks do not depend on this checkout or a particular user's home/cache path. See the [marketplace launch contract](docs/runtime-adapter.md#codex-marketplace-hook-launch-contract). Current native discovery was checked on **0.160.1**; historical live hook captures remain versioned at 0.154.0. See [current preparation evidence](docs/publication/codex-0.160.1-readiness.md).
 
-**Steps.** The personal catalog root is the home directory, so the `./plugins/agentic-sdlc` source path below resolves to `~/plugins/agentic-sdlc`.
+**Local authoring example.** The personal catalog root is the home directory, so the `./plugins/agentic-sdlc` source path below resolves to `~/plugins/agentic-sdlc`. That copy or symlink/junction is an example source for a personal marketplace, not a product install requirement.
 
 Example `~/.agents/plugins/marketplace.json`:
 
@@ -94,12 +94,12 @@ codex plugin add agentic-sdlc@personal
 Then open `/hooks` in Codex and trust each agentic-sdlc hook. From the plugin root, run the read-only post-install check; a fully trusted install prints `codex_hook_trust=trusted`:
 
 ```bash
-python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal
+python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal --cwd <target-project>
 ```
 
 The per-environment trust steps, Codex config locations and exit codes are in [Codex hook trust](docs/troubleshooting.md#codex-hook-trust).
 
-`@personal` is this repository's supported local install. This repo's `.claude-plugin/marketplace.json` uses Claude's marketplace schema; current Codex recognizes that legacy layout and also supports `codex plugin marketplace add owner/repo` ([packaging guide](https://developers.openai.com/plugins/build/plugins), checked 2026-10-06). This repository keeps the explicit personal catalog example; adding both sources can list the plugin twice. The historical 0.154.0 observation of `codex plugin marketplace add MrBekoX/agentic-sdlc` does not replace a current authenticated repository-install test.
+`@personal` names the example marketplace above; use your actual marketplace ID for installation and trust checks, and replace `<target-project>` with the session project's path. This repo's `.claude-plugin/marketplace.json` uses Claude's marketplace schema; current Codex recognizes that legacy layout and also supports `codex plugin marketplace add owner/repo` ([packaging guide](https://developers.openai.com/plugins/build/plugins), checked 2026-10-08). Adding the same plugin from both sources can list it twice. The historical 0.154.0 observation of `codex plugin marketplace add MrBekoX/agentic-sdlc` does not replace a current authenticated repository-install test.
 
 The same skills run through the embedded author/critic adapter where Claude-only Workflow/Skill tooling is unavailable.
 

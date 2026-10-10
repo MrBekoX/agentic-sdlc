@@ -1,5 +1,5 @@
 {
-  "description": "Codex hook wiring for the supported compatibility manifest. Paths use ${PLUGIN_ROOT}, resolved to the installed plugin directory. Commands are single shell strings, not args arrays. Non-managed hooks require review/trust; see docs/runtime-adapter.md for current discovery, execution evidence, and parser limits.",
+  "description": "Codex hook wiring for the supported compatibility manifest. Fixed Node launchers read process.env.PLUGIN_ROOT as data; no installed path is interpolated into shell code. commandWindows selects node.exe on Windows. Non-managed hooks require review/trust; see docs/runtime-adapter.md for prerequisites, execution evidence, and parser limits.",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,21 +7,24 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/hooks/scan-commit.mjs\"",
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','scan-commit.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
             "timeout": 20,
-            "statusMessage": "Secret scan (commit)..."
+            "statusMessage": "Secret scan (commit)...",
+            "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','scan-commit.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\""
           },
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/hooks/destructive-command-guard.mjs\"",
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','destructive-command-guard.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
             "timeout": 15,
-            "statusMessage": "Destructive command guard..."
+            "statusMessage": "Destructive command guard...",
+            "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','destructive-command-guard.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\""
           },
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/hooks/branch-guard.mjs\"",
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','branch-guard.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
             "timeout": 15,
-            "statusMessage": "Branch guard (commit/push)..."
+            "statusMessage": "Branch guard (commit/push)...",
+            "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','branch-guard.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\""
           }
         ]
       },
@@ -30,15 +33,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/hooks/scan-write-codex.mjs\"",
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','scan-write-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
             "timeout": 20,
-            "statusMessage": "Secret scan (write)..."
+            "statusMessage": "Secret scan (write)...",
+            "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','scan-write-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\""
           },
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/hooks/flow-order-guard-codex.mjs\"",
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','flow-order-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
             "timeout": 20,
-            "statusMessage": "Flow-order gate (codex)..."
+            "statusMessage": "Flow-order gate (codex)...",
+            "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','flow-order-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\""
           }
         ]
       }
@@ -49,9 +54,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/hooks/session-start-codex.mjs\"",
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','session-start-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
             "timeout": 15,
-            "statusMessage": "AGENTIC-SDLC startup context"
+            "statusMessage": "AGENTIC-SDLC startup context",
+            "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','session-start-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\""
           }
         ]
       }
@@ -61,15 +67,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/hooks/completion-claim-guard-codex.mjs\"",
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','completion-claim-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
             "timeout": 20,
-            "statusMessage": "Completion-claim gate (marker)..."
+            "statusMessage": "Completion-claim gate (marker)...",
+            "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','completion-claim-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\""
           },
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/hooks/flow-step-guard-codex.mjs\"",
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','flow-step-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
             "timeout": 20,
-            "statusMessage": "Flow-step evidence gate (codex)..."
+            "statusMessage": "Flow-step evidence gate (codex)...",
+            "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','flow-step-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\""
           }
         ]
       }

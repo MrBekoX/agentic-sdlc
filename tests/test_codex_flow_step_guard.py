@@ -44,7 +44,8 @@ LOCK_DIGESTS = {
 # both were empty.
 PINNED_CODEX_COMPLETION_STOP_HANDLER = {
     "type": "command",
-    "command": 'node "${PLUGIN_ROOT}/hooks/completion-claim-guard-codex.mjs"',
+    "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','completion-claim-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
+    "commandWindows": "node.exe -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','completion-claim-guard-codex.mjs');process.argv[1]=p;import(require('node:url').pathToFileURL(p).href)\"",
     "timeout": 20,
     "statusMessage": "Completion-claim gate (marker)...",
 }
@@ -943,7 +944,8 @@ class TestStopWiring(unittest.TestCase):
         self.assertEqual(len(new), 1)
         self.assertEqual(len(old), 1)
         self.assertIsInstance(new[0], str)  # shell-string form (args-array does not run on Codex)
-        self.assertIn("${PLUGIN_ROOT}", new[0])
+        self.assertIn("process.env.PLUGIN_ROOT", new[0])
+        self.assertNotIn("${PLUGIN_ROOT}", new[0])
         self.assertNotIn("flow-step-guard.mjs", new[0])  # -codex infix keeps the deferred lock intact
         self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", self.cfg_text)
         self.assertFalse((REPO / "hooks" / "hooks.json").exists())

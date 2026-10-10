@@ -286,6 +286,21 @@ class TestPluginRootAndHookControls(NegativeControl):
                 {"command": 'node "${CLAUDE_PLUGIN_ROOT}/hooks/real.mjs"'}]}]}}))
         self.assertSilent(h.validate_hooks_json(self.root))
 
+    def test_codex_environment_loader_checks_both_command_fields(self):
+        (self.root / "hooks").mkdir(parents=True, exist_ok=True)
+        (self.root / "hooks" / "real.mjs").write_text("", encoding="utf-8")
+        for field in ("command", "commandWindows"):
+            with self.subTest(field=field):
+                self._hooks(json.dumps({"hooks": {"SessionStart": [{"hooks": [{field:
+                    "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','ghost.mjs');\""
+                }]}]}}))
+                errors, warnings = h.validate_hooks_json(self.root)
+                self.assertIn("hook_script_missing:hooks-codex.json:hooks/ghost.mjs", errors)
+                self._hooks(json.dumps({"hooks": {"SessionStart": [{"hooks": [{field:
+                    "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'hooks','real.mjs');\""
+                }]}]}}))
+                self.assertSilent(h.validate_hooks_json(self.root))
+
 
 class TestWorkflowAgentControls(NegativeControl):
     def test_workflow_agent_missing(self):
