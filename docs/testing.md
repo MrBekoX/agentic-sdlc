@@ -58,7 +58,7 @@ Use live evals for those claims.
 
 > **Automatic CI is OFF right now.** `.github/workflows/ci.yml` is temporarily set to `workflow_dispatch` only, because GitHub Actions cannot start jobs on this account - every run failed in about two seconds with zero steps, and GitHub's annotation on the check run reads *"The job was not started because recent account payments have failed or your spending limit needs to be increased."* Nothing in this repository was failing; the jobs never started. Restoring the triggers is a two-line edit described in the workflow file itself. **Until then the four-command local gate is the only gate**, so run it in full before claiming the repo is healthy.
 
-When the triggers are restored, `.github/workflows/ci.yml` runs on `pull_request`, and on `push` **only to `main`**, across `ubuntu-latest` and `windows-latest`. A push to a feature branch therefore gets no CI until a pull request exists for it — open the PR early if you want the matrix to run. The source steps run:
+When the triggers are restored, `.github/workflows/ci.yml` runs on `pull_request`, and on `push` **only to `main`**, across `ubuntu-latest`, `windows-latest` and `macos-latest`. The macOS entry is preparation until a job result is recorded. A push to a feature branch therefore gets no CI until a pull request exists for it — open the PR early if you want the matrix to run. The source steps run:
 
 ```bash
 python3 scripts/bump_version.py --release-check
@@ -118,6 +118,7 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_house_voice.py` | product-surface unit | Runtime scope, house-voice markers, depth-forcing blocks, and maintenance files remain present. |
 | `tests/test_skill_creator_resolver.py` | helper unit | Official toolkit identity, requested capabilities, candidate fallback, and explicit-path trust diagnostics without hidden installs. |
 | `tests/test_runtime_documentation.py` | doc consistency unit | Current runtime evidence limits, test-result versus ordering semantics, coexistence restoration, and installed-trust proof requirements. |
+| `tests/test_native_distribution_lifecycle.py` | native local lifecycle | Available Codex CLI installs, recopies and removes a relocated local source in a disposable profile while preserving an unrelated plugin and profile settings. No trust/auth/model turn. Missing supported CLI is a skip; this does not certify other installers or remote publication. |
 | `tests/test_handoff_scripts.py` | script unit | `task_brief.py` extracts a single plan task into a handoff file. |
 | `tests/test_secret_guard_bypasses.py` | guard regression | RED regression coverage for every confirmed bypass of the secret, commit and branch guards - prefix and wrapper forms, inner shell payloads, git aliases, statement splitting, and the cost bounds that keep a guard inside its hook budget. Each closed bypass is paired with a control case proving the guard did not simply start blocking everything. |
 | `tests/test_codex_write_guard.py` | Codex adapter | The Codex secret-write guard: which write forms it recognizes (apply_patch, printf/echo redirects, literal heredocs), which it documents as out of reach, and an LF-normalized sha256 lock on the Claude-side files the slice must not touch. |

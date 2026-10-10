@@ -48,14 +48,16 @@ Enabling this plugin is a decision to let its hooks run code. The wired hooks
 Effects: the guards read the hook stdin JSON (`tool_input.command`, `tool_input` write
 fields, `cwd`) and local `git` state. Denial uses the documented
 `hookSpecificOutput.permissionDecision` field and the SessionStart bootstrap uses the
-documented `additionalContext` field; the advisory `systemMessage` channel is a Claude
-Code convention and whether ZCode displays it is unverified. There is **no network
+documented `additionalContext` field. The write scanner also emits model-visible
+`hookSpecificOutput.additionalContext`; the parallel `systemMessage` user channel
+is a Claude Code convention and ZCode ignores that unknown field. Native display
+and invocation remain unverified. There is **no network
 access** (no MCP servers are declared) and no data leaves the machine. Long-lived
 writable data would belong under `ZCODE_PLUGIN_DATA`, not the install directory.
 
 Not wired on ZCode (documented gaps, see `docs/runtime-adapter.md`): the Stop
 completion/flow guards (they read Claude transcripts / Codex rollouts), the flow-order
-guard, the working-tree Stop scan, and the advisory-message channel above. The Claude
+guard and the working-tree Stop scan. The Claude
 and Codex hook files (`hooks-claude.json`, `hooks-codex.json`) are not shared with ZCode.
 
 ## Orchestration fallback
@@ -81,3 +83,10 @@ tracked by `scripts/bump_version.py` and pinned to `VERSION` by
 
 Not done and not claimed. What a future `zai-org/zcode-plugins` PR would still need is
 listed in `docs/publication/zcode-marketplace.md`.
+
+## Uninstall
+
+Open Settings → Plugins → Manage installed → the plugin details, then Uninstall.
+Persistent-data retention is not specified in the reviewed vendor documentation.
+Use the native UI and preserve unrelated plugins/settings. See the
+[lifecycle guide](../docs/publication/multi-platform-distribution.md).

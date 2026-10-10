@@ -210,6 +210,35 @@ class ScratchTestCase(unittest.TestCase):
 
 
 class TestMemberPolicy(unittest.TestCase):
+    def test_windows_member_names_are_rejected_on_every_host(self):
+        for path in ("hooks/CON.mjs", "skills/NUL/SKILL.md", "PRN", "aux.txt",
+                     "docs/COM1.log", "docs/LPT9.txt", "docs/COM\u00b9.txt", "LPT\u00b2/x",
+                     "CON .txt", "AUX .mjs", "LPT1 .log", "CONIN$.txt", "CONOUT$",
+                     "assets/name:stream.txt", "bad?.txt", "bad*.txt", "bad|.txt",
+                     'bad".txt', "bad<.txt", "bad>.txt", "docs/name.", "docs/name "):
+            with self.subTest(path=path):
+                self.assertTrue(build_release._is_unsafe_path(path), path)
+                self.assertEqual(build_release.exclusion_class(path, "100644"), 7)
+
+    def test_windows_member_name_near_misses_remain_portable(self):
+        for path in ("hooks/console.mjs", "docs/COM10.txt", "docs/LPT0.txt",
+                     "docs/null.md", ".config", "docs/a..b.md", "docs/trailing...md",
+                     "skills/\u00e7\u0131\u011f/SKILL.md", "assets/a $ ` & # % '.png"):
+            with self.subTest(path=path):
+                self.assertFalse(build_release._is_unsafe_path(path), path)
+                self.assertIsNone(build_release.exclusion_class(path, "100644"))
+
+    def test_external_zip_rejects_windows_names_before_extraction(self):
+        for path in ("CON.txt", "skills/NUL/SKILL.md", "bad?.txt", "name:stream.txt",
+                     "docs/name.", "docs/name "):
+            with self.subTest(path=path):
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w") as archive:
+                    archive.writestr(path, b"portable name required\n")
+                lines = []
+                self.assertIsNone(build_release._read_archive(buf.getvalue(), lines.append))
+                self.assertEqual(lines, [f"error=unsafe_member:{path}"])
+
     def test_classify_member_flags_each_exclusion_class(self):
         samples = {
             1: [("agentic-sdlc-prompts/plan.md", "100644"), ("agentic-sdlc-prompts/a/b.txt", "100644")],
@@ -263,9 +292,9 @@ class TestMemberPolicy(unittest.TestCase):
             "Audit-Docs/x.md": 6,
             ".ENV": 4,
             "Agentic-SDLC-Prompts/x": 1,
-            "CLAUDE.md.": 3,
+            "CLAUDE.md.": 7,
             "Tests/Test_Superpowers_Referenced_Eval_Prompt.py": 2,
-            "docs/Settings.Local.json ": 4,
+            "docs/Settings.Local.json ": 7,
         }
         for path, expected in samples.items():
             with self.subTest(path=path):
@@ -355,6 +384,21 @@ COMMITTED_CLASS_SAMPLES = {
 
 
 class TestReleaseBuild(ScratchTestCase):
+    def test_build_rejects_windows_names_from_crafted_commit(self):
+        repo = self.scratch()
+        repo.commit({"README.md": b"portable fixture\n"})
+        invalid = ("bad?.txt", "name:stream.txt", "CON.txt", "name.", "name ")
+        for path in invalid:
+            oid = repo.git("hash-object", "-w", "--stdin", stdin=b"invalid portable name\n")
+            repo.git("-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo",
+                     f"100644,{oid},{path}")
+        repo.git("commit", "-q", "-m", "crafted nonportable names")
+        result, text, output = self.build(repo.root)
+        self.assertEqual(result.exit_code, 1, text)
+        for path in invalid:
+            self.assertIn(f"error=excluded_member:class-7:{path}", text)
+        self.assertFalse(output.exists())
+
     def base_files(self) -> dict:
         return {
             "README.md": b"readme\n",
@@ -816,7 +860,9 @@ class TestSkillsOnlyBuild(ScratchTestCase):
                 repo.git("commit", "-q", "-m", "mcp spelling")
                 result, text, out = self.build(repo.root, f"mcp-fold-{index}.zip", skills_only=True)
                 self.assertEqual(result.exit_code, 1, text)
-                self.assertIn(f"error=mcp_configuration:{named}", text.splitlines())
+                expected = (f"error=excluded_member:class-7:{named}" if named.endswith(".")
+                            else f"error=mcp_configuration:{named}")
+                self.assertIn(expected, text.splitlines())
                 self.assertFalse(out.exists())
 
     def test_skills_only_mcp_guard_leaves_near_miss_names_in_the_archive(self):
@@ -1265,7 +1311,7 @@ class TestVerifySecretScan(ScratchTestCase):
         )
         self.assertIn("binary_members_skipped=1", lines)
         self.assertEqual(lines[-1], "verify=failed")
-        # Windows extraction strips a trailing dot or space, so these names land on disk as the credential file.
+        # Windows aliases are now rejected before the credential scan or extraction.
         for name in (".npmrc.", "id_rsa "):
             with self.subTest(name=name):
                 repo = self.scratch(f"trailing-{len(name)}-{name.strip('. ')}")
@@ -1273,15 +1319,17 @@ class TestVerifySecretScan(ScratchTestCase):
                 repo.git("-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo",
                          "100644,%s,%s" % (repo.git("hash-object", "-w", "--stdin", stdin=b"x\n"), name))
                 repo.git("commit", "-q", "-m", "trailing dot or space")
-                result, text, out = self.build(repo.root)
-                self.assertEqual(result.exit_code, 0, text)
-                report, text = self.quiet(build_release.verify_archive, out, repo.root)
-                lines = text.splitlines()
-                self.assertEqual(report.exit_code, 1, text)
-                self.assertEqual(
-                    [l for l in lines if l.startswith("secret_finding=")],
-                    [f"secret_finding={name}:0:credential-filename"],
-                )
+                result, text, out = self.build(repo.root, f"unsafe-trailing-{len(name)}.zip")
+                self.assertEqual(result.exit_code, 1, text)
+                self.assertIn(f"error=excluded_member:class-7:{name}", text.splitlines())
+                self.assertFalse(out.exists())
+                # Externally supplied archives must hit the same name boundary.
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w") as archive:
+                    archive.writestr(name, b"x\n")
+                lines = []
+                self.assertIsNone(build_release._read_archive(buf.getvalue(), lines.append))
+                self.assertEqual(lines, [f"error=unsafe_member:{name}"])
 
     def test_line_separator_in_member_path_keeps_the_bridge_readable(self):
         # Model (4): node writes U+2028 raw inside a JSON string, so the reader splits on newline only.
@@ -1983,7 +2031,7 @@ class TestCiArchiveSteps(unittest.TestCase):
 
     def test_source_steps_and_triggers_unchanged(self):
         assert_triggers_are_a_known_state(self, self.text)
-        self.assertIn("os: [ubuntu-latest, windows-latest]", self.text)
+        self.assertIn("os: [ubuntu-latest, windows-latest, macos-latest]", self.text)
         source = [(name, run) for name, run, _block in self.steps if name in dict(SOURCE_STEPS)]
         self.assertEqual(source, SOURCE_STEPS)
 

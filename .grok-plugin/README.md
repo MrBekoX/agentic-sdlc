@@ -99,6 +99,14 @@ trust, update or skill-trigger behavior. No official catalog submission or
 release tagging is performed here. Follow the
 [publication checklist](../docs/publication/grok-marketplace.md).
 
+## Uninstall
+
+Run `grok plugin uninstall agentic-sdlc` and confirm the native prompt. Add
+`--keep-data` when plugin data must survive removal. Reload the Plugins tab or
+start a new session. Keep unrelated plugins/settings and the source directory;
+marketplace removal is a separate operation. See the
+[lifecycle guide](../docs/publication/multi-platform-distribution.md).
+
 ## Official sources (checked 2026-10-10)
 
 - [Plugin install, update and catalogs](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/09-plugins.md)

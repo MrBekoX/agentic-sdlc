@@ -105,6 +105,13 @@ contract is documented in the reviewed sources. Follow the
 [publication note](../docs/publication/kimi-marketplace.md) before making a
 listing or broader runtime-support claim.
 
+## Uninstall
+
+In the TUI, run `/plugins remove agentic-sdlc`, confirm the native prompt, then
+`/reload` or `/new`. Removal deletes the installed record but retains the managed
+copy on disk. Use Kimi's manager; preserve unrelated plugin records and files.
+See the [lifecycle guide](../docs/publication/multi-platform-distribution.md).
+
 ## Official sources (checked 2026-10-10)
 
 - [Plugins, installer and updates](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/plugins.html)

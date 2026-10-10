@@ -7,6 +7,19 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class RuntimeDocumentationTests(unittest.TestCase):
+    def test_distribution_lifecycle_uses_supported_commands(self):
+        text = (REPO / "docs/publication/multi-platform-distribution.md").read_text(encoding="utf-8")
+        self.assertNotIn("`/plugin update ", text)
+        for command in ("claude plugin update agentic-sdlc@mrbekox",
+                        "claude plugin uninstall agentic-sdlc@mrbekox",
+                        "codex plugin remove agentic-sdlc@",
+                        "/plugins remove agentic-sdlc",
+                        "grok plugin uninstall agentic-sdlc"):
+            with self.subTest(command=command):
+                self.assertIn(command, text)
+        self.assertIn("Uninstall", text)
+        self.assertIn("managed copy", text)
+
     def test_adapter_docs_do_not_prescribe_machine_paths(self):
         for rel in ("README.md", ".grok-plugin/README.md", "hooks/README.md", "docs/runtime-adapter.md"):
             text = (REPO / rel).read_text(encoding="utf-8")
@@ -16,8 +29,9 @@ class RuntimeDocumentationTests(unittest.TestCase):
 
     def test_all_five_platforms_have_install_and_update_guidance(self):
         text = (REPO / "docs/publication/multi-platform-distribution.md").read_text(encoding="utf-8")
+        install_text = text.split("| Platform | Uninstall |", 1)[0]
         for runtime in ("Claude Code", "Codex", "Kimi Code", "ZCode", "Grok CLI"):
-            rows = [line for line in text.splitlines() if line.startswith("| " + runtime + " |")]
+            rows = [line for line in install_text.splitlines() if line.startswith("| " + runtime + " |")]
             self.assertEqual(len(rows), 1, runtime)
             self.assertGreaterEqual(len(rows[0].split('|')), 6)
         self.assertIn("not native trust", text)

@@ -20,6 +20,18 @@ Each entry includes:
 
 ---
 
+## 2026-10-10 — Portable ZIP names must survive extraction without sanitization
+
+- **Date:** 2026-10-10
+- **Task / context:** Verify five-platform packages on clean Windows, Linux and macOS targets.
+- **Symptom:** A crafted committed `bad?.txt` or `name:stream.txt` built and verified successfully, but Windows ZIP extraction wrote a different member name. Regression tests rejected neither name before the fix.
+- **Root cause:** Member validation checked traversal, controls and collisions but omitted Windows forbidden characters, device names and trailing-dot/space rules. Checking on a Linux build host does not establish Windows extraction identity.
+- **Correct fix:** Apply those filename rules on every host at the shared build/archive-reader boundary. Preserve the existing whole-build rejection policy and reject supplied ZIPs before reading/extracting their members.
+- **Preventive rule / automated check:** Use crafted Git index entries and in-memory ZIPs to test invalid Windows names on every OS; pair aliases and superscript-device digits with valid near-misses. Give negative fixtures separate output paths so a previous valid archive does not invalidate the no-new-output assertion. Native lifecycle checks must observe installed bytes, not only successful exit status.
+- **Related files & tests:** `scripts/build_release.py`, `tests/test_release_distribution.py`, `tests/test_native_distribution_lifecycle.py`.
+
+---
+
 ## 2026-10-10 — Package closure checks must visit nested handlers and direct resource owners
 
 - **Date:** 2026-10-10

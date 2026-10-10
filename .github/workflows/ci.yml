@@ -36,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     # The gate runs the suite twice per OS: once over the source tree, once inside the extracted
     # archive. It used to be FOUR - check_all.py also ran an unrestricted `discover -s tests`, so

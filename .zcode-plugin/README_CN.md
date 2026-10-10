@@ -42,13 +42,13 @@ AGENTIC-SDLC 将带门禁的规格/计划/TDD/安全/评审流程打包为 16 �
 副作用：守护脚本读取 Hook stdin JSON（`tool_input.command`、`tool_input` 写入字段、
 `cwd`）与本地 `git` 状态。拒绝操作使用已文档的 `hookSpecificOutput.permissionDecision`
 字段，SessionStart 引导使用已文档的 `additionalContext` 字段；建议消息所用的
-`systemMessage` 通道是 Claude Code 的约定，ZCode 是否显示它尚未验证。**没有网络访问**
+ZCode ignores the unknown `systemMessage` user channel. The write scanner also emits model-visible `hookSpecificOutput.additionalContext`; native delivery remains unverified.**没有网络访问**
 （未声明任何 MCP 服务器），数据不会离开本机。长期可写数据应放在 `ZCODE_PLUGIN_DATA`
 下，而不是安装目录。
 
 ZCode 上未接线（已记录的缺口，见 `docs/runtime-adapter.md`）：Stop 完成/流程守护
 （它们读取 Claude transcript / Codex rollout）、flow-order 守护、工作区 Stop 扫描，
-以及上述建议消息通道。Claude 与 Codex 的 Hook 文件（`hooks-claude.json`、
+Claude 与 Codex 的 Hook 文件（`hooks-claude.json`、
 `hooks-codex.json`）不与 ZCode 共享。
 
 ## 编排回退
@@ -64,8 +64,7 @@ ZCode 在客户端 3.14.0 中新增了动态工作流（官方更新日志，202
 ## 版本
 
 `.zcode-plugin/plugin.json` 与根目录 `marketplace.json` 条目中的 `version` 由
-`tests/test_zcode_packaging.py` 锁定到 `VERSION`。`scripts/bump_version.py` 尚未跟踪
-这两个 ZCode 文件——版本升级必须手动更新它们，否则本地门禁会失败。
+`tests/test_zcode_packaging.py` checks agreement with `VERSION`. `scripts/bump_version.py` tracks both ZCode manifest versions. Use the native plugin details to uninstall; persistent-data retention is not documented. See `docs/publication/multi-platform-distribution.md`.
 
 ## 官方市场提交
 

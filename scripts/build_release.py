@@ -54,6 +54,12 @@ EXCLUSION_CLASSES = {
 
 _SYMLINK_MODE = 0o120000
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
+# Apply Win32 naming rules on every build host: ZIP extractors may otherwise
+# sanitize names (e.g. bad?.txt -> bad_.txt), invalidating the verified payload.
+_WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} | {
+    prefix + digit for prefix in ("COM", "LPT") for digit in "123456789\u00b9\u00b2\u00b3"
+}
+_WINDOWS_INVALID = frozenset('<>:"|?*')
 _GIT_ENV_DROP = (
     "GIT_DIR",
     "GIT_WORK_TREE",
@@ -86,6 +92,10 @@ def _is_unsafe_path(path: str) -> bool:
     # directory as '..' and '.'; a literal comparison against ".." is evaded by such a spelling.
     if any(part.rstrip(". ") in ("", ".", "..") for part in path.split("/")):
         return True
+    for part in path.split("/"):
+        if (part.endswith((".", " ")) or any(ch in _WINDOWS_INVALID for ch in part)
+                or part.partition(".")[0].rstrip(" ").upper() in _WINDOWS_RESERVED):
+            return True
     if _has_unsafe_character(path):
         return True
     try:
