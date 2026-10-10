@@ -1,0 +1,52 @@
+{
+  "name": "agentic-sdlc",
+  "version": "0.4.3",
+  "description": "Gated SDLC skills for spec, plan, TDD, security review, and evidence-backed delivery on Kimi Code CLI.",
+  "keywords": [
+    "skills",
+    "sdlc",
+    "tdd",
+    "security",
+    "code-review"
+  ],
+  "author": {
+    "name": "Beko",
+    "url": "https://github.com/MrBekoX"
+  },
+  "homepage": "https://github.com/MrBekoX/agentic-sdlc",
+  "license": "MIT",
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "agents": "./agents/",
+  "sessionStart": {
+    "skill": "using-agentic-sdlc"
+  },
+  "skillInstructions": "Kimi Code adapter for AGENTIC-SDLC:\n- Activate skills with the available skill mechanism or read their installed SKILL.md.\n- Map TaskCreate/TaskUpdate/TodoWrite to TodoList when the session exposes it.\n- Dispatch Agent using a discovered custom plugin role when available; otherwise use coder, explore or plan and pass the bundled role instructions. Do not invent general-purpose or assume nested Agent is available.\n- No Claude Workflow runtime is available: use Agent author -> critic -> revise with saved artifacts and validate_artifacts.py, or explicitly mark the degraded inline pass.\n- Resolve runtime-root/CLAUDE_PLUGIN_ROOT/PLUGIN_ROOT notation from the loaded skill path: remove skills/<name>/SKILL.md to locate the installed plugin root. KIMI_PLUGIN_ROOT is documented for hook processes; do not assume a Bash environment alias.\n- Use actual Kimi tool names; FetchURL replaces WebFetch. A shared role tools allowlist may omit FetchURL, so use an available profile with the required tools and pass the role instructions when needed.",
+  "interface": {
+    "displayName": "Agentic SDLC",
+    "shortDescription": "Gated spec, plan, TDD, security, and review workflows",
+    "longDescription": "AGENTIC-SDLC packages gated spec, plan, TDD, security review, and evidence-backed delivery procedure as skills, a manual git-safety-check command, and deterministic PreToolUse guard hooks for Kimi Code CLI.",
+    "developerName": "Beko",
+    "websiteURL": "https://github.com/MrBekoX/agentic-sdlc"
+  },
+  "hooks": [
+    {
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "command": "node \"./hooks/scan-commit.mjs\"",
+      "timeout": 20
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "command": "node \"./hooks/destructive-command-guard.mjs\"",
+      "timeout": 15
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "command": "node \"./hooks/branch-guard.mjs\"",
+      "timeout": 15
+    }
+  ]
+}

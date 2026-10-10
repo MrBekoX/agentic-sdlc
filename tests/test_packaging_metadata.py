@@ -894,6 +894,7 @@ class TestVersionDeclarations(unittest.TestCase):
                 self.assertIn("version_check=failed", out)
 
     ADAPTER_MANIFESTS = {
+        ".kimi-plugin/plugin.json": {"name": "agentic-sdlc", "version": "0.4.3"},
         ".zcode-plugin/plugin.json": {"name": "agentic-sdlc", "version": "0.4.3"},
         "marketplace.json": {"name": "mrbekox", "plugins": [{"name": "agentic-sdlc", "version": "0.4.3"}]},
         ".grok-plugin/plugin.json": {"name": "agentic-sdlc", "version": "0.4.3"},
@@ -956,6 +957,31 @@ class TestVersionDeclarations(unittest.TestCase):
             self.assertEqual(code, 1, out.getvalue())
             self.assertIn("audit_manifest=.newharness-plugin/plugin.json:unregistered", out.getvalue())
             self.assertIn("audit=failed", out.getvalue())
+
+    def test_kimi_bump_preserves_marketplace_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_tree(root, manifests=self.ADAPTER_MANIFESTS)
+            marketplace = root / "marketplace-kimi.json"
+            marketplace.write_text('{"version":"2","plugins":[{"id":"agentic-sdlc","source":"https://github.com/MrBekoX/agentic-sdlc"}]}\n', encoding="utf-8")
+            before = marketplace.read_bytes()
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = self.bump_version.bump("0.4.4", root=root)
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads((root / ".kimi-plugin/plugin.json").read_bytes())["version"], "0.4.4")
+            self.assertEqual(marketplace.read_bytes(), before)
+
+    def test_audit_discovers_named_marketplace_plugin_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_tree(root)
+            marketplace = root / "marketplace-new-runtime.json"
+            marketplace.write_text('{"version":"2","plugins":[{"id":"agentic-sdlc","version":"0.4.3"}]}', encoding="utf-8")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = self.bump_version.audit(root=root)
+            self.assertEqual(code, 1, out.getvalue())
+            self.assertIn("audit_manifest=marketplace-new-runtime.json:unregistered", out.getvalue())
 
     def test_audit_ignores_test_fixtures_and_untracked_scratch_trees(self):
         # The walk fallback runs here (a temp dir is not a git repository), so the prune list is

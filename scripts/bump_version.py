@@ -27,13 +27,14 @@ README = REPO / "README.md"
 CHANGELOG = REPO / "CHANGELOG.md"
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 # Every runtime manifest that declares this plugin's version, with how the version is nested.
-# The adapter manifests (ZCode, Grok) are optional members: a skills-only archive and any future
+# The adapter manifests (Kimi, ZCode, Grok) are optional members: a skills-only archive and any future
 # adapter removal leave them absent, and an absent file is not drift. That each one exists in the
 # repository is asserted by that adapter's own packaging test; what belongs here is the version.
 MANIFESTS = (
     (".claude-plugin/plugin.json", "plugin"),
     (".claude-plugin/marketplace.json", "marketplace"),
     (".codex-plugin/plugin.json", "plugin"),
+    (".kimi-plugin/plugin.json", "plugin"),
     (".zcode-plugin/plugin.json", "plugin"),
     ("marketplace.json", "marketplace"),          # root, ZCode marketplace schema
     (".grok-plugin/plugin.json", "plugin"),
@@ -230,9 +231,12 @@ def discovered_manifests(root: Path = REPO) -> list[str]:
     found: list[str] = []
     for rel in sorted(candidates):
         name = rel.rsplit("/", 1)[-1]
-        if name not in ("plugin.json", "marketplace.json"):
+        if name != "plugin.json" and not (name == "marketplace.json" or
+                                         name.startswith("marketplace-") and name.endswith(".json")):
             continue
-        kind = "marketplace" if name == "marketplace.json" else "plugin"
+        # Named marketplace files may carry a schema version at the top level.
+        # Only a plugins[] entry version is a plugin version to register/audit.
+        kind = "plugin" if name == "plugin.json" else "marketplace"
         try:
             declared = manifest_version(root, rel, kind)
         except (OSError, ValueError, AttributeError):

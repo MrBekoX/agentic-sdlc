@@ -301,6 +301,23 @@ class TestPluginRootAndHookControls(NegativeControl):
                 }]}]}}))
                 self.assertSilent(h.validate_hooks_json(self.root))
 
+    def test_grok_environment_loader_checks_missing_handler(self):
+        self._hooks(json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command":
+            "node -e \"const p=require('node:path').join(process.env.GROK_PLUGIN_ROOT,'hooks','ghost.mjs');\""
+        }]}]}}), name="hooks-grok.json")
+        errors, _ = h.validate_hooks_json(self.root)
+        self.assertIn("hook_script_missing:hooks-grok.json:hooks/ghost.mjs", errors)
+        (self.root / "hooks/ghost.mjs").write_text("// fixture", encoding="utf-8")
+        self.assertSilent(h.validate_hooks_json(self.root))
+
+    def test_zcode_argv_checks_missing_handler(self):
+        self._hooks(json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/ghost.mjs"]}]}]}}), name="hooks-zcode.json")
+        errors, _ = h.validate_hooks_json(self.root)
+        self.assertIn("hook_script_missing:hooks-zcode.json:hooks/ghost.mjs", errors)
+        (self.root / "hooks/ghost.mjs").write_text("// fixture", encoding="utf-8")
+        self.assertSilent(h.validate_hooks_json(self.root))
+
 
 class TestWorkflowAgentControls(NegativeControl):
     def test_workflow_agent_missing(self):

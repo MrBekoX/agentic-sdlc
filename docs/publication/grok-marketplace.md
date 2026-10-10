@@ -1,76 +1,110 @@
-# Grok CLI personal marketplace — how to add this repo (NOT a publish)
+# Grok CLI distribution and official catalog checklist
 
-Status: adapter infrastructure only. Nothing here has been submitted to an
-official xAI plugin directory, and `grok plugin tag` has not been run. This
-note records how another person adds this repository as a **personal**
-marketplace source, from `~/.grok/docs/user-guide/09-plugins.md` and live
-`grok plugin --help` on grok 1.0.34.
+All five platforms are included in this distribution preparation; Grok runtime
+coverage remains experimental. The historical certification was **not a 0.4.3 release target**.
+See [multi-platform distribution](multi-platform-distribution.md) for the current
+scope. No catalog PR, release tag or external publication has been performed.
 
-Grok CLI is an experimental adapter, not a supported 0.4.3 release target.
+The current manifest and catalog use `.grok-plugin/plugin.json` and
+`.grok-plugin/marketplace.json`. The catalog's `source: "./"` points at the
+package root. Hook commands read the installed root from `GROK_PLUGIN_ROOT`
+inside Node; no maintainer drive path is required. Both Grok versions are tracked
+by `scripts/bump_version.py`.
 
-## Already prepared locally
+## Install and update a prepared directory
 
-- `.grok-plugin/plugin.json` with `name=agentic-sdlc`, `version` pinned to
-  `VERSION`, a Grok-facing `description` (not the Claude-only sentence), and
-  `hooks` pointing at `./hooks/hooks-grok.json`.
-- `.grok-plugin/marketplace.json` (`name=mrbekox`, `plugins[]` entry with
-  `name`/`version`/`source="./"`). No zip `sha256` or `_artifact` fields.
-- `.grok-plugin/README.md` documenting `marketplace add`, `install --trust`,
-  `enable`, `details`, `inspect`, side effects, and project-catalog Rhai
-  workflows (not a plugin component).
-- Version binding via `tests/test_grok_packaging.py`.
-- Optional catalog `.grok-plugin/plugin-index.json` is **not** shipped;
-  `09-plugins.md` says installs work without it.
-
-## Add and install (personal)
-
-From a clone of this repository (public or, with your own git credentials,
-private):
+Extract the complete full package and use Grok and Node in the same OS environment.
+Ensure `node` is on the selected hook shell PATH:
 
 ```text
-grok plugin marketplace add /path/to/agentic-sdlc
-grok plugin marketplace list
-grok plugin install agentic-sdlc --trust
+grok plugin install <package-directory> --trust
 grok plugin enable agentic-sdlc
 grok plugin details agentic-sdlc
-grok inspect
+grok inspect --json
 ```
 
-`--trust` is required. Without it, hooks and skills stay inactive. Plugins
-are off by default until enabled.
+Registering a marketplace is optional for this directory install:
 
-Observed on grok 1.0.34 (this adapter session): `grok plugin marketplace add .`
-registers the folder as a source. Name lookup `grok plugin install agentic-sdlc`
-then reported `No marketplace plugin named "agentic-sdlc"` — the local
-`source: "./"` entry was not in `grok plugin list --json --available`. The
-documented CLI form `grok plugin install <local-path> --trust` is the install
-that succeeded. Installing the live git worktree with `grok plugin install .`
-hit Windows I/O error 5 (access denied) while copying `.git`; a git-less
-snapshot of the same packaging installed, enabled, and appeared in
-`grok plugin details` / `grok inspect --json` with 16 skills.
+```text
+grok plugin marketplace add <package-directory>
+grok plugin marketplace list
+grok plugin list --json --available
+```
 
-When this repository is public, a GitHub shorthand also works:
+Install by name only after the available list shows `agentic-sdlc`. Historical
+Grok 1.0.34 name lookup did not expose this catalog's local `source: "./"` entry;
+directory installation was the recorded fallback. Copying the live checkout
+also hit a Windows `.git` access error. These are historical observations,
+not a native installer result for the current candidate or Grok 1.0.50.
+
+For a reachable repository, the documented GitHub shorthand can register its
+marketplace:
 
 ```text
 grok plugin marketplace add MrBekoX/agentic-sdlc
 ```
 
-A **private** GitHub URL without credentials returns 404; access uses each
-person's own git credentials (`09-plugins.md`). Visibility is a separate
-gate from this adapter work.
+Grok documents GitHub shorthand, git URLs and local directories as sources;
+private repositories depend on each installer's git credentials. An official
+catalog remote source must instead be public and pinned as described below.
+Source visibility and policy restrictions are separate installation gates.
 
-After install, press `r` in the Plugins tab (`/plugins`) or start a new
-session. Invoke `/using-agentic-sdlc` (or `/agentic-sdlc:using-agentic-sdlc`
-on collision).
+For an added marketplace and installed plugin:
 
-`require_sha` / `GROK_MARKETPLACE_REQUIRE_SHA=1` refuses unpinned **remote**
-installs. A local directory source is copied from the checkout; do not
-invent a `sha` on `source: "./"`. A binding `strictKnownMarketplaces` list
-refuses local-path adds unless an admin pin names that exact path — that is
-`BLOCKED`, not a local-validate pass.
+```text
+grok plugin marketplace update mrbekox
+grok plugin update agentic-sdlc
+```
 
-## Explicitly out of scope
+Reinstall a refreshed local directory when there is no remote update to fetch.
+Press `r` in Plugins or start a new session. Review trust before enabling;
+do not silently change organization policy or experimental settings.
 
-No `grok plugin tag`, no git commit/push, no official directory submission,
-no fabricated zip `sha256`, and no claim that `grok plugin validate .` on
-the Claude layout is Grok-native publish.
+## Official xAI catalog submission
+
+The [official contribution guide](https://github.com/xai-org/plugin-marketplace/blob/main/CONTRIBUTING.md)
+accepts reviewed catalog PRs. The following are manual publication steps:
+
+1. Freeze and review the actual release commit and package evidence. Confirm the
+   source is public and the selected commit is reachable; resolve any separate
+   privacy/history release blocker before changing repository visibility.
+2. In a fork of `xai-org/plugin-marketplace`, add one unique kebab-case entry to
+   `.grok-plugin/marketplace.json`. A remote third-party entry uses
+   `source: {"source":"url","url":"https://github.com/MrBekoX/agentic-sdlc.git","sha":"<actual-full-commit-sha>"}`.
+   Replace the placeholder with the real 40-character lowercase commit SHA;
+   do not submit a branch, tag, abbreviated SHA or fabricated value.
+3. Alternatively vendor a local third-party plugin under
+   `external_plugins/agentic-sdlc/` and point a local `source.path` there.
+   Include a README, manifest, license, homepage and explicit hook side effects.
+4. Run the marketplace repository's own tools:
+
+   ```text
+   python3 scripts/generate-plugin-index.py
+   python3 scripts/validate-catalog.py
+   python3 scripts/generate-plugin-index.py --check
+   ```
+
+5. Open the PR with its template and wait for CI and code-owner review.
+   For later updates, change the existing entry's remote SHA (or vendored files)
+   and regenerate the index.
+
+This repository's optional `.grok-plugin/plugin-index.json` is not shipped;
+personal directory installs do not require it. Official catalog generation is
+a different repository's publication requirement. Local `grok plugin validate`
+or an inventory showing skills is not proof of catalog acceptance or live behavior.
+Rhai workflows remain separate project/user catalogs, not a delivered plugin
+component.
+
+## Evidence still required
+
+The current scope covers static wiring/dependency checks and relocated handler
+replays. Native clean install, trust, update, skill invocation and supported-host
+behavior need separate runtime evidence before broader certification. Unverified
+write/startup/Stop readers remain unwired; no such execution is claimed.
+
+## Official sources (checked 2026-10-10)
+
+- [Runtime plugin reference](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/09-plugins.md)
+- [Runtime hook reference](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/10-hooks.md)
+- [Official catalog format](https://github.com/xai-org/plugin-marketplace)
+- [Contribution and validation steps](https://github.com/xai-org/plugin-marketplace/blob/main/CONTRIBUTING.md)

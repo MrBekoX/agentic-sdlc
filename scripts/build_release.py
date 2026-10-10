@@ -35,8 +35,10 @@ from pathlib import Path
 
 try:
     from scripts.eval_safety import require_relative_pattern
+    from scripts.check_plugin_portability import portability_errors
 except ModuleNotFoundError:
     from eval_safety import require_relative_pattern
+    from check_plugin_portability import portability_errors
 
 
 # BR13 exclusion classes. A member in any class never enters an archive.
@@ -566,6 +568,9 @@ def build_archive(repo_root, output, *, skills_only: bool = False) -> BuildResul
     try:
         commit = _resolve_head_commit(repo_root)
         members = _kind_members(commit, cwd=repo_root, skills_only=skills_only)
+        portability = portability_errors({p: blob for p, (_mode, blob) in members.items()})
+        if portability:
+            raise ReleaseError(['error=' + error for error in portability])
     except ReleaseError as exc:
         for line in exc.lines:
             emit(line)
@@ -841,6 +846,7 @@ def verify_archive(zip_path, repo_root) -> VerifyReport:
             kind = "skills-only"
     expected = skills if kind == "skills-only" else release
     errors = [f"error=unexpected_member:{n}" for n in _utf8_order(names - set(expected))]
+    errors += ['error=' + error for error in portability_errors(data)]
     errors += [f"error=missing_member:{n}" for n in _utf8_order(set(expected) - names)]
     for name in _utf8_order(names & set(expected)):
         git_mode, blob = expected[name]

@@ -557,6 +557,27 @@ class TestReleaseBuild(ScratchTestCase):
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertEqual(manifest["hooks"], "./hooks/hooks-codex.json")
 
+    def test_build_and_verify_reject_machine_specific_hook_commands(self):
+        repo = self.scratch()
+        wire = {"hooks": {"PreToolUse": [{"hooks": [{"type": "command",
+            "command": "node Z:/developer-checkout/hooks/guard.mjs"}]}]}}
+        commit = repo.commit({
+            ".grok-plugin/plugin.json": b'{"hooks":"./hooks/grok.json"}',
+            "hooks/grok.json": json.dumps(wire).encode(),
+        }, "nonportable fixture")
+        result, text, output = self.build(repo.root, "must-not-build.zip")
+        self.assertEqual(result.exit_code, 1, text)
+        self.assertIn("error=absolute_hook_path:hooks/grok.json", text)
+        self.assertFalse(output.exists())
+        # An externally supplied archive must get the same check, even when it
+        # exactly matches its recorded commit's bytes.
+        members = build_release._commit_members(commit, cwd=repo.root)
+        supplied = self.tmp / "externally-supplied.zip"
+        supplied.write_bytes(build_release._zip_bytes(members, commit))
+        report, text = self.quiet(build_release.verify_archive, supplied, repo.root)
+        self.assertEqual(report.exit_code, 1, text)
+        self.assertIn("error=absolute_hook_path:hooks/grok.json", text)
+
 
 # Recorded when Task 47 went GREEN; asserted on both CI operating systems.
 GOLDEN_COMMIT = "51e01c39dc9290011b206ec409745c6909da541b"
@@ -655,7 +676,7 @@ class TestDeterministicLayout(ScratchTestCase):
         # QUAL-8: after a bump, the new ledger stays out of the runtime payload identity.
         tree = self.tmp / "copied"
         (tree / "scripts").mkdir(parents=True)
-        for name in ("build_release.py", "eval_safety.py"):
+        for name in ("build_release.py", "eval_safety.py", "check_plugin_portability.py"):
             shutil.copyfile(REPO / "scripts" / name, tree / "scripts" / name)
         (tree / "VERSION").write_bytes(b"9.9.9\n")
         proc = subprocess.run(

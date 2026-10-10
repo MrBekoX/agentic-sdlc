@@ -20,6 +20,18 @@ Each entry includes:
 
 ---
 
+## 2026-10-10 — Package closure checks must visit nested handlers and direct resource owners
+
+- **Date:** 2026-10-10
+- **Task / context:** Add one portability check shared by source validation and release build/verify.
+- **Symptom:** The new checker returned no errors when a top-level command concealed a nested missing handler, and when a Stop-only payload omitted its validator. Both failures were reproduced by regression tests before fixes.
+- **Root cause:** Traversal stopped after recognizing a command-shaped dictionary, and a non-module dependency was recorded on a sibling consumer instead of the module that opens it.
+- **Correct fix:** Continue traversing children after inspecting a handler; resolve config-path arrays; record resource dependencies on their actual owners. Reject malformed handlers and control-character paths.
+- **Preventive rule / automated check:** Slice the dependency graph to one entrypoint and remove each dependency. Test nested metadata that resembles a handler, both source and externally supplied archive enforcement, and absence of diagnostic injection.
+- **Related files & tests:** `scripts/check_plugin_portability.py`, `tests/test_multi_platform_portability.py`, `tests/test_release_distribution.py`.
+
+---
+
 ## 2026-10-08 — Installed plugin paths must stay data until the runtime opens them
 
 - **Date:** 2026-10-08
@@ -29,6 +41,18 @@ Each entry includes:
 - **Correct fix:** Keep shell command text fixed, read `process.env.PLUGIN_ROOT` inside Node, join a fixed handler name, set `process.argv[1]`, and import `pathToFileURL()`; use `commandWindows` to select `node.exe` on native Windows. Preserve Node PATH and native trust prerequisites.
 - **Preventive rule / automated check:** Execute the actual shipped command strings from a copied package with an unrelated cwd and valid shell-sensitive path characters. Assert startup JSON and guard denials, not just exit 0. Mirror the executor's serialization: Codex uses raw cmd arguments, while Python list2cmdline adds quote escapes cmd interprets differently. Keep the harness's missing-handler check effective for both command fields.
 - **Related files & tests:** `hooks/hooks-codex.json`, `docs/runtime-adapter.md`, `tests/skills/harness.py`; `tests/test_codex_hook_portability.py`, `tests/test_harness_negative_controls.py`.
+
+---
+
+## 2026-10-08 — Mixed Windows/POSIX paths require matching runtimes (superseded repair)
+
+- **Date:** 2026-10-08
+- **Task / context:** Grok hooks failed through a mixed Windows/WSL launcher.
+- **Symptom:** Backslashes disappeared and Windows Node could not open POSIX mount paths.
+- **Root cause:** The runtime shell and Node interpreted different host path conventions.
+- **Correct fix:** The original checkout-specific forward-slash workaround was local-only and is superseded by the 2026-10-10 portable launcher. Keep Node and the runtime in the same OS environment; read the installed root inside Node as data.
+- **Preventive rule / automated check:** Execute shipped commands after relocation and test command denials, rather than pinning the maintainer's successful checkout path.
+- **Related files & tests:** `hooks/hooks-grok.json`, `tests/test_multi_platform_portability.py`, `tests/test_grok_packaging.py`.
 
 ---
 

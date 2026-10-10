@@ -7,6 +7,21 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class RuntimeDocumentationTests(unittest.TestCase):
+    def test_adapter_docs_do_not_prescribe_machine_paths(self):
+        for rel in ("README.md", ".grok-plugin/README.md", "hooks/README.md", "docs/runtime-adapter.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            with self.subTest(file=rel):
+                self.assertNotIn("D:/agentic-sdlc", text)
+                self.assertNotIn("node.exe D:", text)
+
+    def test_all_five_platforms_have_install_and_update_guidance(self):
+        text = (REPO / "docs/publication/multi-platform-distribution.md").read_text(encoding="utf-8")
+        for runtime in ("Claude Code", "Codex", "Kimi Code", "ZCode", "Grok CLI"):
+            rows = [line for line in text.splitlines() if line.startswith("| " + runtime + " |")]
+            self.assertEqual(len(rows), 1, runtime)
+            self.assertGreaterEqual(len(rows[0].split('|')), 6)
+        self.assertIn("not native trust", text)
+
     def test_portable_metadata_is_not_claimed_as_hook_delivery_on_current_binary(self):
         text = (REPO / "docs/runtime-adapter.md").read_text(encoding="utf-8")
         for fact in ("0.154.0", "portable", "legacy", "zero hooks", "eight hooks",

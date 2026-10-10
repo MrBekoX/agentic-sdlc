@@ -7,10 +7,8 @@ schema read this session from ~/.grok/docs/user-guide/09-plugins.md, 08-skills.m
 (grok 1.0.34), without loosening the Claude Code / Codex packaging contracts in
 test_packaging_metadata.py.
 
-Version binding note: scripts/bump_version.py MANIFEST_KEYS tracks only the
-Claude Code and Codex manifests, so these tests pin the Grok manifest and
-marketplace entry to VERSION instead. A version bump that forgets the Grok
-files fails this test loudly rather than drifting silently.
+Version binding: scripts/bump_version.py tracks the Grok manifest and marketplace
+entry; these tests independently bind their values to VERSION.
 """
 import json
 import subprocess
@@ -84,8 +82,9 @@ def wired_hooks(wire):
 
 
 def command_script_basename(command):
-    # The wired command quotes its expanded path (see the executor test for why), so strip the
-    # closing quote before taking the basename — otherwise every name ends up as `x.mjs"`.
+    if names := re.findall(r"[a-z-]+\.mjs", str(command)):
+        return names[-1]
+    # Final path segment. strip('"') stays so a quoted command would not keep the quote.
     return str(command).replace("\\", "/").rsplit("/", 1)[-1].split()[0].strip('"')
 
 
@@ -164,30 +163,20 @@ class TestGrokHookWire(unittest.TestCase):
                 self.assertLessEqual(tokens, ALLOWED_MATCHER_TOKENS)
 
     def test_executors_are_command_strings_with_plugin_root_and_second_timeouts(self):
-        # The expanded path MUST be quoted. Sourcing, stated precisely because the vendor docs
-        # are incomplete here: 10-hooks.md documents ${VAR} expansion and that hook failures are
-        # FAIL-OPEN, but it defers load-time-vs-runtime expansion to a custom-hooks reference that
-        # is not published, and it says nothing about shell-vs-direct-spawn for a hook `command`.
-        # The shell rule is documented for the STATUS-LINE command (25-status-line.md): "a path is
-        # run directly when it names an executable, and through `sh -c` otherwise ... Quote a path
-        # containing spaces as you would at a prompt." Applying it to hooks is an INFERENCE.
-        # The quoting is correct under every reading (it is also safe when spawned directly and
-        # under the documented PowerShell $VAR rewrite), and the downside if the inference is
-        # right is severe: an install path with a space would word-split, node would exit
-        # non-zero, and fail-open means all three command guards go silently inert while still
-        # appearing wired. This assertion previously anchored the UNQUOTED form and so pinned the
-        # defect in place; it now pins the fix. hooks/hooks-codex.json has always quoted.
+        # Root bytes stay environment data until Node opens the module. Grok has
+        # no Codex commandWindows selector; Node must be on the selected shell PATH.
         for hook in wired_hooks(self.wire):
             self.assertEqual(hook["type"], "command")
             self.assertRegex(
                 hook["command"],
-                r'^node "\$\{GROK_PLUGIN_ROOT\}/hooks/[a-z-]+\.mjs"$',
+                r"^node -e \"const p=require\('node:path'\)\.join\(process\.env\.GROK_PLUGIN_ROOT,'hooks','[a-z-]+\.mjs'\);process\.argv\[1\]=p;import\(require\('node:url'\)\.pathToFileURL\(p\)\.href\)\"$",
             )
             self.assertIsInstance(hook["timeout"], int)
             self.assertGreater(hook["timeout"], 0)
             self.assertLess(hook["timeout"], 600)
             self.assertNotIn("timeoutMs", hook)
             self.assertNotIn("args", hook)
+            self.assertNotIn("commandWindows", hook)
 
     def test_wired_scripts_exist_and_are_the_verified_set(self):
         wired = {command_script_basename(hook["command"]) for hook in wired_hooks(self.wire)}

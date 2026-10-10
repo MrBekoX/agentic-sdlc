@@ -1,0 +1,10 @@
+{
+  "version": "2",
+  "plugins": [
+    {
+      "id": "agentic-sdlc",
+      "displayName": "Agentic SDLC",
+      "source": "https://github.com/MrBekoX/agentic-sdlc"
+    }
+  ]
+}

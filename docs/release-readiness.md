@@ -4,7 +4,11 @@ This file is the publish gate for `agentic-sdlc` version `0.4.3`. It keeps the r
 
 The 2026-10-06 preparation fixes public hook removal and packaged instruction/helper closure; current native Codex 0.160.1 discovery is recorded in [current readiness](publication/codex-0.160.1-readiness.md). The historical ledger below is preserved. New local preparation does not erase historical failed/not-run live evaluations or claim portal acceptance. No upload, publication, commit, push, PR or merge is part of this preparation.
 
-## Supported Release Scope
+## Current multi-platform preparation
+
+Kimi, ZCode and Grok are now included in the installation/portability candidate alongside Claude and Codex. The candidate artifacts, supported channels, update methods, official references and unverified native checks are in [multi-platform distribution](publication/multi-platform-distribution.md). This does not change the historical ledger below or approve publication.
+
+## Supported Release Scope (historical 0.4.3 verdict)
 
 | Runtime | Status | Evidence requirement |
 |---|---|---|

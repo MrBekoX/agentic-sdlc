@@ -140,6 +140,8 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_eval_path_safety.py` | safety | Path traversal across the eval runners: slugs, fixture trees and frontmatter names reject parent and separator forms, absolute paths, and nested symlinks. |
 | `tests/test_release_distribution.py` | release | General committed-source archives and deterministic public projections: members, byte/mode/rebuild verification, archive gate logs, golden general digest, preserved identity/listing rules, and public lifecycle exclusion. |
 | `tests/test_release_ledger_docs.py` | release | The release-evidence ledger format and the historical rows it must keep byte-exact (skipped where the historical blob is absent, as in a shallow clone). |
+| `tests/test_multi_platform_portability.py` | portability | All-five manifests, source/archive hook dependency checks with negative controls, and real Grok/Kimi/ZCode relocated handler execution; native lifecycle remains separate. |
+| `tests/test_kimi_packaging.py` | runtime adapter | Kimi manifest, custom marketplace schema, inline hooks and runtime boundaries. |
 | `tests/test_grok_packaging.py` | runtime adapter | The experimental Grok CLI adapter: manifest, local marketplace entry, and hook wiring narrow enough that a failure cannot silently widen. |
 | `tests/test_zcode_packaging.py` | runtime adapter | The experimental ZCode adapter: manifest, root marketplace entry, and hook wiring, including the claims its README is allowed to make. |
 | `tests/test_process_owner_policy.py` | process | The coexistence context actually delivered to a session - not model compliance and not hook installation, which are separate concerns. |

@@ -35,7 +35,7 @@ AGENTS_DIR = REPO / "agents"
 WORKFLOWS_DIR = REPO / "workflows"
 COMMANDS_DIR = REPO / "commands"
 HOOKS_DIR = REPO / "hooks"
-HOOK_CONFIGS = ("hooks-codex.json", "hooks-claude.json")
+HOOK_CONFIGS = ("hooks-codex.json", "hooks-claude.json", "hooks-grok.json", "hooks-zcode.json")
 SKILL_CONTRACTS_DIR = REPO / "contracts" / "skills"
 SCRIPTS_DIR = REPO / "scripts"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
@@ -49,10 +49,10 @@ ALLOWED_SKILL_KEYS = {
 }
 ALLOWED_AGENT_KEYS = {"name", "description", "tools", "model"}
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-PLUGIN_ROOT_REF_RE = re.compile(r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}/([A-Za-z0-9_./-]+)")
+PLUGIN_ROOT_REF_RE = re.compile(r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT|GROK_PLUGIN_ROOT|ZCODE_PLUGIN_ROOT|KIMI_PLUGIN_ROOT)\}/([A-Za-z0-9_./-]+)")
 # Codex launchers read the installed root as data, avoiding raw shell interpolation.
 CODEX_HOOK_REF_RE = re.compile(
-    r"\.join\(process\.env\.PLUGIN_ROOT,'hooks','([a-z0-9-]+\.mjs)'\)"
+    r"\.join\(process\.env\.(?:PLUGIN_ROOT|GROK_PLUGIN_ROOT),'hooks','([a-z0-9-]+\.mjs)'\)"
 )
 
 
@@ -585,6 +585,13 @@ def run_all(golden=None):
         e, w = fn()
         errors += e
         warnings += w
+
+    # Share the static byte-map check with release builds and archive verification.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('plugin_portability', SCRIPTS_DIR / 'check_plugin_portability.py')
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    errors += checker.portability_errors(checker.runtime_members(REPO))
 
     metrics = {
         "skills_checked": len(skills),

@@ -12,7 +12,10 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 | Codex | Supported | Shared skills, Codex manifest metadata, personal-marketplace install flow, and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
 | ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through the root ZCode-schema `marketplace.json`; a narrow verified-event hook wire. ZCode 3.14.0 added dynamic workflows, but Z.ai publishes no script API and `plugin.json` has no `workflows` key, so none ships here. See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
 | Grok CLI | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through `.grok-plugin/marketplace.json`; a narrow verified-event hook wire (`hooks/hooks-grok.json`); project-catalog Rhai at `.grok/workflows/*.rhai` (not a plugin component). See [`../.grok-plugin/README.md`](../.grok-plugin/README.md). |
-| OpenCode / Kimi Code / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.3`. |
+| Kimi Code | Packaged adapter with limited runtime coverage | `.kimi-plugin/plugin.json`, `marketplace-kimi.json`, startup router and three inline command guards; see [Kimi](../.kimi-plugin/README.md). |
+| OpenCode / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.3`. |
+
+All five platform adapters are included in [distribution preparation](publication/multi-platform-distribution.md); packaging/replay evidence does not replace native/live validation.
 
 ## Installation Model
 
@@ -20,6 +23,8 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 |---|---|---|
 | `.claude-plugin/plugin.json` | Claude Code | Plugin metadata. |
 | `.claude-plugin/marketplace.json` | Claude Code | Local marketplace source; the repo root is the source. |
+| `.kimi-plugin/plugin.json` | Kimi Code | Skills, commands, agents, startup router, tool mapping and inline hooks. |
+| `marketplace-kimi.json` | Kimi Code | Custom catalog schema version 2; plugin version lives in its manifest. |
 | `.codex-plugin/plugin.json` | Codex | Codex plugin metadata, `skills`, `hooks`, and `interface` block. |
 | `hooks/hooks-claude.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
 | `hooks/hooks-codex.json` | Codex | Blocking `PreToolUse`, bootstrap `SessionStart`, and advisory/env-gated `Stop` wiring, subject to Codex hook review/trust. |
@@ -137,7 +142,7 @@ The scripts are shared, but runtime wiring differs.
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
-## 11. Deterministic scripts (20)
+## 11. Deterministic scripts (21)
 
 | Script | Purpose |
 |---|---|
@@ -149,6 +154,7 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | `sensitive_redaction.py` | Canonical high-confidence redaction adapter for persisted artifacts. |
 | `validate_artifacts.py` | Spec/plan validation: structure, AC coverage, placeholders/secrets, task verification, deferral, and security hand-wave checks. |
 | `resolve_work_package.py` | Deterministically resolves the canonical spec/plan pair for implementation audits without timestamp fallback. |
+| `check_plugin_portability.py` | Checks declared hook paths and their transitive module/resource closure; shared by source harness and release build/verification. |
 | `detect_context.py` | Workspace/dependency/toolchain classification. |
 | `run_trigger_eval.py` | Claude Code trigger eval runner. |
 | `run_codex_trigger_eval.py` | Codex route-classifier trigger runner. |

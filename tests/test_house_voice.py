@@ -83,8 +83,8 @@ class TestAssertionContractSections(unittest.TestCase):
         self.assertEqual(missing, [], f"missing Assertion-contract sections: {missing}")
 
 
-# --- AC #2: Claude+Codex-only scope ---
-OTHER_RUNTIMES = ("OpenCode", "Kimi", "GLM")
+# --- Deferred harnesses; the five packaged adapters are in distribution scope ---
+OTHER_RUNTIMES = ("OpenCode", "GLM")
 FUTURE_MARKERS = ("future", "unsupported", "experimental", "deferred", "not a release target", "not release")
 TRIMMED_SKILLS = [
     "using-agentic-sdlc", "spec-authoring", "plan-authoring", "dispatch-strategy",

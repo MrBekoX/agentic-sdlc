@@ -73,9 +73,9 @@ supported path.
 ## Versioning
 
 `version` in `.zcode-plugin/plugin.json` and in the root `marketplace.json` entry is
-pinned to `VERSION` by `tests/test_zcode_packaging.py`. `scripts/bump_version.py` does
-not track these two ZCode files yet — a version bump must update them by hand or the
-local gate fails.
+tracked by `scripts/bump_version.py` and pinned to `VERSION` by
+`tests/test_zcode_packaging.py`. Refresh the marketplace, then use Manage installed
+→ Check for updates and apply the update. See [distribution preparation](../docs/publication/multi-platform-distribution.md) for current scope and publishing requirements.
 
 ## Official marketplace submission
 

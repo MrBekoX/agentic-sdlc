@@ -2,7 +2,7 @@
 
 ![agentic-sdlc](agentic-sdlc-image.png)
 
-> A local AGENTIC-SDLC plugin for **Claude Code** and **Codex**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
+> An AGENTIC-SDLC skill library with adapters for **Claude Code**, **Codex**, **Kimi Code**, **ZCode** and **Grok CLI**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
 > `Version 0.4.3` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
 
@@ -10,18 +10,21 @@
 
 ## Scope
 
-This repository supports two runtimes:
+All five platforms are in packaging and portability scope. Claude Code and Codex retain their full runtime guard adapters; the others expose the documented subsets below. Native/live evidence is separate from packaging support:
 
 | Runtime | Read this first | Plugin entry point |
 |---|---|---|
 | Claude Code | [`.claude-plugin/README.md`](.claude-plugin/README.md) | [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) + [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) |
 | Codex | [`.codex-plugin/README.md`](.codex-plugin/README.md) | [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json) |
+| Kimi Code | [`.kimi-plugin/README.md`](.kimi-plugin/README.md) | [`.kimi-plugin/plugin.json`](.kimi-plugin/plugin.json) + [custom marketplace](marketplace-kimi.json) |
+| ZCode | [`.zcode-plugin/README.md`](.zcode-plugin/README.md) | [`.zcode-plugin/plugin.json`](.zcode-plugin/plugin.json) + [marketplace](marketplace.json) |
+| Grok CLI | [`.grok-plugin/README.md`](.grok-plugin/README.md) | [`.grok-plugin/plugin.json`](.grok-plugin/plugin.json) + [marketplace](.grok-plugin/marketplace.json) |
 
-Other harnesses are intentionally deferred. [`docs/runtime-adapter.md`](docs/runtime-adapter.md) may mention adapter concepts for future or experimental portability, but Claude Code and Codex are the supported release targets. ZCode (Z.ai) exists only as an **experimental adapter** for local personal-marketplace installs — see [`.zcode-plugin/README.md`](.zcode-plugin/README.md); it is not a supported release target. Grok CLI exists only as an **experimental adapter** for local personal-marketplace installs — see [`.grok-plugin/README.md`](.grok-plugin/README.md); it is not a supported release target.
+Installation/update steps, verified root contracts and publishing limits for all five platforms are in [multi-platform distribution](docs/publication/multi-platform-distribution.md). Kimi, ZCode and Grok are packaged adapters with limited runtime coverage; they do not inherit Claude/Codex transcript or Workflow behavior. Historical 0.4.3 certification covers Claude Code and Codex and does not certify the other adapters' native lifecycle. Other harnesses remain deferred.
 
 ## Distribution paths
 
-`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.4.3.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. Additional experimental ZCode and Grok CLI local installs exist outside the four release-gated paths; they carry no 0.4.3 verdict.
+`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.4.3.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. Kimi, ZCode and Grok adapters are included in this distribution candidate; the historical four-path 0.4.3 verdict does not establish their native lifecycle or public-directory acceptance.
 
 ### Claude own marketplace
 
@@ -125,15 +128,15 @@ State: GAP. The manifest, marketplace and hook wire exist and pass `tests/test_z
 
 ### Grok CLI personal marketplace (experimental, not a release-gated path)
 
-> **Experimental adapter.** Grok CLI is not a supported 0.4.3 release target; this local install path carries no go/no-go verdict and no official xAI directory submission exists. `grok plugin validate .` green on the Claude layout is not Grok-native publish. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
+> **Limited runtime coverage.** Grok is included in current distribution preparation. No submission has been performed here; the historical 0.4.3 verdict does not certify its native lifecycle. See the [current publication checklist](docs/publication/grok-marketplace.md). Vendor manifest validation is separate from catalog acceptance and live behavior.
 
-**Prerequisites.** Grok CLI, `node` on `PATH`, and this clone. Install with `--trust` or hooks/skills stay inactive.
+**Prerequisites.** Grok CLI, `node` on the selected shell `PATH`, and the extracted plugin directory. Install with `--trust` or hooks/skills stay inactive.
 
 **Steps.** Grok discovers `.grok-plugin/plugin.json` and `.grok-plugin/marketplace.json`, a shared `skills/<name>/SKILL.md` layout, and loads the separate [`hooks/hooks-grok.json`](hooks/hooks-grok.json) wire declared by the manifest (`hooks/hooks.json` is never created — that is Grok's auto-discovered hook file).
 
 ```text
 grok plugin marketplace add .
-grok plugin install agentic-sdlc --trust
+grok plugin install <package-directory> --trust
 grok plugin enable agentic-sdlc
 grok plugin details agentic-sdlc
 grok inspect
@@ -214,7 +217,7 @@ workflows/         Claude Code dynamic workflow scripts; workflows/zcode/ holds 
 hooks/             Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/  Durable behavior contracts
 commands/          Manual slash-command definitions
-scripts/           20 Python helpers: probes, validators, eval runners, release archives, strict evidence, versioning, git-hook install, hook trust check
+scripts/           21 Python helpers: probes, validators, eval runners, release archives, portability, strict evidence, versioning, git-hook install, hook trust check
 tests/             Unit tests, harness, fixtures, golden refs, eval seeds
 docs/              Component reference, boundaries, testing, release notes
 ```
@@ -268,7 +271,7 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 | Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. The command guards match `Bash|PowerShell` and carry no `if` filter — a `Bash`-only matcher is inert on a Windows host without Git Bash, and a subcommand-level `if` never starts the hook for a git alias, so each guard self-gates internally instead. |
 | Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`, after Codex hook review/trust: `SessionStart` bootstrap **plus** native blocking `PreToolUse` command guards, a pre-write secret guard, and two `Stop` backstops. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md) for the exact set and its documented coverage gaps. |
 | ZCode (experimental adapter) | [`hooks/hooks-zcode.json`](hooks/hooks-zcode.json), declared by `.zcode-plugin/plugin.json`: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, and the `SessionStart` bootstrap on `startup\|clear\|compact`, each a `process` executor (`node` on `PATH` required). Stop completion/flow guards and the flow-order guard stay unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
-| Grok CLI (experimental adapter) | [`hooks/hooks-grok.json`](hooks/hooks-grok.json), declared by `.grok-plugin/plugin.json`: `PreToolUse` command guards on `Bash\|run_terminal_command` (`type: command`, `timeout` in seconds, `${GROK_PLUGIN_ROOT}`). Write-scan, Stop, and SessionStart stay unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
+| Grok CLI (experimental adapter) | [`hooks/hooks-grok.json`](hooks/hooks-grok.json), declared by `.grok-plugin/plugin.json`: `PreToolUse` command guards on `Bash\|run_terminal_command`; fixed Node code reads `process.env.GROK_PLUGIN_ROOT` as data. Write-scan, Stop, and SessionStart remain unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
 
 Claude Code wires flow enforcement through `flow-order-guard.mjs` and `flow-step-guard.mjs`. Codex uses its own `flow-order-guard-codex.mjs` and `flow-step-guard-codex.mjs` adapters over the same [`hooks/flow-requirements.json`](hooks/flow-requirements.json); the Codex order gate is opt-in and its Stop gate can continue the turn but cannot undo effects.
 

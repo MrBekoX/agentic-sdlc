@@ -76,10 +76,15 @@ class TestNoSuiteFallsOutOfTheGate(unittest.TestCase):
     def test_agents_md_still_documents_the_full_suite_command(self):
         # If the documented gate ever drops the full-suite command, the narrowing above stops
         # being safe. Pin the premise, not just the conclusion.
-        agents = (REPO / "AGENTS.md").read_text(encoding="utf-8")
-        self.assertIn("unittest discover -s tests", agents,
-                      "AGENTS.md no longer documents a full-suite gate command, so narrowing "
-                      "check_all.py would leave those tests unrun")
+        # Local agent instructions are intentionally excluded from release archives.
+        # The runnable package must keep its full-suite gate in shipped docs too.
+        paths = [REPO / "README.md", REPO / "docs/testing.md"]
+        if (REPO / "AGENTS.md").is_file():
+            paths.append(REPO / "AGENTS.md")
+        for path in paths:
+            with self.subTest(path=path.name):
+                self.assertIn("python3 -m unittest discover -s tests", path.read_text(encoding="utf-8"),
+                              "The full-suite gate must remain documented when check_all is narrowed")
 
 
 if __name__ == "__main__":

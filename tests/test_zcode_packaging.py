@@ -7,10 +7,8 @@ zcode.z.ai/en/docs/skill and zcode.z.ai/en/docs/hooks, plus the plugin/marketpla
 naming rules of github.com/zai-org/zcode-plugins, without loosening the
 Claude Code / Codex packaging contracts in test_packaging_metadata.py.
 
-Version binding note: scripts/bump_version.py MANIFEST_KEYS tracks only the
-Claude Code and Codex manifests, so these tests pin the ZCode manifest and
-marketplace entry to VERSION instead. A version bump that forgets the ZCode
-files fails this test loudly rather than drifting silently.
+Version binding: scripts/bump_version.py tracks the ZCode manifest and marketplace
+entry; these tests independently bind their values to VERSION.
 """
 import json
 import subprocess
@@ -32,7 +30,7 @@ def workflow_port_sources(root):
     for directory, dirs, files in os.walk(root):
         relative = Path(directory).relative_to(root)
         dirs[:] = [name for name in dirs if name not in {".git", "node_modules", "__pycache__"}
-                   and not (relative == Path(".") and name in {"dist", "build"})
+                   and not (relative == Path(".") and name in {"dist", "build", ".worktrees"})
                    and not (relative == Path("tests") and name == "artifacts")]
         found.extend((relative / name).as_posix() for name in files if name.endswith(".dwf.ts"))
     return sorted(found)
@@ -251,6 +249,7 @@ class TestZcodeSkillAdapters(unittest.TestCase):
             root = Path(tmp)
             for relative in ("workflows/zcode/spec-plan-draft.dwf.ts",
                              "dist/cache/workflows/zcode/spec-plan-draft.dwf.ts",
+                             ".worktrees/other-checkout/workflows/zcode/spec-plan-draft.dwf.ts",
                              "build/package/workflows/zcode/spec-plan-draft.dwf.ts"):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
