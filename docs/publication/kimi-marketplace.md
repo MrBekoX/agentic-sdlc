@@ -62,8 +62,9 @@ fallback when a role is unavailable. Resolve helper paths from the loaded Skill
 file's installed root. `KIMI_PLUGIN_ROOT` is documented for hook subprocesses;
 a Bash alias or automatic `CLAUDE_PLUGIN_ROOT` substitution is not promised.
 
-Current automated evidence covers packaging and relocated handler execution.
-It does not certify a clean native installer/update, router activation or
+Current evidence adds an authenticated native Kimi 2.1.1 loopback management
+install/recopy/remove check to packaging and relocated handler execution.
+It does not certify router activation, native hook execution or
 native skill/agent behavior. Earlier manual managed-copy probes are not proof
 that `/plugins install` or GitHub download ran. Write scanning and transcript-based
 Stop/flow guards remain unwired; Claude JS workflows use the documented author →

@@ -80,6 +80,17 @@ class RuntimeDocumentationTests(unittest.TestCase):
         self.assertNotIn("Harmless noise; ignore for trigger-eval results", text)
 
 
+class TestRuntimeDocumentation(unittest.TestCase):
+    def test_grok_update_instructions_match_native_copy_semantics(self):
+        for rel in ('docs/publication/grok-marketplace.md', '.grok-plugin/README.md'):
+            text = (REPO / rel).read_text(encoding='utf-8')
+            with self.subTest(path=rel):
+                self.assertNotIn('Reinstall a refreshed local directory', text)
+                self.assertIn('local `plugin update` does not recopy', text)
+                self.assertIn('already installed', text)
+                self.assertIn('moving Git branch', text)
+
+
 class TestClaudeCurrencyClaims(unittest.TestCase):
     """AC25: current Claude claims match the 2026-10-07 documentation snapshot."""
 

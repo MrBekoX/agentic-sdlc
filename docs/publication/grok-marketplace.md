@@ -56,8 +56,15 @@ grok plugin marketplace update mrbekox
 grok plugin update agentic-sdlc
 ```
 
-Reinstall a refreshed local directory when there is no remote update to fetch.
-Press `r` in Plugins or start a new session. Review trust before enabling;
+On native Grok 1.0.50, local `plugin update` does not recopy the installed
+directory, and reinstalling the same source reports "already installed".
+Use the documented session reload (`r` in Plugins or a new session), then verify
+the installed bytes; that reload path has not been exercised here. A moving Git branch
+supports a genuine fetch/update, verified with a disposable offline Git fixture.
+If a local refresh remains unavailable, explicitly uninstall and install the new
+directory after reviewing retained data. For a path containing `#`, change into
+that directory and run `grok plugin install . --trust`: 1.0.50 treats `#` in an
+absolute source operand as a subdirectory suffix. Review trust before enabling;
 do not silently change organization policy or experimental settings.
 
 ## Official xAI catalog submission
@@ -70,11 +77,12 @@ accepts reviewed catalog PRs. The following are manual publication steps:
    privacy/history release blocker before changing repository visibility.
 2. In a fork of `xai-org/plugin-marketplace`, add one unique kebab-case entry to
    `.grok-plugin/marketplace.json`. A remote third-party entry uses
-   `source: {"source":"url","url":"https://github.com/MrBekoX/agentic-sdlc.git","sha":"<actual-full-commit-sha>"}`.
+   `source: {"type":"url","url":"<public-repository-git-url>","sha":"<actual-full-commit-sha>"}`.
    Replace the placeholder with the real 40-character lowercase commit SHA;
    do not submit a branch, tag, abbreviated SHA or fabricated value.
 3. Alternatively vendor a local third-party plugin under
-   `external_plugins/agentic-sdlc/` and point a local `source.path` there.
+   `external_plugins/agentic-sdlc/` and use
+   `source: {"type":"local","path":"./external_plugins/agentic-sdlc"}`.
    Include a README, manifest, license, homepage and explicit hook side effects.
 4. Run the marketplace repository's own tools:
 
@@ -97,8 +105,12 @@ component.
 
 ## Evidence still required
 
-The current scope covers static wiring/dependency checks and relocated handler
-replays. Native clean install, trust, update, skill invocation and supported-host
+Current Windows 1.0.50 evidence includes isolated native install/remove,
+authorized temporary trust and an offline moving-branch Git update with changed
+installed bytes and HEAD. Local-copy update/reinstall limitations above were
+observed directly. Pinned official catalog tools are exercised on a single-plugin
+fixture; see [current preparation](marketplace-readiness-2026-10-11.md).
+Native hook delivery, live skill invocation and supported-host
 behavior need separate runtime evidence before broader certification. Unverified
 write/startup/Stop readers remain unwired; no such execution is claimed.
 

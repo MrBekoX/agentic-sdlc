@@ -146,6 +146,17 @@ def _require_git_checkout(testcase):
 
 
 class TestReleaseReadinessDocs(unittest.TestCase):
+    def test_current_readiness_separates_fixture_native_and_external_gates(self):
+        readiness = REPO / 'docs/publication/marketplace-readiness-2026-10-11.md'
+        self.assertTrue(readiness.is_file(), 'Current evidence must not overwrite the historical ledger')
+        text = readiness.read_text(encoding='utf-8')
+        for boundary in ('committed source', 'producer', 'not published',
+                         'macOS', 'skipped', 'publisher identity', 'native',
+                         'fixture', 'original history', 'Live model'):
+            self.assertIn(boundary, text)
+        self.assertIn('marketplace-readiness-2026-10-11.md',
+                      (REPO / 'docs/release-readiness.md').read_text(encoding='utf-8'))
+
     def test_gitignore_newly_unignores_only_publication_paths(self):
         _require_git_checkout(self)
 

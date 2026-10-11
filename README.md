@@ -22,6 +22,11 @@ All five platforms are in packaging and portability scope. Claude Code and Codex
 
 Installation/update/uninstall steps, verified root contracts and publishing limits for all five platforms are in [multi-platform distribution](docs/publication/multi-platform-distribution.md). Kimi, ZCode and Grok are packaged adapters with limited runtime coverage; they do not inherit Claude/Codex transcript or Workflow behavior. Historical 0.4.3 certification covers Claude Code and Codex and does not certify the other adapters' native lifecycle. Other harnesses remain deferred.
 
+The [2026-10-11 marketplace preparation](docs/publication/marketplace-readiness-2026-10-11.md)
+records current isolated native checks and clean-source/vendor packet preparation.
+Account eligibility, public source and vendor approval remain separate gates;
+macOS was skipped by request and nothing was published.
+
 ## Distribution paths
 
 `agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.4.3.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. Kimi, ZCode and Grok adapters are included in this distribution candidate; the historical four-path 0.4.3 verdict does not establish their native lifecycle or public-directory acceptance.
@@ -217,7 +222,7 @@ workflows/         Claude Code dynamic workflow scripts; workflows/zcode/ holds 
 hooks/             Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/  Durable behavior contracts
 commands/          Manual slash-command definitions
-scripts/           21 Python helpers: probes, validators, eval runners, release archives, portability, strict evidence, versioning, git-hook install, hook trust check
+scripts/           22 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check
 tests/             Unit tests, harness, fixtures, golden refs, eval seeds
 docs/              Component reference, boundaries, testing, release notes
 ```

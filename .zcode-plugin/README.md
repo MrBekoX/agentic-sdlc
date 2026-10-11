@@ -81,6 +81,12 @@ tracked by `scripts/bump_version.py` and pinned to `VERSION` by
 
 ## Official marketplace submission
 
+The signed desktop 3.14.5 distribution's bundled agent CLI 0.16.9 has isolated
+native validate/install/discovery/versioned-update/uninstall evidence, including
+16 skills and five hook declarations. This verifies the bundled manager only;
+desktop GUI, actual hook delivery and model behavior remain unverified. See
+[current preparation](../docs/publication/marketplace-readiness-2026-10-11.md).
+
 Not done and not claimed. What a future `zai-org/zcode-plugins` PR would still need is
 listed in `docs/publication/zcode-marketplace.md`.
 

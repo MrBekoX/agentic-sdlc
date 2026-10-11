@@ -93,6 +93,11 @@ hook. Static packaging and relocated handler replays do not prove installer,
 router invocation, frontmatter tolerance, update or native lifecycle behavior.
 A manually copied managed directory is not an installer transcript.
 
+Native Kimi 2.1.1 authenticated loopback management evidence now covers install,
+changed-source managed-copy refresh and removal while retaining bytes, with
+unrelated state preserved. See [current preparation](../docs/publication/marketplace-readiness-2026-10-11.md).
+This is native management evidence, without a model session or hook execution claim.
+
 ## Versioning and publication
 
 `scripts/bump_version.py` tracks `.kimi-plugin/plugin.json` and `VERSION`;

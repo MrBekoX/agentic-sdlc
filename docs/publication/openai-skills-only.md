@@ -35,7 +35,9 @@ This public package provides procedural guidance and no lifecycle hook enforceme
 
 ## Prerequisites
 
-Maintainer-verified identity and Apps Management Write (`api.apps.write`): BLOCKED until the maintainer verifies both.
+Maintainer-verified identity and Apps Management Write (`api.apps.write`): account
+status is unknown in this workspace. The maintainer must verify both in the portal
+before submission; local package checks cannot establish them.
 
 ## Listing risk
 

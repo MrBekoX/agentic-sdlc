@@ -89,13 +89,19 @@ grok plugin marketplace update mrbekox
 grok plugin update agentic-sdlc
 ```
 
-For a refreshed local package, repeat the directory install when there is no
-remote update to fetch. Reload the Plugins tab or start a new session.
+On Grok 1.0.50, local `plugin update` does not recopy the installed directory;
+reinstalling the same source reports "already installed". Reload the Plugins tab
+or start a new session and verify the installed bytes. That reload path remains
+unverified here. A moving Git branch supports a genuine update, observed in an
+offline Git fixture. If necessary, explicitly uninstall and install the refreshed
+directory after reviewing retained data. Paths containing `#` should be installed
+with `grok plugin install . --trust` from inside that directory.
 `scripts/bump_version.py` tracks both Grok manifest versions and `VERSION`;
 `tests/test_grok_packaging.py` checks their agreement.
 
-Static packaging and relocated handler replays do not prove native install,
-trust, update or skill-trigger behavior. No official catalog submission or
+Native Windows install/remove, temporary trust and moving-branch update evidence
+is recorded in [current readiness](../docs/publication/marketplace-readiness-2026-10-11.md).
+It does not prove native hook delivery or skill-trigger behavior. No official catalog submission or
 release tagging is performed here. Follow the
 [publication checklist](../docs/publication/grok-marketplace.md).
 

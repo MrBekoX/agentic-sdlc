@@ -88,7 +88,8 @@ installer or skill-trigger proof. No fresh model eval batch was run.
 
 Record the final source commit, archive hashes, full gate counts, host names and
 skips in the delivery report. Windows and Linux runs do not establish macOS results.
-CI remains manual while the existing account billing blocker prevents jobs starting.
+CI remains manual. The historical billing failure is not a fresh account check;
+macOS execution was explicitly skipped by the maintainer on 2026-10-11.
 
 Native preparation on 2026-10-10: Claude Code 2.1.296 accepted the clean marketplace
 and plugin manifests with strict validation, without warnings. Grok 1.0.50 accepted
@@ -118,6 +119,14 @@ The filename contract follows [Windows naming rules](https://learn.microsoft.com
 and [Python's reserved-path reference](https://docs.python.org/3/library/os.path.html#os.path.isreserved);
 the implementation also runs on the repository's Python 3.12 floor.
 
+Current [2026-10-11 preparation](marketplace-readiness-2026-10-11.md) adds native
+Kimi authenticated management, Grok directory/Git lifecycle and Codex exact-hash
+trust plus startup event delivery in isolated profiles. No model-backed skill
+evaluation is implied. Grok 1.0.50 local update does not recopy and same-source
+reinstall fails; see its [update instructions](grok-marketplace.md).
+The clean committed-source exporter prepares official Grok/ZCode layouts without
+rewriting the private original repository or claiming future public reachability.
+
 ## Manual publishing steps
 
 1. Review the final diff, local gate and built full/skills-only ZIP identities.
@@ -143,8 +152,9 @@ the implementation also runs on the repository's Python 3.12 floor.
    Official/Curated listing has no documented self-service submission contract;
    obtain the vendor's actual listing requirements before claiming readiness there.
 
-No directory submission, tagging, external publication, trust mutation or merge is
-performed by this preparation. Native clean install/update and live behavior must
+No directory submission, tagging, external publication or source merge is
+performed by this preparation. Authorized trust was confined to temporary profiles.
+Native clean install/update and live behavior must
 be checked on each intended runtime/version before a broader release claim.
 
 ## Official sources (checked 2026-10-10)

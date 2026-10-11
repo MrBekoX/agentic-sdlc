@@ -20,6 +20,30 @@ Each entry includes:
 
 ---
 
+## 2026-10-11 — Containment checks must cover actual Git roots and internal junctions
+
+- **Date:** 2026-10-11
+- **Task / context:** Review committed-source marketplace staging and its Windows verifier.
+- **Symptom:** A nested source-root operand weakened destination policy, and an internal NTFS junction to an external matching tree still verified successfully.
+- **Root cause:** Git resolves the complete repository from a nested cwd; Windows junctions are not reported by `is_symlink()`, and `os.walk(..., followlinks=False)` alone did not prevent traversal.
+- **Correct fix:** Bind source-root admission to Git's actual repository root. Reject symlinks and junctions at output admission and within verification, pruning aliased directories before traversal.
+- **Preventive rule / automated check:** Derive containment from the real resource root and check aliases at every traversal boundary. Keep a native Windows junction regression rather than assuming a POSIX symlink test covers it.
+- **Related files & tests:** `scripts/prepare_marketplace_release.py`; `tests/test_marketplace_release.py` (`test_nested_source_root_cannot_bypass_destination_policy`, `test_verify_rejects_internal_junction`).
+
+---
+
+## 2026-10-11 — Compare installed Git bytes with committed fixture bytes
+
+- **Date:** 2026-10-11
+- **Task / context:** Native offline Grok install/update verification on Windows.
+- **Symptom:** The installed marker hash differed from the fixture worktree although the native Git install succeeded.
+- **Root cause:** Python text writing produced CRLF, while the copied `.gitattributes` made Git store/check out LF. The test compared different representations and misidentified a fixture mismatch as an installer defect.
+- **Correct fix:** Write generated markers as explicit LF bytes and compare installed files with the committed Git blobs; verify both installed marker and HEAD after update.
+- **Preventive rule / automated check:** For Git-source lifecycle checks, establish the expected bytes at the committed-source boundary, rather than assuming worktree newline policy. Observe bytes and revision together.
+- **Related files & tests:** `tests/test_native_distribution_lifecycle.py` (`OptionalNativeLifecycleTests.test_grok_local_and_file_git_lifecycle_preserves_other_settings`).
+
+---
+
 ## 2026-10-10 — Portable ZIP names must survive extraction without sanitization
 
 - **Date:** 2026-10-10

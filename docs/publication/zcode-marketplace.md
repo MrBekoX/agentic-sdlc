@@ -29,14 +29,19 @@ requirements fetched on 2026-09-19
 
 1. **Layout**: the official marketplace requires each plugin to live in a unique
    kebab-case directory under `plugins/` of that repository. This repo is a plugin
-   root itself, so the PR would copy/package the plugin into that layout (or the
-   entry's `source` would point at this repository, if accepted).
+   root itself, so the PR copies the prepared plugin into that layout. The current
+   official validator requires the exact local source `./plugins/agentic-sdlc`;
+   it does not accept a remote repository source as an alternative.
 2. **Validation scripts**: `python3 scripts/validate.py` and
    `python3 scripts/build_dist.py` are maintainer scripts in the official repository;
-   they have not been run against this plugin and no result is claimed.
+   they are pinned and run in a separate local single-plugin fixture. Their
+   actual outputs and identities are in [current preparation](marketplace-readiness-2026-10-11.md).
+   Fixture validation does not publish their generated CDN URLs.
 3. **User-facing README pair at the plugin root**: the official requirements ask for
    equivalent `README.md` and `README_CN.md` user-facing files; the prepared pair
-   lives under `.zcode-plugin/` and may need to move or duplicate per the PR review.
+   lives under `.zcode-plugin/`. The staging helper produces an equivalent root
+   English/Chinese pair with rebased links, prerequisites, hook side effects and
+   third-party attribution; original source READMEs remain separate.
 4. **Category check**: `developer-tools` is one of the supported categories
    (`developer-tools`, `productivity`, `utilities`, `finance`, `guides`, `template`,
    `other`); the official listing pipeline may still normalize or reject it.
@@ -45,7 +50,10 @@ requirements fetched on 2026-09-19
    plugin manifest and the official marketplace entry.
 6. **Live evidence**: the contribution guide asks contributors to exercise the
    plugin's main behavior in ZCode and document reproducible steps; no such official
-   -marketplace run is recorded yet.
+   -marketplace run is recorded yet. The signed desktop 3.14.5 bundle's agent CLI
+   0.16.9 now has isolated native validate/install/versioned-update/uninstall and
+   component discovery evidence. Desktop GUI, hook execution and live model
+   behavior remain separate boundaries.
 7. **Third-party assets/licenses**: the README must identify bundled third-party
    assets and their licenses; the acknowledgement of obra/superpowers in the
    repository `README.md` would need to be surfaced in the plugin README pair.

@@ -6,6 +6,11 @@ The 2026-10-06 preparation fixes public hook removal and packaged instruction/he
 
 ## Current multi-platform preparation
 
+The [2026-10-11 preparation record](publication/marketplace-readiness-2026-10-11.md)
+separates committed source, producer projections, official-tool fixtures and
+native lifecycle/event evidence from external publisher and review gates.
+macOS was skipped at the maintainer's request. No publication occurred.
+
 Kimi, ZCode and Grok are now included in the installation/portability candidate alongside Claude and Codex. The candidate artifacts, supported channels, update methods, official references and unverified native checks are in [multi-platform distribution](publication/multi-platform-distribution.md). This does not change the historical ledger below or approve publication.
 
 ## Supported Release Scope (historical 0.4.3 verdict)
