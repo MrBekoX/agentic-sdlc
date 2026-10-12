@@ -10,5 +10,11 @@
     "checked_at": "2026-10-12T11:07:53Z",
     "http_status": 200,
     "auth": "none"
+  },
+  {
+    "url": "https://github.com/MrBekoX/agentic-sdlc/blob/main/docs/data-handling.md",
+    "checked_at": "2026-10-12T13:35:36Z",
+    "http_status": 200,
+    "auth": "none"
   }
 ]
