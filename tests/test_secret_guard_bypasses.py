@@ -166,7 +166,9 @@ class TestPlaceholderFilterOnVendorTokens(unittest.TestCase):
     def test_published_doc_samples_stay_suppressed(self):
         # CONTROL: the canonical vendor documentation keys appear in countless READMEs. They are
         # suppressed by an EXACT-value allowlist, which cannot suppress a class the way the old
-        # substring rule did.
+        # substring rule did. The Google value is Google Cloud's own documented example key (see
+        # DOC_SAMPLES in hooks/secret-patterns.mjs), so GitHub secret scanning alert #1 on this
+        # line is a known false positive.
         for label, line in {
             "aws-docs": "KEY = " + "AKIA" + "IOSFODNN7EXAMPLE",
             "google-docs": "KEY = " + "AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe",
