@@ -4,8 +4,9 @@ name: Native lifecycle (macOS)
 # push or pull request. It builds the release package from the checked-out commit, installs the
 # pinned plugin-managing CLIs, and runs scripts/check_native_lifecycle.py: every platform installs,
 # discovers, refreshes and uninstalls the package in a disposable profile through its own plugin
-# manager. Plugin-management subcommands only - no model prompt, no login, no credentials. The
-# result lines feed the macOS column of docs/publication/compatibility-matrix.md.
+# manager. A final step does the same for ZCode through its desktop bundle's agent CLI.
+# Plugin-management subcommands only - no model prompt, no login, no credentials. The result lines
+# feed the macOS column of docs/publication/compatibility-matrix.md.
 on:
   workflow_dispatch:
 
@@ -53,3 +54,23 @@ jobs:
           claude --version; codex --version; kimi --version; grok --version
           python3 scripts/check_native_lifecycle.py --package "$RUNNER_TEMP/package" --platform all \
             --require claude --require codex --require grok --require kimi
+      # ZCode documents no headless installer, so the checker reports it not-run. The desktop app's
+      # bundled agent CLI manages plugins when the app binary runs in Electron's Node mode; the DMG
+      # from ZCode's official download page is mounted read-only (nothing is installed), its code
+      # signature must verify, and .github/scripts/zcode_agent_lifecycle.mjs drives install, update
+      # and uninstall with every home, data and provider path isolated - no GUI, login or model turn.
+      - name: ZCode desktop bundle - native install, update and uninstall
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zcode.dmg" \
+            https://cdn-zcode.z.ai/zcode/electron/releases/3.14.5/macos-arm64/ZCode-3.14.5-mac-arm64.dmg
+          shasum -a 256 "$RUNNER_TEMP/zcode.dmg"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/zcode-mount" "$RUNNER_TEMP/zcode.dmg"
+          app=$(find "$RUNNER_TEMP/zcode-mount" -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$app"
+          codesign --verify --deep --strict "$app"
+          codesign -dv --verbose=2 "$app" 2>&1 | grep -E '^(Authority|TeamIdentifier)='
+          exe="$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+          node .github/scripts/zcode_agent_lifecycle.mjs --exe "$exe" --resources "$app/Contents/Resources" \
+            --package "$RUNNER_TEMP/package" --receipt "$RUNNER_TEMP/zcode-receipt.json"
+          hdiutil detach "$RUNNER_TEMP/zcode-mount"
