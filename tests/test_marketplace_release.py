@@ -56,7 +56,10 @@ class TestMarketplacePreparation(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.base = Path(self.tmp.name)
+        # Canonical temp path: macOS TMPDIR sits under the /var -> /private/var symlink, which the
+        # destination check rejects by design, and Windows runners hand out 8.3 short names
+        # (RUNNER~1) that the script's resolve() expands, so path comparisons would miss.
+        self.base = Path(self.tmp.name).resolve()
         self.output = self.base / "reviewed publication packet"
 
     def module(self):

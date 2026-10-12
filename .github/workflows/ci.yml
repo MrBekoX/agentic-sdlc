@@ -1,25 +1,11 @@
 name: CI
 
-# TEMPORARY - automatic triggers are off while GitHub Actions cannot run on this account.
-#
-# Every run currently fails in about two seconds with zero steps and no logs. GitHub's own
-# annotation on the check run says why: "The job was not started because recent account
-# payments have failed or your spending limit needs to be increased." Nothing in this
-# repository is failing - the jobs never start - but each push and each pull-request update
-# still sends a failure notification, which trains people to ignore the one signal that is
-# supposed to mean something.
-#
-# TO RESTORE, once Billing & plans is sorted: delete the `workflow_dispatch:` line and restore
-# the two triggers below it. That is the whole change.
-#
-#   on:
-#     push:
-#       branches: [main]
-#     pull_request:
-#
-# `workflow_dispatch` keeps the workflow runnable by hand, so the gate can be exercised
-# deliberately the moment billing is fixed - without waiting for the next push to find out.
+# Runs on every pull request and on pushes to main; a push to another branch gets CI once a pull
+# request exists for it. `workflow_dispatch` keeps a manual run available.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
