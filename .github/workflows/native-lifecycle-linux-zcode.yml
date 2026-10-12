@@ -1,0 +1,58 @@
+name: Native lifecycle (ZCode on Linux)
+
+# Manual only. ZCode documents no headless installer, so scripts/check_native_lifecycle.py reports it
+# not-run; this job drives the agent CLI bundled with the official ZCode Linux AppImage instead. The
+# AppImage is unpacked, never installed; the app binary runs in Electron's Node mode and
+# .github/scripts/zcode_agent_lifecycle.mjs performs validate, marketplace add, install, update and
+# uninstall with every home, data and provider path isolated - no GUI, no login, no model prompt.
+# The result line feeds the Linux ZCode cell of docs/publication/compatibility-matrix.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  zcode-linux:
+    # Pinned: the apt package names below (t64 suffixes) are those of Ubuntu 24.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # Same pins as ci.yml; Dependabot keeps the SHA and the version comment current.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Build and verify the release package
+        shell: bash
+        run: |
+          python3 scripts/build_release.py --output "$RUNNER_TEMP/full.zip"
+          python3 scripts/build_release.py --verify "$RUNNER_TEMP/full.zip"
+          python3 -m zipfile -e "$RUNNER_TEMP/full.zip" "$RUNNER_TEMP/package"
+      # The Electron binary links the Chromium runtime libraries even in Node mode.
+      - name: Install the Electron runtime libraries
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libnspr4 libnss3 libgbm1 libasound2t64 libgtk-3-0t64
+      - name: ZCode AppImage - native install, update and uninstall
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o zcode.AppImage \
+            https://cdn-zcode.z.ai/zcode/electron/releases/3.14.5/linux-x64/ZCode-3.14.5-linux-x64.AppImage
+          sha256sum zcode.AppImage
+          chmod +x zcode.AppImage
+          ./zcode.AppImage --appimage-extract > /dev/null
+          exe="$RUNNER_TEMP/squashfs-root/zcode"
+          test -x "$exe"
+          missing=$(ldd "$exe" | grep 'not found' || true)
+          if [ -n "$missing" ]; then echo "$missing"; exit 1; fi
+          node "$GITHUB_WORKSPACE/.github/scripts/zcode_agent_lifecycle.mjs" --exe "$exe" \
+            --resources "$RUNNER_TEMP/squashfs-root/resources" --package "$RUNNER_TEMP/package" \
+            --receipt "$RUNNER_TEMP/zcode-receipt.json"
