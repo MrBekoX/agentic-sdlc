@@ -11,8 +11,10 @@ with `python3 scripts/check_native_lifecycle.py --package <extracted-package-dir
 All evidence below binds to one candidate package built from commit `02de556` of the
 `fix/cross-platform-native-distribution` branch on 2026-10-12 (full archive sha256
 `384c883c27f546ba62a7e95e9ba061a25a64089ebdaddb57e0c3b168edad3cfd`, archive verify and portability
-check passed); later commits change only documentation and the manual macOS workflow. Linux rows ran `scripts/check_native_lifecycle.py`; the ZCode row drove the
-desktop bundle's agent CLI through a Node harness (E9); the Windows test host has no
+check passed); later commits change only documentation and CI workflows. The macOS rows (E10–E13)
+built their package on the runner from main `9bc884b`, whose files differ from `02de556` only in
+documentation and CI workflows. Linux and macOS rows ran `scripts/check_native_lifecycle.py`; the
+ZCode row drove the desktop bundle's agent CLI through a Node harness (E9); the Windows test host has no
 Python, so its rows ran a shell harness that drives the Windows CLIs with the same isolation and
 lifecycle steps (install, discovery, version-bumped refresh, uninstall, unrelated settings kept),
 but its checks are lighter: it sees the refresh through a marker appended to one skill file, where
@@ -38,11 +40,11 @@ publication.
 
 | Platform | Windows | Linux | macOS |
 |---|---|---|---|
-| Claude Code | passed (E1, 2026-10-12, 2.1.296) | passed (E5, 2026-10-12, 2.1.282) | not-run: no local macOS host; pending the manual macOS workflow (`.github/workflows/native-lifecycle-macos.yml`) |
-| Codex | passed (E2, 2026-10-12, codex-cli 0.162.1) | passed (E6, 2026-10-12, codex-cli 0.156.1) | not-run: no local macOS host; pending the manual macOS workflow (`.github/workflows/native-lifecycle-macos.yml`) |
-| Kimi Code | passed (E4, 2026-10-12, 2.1.1) | passed (E7, 2026-10-12, 2.1.1) | not-run: no local macOS host; pending the manual macOS workflow (`.github/workflows/native-lifecycle-macos.yml`) |
-| Grok CLI | passed (E3, 2026-10-12, 1.0.50) | passed (E8, 2026-10-12, 1.0.50) | not-run: no local macOS host; pending the manual macOS workflow (`.github/workflows/native-lifecycle-macos.yml`) |
-| ZCode | passed (E9, 2026-10-12, agent CLI 0.16.9) | not-run: no ZCode build on the Linux test host | not-run: no local macOS host; pending the manual macOS workflow (`.github/workflows/native-lifecycle-macos.yml`) |
+| Claude Code | passed (E1, 2026-10-12, 2.1.296) | passed (E5, 2026-10-12, 2.1.282) | passed (E10, 2026-10-12, 2.1.293) |
+| Codex | passed (E2, 2026-10-12, codex-cli 0.162.1) | passed (E6, 2026-10-12, codex-cli 0.156.1) | passed (E11, 2026-10-12, codex-cli 0.162.1) |
+| Kimi Code | passed (E4, 2026-10-12, 2.1.1) | passed (E7, 2026-10-12, 2.1.1) | passed (E12, 2026-10-12, 2.1.1) |
+| Grok CLI | passed (E3, 2026-10-12, 1.0.50) | passed (E8, 2026-10-12, 1.0.50) | passed (E13, 2026-10-12, 1.0.50) |
+| ZCode | passed (E9, 2026-10-12, agent CLI 0.16.9) | not-run: no ZCode build on the Linux test host | not-run: the GitHub-hosted macOS runner has no ZCode desktop bundle, and the checker has no ZCode recipe |
 
 ## Evidence log
 
@@ -57,3 +59,7 @@ publication.
 | E7 | 2026-10-12 | Kimi Code | Linux | 2.1.1 | native_kimi via `scripts/check_native_lifecycle.py --platform kimi --require kimi` (WSL Ubuntu 24.04, CLI from the official `code.kimi.com` installer into a separate folder): isolated KIMI_CODE_HOME, local `kimi web` REST API with its bearer token, 16 skills / 1 command discovered, refresh bytes and version observed, record removed, sentinel kept, no server left running | native_kimi=passed |
 | E8 | 2026-10-12 | Grok CLI | Linux | 1.0.50 | native_grok via `scripts/check_native_lifecycle.py --platform grok --require grok` (WSL Ubuntu 24.04, CLI from the official `x.ai/cli` installer into a separate folder): isolated GROK_HOME, `grok plugin install --trust`, `grok inspect --json` lists 17 plugin skills, uninstall + reinstall refresh observed, record removed, sentinel kept | native_grok=passed |
 | E9 | 2026-10-12 | ZCode | Windows | agent CLI 0.16.9 | native_zcode via a Node harness (the checker has no ZCode recipe; same steps as the 2026-10-11 run on `3bcbf7b`): the signed ZCode desktop 3.14.5 installer (Authenticode valid, Zhipu AI) unpacked without installing, its bundled agent CLI run in Electron's Node mode with every home, data and provider path isolated; `plugins validate`, marketplace add of the root `marketplace.json`, install (enabled, user scope, 16 skills, 5 hook declarations), version-bumped update to 0.4.4 with refreshed bytes, uninstall refused without confirmation then removes the record, unrelated plugin and settings kept, the host's real ZCode settings and plugin records unchanged; no GUI, login or model turn | native_zcode=passed |
+| E10 | 2026-10-12 | Claude Code | macOS | 2.1.293 | native_claude via `.github/workflows/native-lifecycle-macos.yml` (run 38212231146, GitHub-hosted macos-26-arm64, CLI from npm): package built and verified on the runner, `scripts/check_native_lifecycle.py --platform all --require claude`: isolated install, 17 skills discovered, version-bumped refresh observed, uninstall, sentinel kept | native_claude=passed |
+| E11 | 2026-10-12 | Codex | macOS | codex-cli 0.162.1 | native_codex in the same run (CLI from npm): isolated personal-catalog install, app-server `skills/list` reports 17 plugin skills, recopy of the bumped source observed, remove, sentinel kept | native_codex=passed |
+| E12 | 2026-10-12 | Kimi Code | macOS | 2.1.1 | native_kimi in the same run (CLI from the official `code.kimi.com` installer, sha256 checked, no shell-profile edit): isolated KIMI_CODE_HOME, local `kimi web` REST API, 16 skills / 1 command discovered, refresh observed, record removed, sentinel kept | native_kimi=passed |
+| E13 | 2026-10-12 | Grok CLI | macOS | 1.0.50 | native_grok in the same run (CLI from the official `x.ai/cli` installer, no shell-profile edit): isolated GROK_HOME, `grok plugin install --trust`, `grok inspect --json` lists 17 plugin skills, uninstall + reinstall refresh observed, record removed, sentinel kept | native_grok=passed |
