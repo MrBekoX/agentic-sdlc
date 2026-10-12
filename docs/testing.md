@@ -56,9 +56,7 @@ Use live evals for those claims.
 
 ## Automation / CI policy
 
-> **Automatic CI is OFF right now.** `.github/workflows/ci.yml` is temporarily set to `workflow_dispatch` only, because GitHub Actions cannot start jobs on this account - every run failed in about two seconds with zero steps, and GitHub's annotation on the check run reads *"The job was not started because recent account payments have failed or your spending limit needs to be increased."* Nothing in this repository was failing; the jobs never started. Restoring the triggers is a two-line edit described in the workflow file itself. **Until then the four-command local gate is the only gate**, so run it in full before claiming the repo is healthy.
-
-When the triggers are restored, `.github/workflows/ci.yml` runs on `pull_request`, and on `push` **only to `main`**, across `ubuntu-latest`, `windows-latest` and `macos-latest`. The macOS entry is preparation until a job result is recorded. A push to a feature branch therefore gets no CI until a pull request exists for it — open the PR early if you want the matrix to run. The source steps run:
+`.github/workflows/ci.yml` runs on `pull_request`, and on `push` **only to `main`** (`workflow_dispatch` also allows a manual run), across `ubuntu-latest`, `windows-latest` and `macos-latest`. The macOS entry is preparation until a job result is recorded. A push to a feature branch therefore gets no CI until a pull request exists for it — open the PR early if you want the matrix to run. The source steps run:
 
 ```bash
 python3 scripts/bump_version.py --release-check

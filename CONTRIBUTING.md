@@ -14,9 +14,9 @@ python3 scripts/bump_version.py --check
 ```
 
 On Windows, use `py -3` in place of `python3` when `python3` is missing or is the Microsoft Store
-alias. `.github/workflows/ci.yml` runs the same deterministic gate on Windows, Linux and macOS, but
-it is currently started by hand (`workflow_dispatch`) and does not run on pushes or pull requests,
-so attach local gate output to the PR, and name the OS when a failure is platform-specific.
+alias. `.github/workflows/ci.yml` runs the same deterministic gate on Windows, Linux and macOS for every
+pull request and every push to `main`; still attach local gate output to the PR, and name the OS
+when a failure is platform-specific.
 
 ## Rules
 
