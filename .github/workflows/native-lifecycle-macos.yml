@@ -1,0 +1,55 @@
+name: Native lifecycle (macOS)
+
+# Manual only: it installs four vendor CLIs and spends macOS runner minutes, so it never runs on a
+# push or pull request. It builds the release package from the checked-out commit, installs the
+# pinned plugin-managing CLIs, and runs scripts/check_native_lifecycle.py: every platform installs,
+# discovers, refreshes and uninstalls the package in a disposable profile through its own plugin
+# manager. Plugin-management subcommands only - no model prompt, no login, no credentials. The
+# result lines feed the macOS column of docs/publication/compatibility-matrix.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-lifecycle:
+    runs-on: macos-latest
+    # A hung vendor CLI is killed by the checker's own per-step timeout; this caps the whole job.
+    timeout-minutes: 30
+    steps:
+      # Same pins as ci.yml; Dependabot keeps the SHA and the version comment current.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Build and verify the release package
+        shell: bash
+        run: |
+          python3 scripts/build_release.py --output "$RUNNER_TEMP/full.zip"
+          python3 scripts/build_release.py --verify "$RUNNER_TEMP/full.zip"
+          python3 -m zipfile -e "$RUNNER_TEMP/full.zip" "$RUNNER_TEMP/package"
+      # Versions match the Windows/Linux evidence rows. Each vendor installer is fetched to a file
+      # first (not piped into a shell) and told not to edit shell profiles; Kimi's installer checks
+      # the binary's sha256, Grok's runs the downloaded binary's --version before linking it.
+      - name: Install the pinned plugin-managing CLIs
+        shell: bash
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.293 @openai/codex@0.162.1
+          curl -fsSL -o "$RUNNER_TEMP/kimi-install.sh" https://code.kimi.com/kimi-code/install.sh
+          KIMI_NO_MODIFY_PATH=1 bash "$RUNNER_TEMP/kimi-install.sh" --version 2.1.1
+          curl -fsSL -o "$RUNNER_TEMP/grok-install.sh" https://x.ai/cli/install.sh
+          SHELL=/bin/sh bash "$RUNNER_TEMP/grok-install.sh" 1.0.50
+          echo "$HOME/.kimi-code/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.grok/bin" >> "$GITHUB_PATH"
+      - name: Native install, refresh and uninstall on every platform
+        shell: bash
+        run: |
+          claude --version; codex --version; kimi --version; grok --version
+          python3 scripts/check_native_lifecycle.py --package "$RUNNER_TEMP/package" --platform all \
+            --require claude --require codex --require grok --require kimi

@@ -11,7 +11,8 @@ with `python3 scripts/check_native_lifecycle.py --package <extracted-package-dir
 All evidence below binds to one candidate package built from commit `02de556` of the
 `fix/cross-platform-native-distribution` branch on 2026-10-12 (full archive sha256
 `384c883c27f546ba62a7e95e9ba061a25a64089ebdaddb57e0c3b168edad3cfd`, archive verify and portability
-check passed); later commits change documentation only. Linux rows ran `scripts/check_native_lifecycle.py`; the Windows test host has no
+check passed); later commits change only documentation and the manual macOS workflow. Linux rows ran `scripts/check_native_lifecycle.py`; the ZCode row drove the
+desktop bundle's agent CLI through a Node harness (E9); the Windows test host has no
 Python, so its rows ran a shell harness that drives the Windows CLIs with the same isolation and
 lifecycle steps (install, discovery, version-bumped refresh, uninstall, unrelated settings kept),
 but its checks are lighter: it sees the refresh through a marker appended to one skill file, where
@@ -37,11 +38,11 @@ publication.
 
 | Platform | Windows | Linux | macOS |
 |---|---|---|---|
-| Claude Code | passed (E1, 2026-10-12, 2.1.296) | passed (E5, 2026-10-12, 2.1.282) | not-run: no macOS host; macOS was skipped at the maintainer's request on 2026-10-11 |
-| Codex | passed (E2, 2026-10-12, codex-cli 0.162.1) | passed (E6, 2026-10-12, codex-cli 0.156.1) | not-run: no macOS host; macOS was skipped at the maintainer's request on 2026-10-11 |
-| Kimi Code | passed (E4, 2026-10-12, 2.1.1) | passed (E7, 2026-10-12, 2.1.1) | not-run: no macOS host; macOS was skipped at the maintainer's request on 2026-10-11 |
-| Grok CLI | passed (E3, 2026-10-12, 1.0.50) | passed (E8, 2026-10-12, 1.0.50) | not-run: no macOS host; macOS was skipped at the maintainer's request on 2026-10-11 |
-| ZCode | not-run: the checker has no ZCode recipe and this candidate was not installed in ZCode; the desktop bundle's agent CLI 0.16.9 passed isolated validate/install/update/uninstall on base commit `3bcbf7b` on 2026-10-11 ([readiness ledger](marketplace-readiness-2026-10-11.md)) | not-run: no ZCode build on the Linux test host | not-run: no macOS host; macOS was skipped at the maintainer's request on 2026-10-11 |
+| Claude Code | passed (E1, 2026-10-12, 2.1.296) | passed (E5, 2026-10-12, 2.1.282) | not-run: no local macOS host; pending the manual macOS workflow (`.github/workflows/native-lifecycle-macos.yml`) |
+| Codex | passed (E2, 2026-10-12, codex-cli 0.162.1) | passed (E6, 2026-10-12, codex-cli 0.156.1) | not-run: no local macOS host; pending the manual macOS workflow (`.github/workflows/native-lifecycle-macos.yml`) |
+| Kimi Code | passed (E4, 2026-10-12, 2.1.1) | passed (E7, 2026-10-12, 2.1.1) | not-run: no local macOS host; pending the manual macOS workflow (`.github/workflows/native-lifecycle-macos.yml`) |
+| Grok CLI | passed (E3, 2026-10-12, 1.0.50) | passed (E8, 2026-10-12, 1.0.50) | not-run: no local macOS host; pending the manual macOS workflow (`.github/workflows/native-lifecycle-macos.yml`) |
+| ZCode | passed (E9, 2026-10-12, agent CLI 0.16.9) | not-run: no ZCode build on the Linux test host | not-run: no local macOS host; pending the manual macOS workflow (`.github/workflows/native-lifecycle-macos.yml`) |
 
 ## Evidence log
 
@@ -55,3 +56,4 @@ publication.
 | E6 | 2026-10-12 | Codex | Linux | codex-cli 0.156.1 | native_codex via `scripts/check_native_lifecycle.py --platform all` (WSL Ubuntu 24.04): isolated local catalog install, app-server `skills/list` reports 17 plugin skills, recopy of the bumped source observed, remove, sentinel kept | native_codex=passed |
 | E7 | 2026-10-12 | Kimi Code | Linux | 2.1.1 | native_kimi via `scripts/check_native_lifecycle.py --platform kimi --require kimi` (WSL Ubuntu 24.04, CLI from the official `code.kimi.com` installer into a separate folder): isolated KIMI_CODE_HOME, local `kimi web` REST API with its bearer token, 16 skills / 1 command discovered, refresh bytes and version observed, record removed, sentinel kept, no server left running | native_kimi=passed |
 | E8 | 2026-10-12 | Grok CLI | Linux | 1.0.50 | native_grok via `scripts/check_native_lifecycle.py --platform grok --require grok` (WSL Ubuntu 24.04, CLI from the official `x.ai/cli` installer into a separate folder): isolated GROK_HOME, `grok plugin install --trust`, `grok inspect --json` lists 17 plugin skills, uninstall + reinstall refresh observed, record removed, sentinel kept | native_grok=passed |
+| E9 | 2026-10-12 | ZCode | Windows | agent CLI 0.16.9 | native_zcode via a Node harness (the checker has no ZCode recipe; same steps as the 2026-10-11 run on `3bcbf7b`): the signed ZCode desktop 3.14.5 installer (Authenticode valid, Zhipu AI) unpacked without installing, its bundled agent CLI run in Electron's Node mode with every home, data and provider path isolated; `plugins validate`, marketplace add of the root `marketplace.json`, install (enabled, user scope, 16 skills, 5 hook declarations), version-bumped update to 0.4.4 with refreshed bytes, uninstall refused without confirmation then removes the record, unrelated plugin and settings kept, the host's real ZCode settings and plugin records unchanged; no GUI, login or model turn | native_zcode=passed |
