@@ -11,10 +11,10 @@ with `python3 scripts/check_native_lifecycle.py --package <extracted-package-dir
 All evidence below binds to one candidate package built from commit `02de556` of the
 `fix/cross-platform-native-distribution` branch on 2026-10-12 (full archive sha256
 `384c883c27f546ba62a7e95e9ba061a25a64089ebdaddb57e0c3b168edad3cfd`, archive verify and portability
-check passed); later commits change only documentation and CI files. The macOS rows built their
-package on the runner from main `9bc884b` (E10–E13) and `64d6744` (E14), whose files differ from
-`02de556` only in documentation and CI files. Linux and macOS rows ran `scripts/check_native_lifecycle.py`; the
-ZCode rows drove the desktop bundle's agent CLI with `.github/scripts/zcode_agent_lifecycle.mjs` (E9, E14); the Windows test host has no
+check passed); later commits change only documentation and CI files. The GitHub-hosted rows built
+their package on the runner from main `9bc884b` (E10–E13), `64d6744` (E14) and `df3cd91` (E15),
+whose files differ from `02de556` only in documentation and CI files. Linux and macOS rows ran `scripts/check_native_lifecycle.py`; the
+ZCode rows drove the desktop bundle's agent CLI with `.github/scripts/zcode_agent_lifecycle.mjs` (E9, E14, E15); the Windows test host has no
 Python, so its rows ran a shell harness that drives the Windows CLIs with the same isolation and
 lifecycle steps (install, discovery, version-bumped refresh, uninstall, unrelated settings kept),
 but its checks are lighter: it sees the refresh through a marker appended to one skill file, where
@@ -44,7 +44,7 @@ publication.
 | Codex | passed (E2, 2026-10-12, codex-cli 0.162.1) | passed (E6, 2026-10-12, codex-cli 0.156.1) | passed (E11, 2026-10-12, codex-cli 0.162.1) |
 | Kimi Code | passed (E4, 2026-10-12, 2.1.1) | passed (E7, 2026-10-12, 2.1.1) | passed (E12, 2026-10-12, 2.1.1) |
 | Grok CLI | passed (E3, 2026-10-12, 1.0.50) | passed (E8, 2026-10-12, 1.0.50) | passed (E13, 2026-10-12, 1.0.50) |
-| ZCode | passed (E9, 2026-10-12, agent CLI 0.16.9) | not-run: not tested at the maintainer's request (ZCode publishes an official x64 AppImage) | passed (E14, 2026-10-12, agent CLI 0.16.9) |
+| ZCode | passed (E9, 2026-10-12, agent CLI 0.16.9) | passed (E15, 2026-10-12, agent CLI 0.16.9) | passed (E14, 2026-10-12, agent CLI 0.16.9) |
 
 ## Evidence log
 
@@ -64,3 +64,4 @@ publication.
 | E12 | 2026-10-12 | Kimi Code | macOS | 2.1.1 | native_kimi in the same run (CLI from the official `code.kimi.com` installer, sha256 checked, no shell-profile edit): isolated KIMI_CODE_HOME, local `kimi web` REST API, 16 skills / 1 command discovered, refresh observed, record removed, sentinel kept | native_kimi=passed |
 | E13 | 2026-10-12 | Grok CLI | macOS | 1.0.50 | native_grok in the same run (CLI from the official `x.ai/cli` installer, no shell-profile edit): isolated GROK_HOME, `grok plugin install --trust`, `grok inspect --json` lists 17 plugin skills, uninstall + reinstall refresh observed, record removed, sentinel kept | native_grok=passed |
 | E14 | 2026-10-12 | ZCode | macOS | agent CLI 0.16.9 | native_zcode via `.github/workflows/native-lifecycle-macos.yml` (run 38212983263, GitHub-hosted macos-26-arm64): the official ZCode 3.14.5 Apple Silicon DMG mounted read-only (sha256 `7e46b70165fe83fe2df6e5154da1982b50660ff4ff250cdb4b778e4f25c97d94`), `codesign --verify --deep --strict` passed (Developer ID Application: Beijing Knowledge Atlas Technology Joint Stock Company Limited, team 8A5X4JJ39T), then `.github/scripts/zcode_agent_lifecycle.mjs` with the app binary in Electron's Node mode and every home, data and provider path isolated: validate, marketplace add, install (16 skills, 5 hook declarations), version-bumped update with refreshed bytes, confirmed uninstall, unrelated plugin and settings kept; no GUI, login or model turn. The same run re-passed Claude Code, Codex, Kimi and Grok | native_zcode=passed |
+| E15 | 2026-10-12 | ZCode | Linux | agent CLI 0.16.9 | native_zcode via `.github/workflows/native-lifecycle-linux-zcode.yml` (run 38214023508, GitHub-hosted ubuntu-24.04): Electron runtime libraries installed with apt on the runner, the official ZCode 3.14.5 x64 AppImage (sha256 `5cfa481c1e98eef85c4ef3e05639deb144de68c89e1a845b5cf19126f49eed07`, the same bytes a local download produced) unpacked with `--appimage-extract` without installing, no library missing per `ldd`, then `.github/scripts/zcode_agent_lifecycle.mjs` with every home, data and provider path isolated: validate, marketplace add, install (16 skills, 5 hook declarations), version-bumped update with refreshed bytes, confirmed uninstall, unrelated plugin and settings kept; no GUI, login or model turn | native_zcode=passed |
