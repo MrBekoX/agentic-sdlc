@@ -28,7 +28,7 @@ DMG）和 Linux（x64 AppImage）版本。
 4. 开启新会话（或重新加载），使技能、命令与 Hook 被发现。
 
 没有本地包目录时，在第 2 步改为将 GitHub 仓库 `MrBekoX/agentic-sdlc`（或其 URL）添加为
-marketplace 源。这需要公开仓库（目前仓库为私有），且尚未经过原生验证。厂商插件页面将
+marketplace 源。仓库自 2026-10-12 起已公开；该方式尚未经过原生验证。厂商插件页面将
 GitHub 仓库列为 marketplace 源（2026-10-08 核对）。如第 2 步所述，ZCode 会先通过
 `.claude-plugin/marketplace.json` 读取该源：插件以 Claude 条目安装，没有 ZCode 的类别、
 标签与翻译。

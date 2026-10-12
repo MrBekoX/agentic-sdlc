@@ -1,6 +1,6 @@
 {
   "name": "mrbekox",
-  "description": "AGENTIC-SDLC — gated spec/plan/TDD/security/review skills. Experimental Grok CLI catalog; its entry installs from the GitHub repository, which needs public or authorized access.",
+  "description": "AGENTIC-SDLC — gated spec/plan/TDD/security/review skills. Experimental Grok CLI catalog; its entry installs from the public GitHub repository.",
   "owner": {
     "name": "Beko",
     "url": "https://github.com/MrBekoX"

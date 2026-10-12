@@ -33,8 +33,8 @@ Windows (x64/ARM64), macOS (Apple Silicon/Intel DMG) and Linux (x64 AppImage).
 4. Start a new session (or reload) so skills, commands, and hooks are discovered.
 
 Without a local package directory, add the GitHub repository `MrBekoX/agentic-sdlc` (or
-its URL) as the marketplace source in step 2. This needs the public repository (it is
-private today) and has not been natively verified. The vendor plugin page lists a GitHub
+its URL) as the marketplace source in step 2. The repository is public since
+2026-10-12; this route has not been natively verified. The vendor plugin page lists a GitHub
 repository as a marketplace source (checked 2026-10-08). ZCode reads that source through
 `.claude-plugin/marketplace.json` first, as step 2 describes: the plugin installs with the
 Claude entry, without the ZCode category, tags and translations.

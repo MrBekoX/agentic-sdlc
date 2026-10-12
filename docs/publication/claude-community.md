@@ -10,7 +10,7 @@ This packet prepares an `agentic-sdlc` submission to the Anthropic plugin direct
 | Display name | `Agentic SDLC` (copied from `.claude-plugin/plugin.json`) |
 | Description | "Claude Code skill library for gated spec, plan, TDD, security, and review workflows" (copied from `.claude-plugin/plugin.json`) |
 | Product description | A local development plugin for Claude Code and Codex that packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents and workflows: a router picks the smallest sufficient skill, and a gated pipeline covers end-to-end or high-risk work. |
-| Support channel | Repository issues on `MrBekoX/agentic-sdlc`, plus the reporting path in `SECURITY.md`. Both are GAP while the repository is private: its unauthenticated URL returns 404 in `docs/publication/link-checks.json`. |
+| Support channel | Repository issues on `MrBekoX/agentic-sdlc`, plus the reporting path in `SECURITY.md`. The repository is public since 2026-10-12 (unauthenticated URL 200 in `docs/publication/link-checks.json`) and issues are enabled; GitHub private vulnerability reporting is disabled (2026-10-12). |
 | Source and package identity | Plugin `agentic-sdlc`, marketplace `mrbekox`, install id `agentic-sdlc@mrbekox`. The release commit and archive hash are bound to the ledger rows `archive_verify` and `clean_package_native_validation` in [`../release-evidence-0.5.0.md`](../release-evidence-0.5.0.md); read their state there. |
 | Evidence links | Ledger rows `clean_package_native_validation`, `archive_verify`, `archive_reproducibility`, `claude_routing_eval`, `claude_pipeline_procedure`, `security_report_mechanism`, `submission_cases_group` and `path_verdicts`. |
 
@@ -23,10 +23,10 @@ Sources: the [Anthropic Software Directory Policy](https://support.claude.com/en
 | 1.D | Directory Policy clause 1.D | facts listed, Anthropic decision | The plugin runs locally inside Claude Code; hooks read session transcripts, Git state and working-tree bytes on the user's machine (see Hook data access facts below). |
 | 1.F | Directory Policy clause 1.F | facts listed, Anthropic decision | Hook behavior, trust needs and bounded coverage are documented in `docs/runtime-adapter.md` and `hooks/README.md`. |
 | 3.A | Directory Policy clause 3.A (privacy and data handling disclosure) | GAP | Decision DP10: link `docs/data-handling.md` once it is reachable. It is linked only through a URL whose `docs/publication/link-checks.json` entry records `http_status` 200 with `auth` `none`; no such entry exists today. |
-| 3.B | Directory Policy clause 3.B (verified contact) | GAP | No verified public contact yet; the repository URL returns 404 unauthenticated. |
+| 3.B | Directory Policy clause 3.B (verified contact) | GAP | No verified public contact yet; the repository URL returns 200 unauthenticated since 2026-10-12, but a verified contact is still a maintainer step. |
 | 3.D | Directory Policy clause 3.D (test account) | not needed | No test account is needed: the plugin operates locally and calls no hosted service of its own. |
 | 3.E | Directory Policy clause 3.E (usage examples) | GAP | The 5 positive cases are in `tests/skills/submission/cases.json`; none of them has run live (ledger row `submission_cases_group`, BLOCKED; AC84). |
-| Directory Terms security-report mechanism | A mechanism for reporting security vulnerabilities | GAP | The GitHub private vulnerability reporting API returns 404 while the repository is private. `LICENSE` (MIT) and `SECURITY.md` are unchanged since 5801cb9. |
+| Directory Terms security-report mechanism | A mechanism for reporting security vulnerabilities | GAP | The repository is public since 2026-10-12, but GitHub private vulnerability reporting is disabled (API `enabled=false`, 2026-10-12). `LICENSE` (MIT) and `SECURITY.md` are unchanged since 5801cb9. |
 
 ## Hook data access facts
 

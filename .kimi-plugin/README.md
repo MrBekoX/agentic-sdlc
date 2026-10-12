@@ -41,8 +41,8 @@ repository, `/tree/<ref>`, `/releases/tag/<tag>` and `/commit/<sha>`. A bare
 repository URL selects its latest release, falling back to the default branch.
 Choose a ref that actually contains this candidate's Kimi manifest; an older
 release is not assumed to include it. Remote installation requires source access:
-the repository is private today, so a GitHub URL install needs the public
-repository; private-repository authentication is not verified here.
+the repository is public since 2026-10-12, so a GitHub URL install can reach it;
+that route is not natively verified here.
 
 To browse the prepared custom catalog:
 
