@@ -45,11 +45,11 @@ When `hooks/scan-write.mjs` finds something, it emits its advisory on two channe
 
 ### Working tree
 
-`hooks/worktree-scan.mjs` (Claude Code, `Stop`) runs `git` to read the added lines of `git diff HEAD` for tracked changes, and to list untracked files, gitignored files included. It reads the bytes of those untracked files to scan them for secret-shaped content. It skips vendor and tool-state directories, such as `node_modules` and `.claude`, and caps the scan at 200 files, 256 KiB per file and 4 MiB in total; binary files and files over the per-file cap are skipped. It also flags changed or untracked files whose names mark them as credential files.
+`hooks/worktree-scan.mjs` (Claude Code, `Stop`) runs `git` to read the added lines of the tracked changes against `HEAD` (before the first commit, of the staged and unstaged diffs), and to list untracked files, gitignored files included. It reads the bytes of those untracked files to scan them for secret-shaped content. It skips vendor and tool-state directories, such as `node_modules` and `.claude`, and caps the scan at 200 files, 256 KiB per file and 4 MiB in total; binary files and files over the per-file cap are skipped. It also flags changed or untracked files whose names mark them as credential files.
 
 ## What hooks write
 
-`hooks/worktree-scan.mjs:125-141` writes one per-session deduplication state file under the operating system's temporary directory, at `agentic-sdlc/worktree-scan-<session>.json`, or at the path set in the `AGENTIC_WORKTREE_SCAN_STATE` environment variable. The file holds finding keys only: the first 16 hexadecimal characters of a SHA-256 digest over a finding's pattern label and its location, which is a file path or, for a finding in the tracked diff, the literal `uncommitted change`.
+`hooks/worktree-scan.mjs:183-208` writes one per-session deduplication state file under the operating system's temporary directory, at `agentic-sdlc/worktree-scan-<session>.json`, or at the path set in the `AGENTIC_WORKTREE_SCAN_STATE` environment variable. The file holds finding keys only: the first 16 hexadecimal characters of a SHA-256 digest over a finding's pattern label, its location and the matched line of text. The location is a file path or, for a finding in the tracked diff, the literal `uncommitted change`. The matched line is hashed so that a different secret at the same place counts as new; it is never written to the file itself. The digest is unsalted and truncated, so it is not reversible, but someone who can read the file could confirm a guess of the line; for that reason the folder is created owner-only (mode 0700) and the file mode 0600 on POSIX systems (Windows ignores the mode and keeps the temporary directory per user).
 
 The Claude Stop hooks `hooks/completion-claim-guard.mjs` and `hooks/flow-step-guard.mjs` also read `last_assistant_message` and `background_tasks` from the Stop payload. Shell entries in `background_tasks` can carry command lines. `scripts/run_trigger_eval.py` writes a command shim into the selected project's `.claude/commands/` for the duration of a query when `--plugin-dir` is absent, then removes the file and any directory that run created.
 
@@ -57,7 +57,7 @@ Hooks report their results to the runtime as JSON on standard output.
 
 ## Masking
 
-Hook findings show a pattern label and a location, such as a file path, an added-line number or the commit message (`hooks/scan-commit.mjs`, `hooks/scan-write.mjs`, `hooks/worktree-scan.mjs:144-145`). The matched value is left out of the message.
+Hook findings show a pattern label and a location, such as a file path, an added-line number or the commit message (`hooks/scan-commit.mjs`, `hooks/scan-write.mjs`, `hooks/worktree-scan.mjs:211`). The matched value is left out of the message.
 
 Eval and review artifacts that the helper scripts persist pass through `scripts/sensitive_redaction.py`. It is a fail-closed adapter to `hooks/redact-sensitive.mjs`: it raises an error when `node` is missing or the redactor fails, so unredacted output is not written. Its behavior is covered by `tests/test_sensitive_redaction.py`. The callers are `scripts/run_trigger_eval.py`, `scripts/run_codex_trigger_eval.py`, `scripts/run_routing_eval.py`, `scripts/run_procedure_eval.py`, `scripts/run_glm_trigger_eval.py`, `scripts/review_package.py` and `scripts/task_brief.py`.
 

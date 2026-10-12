@@ -85,34 +85,53 @@ function fenceUntrusted(label, s) {
 const scopeBlock = fenceUntrusted('SCOPE', scopeStr)
 
 // --- Find: one specialist per lens, concurrently ---
+// A lens whose agent returned nothing did NOT look and find nothing: `answered` keeps "no answer"
+// apart from "answered with an empty list", so a missing answer can never read as a clean review.
 phase('Find')
 const perLens = await parallel(cfg.lenses.map((L) => () =>
   agent(
     cfg.find.replace('{lens}', L.key) + scopeBlock,
     { label: `find:${L.key}`, phase: 'Find', schema: FINDINGS, agentType: L.agentType },
-  ).then((r) => (((r && r.findings) || []).map((f) => ({ ...f, lens: L.key, agentType: L.agentType }))))
+  ).then((r) => (r && Array.isArray(r.findings)
+    ? { lens: L.key, answered: true, findings: r.findings.map((f) => ({ ...f, lens: L.key, agentType: L.agentType })) }
+    : { lens: L.key, answered: false, findings: [] }))
 ))
+// parallel() itself may yield null for a thunk that threw: that lens did not answer either.
+const outcomes = cfg.lenses.map((L, i) => perLens[i] || { lens: L.key, answered: false, findings: [] })
+const incompleteLenses = outcomes.filter((o) => !o.answered).map((o) => o.lens)
+if (incompleteLenses.length === cfg.lenses.length) {
+  throw new Error('multi-lens-review: no lens returned an answer (' + incompleteLenses.join(', ')
+    + ') — refusing to report an empty review as a clean one.')
+}
+if (incompleteLenses.length) {
+  log(`lens(es) without an answer: ${incompleteLenses.join(', ')} — the review is incomplete`)
+}
 
 // Barrier is justified here: dedup across ALL lenses before the expensive verify fan-out, so the
 // same issue surfaced by two lenses is challenged once, not twice.
 const seen = new Set()
 const findings = []
-for (const f of perLens.filter(Boolean).flat()) {
+for (const f of outcomes.flatMap((o) => o.findings)) {
   const key = ((f.title || '') + '|' + (f.location || '')).toLowerCase().trim()
   if (seen.has(key)) continue
   seen.add(key)
   findings.push(f)
 }
 if (!findings.length) {
-  return { preset, lensCount: cfg.lenses.length, findingCount: 0, confirmed: [], dropped: [], unverified: [] }
+  return {
+    preset, lensCount: cfg.lenses.length, findingCount: 0, confirmed: [], dropped: [], unverified: [],
+    incompleteLenses, complete: incompleteLenses.length === 0,
+  }
 }
 
 // Bound the verify fan-out by severity; never drop silently — report what was not verified.
 findings.sort((a, b) => (SEV[a.severity] === undefined ? 9 : SEV[a.severity]) - (SEV[b.severity] === undefined ? 9 : SEV[b.severity]))
 const toVerify = findings.slice(0, maxVerify)
-const unverified = findings.slice(maxVerify)
-if (unverified.length) {
-  log(`verify cap ${maxVerify}: ${unverified.length} lower-severity finding(s) reported unverified, not dropped`)
+const overCap = findings.slice(maxVerify).map((u) => ({
+  title: u.title, lens: u.lens, severity: u.severity, reason: `verify cap ${maxVerify}: not verified`,
+}))
+if (overCap.length) {
+  log(`verify cap ${maxVerify}: ${overCap.length} lower-severity finding(s) reported unverified, not dropped`)
 }
 
 // --- Verify: independent skeptics try to refute each finding ---
@@ -127,21 +146,38 @@ const judged = await parallel(toVerify.map((f) => () =>
       { label: `verify:${f.lens}:${i}`, phase: 'Verify', schema: VERDICT, agentType: f.agentType },
     )
   )).then((vs) => {
-    const valid = vs.filter(Boolean)
+    // Only a boolean verdict is a vote: a null (or malformed) answer is a skeptic that did not answer.
+    const valid = vs.filter((v) => v && typeof v.refuted === 'boolean')
     return { finding: f, refutedVotes: valid.filter((v) => v.refuted).length, totalVotes: valid.length }
   })
 ))
 
 const confirmed = []
 const dropped = []
-for (const j of judged.filter(Boolean)) {
-  // Keep unless a strict majority refuted (a tie keeps the finding — conservative for security).
-  if (j.totalVotes > 0 && j.refutedVotes * 2 > j.totalVotes) {
-    dropped.push({ title: j.finding.title, lens: j.finding.lens, severity: j.finding.severity, refutedVotes: j.refutedVotes, totalVotes: j.totalVotes })
-  } else {
-    confirmed.push(j.finding)
+const noAnswer = []
+toVerify.forEach((f, i) => {
+  const j = judged[i]
+  // A finding nobody could check is UNVERIFIED, never confirmed: zero votes is not a pass.
+  if (!j || j.totalVotes === 0) {
+    noAnswer.push({ title: f.title, lens: f.lens, severity: f.severity, reason: `no verifier answered (${votes} requested)` })
+    return
   }
-}
+  // Drop only on a strict majority of the REQUESTED skeptics (a tie keeps the finding — conservative
+  // for security). A missing answer must not decide the verdict, so one refute among several silent
+  // skeptics is neither a drop nor a confirmation: the finding stays unverified.
+  if (j.refutedVotes * 2 > votes) {
+    dropped.push({ title: f.title, lens: f.lens, severity: f.severity, refutedVotes: j.refutedVotes, totalVotes: j.totalVotes })
+  } else if (j.refutedVotes > 0 && j.totalVotes < votes) {
+    noAnswer.push({
+      title: f.title, lens: f.lens, severity: f.severity,
+      reason: `${j.refutedVotes} of ${j.totalVotes} answering skeptics refuted it, ${votes} requested: cannot drop or confirm`,
+    })
+  } else {
+    // votes < requestedVotes shows the finding was judged by fewer skeptics than asked for.
+    confirmed.push({ ...f, votes: j.totalVotes, requestedVotes: votes })
+  }
+})
+const unverified = [...overCap, ...noAnswer]
 
 return {
   preset,
@@ -149,5 +185,9 @@ return {
   findingCount: findings.length,
   confirmed,
   dropped,
-  unverified: unverified.map((u) => ({ title: u.title, lens: u.lens, severity: u.severity })),
+  unverified,
+  incompleteLenses,
+  // complete = every lens answered and every finding was judged by every skeptic asked.
+  complete: incompleteLenses.length === 0 && unverified.length === 0
+    && confirmed.every((c) => c.votes === c.requestedVotes),
 }

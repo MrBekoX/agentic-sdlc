@@ -42,6 +42,7 @@ PY = sys.executable
 
 _A = "a1B2"
 GH_CLEAN = "ghp_" + _A * 9
+GH_OTHER = "ghp_" + "c3D4" * 9      # a second, different token of the same label (also synthetic)
 GH_DOC = "ghp_" + "x" * 36          # a genuine documentation placeholder: must stay allowed
 
 INSTALLER = REPO / "scripts" / "install_git_hooks.py"
@@ -367,6 +368,96 @@ class TestWorktreeScan(unittest.TestCase):
         self.addCleanup(shutil.rmtree, td, ignore_errors=True)
         Path(td, "x.txt").write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
         self.assertEqual(self._run(td), {}, "must fail open and stay quiet outside a repo")
+
+    # --- before the first commit -------------------------------------------------------------
+    # `git diff HEAD` has no HEAD to diff against, fails, and the single outer try/catch used to
+    # take the untracked and ignored scans down with it: a brand-new project (where `.env` is
+    # most likely to appear) was never scanned at all.
+
+    def _unborn_repo(self):
+        td = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, td, ignore_errors=True)
+        _init_repo(td)
+        return td
+
+    def test_detects_an_untracked_secret_before_the_first_commit(self):
+        td = self._unborn_repo()
+        Path(td, "out.txt").write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        out = self._run(td)
+        self.assertTrue(out, "a secret in a new file of a repository with no commit was not reported")
+        self.assertNotIn(GH_CLEAN, json.dumps(out), "the report must mask the value")
+
+    def test_detects_an_ignored_secret_before_the_first_commit(self):
+        td = self._unborn_repo()
+        Path(td, ".gitignore").write_text(".env\n", encoding="utf-8")
+        Path(td, ".env").write_text("TOKEN=" + GH_CLEAN + "\n", encoding="utf-8")
+        self.assertTrue(self._run(td), "a gitignored .env in a repository with no commit was not reported")
+
+    def test_detects_a_staged_secret_before_the_first_commit(self):
+        td = self._unborn_repo()
+        Path(td, "out.txt").write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        _git(["add", "out.txt"], td).check_returncode()
+        self.assertTrue(self._run(td), "a staged secret in a repository with no commit was not reported")
+
+    def test_detects_a_credential_file_before_the_first_commit(self):
+        td = self._unborn_repo()
+        Path(td, "id_rsa").write_text("binary-key-body\n", encoding="utf-8")
+        self.assertTrue(self._run(td), "a credential file in a repository with no commit was not reported")
+
+    def test_clean_tree_before_the_first_commit_stays_silent(self):
+        td = self._unborn_repo()
+        Path(td, "notes.md").write_text("just some notes\n", encoding="utf-8")
+        self.assertEqual(self._run(td), {})
+
+    # --- the suppression key must tell a new value from an old one ----------------------------
+
+    def test_a_different_secret_in_the_same_file_is_reported_again(self):
+        td = self._repo()
+        shared = Path(td, "dedup.json")
+        target = Path(td, "out.txt")
+        target.write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        self.assertTrue(self._run(td, state=shared), "first sighting must be reported")
+        self.assertEqual(self._run(td, state=shared), {}, "the unchanged finding must not repeat")
+        target.write_text("TOKEN = " + GH_OTHER + "\n", encoding="utf-8")
+        out = self._run(td, state=shared)
+        self.assertTrue(out, "a different secret at the same place was suppressed as an old finding")
+        self.assertNotIn(GH_OTHER, json.dumps(out), "the report must mask the value")
+
+    def test_a_different_secret_in_the_uncommitted_diff_is_reported_again(self):
+        # Every uncommitted-diff finding shares one location label, so the label cannot tell two
+        # secrets apart: only the matched line can.
+        td = self._repo()
+        shared = Path(td, "dedup.json")
+        readme = Path(td, "readme.md")
+        readme.write_text("# hi\nTOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        self.assertTrue(self._run(td, state=shared), "first sighting must be reported")
+        self.assertEqual(self._run(td, state=shared), {}, "the unchanged finding must not repeat")
+        readme.write_text("# hi\nTOKEN = " + GH_OTHER + "\n", encoding="utf-8")
+        self.assertTrue(self._run(td, state=shared), "a different secret in the diff was suppressed as old")
+
+    def test_the_state_file_holds_digests_only_and_is_owner_only(self):
+        td = self._repo()
+        state = Path(td, "dedup.json")
+        Path(td, "out.txt").write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        self.assertTrue(self._run(td, state=state))
+        raw = state.read_text(encoding="utf-8")
+        self.assertNotIn(GH_CLEAN, raw, "the state file must never hold the secret")
+        self.assertNotIn("TOKEN", raw, "the state file must never hold the matched line")
+        keys = json.loads(raw)
+        self.assertTrue(keys and all(len(k) == 16 and set(k) <= set("0123456789abcdef") for k in keys), keys)
+        if os.name != "nt":
+            self.assertEqual(state.stat().st_mode & 0o777, 0o600, "the suppression state must be owner-only")
+
+    def test_the_same_secret_moving_to_another_line_is_not_a_new_finding(self):
+        # CONTROL: a fingerprint of the matched line, not of its position, so editing around an
+        # unchanged secret does not make the hook repeat itself every turn.
+        td = self._repo()
+        shared = Path(td, "dedup.json")
+        target = Path(td, "out.txt")
+        target.write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        self.assertTrue(self._run(td, state=shared))
+        target.write_text("# a new first line\nTOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        self.assertEqual(self._run(td, state=shared), {}, "moving an unchanged secret re-reported it")
 
 
 if __name__ == "__main__":

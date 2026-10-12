@@ -57,7 +57,7 @@ Characterizing current behavior across modules is a read-only fan-out: dispatch 
 4. **Small steps** — one structural change at a time (extract, rename, dedupe, simplify). After **each** step run the relevant tests and **show output**. Use the runtime loop tool when available; otherwise record each fail -> fix -> retest cycle with command evidence.
 5. **No behavior change** — if a "refactor" alters behavior, stop: that is a feature/fix, not a refactor.
 6. **Security re-check** (contract 06) if the refactor touches auth/config/data paths.
-7. **Implementation control** — run **`implementation-control`** before finalizing.
+7. **Implementation control** — run **`implementation-control`** before finalizing. When this refactor runs on its own it has no spec or plan by design: state `Flow: safe-refactor` and pass the Goal Lock from step 2, and the audit grades the Goal Lock and the characterization tests in their place (every other audit row still applies). When a spec or plan already exists for the work (for example, this refactor is a step inside `agentic-sdlc-pipeline`), do not claim the light path: the audit grades that spec and plan as usual.
 
 ## Final Response
 What was restructured · files changed · proof behavior is unchanged (tests green before & after, with output) · remaining risks.

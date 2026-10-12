@@ -160,6 +160,8 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_strict_flow_evidence.py` | flow evidence | Offline strict flow-evidence derivation: what counts as a step having run, and the characterization pairs that separate a real signal from a jointly-empty comparison. |
 | `tests/test_br6_case_table.py` | guard regression | The shared shell-attribution case table: schema, row coverage, and parity between the Node and Python implementations that read it. |
 | `tests/test_grok_rhai_workflows.py` | runtime adapter | The experimental Grok adapter's Rhai workflow scripts: each shipped script parses, declares the metadata the runtime reads, and dispatches only agent types that exist. |
+| `tests/test_multi_lens_review_workflow.py` | workflow behaviour | Runs `workflows/multi-lens-review.js` under the runtime wrapper with stubbed agents: a missing finder or verifier answer is an error, an incomplete result or an unverified finding, never a clean or confirmed review. Skipped if `node` is absent. |
+| `tests/test_light_flow_audit.py` | skill contract | The `safe-refactor` audit path: `implementation-control` and `implementation-auditor` grade the Goal Lock for that one flow, and every other flow without a spec/plan keeps the block. |
 
 Source inventory tests must exclude generated `dist/`/`build/` archive and installed-cache copies while retaining controls for accidental source copies. External-toolkit negative fixtures must isolate the user's home: a legitimate already-installed fallback is runtime behavior, not a failed identity check. The source gate never installs a toolkit to make a fixture pass.
 
@@ -278,6 +280,8 @@ python3 scripts/run_trigger_eval.py \
 ```
 
 `--bare` is rejected with exit 2 and does not start `claude`. Use real plugin skills only (no command shim): `--no-command-shim`, or pass `--plugin-dir` so the shim stays off.
+
+**Exit codes and the unmeasured outcome.** `0` every query met its expectation; `1` a measured query missed it (`trigger_eval=failed`); `2` `--bare` was rejected; `3` at least one run produced no measurement and no measured query failed (`trigger_eval=unmeasured`). "The skill did not trigger" is a measurement: the model answered, or took another action first. A missing or failing `claude`, a non-zero exit, a stream that ends without a verdict, an `is_error` result or a timeout is not, so such a run is never counted as "did not trigger" and a negative query can no longer pass on it. The output names the query and the reason (`error=q0_unmeasured:runs=2,reason=exit_1`). When a measured query also missed its expectation, `failed` and exit 1 win. The batch wrapper `run_all_trigger_evals.py` labels such a skill `status=unmeasured`, prints `trigger_matrix=unmeasured` when nothing worse happened, and exits 3.
 
 The Claude trigger runner uses a fresh temporary project by default. Running against a real writable
 checkout requires both `--project-root <path>` and `--allow-writable-project`. Relative

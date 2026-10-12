@@ -166,9 +166,16 @@ let results = parallel(jobs);
 
 let findings = [];
 let seen = [];
+// A lens whose agent returned nothing did NOT look and find nothing: it is recorded as incomplete
+// so a missing answer can never read as a clean review.
+let incomplete = [];
 let ri = 0;
 for r in results {
-    if r != () && r.success && r.output != () && r.output.findings != () {
+    let answered = r != () && r.success && r.output != () && type_of(r.output.findings) == "array";
+    if answered == false {
+        incomplete.push(lens_keys[ri]);
+    }
+    if answered {
         for f in r.output.findings {
             let title = if f.title != () { f.title } else { "" };
             let loc = if f.location != () { f.location } else { "" };
@@ -197,6 +204,20 @@ for r in results {
     ri += 1;
 }
 
+let incomplete_names = "";
+for name in incomplete {
+    if incomplete_names != "" {
+        incomplete_names += ", ";
+    }
+    incomplete_names += name;
+}
+if incomplete.len() == lens_keys.len() {
+    pause("verification", "multi-lens-review: no lens returned an answer (" + incomplete_names + ") — refusing to report an empty review as a clean one.");
+}
+if incomplete.len() > 0 {
+    log("lens(es) without an answer: " + incomplete_names + " — the review is incomplete");
+}
+
 if findings.len() == 0 {
     complete(#{
         preset: preset,
@@ -205,6 +226,8 @@ if findings.len() == 0 {
         confirmed: [],
         dropped: [],
         unverified: [],
+        incompleteLenses: incomplete,
+        complete: incomplete.len() == 0,
     });
 }
 
@@ -240,7 +263,12 @@ for f in ordered {
     if fi < max_verify {
         to_verify.push(f);
     } else {
-        unverified.push(#{ title: f.title, lens: f.lens, severity: f.severity });
+        unverified.push(#{
+            title: f.title,
+            lens: f.lens,
+            severity: f.severity,
+            reason: "verify cap " + max_verify.to_string() + ": not verified",
+        });
     }
     fi += 1;
 }
@@ -276,6 +304,7 @@ let verdicts = parallel(vjobs);
 
 let confirmed = [];
 let dropped = [];
+let short_votes = 0;
 let ji = 0;
 for f in to_verify {
     let refuted_votes = 0;
@@ -284,7 +313,8 @@ for f in to_verify {
     while vi < votes {
         let slot = ji * votes + vi;
         let v = verdicts[slot];
-        if v != () && v.success && v.output != () {
+        // Only a boolean verdict is a vote: a missing or malformed answer is a skeptic that did not answer.
+        if v != () && v.success && v.output != () && type_of(v.output.refuted) == "bool" {
             total_votes += 1;
             if v.output.refuted == true {
                 refuted_votes += 1;
@@ -292,7 +322,16 @@ for f in to_verify {
         }
         vi += 1;
     }
-    if total_votes > 0 && refuted_votes * 2 > total_votes {
+    if total_votes == 0 {
+        // A finding nobody could check is UNVERIFIED, never confirmed: zero votes is not a pass.
+        unverified.push(#{
+            title: f.title,
+            lens: f.lens,
+            severity: f.severity,
+            reason: "no verifier answered (" + votes.to_string() + " requested)",
+        });
+    } else if refuted_votes * 2 > votes {
+        // Drop only on a strict majority of the REQUESTED skeptics (a tie keeps the finding).
         dropped.push(#{
             title: f.title,
             lens: f.lens,
@@ -300,8 +339,23 @@ for f in to_verify {
             refutedVotes: refuted_votes,
             totalVotes: total_votes,
         });
+    } else if refuted_votes > 0 && total_votes < votes {
+        // A missing answer must not decide the verdict: neither dropped nor confirmed.
+        unverified.push(#{
+            title: f.title,
+            lens: f.lens,
+            severity: f.severity,
+            reason: refuted_votes.to_string() + " of " + total_votes.to_string() + " answering skeptics refuted it, " + votes.to_string() + " requested: cannot drop or confirm",
+        });
     } else {
-        confirmed.push(f);
+        // votes < requestedVotes shows the finding was judged by fewer skeptics than asked for.
+        let kept = f;
+        kept.votes = total_votes;
+        kept.requestedVotes = votes;
+        if total_votes < votes {
+            short_votes += 1;
+        }
+        confirmed.push(kept);
     }
     ji += 1;
 }
@@ -313,4 +367,7 @@ complete(#{
     confirmed: confirmed,
     dropped: dropped,
     unverified: unverified,
+    incompleteLenses: incomplete,
+    // complete = every lens answered and every finding was judged by every skeptic asked.
+    complete: incomplete.len() == 0 && unverified.len() == 0 && short_votes == 0,
 });

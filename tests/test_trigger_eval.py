@@ -206,5 +206,175 @@ class TestCommandShimLocation(unittest.TestCase):
         self.assertFalse(run_once.call_args.args[-1])
 
 
+class FakeProcess:
+    """A child that has already exited; `stdout` is what it printed before exiting."""
+
+    pid = 4242
+
+    def __init__(self, lines, returncode):
+        self.stdout = iter(lines)
+        self.returncode = returncode
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):  # never reached: kill_process_tree is stubbed in these tests
+        raise AssertionError("a fake process must not be killed")
+
+
+class FakeRunningProcess(FakeProcess):
+    """A child that never exits within the test: poll() stays None."""
+
+    def poll(self):
+        return None
+
+
+class TestUnmeasuredRuns(unittest.TestCase):
+    """A run that produced no trigger measurement must not be counted as "did not trigger".
+
+    A process failure used to return False from run_streaming, so a negative query (should_trigger
+    false) PASSED when the CLI was unauthenticated, out of quota or killed by the timeout."""
+
+    def _stream(self, process, timeout=5):
+        with mock.patch.object(runner.subprocess, "Popen", return_value=process), \
+                mock.patch.object(runner, "kill_process_tree"):
+            return runner.run_streaming(
+                ["claude", "-p", "q"], Path("."), {}, timeout, runner.TriggerDetector("clean-1", "spec-authoring"),
+            )
+
+    def test_a_failed_process_is_unmeasured_not_untriggered(self):
+        with self.assertRaises(runner.UnmeasuredRun) as caught:
+            self._stream(FakeProcess([], 1))
+        self.assertEqual(caught.exception.reason, "exit_1")
+
+    def test_a_failed_process_with_output_is_still_unmeasured(self):
+        with self.assertRaises(runner.UnmeasuredRun) as caught:
+            self._stream(FakeProcess(["Credit balance is too low\n"], 1))
+        self.assertEqual(caught.exception.reason, "exit_1")
+
+    def test_a_clean_exit_with_no_output_is_unmeasured(self):
+        with self.assertRaises(runner.UnmeasuredRun) as caught:
+            self._stream(FakeProcess([], 0))
+        self.assertEqual(caught.exception.reason, "no_output")
+
+    def test_a_truncated_stream_with_no_verdict_is_unmeasured(self):
+        garbled = '{"type": "system", "subtype": "init"}\n'
+        with self.assertRaises(runner.UnmeasuredRun) as caught:
+            self._stream(FakeProcess([garbled], 0))
+        self.assertEqual(caught.exception.reason, "no_decision")
+
+    def test_a_timeout_is_unmeasured(self):
+        with self.assertRaises(runner.UnmeasuredRun) as caught:
+            self._stream(FakeRunningProcess([], None), timeout=0)
+        self.assertEqual(caught.exception.reason, "timeout")
+
+    def test_an_error_result_without_a_decision_is_unmeasured(self):
+        # An unauthenticated or out-of-quota CLI still emits a `result` event, flagged is_error.
+        error = json.dumps({"type": "result", "subtype": "success", "is_error": True}) + "\n"
+        with self.assertRaises(runner.UnmeasuredRun) as caught:
+            self._stream(FakeProcess([error], 0))
+        self.assertEqual(caught.exception.reason, "result_error")
+
+    def test_a_missing_cli_is_unmeasured(self):
+        with mock.patch.object(runner.subprocess, "Popen", side_effect=FileNotFoundError("claude")), \
+                self.assertRaises(runner.UnmeasuredRun) as caught:
+            runner.run_streaming(["claude"], Path("."), {}, 5, runner.TriggerDetector("c", "s"))
+        self.assertEqual(caught.exception.reason, "claude_missing")
+
+    def test_control_an_answer_without_the_skill_is_untriggered(self):
+        self.assertIs(self._stream(FakeProcess([result_event() + "\n"], 0)), False)
+
+    def test_control_a_skill_call_is_triggered(self):
+        line = assistant_tool("Skill", {"skill": "agentic-sdlc:spec-authoring"}) + "\n"
+        self.assertIs(self._stream(FakeProcess([line], 0)), True)
+
+    def _main(self, queries, side_effect, runs="2"):
+        with tempfile.TemporaryDirectory() as td:
+            eval_set = Path(td) / "eval.json"
+            eval_set.write_text(json.dumps({"queries": queries}), encoding="utf-8")
+            out = io.StringIO()
+            with mock.patch.object(runner, "run_once", side_effect=side_effect), redirect_stdout(out):
+                code = runner.main([
+                    "--skill-path", str(SKILL_PATH), "--eval-set", str(eval_set),
+                    "--runs", runs, "--plugin-dir", str(REPO),
+                ])
+        return code, out.getvalue()
+
+    def test_main_reports_an_unmeasured_negative_query_as_unmeasured_not_passed(self):
+        def fail(*_args, **_kwargs):
+            raise runner.UnmeasuredRun("exit_1")
+
+        code, out = self._main([{"query": "unrelated", "should_trigger": False}], fail)
+        self.assertEqual(code, 3, out)
+        self.assertIn("trigger_eval=unmeasured", out)
+        self.assertNotIn("trigger_eval=passed", out)
+        self.assertIn("queries_passed=0/1", out)
+        self.assertIn("error=q0_unmeasured:runs=2,reason=exit_1", out)
+
+    def test_main_does_not_hide_a_mismatch_behind_an_unmeasured_query(self):
+        def run(query, *_args, **_kwargs):
+            if query == "a":
+                raise runner.UnmeasuredRun("timeout")
+            return True  # triggered on a negative query: a real mismatch
+
+        queries = [{"query": "a", "should_trigger": True}, {"query": "b", "should_trigger": False}]
+        code, out = self._main(queries, run)
+        self.assertEqual(code, 1, out)
+        self.assertIn("trigger_eval=failed", out)
+        self.assertIn("error=q0_unmeasured:runs=2,reason=timeout", out)
+        self.assertIn("error=q1_mismatch:should_trigger=False,rate=1.00", out)
+
+    def test_main_still_passes_when_every_run_was_measured(self):
+        code, out = self._main([{"query": "unrelated", "should_trigger": False}], lambda *_a, **_k: False)
+        self.assertEqual(code, 0, out)
+        self.assertIn("trigger_eval=passed", out)
+
+    def test_the_batch_wrapper_labels_an_unmeasured_skill_as_unmeasured(self):
+        from scripts import run_all_trigger_evals as batch
+
+        with tempfile.TemporaryDirectory() as td:
+            skill = Path(td) / "skills" / "demo"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("---\nname: demo\n---\n", encoding="utf-8")
+            args = mock.Mock(runtime="claude")
+            out = io.StringIO()
+            with mock.patch.object(batch, "run_single_eval", return_value=(3, "trigger_eval=unmeasured\n")), \
+                    redirect_stdout(out):
+                total, passed, failures = batch.run_evaluations(
+                    [("demo", skill, Path(td) / "e.json")], ("claude",), args,
+                )
+        self.assertEqual((total, passed, failures), (1, 0, ["claude:demo:exit_3"]))
+        self.assertIn("claude:demo:status=unmeasured", out.getvalue())
+
+    def test_the_batch_summary_and_exit_code_tell_unmeasured_from_failed(self):
+        from scripts import run_all_trigger_evals as batch
+
+        self.assertEqual(batch.matrix_status_of([]), "passed")
+        self.assertEqual(batch.matrix_status_of(["claude:a:exit_3"]), "unmeasured")
+        self.assertEqual(batch.matrix_status_of(["claude:a:exit_3", "claude:b:exit_1"]), "failed")
+        self.assertEqual(batch.matrix_status_of(["claude:a:missing_skill"]), "failed")
+
+        def main_with(failures):
+            with tempfile.TemporaryDirectory() as td:
+                evals = Path(td) / "evals"
+                evals.mkdir()
+                (evals / "demo.json").write_text("{}", encoding="utf-8")
+                skill = Path(td) / "skills" / "demo"
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text("---\nname: demo\n---\n", encoding="utf-8")
+                out = io.StringIO()
+                with mock.patch.object(batch, "run_evaluations", return_value=(1, 0, failures)), \
+                        redirect_stdout(out):
+                    code = batch.main(["--skills-dir", str(Path(td) / "skills"), "--evals-dir", str(evals)])
+            return code, out.getvalue()
+
+        code, out = main_with(["claude:demo:exit_3"])
+        self.assertEqual(code, 3, out)
+        self.assertIn("trigger_matrix=unmeasured", out)
+        code, out = main_with(["claude:demo:exit_1"])
+        self.assertEqual(code, 1, out)
+        self.assertIn("trigger_matrix=failed", out)
+
+
 if __name__ == "__main__":
     unittest.main()
