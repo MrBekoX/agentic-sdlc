@@ -101,7 +101,7 @@ DATA_HANDLING_FACTS = (
     ("it reads the file named by `tool_input.file_path`", "hooks/scan-write.mjs", "String(ti.file_path || '')"),
     ("it reads the file named by `tool_input.file_path`", "hooks/scan-write.mjs", "readFileSync(file, 'utf8')"),
     ("runs `git` to read the added lines of the tracked changes against `HEAD`", "hooks/worktree-scan.mjs", "git(['diff', 'HEAD', ...extra])"),
-    ("before the first commit, of the staged and unstaged diffs", "hooks/worktree-scan.mjs", "git(['diff', '--cached', ...extra]) + git(['diff', ...extra])"),
+    ("before the first commit, of the staged and unstaged diffs", "hooks/worktree-scan.mjs", "for (const base of [['diff', '--cached'], ['diff']])"),
     ("the added lines of the tracked changes", "hooks/worktree-scan.mjs", "trackedDelta(['--unified=0'])"),
     ("and to list untracked files, gitignored files included", "hooks/worktree-scan.mjs", "'--others', '--ignored', '--exclude-standard'"),
     ("It reads the bytes of those untracked files", "hooks/worktree-scan.mjs", "readFileSync(resolvePath(root, rel))"),
