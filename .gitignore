@@ -55,6 +55,8 @@ tests/test_superpowers_referenced_eval_prompt.py
 debug.txt
 # Dated local debug dumps at the repository root (YYYY-MM-DD-HHMMSS-<topic>.txt).
 /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.txt
+# ZCode's local copy-exclusion list; kept on each machine, not in the repository.
+/.zcodeignore
 
 # Optional tool reference snapshots
 mcps/
