@@ -1,6 +1,6 @@
 {
   "name": "mrbekox",
-  "description": "AGENTIC-SDLC — gated spec/plan/TDD/security/review skills for Claude Code and Codex.",
+  "description": "AGENTIC-SDLC — gated spec/plan/TDD/security/review skills and guard hooks.",
   "owner": {
     "name": "Beko",
     "url": "https://github.com/MrBekoX"
@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "agentic-sdlc",
-      "description": "Claude Code skill library for gated spec, plan, TDD, security, and review workflows",
+      "description": "Skill library for gated spec, plan, TDD, security, and review workflows",
       "version": "0.4.3",
       "source": "./",
       "author": {

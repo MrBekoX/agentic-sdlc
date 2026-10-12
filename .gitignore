@@ -52,17 +52,17 @@ tests/test_superpowers_referenced_eval_prompt.py
 # Local agent-tool state; plugin_root holds this machine's absolute path.
 .video_agent/
 debug.txt
-2026-06-21-161126-sessionstartstartup-hook-error.txt
-2026-06-22-181040-hooksbranch-guardmjs-hooku-tetiklenmiyor-bu.txt
-2026-06-22-184416-hooksbranch-guardmjs-hooku-tetiklenmiyor.txt
-2026-06-24-133157-security-debug.txt
-2026-06-24-155430-grev.txt
+# Dated local debug dumps at the repository root (YYYY-MM-DD-HHMMSS-<topic>.txt).
+/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.txt
 
 # Optional tool reference snapshots
 mcps/
 
 # Claude Code local / runtime
 .claude/
+# Codex local workspace and code-index caches (per-machine tool state, not distributed)
+.codex/
+.codegraph/
 # ZCode local workspace. NOT .grok/: that is the project workflow catalog Grok loads from the
 # repo (.grok/workflows/*.rhai), so it is tracked and shared. ZCode publishes no such catalog
 # path, and an untracked .zcode/ copy of a tracked workflow silently drifted once already.

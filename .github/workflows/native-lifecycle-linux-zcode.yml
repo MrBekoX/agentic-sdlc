@@ -46,7 +46,9 @@ jobs:
           cd "$RUNNER_TEMP"
           curl -fsSL -o zcode.AppImage \
             https://cdn-zcode.z.ai/zcode/electron/releases/3.14.5/linux-x64/ZCode-3.14.5-linux-x64.AppImage
-          sha256sum zcode.AppImage
+          # Pinned bytes: the 3.14.5 AppImage observed in runs 38214023508 and 38216876117 and in a
+          # local download. A changed file at this versioned URL stops the job instead of being run.
+          echo "5cfa481c1e98eef85c4ef3e05639deb144de68c89e1a845b5cf19126f49eed07  zcode.AppImage" | sha256sum -c -
           chmod +x zcode.AppImage
           ./zcode.AppImage --appimage-extract > /dev/null
           exe="$RUNNER_TEMP/squashfs-root/zcode"

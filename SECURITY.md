@@ -14,8 +14,9 @@ If private reporting is unavailable, open an issue that contains no secret, expl
 sensitive machine data and ask the maintainer for a private contact channel. Do not publish a proof
 of concept before the maintainer has had a reasonable opportunity to investigate and release a fix.
 
-Include the affected version, runtime (Claude Code or Codex), operating system, minimal sanitized
-reproduction, observed impact, and whether the behavior requires a non-default environment flag.
+Include the affected version, runtime (Claude Code, Codex, Kimi Code, Grok CLI or ZCode), operating
+system, minimal sanitized reproduction, observed impact, and whether the behavior requires a
+non-default environment flag.
 
 ## Security boundaries
 

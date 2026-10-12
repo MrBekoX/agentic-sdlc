@@ -18,6 +18,27 @@ Claude Code reads:
 
 Skills are intentionally stored in root `skills/`, not `.claude/skills/`. The local `.claude/` directory is workspace settings only.
 
+## Install
+
+Get the package: a package directory is an extracted copy of this repository's files. Clone the repository, or download and extract its source ZIP or a release archive (maintainers build one with `python3 scripts/build_release.py --output agentic-sdlc.zip`; GitHub Releases are not published yet). Keep `#` out of the path (Codex and Grok read `#` specially). Nothing inside the folder needs editing.
+
+```bash
+claude plugin marketplace add <package-directory>
+claude plugin install agentic-sdlc@mrbekox
+```
+
+Once the repository is public, `claude plugin marketplace add MrBekoX/agentic-sdlc` replaces the directory source; while it is private, a repository add needs a git credential helper or SSH access. Hooks run once the plugin is installed and enabled. Run `/reload-plugins` or start a new session; `claude plugin details agentic-sdlc@mrbekox` lists 17 entries (16 skills and the `git-safety-check` command) without starting a session.
+
+## Update and uninstall
+
+```bash
+claude plugin marketplace update mrbekox
+claude plugin update agentic-sdlc@mrbekox
+claude plugin uninstall agentic-sdlc@mrbekox
+```
+
+An update is delivered only when the manifest version changes; run `/reload-plugins` or start a new session afterwards. Uninstall removes the installed record (add `--keep-data` to keep the plugin's data directory); the marketplace registration and your other plugins stay. `claude plugin details agentic-sdlc@mrbekox` lists the installed skills, agents and hook events without starting a session.
+
 ## Runtime Root
 
 Claude hook and script paths resolve through:
@@ -34,16 +55,6 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode spec --file
 ```
 
 The variable is not set in your own terminal or in the model's Bash tool. To run a helper yourself, use the `installPath` printed by `claude plugin list --json` (on Windows, `py -3` when `python3` is missing or is the Microsoft Store alias).
-
-## Update and uninstall
-
-```bash
-claude plugin marketplace update mrbekox
-claude plugin update agentic-sdlc@mrbekox
-claude plugin uninstall agentic-sdlc@mrbekox
-```
-
-An update is delivered only when the manifest version changes; run `/reload-plugins` or start a new session afterwards. Uninstall removes the installed record (add `--keep-data` to keep the plugin's data directory); the marketplace registration and your other plugins stay. `claude plugin details agentic-sdlc@mrbekox` lists the installed skills, agents and hook events without starting a session.
 
 Do not hard-code machine-specific absolute paths into skills, hooks, evals, or generated artifacts.
 
@@ -105,12 +116,12 @@ Four paths exist; each has its own go condition and state. The per-path verdicts
 
 | Path | Prerequisites | Steps | Go condition | State |
 |---|---|---|---|---|
-| Claude own marketplace | Claude Code with plugin marketplace support; `node` on `PATH`; read access to `MrBekoX/agentic-sdlc`. | `claude plugin marketplace add MrBekoX/agentic-sdlc`, then `claude plugin install agentic-sdlc@mrbekox`. | Go condition: anonymous users need a public repository (a private one installs only through a git credential helper or SSH; a token only in an environment variable does not authenticate, [private repositories](https://code.claude.com/docs/en/plugin-marketplaces.md#private-repositories), observed 2026-09-14); both strict validations below pass; a clean install from an empty profile runs marketplace add, install, a new session or `/reload-plugins`, then skill, command and hook discovery plus one real invocation, with the clone transport (SSH or HTTPS) recorded. | State: BLOCKED. The repository is private and its unauthenticated URL returns 404 in `docs/publication/link-checks.json`; visibility is blocked by an unresolved Git history finding. |
+| Claude own marketplace | Claude Code with plugin marketplace support; `node` on `PATH`; a package directory, or read access to `MrBekoX/agentic-sdlc` for the repository source. | `claude plugin marketplace add <package-directory>` (see [Install](#install); works without repository access) or, once the repository is public, `claude plugin marketplace add MrBekoX/agentic-sdlc`; then `claude plugin install agentic-sdlc@mrbekox`. | Go condition: anonymous users need a public repository (a private one installs only through a git credential helper or SSH; a token only in an environment variable does not authenticate, [private repositories](https://code.claude.com/docs/en/plugin-marketplaces.md#private-repositories), observed 2026-09-14); both strict validations below pass; a clean install from an empty profile runs marketplace add, install, a new session or `/reload-plugins`, then skill, command and hook discovery plus one real invocation, with the clone transport (SSH or HTTPS) recorded. | State: BLOCKED. The repository is private and its unauthenticated URL returns 404 in `docs/publication/link-checks.json`; visibility is blocked by an unresolved Git history finding. |
 | Claude community marketplace submission | A public repository; a recorded clean-package `claude plugin validate ./plugin --strict` result; a paid claude.ai plan (Pro and Max submit from their own account; Team and Enterprise need an Owner, and Enterprise can grant the Directory permission; [plugins/publish](https://code.claude.com/docs/en/plugins/publish), fetched 2026-10-07). | Submit at [claude.ai/directory/manage](https://claude.ai/directory/manage); packet [`docs/publication/claude-community.md`](../docs/publication/claude-community.md). | Go condition: public repository and a passing `claude plugin validate` on the submitted root; acceptance is not guaranteed. Observed 2026-09-14: [code.claude.com/docs/en/plugins](https://code.claude.com/docs/en/plugins.md) says approved plugins "are pinned to a specific commit SHA" with CI bumping the pin as commits are pushed, and [claude.com/docs/plugins/submit](https://claude.com/docs/plugins/submit) says updates pushed to the repository "are picked up automatically", so every default-branch push after approval counts as publication. The pages name `claude-community` and `claude-plugins-official` as targets; neither is promised. | State: BLOCKED. Needs a public repository, the clean-package validation and maintainer form access. |
-| Codex personal marketplace | Codex CLI 0.154.0; `node` on `PATH`; plugin at `~/plugins/agentic-sdlc`. | See [`../.codex-plugin/README.md`](../.codex-plugin/README.md): `codex plugin add agentic-sdlc@personal`, trust the hooks in `/hooks`, then run the hook trust check. | Go condition: catalog `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`; native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; hook trust granted through the native `/hooks` protocol. | State: GAP. Final-package discovery and real-profile trust are not yet recorded. |
+| Codex personal marketplace | Codex CLI with plugin marketplace support (native lifecycle passed on codex-cli 0.162.1 on Windows and macOS and 0.156.1 on Linux, [compatibility matrix](../docs/publication/compatibility-matrix.md)); `node` on `PATH`; a package directory. | See [`../.codex-plugin/README.md`](../.codex-plugin/README.md): `codex plugin marketplace add <package-directory>`, then `codex plugin add agentic-sdlc@mrbekox` (the personal catalog is an optional alternative), trust the hooks in `/hooks`, then run the hook trust check. | Go condition: a discoverable catalog (the added package directory, or the optional personal catalog `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`); native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; hook trust granted through the native `/hooks` protocol. | State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the compatibility matrix; `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded in the ledger. |
 | OpenAI public directory | Maintainer-verified identity and Apps Management Write (`api.apps.write`). | Build the skills-only archive with `python3 scripts/build_release.py --output <zip> --skills-only`, verify it, then upload; see [`../.codex-plugin/README.md`](../.codex-plugin/README.md). | Go condition: a verified skills-only archive; submission, acceptance and publication are three separate stages, and the listing changes after publication only through a newly reviewed version. | State: BLOCKED. Needs verified identity, `api.apps.write` and a verified skills-only archive. |
 
-### Verification
+### Native manifest validation
 
 Native Claude validation is two separate checks:
 
@@ -119,16 +130,16 @@ claude plugin validate .claude-plugin/marketplace.json --strict
 claude plugin validate .claude-plugin/plugin.json --strict
 ```
 
-Marketplace validation checks no plugin contents; hook-config validity comes from the repository tests (`tests/test_hooks_policy.py`, `tests/test_skill_integration.py`). A strict `plugin.json` exit 1 in a working tree caused by an untracked local agent instruction file is not the clean-package result; that result comes from a package extracted from a verified release archive.
+Validating the marketplace file checks no plugin contents; since Claude Code 2.1.289, `claude plugin validate .` also checks the plugin beside a marketplace manifest. Hook-config validity comes from the repository tests (`tests/test_hooks_policy.py`, `tests/test_skill_integration.py`). A strict `plugin.json` exit 1 in a working tree caused by an untracked local agent instruction file is not the clean-package result; that result comes from a package extracted from a verified release archive.
 
 ## Requirements
 
-- Claude Code with local plugin/marketplace support. Versions re-captured on 2026-09-15: Windows 2.1.271 and WSL Ubuntu 24.04 2.1.269; see [CLI versions by platform](../docs/runtime-adapter.md#cli-versions-by-platform) for the last live-tested versions.
+- Claude Code with local plugin/marketplace support. Native install, discovery, version-bumped update and uninstall passed on 2026-10-12 with Claude Code 2.1.296 (Windows), 2.1.282 (Linux) and 2.1.293 (macOS); see the [compatibility matrix](../docs/publication/compatibility-matrix.md) (E1, E5, E10). No model turn ran in those checks; earlier captures and the last live-tested versions are in [CLI versions by platform](../docs/runtime-adapter.md#cli-versions-by-platform).
 - Node.js on `PATH` for `.mjs` hooks.
-- Python 3 for deterministic scripts and local gates.
+- Python 3 for helper scripts (3.12 tested; the helpers skills run are kept import-compatible with Python 3.8 by a static check). Maintainer and release tooling (`build_release.py`, `bump_version.py`, eval runners) needs Python 3.12. On Windows, use `py -3` when `python3` is missing or is the Microsoft Store alias.
 - Git for branch, diff, commit, PR, and worktree flows.
 
-## Verification
+## Local verification
 
 Local static gate:
 

@@ -64,7 +64,8 @@ jobs:
         run: |
           curl -fsSL -o "$RUNNER_TEMP/zcode.dmg" \
             https://cdn-zcode.z.ai/zcode/electron/releases/3.14.5/macos-arm64/ZCode-3.14.5-mac-arm64.dmg
-          shasum -a 256 "$RUNNER_TEMP/zcode.dmg"
+          # Pinned bytes (observed in runs 38212983263 and 38216872984) on top of the signature check.
+          echo "7e46b70165fe83fe2df6e5154da1982b50660ff4ff250cdb4b778e4f25c97d94  $RUNNER_TEMP/zcode.dmg" | shasum -a 256 -c -
           hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/zcode-mount" "$RUNNER_TEMP/zcode.dmg"
           app=$(find "$RUNNER_TEMP/zcode-mount" -maxdepth 1 -name '*.app' -print -quit)
           test -n "$app"

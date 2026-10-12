@@ -1,6 +1,6 @@
 {
   "name": "mrbekox",
-  "description": "AGENTIC-SDLC plugin marketplace (ZCode schema). Claude Code uses .claude-plugin/marketplace.json; Codex uses the personal catalog.",
+  "description": "AGENTIC-SDLC plugin marketplace (ZCode schema). Other runtimes read .claude-plugin/marketplace.json, .grok-plugin/marketplace.json or marketplace-kimi.json.",
   "owner": {
     "name": "Beko",
     "url": "https://github.com/MrBekoX"

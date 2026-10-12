@@ -1,8 +1,10 @@
 # AGENTIC-SDLC for Kimi Code (experimental adapter)
 
-Kimi is included in the current five-platform distribution preparation. Runtime
-coverage remains experimental; the historical certification was **not a 0.4.3 release target**.
-See the [current distribution guide](../docs/publication/multi-platform-distribution.md)
+Kimi Code is an experimental adapter. It was **not a 0.4.3 release target**; the
+next release includes it as an experimental adapter. Native install, update and
+remove passed on Kimi Code 2.1.1 on Windows, Linux and macOS (see
+[Native evidence](#native-evidence)); hook delivery and live skill/model behavior
+are not proven. See the [current distribution guide](../docs/publication/multi-platform-distribution.md)
 for scope, evidence and publication limits.
 
 The Kimi manifest is `.kimi-plugin/plugin.json`; the custom catalog is root
@@ -12,9 +14,16 @@ directories. Keep the complete plugin, including `hooks/`, `scripts/` and
 
 ## Install and update
 
+Get the package: a package directory is an extracted copy of this repository's
+files. Clone the repository, or download and extract its source ZIP or a release
+archive (maintainers build one with `python3 scripts/build_release.py --output agentic-sdlc.zip`;
+GitHub Releases are not published yet). Keep `#` out of the path (Codex and Grok
+read `#` specially). Nothing inside the folder needs editing.
+
 Use Kimi and Node in the same OS environment, with `node` on the hook shell PATH.
 Helper workflows require Python 3 (3.12 is tested; the helpers skills run are kept
-import-compatible with 3.8 by a static check, not a runtime test) and Git. In the Kimi TUI, run:
+import-compatible with 3.8 by a static check, not a runtime test) and Git. On
+Windows, Kimi's Bash tool needs Git for Windows. In the Kimi TUI, run:
 
 ```text
 /plugins install <package-directory>
@@ -22,15 +31,18 @@ import-compatible with 3.8 by a static check, not a runtime test) and Git. In th
 /reload
 ```
 
-`/new` is an alternative to `/reload`. Plugin commands are TUI slash commands;
+The installed plugin reports 16 skills, 1 command and 3 hooks. The hooks run as
+soon as the plugin is installed; review [Hooks and side effects](#hooks-and-side-effects)
+first. `/new` is an alternative to `/reload`. Plugin commands are TUI slash commands;
 Kimi Code CLI 2.1.1 does not expose a `kimi plugin` shell subcommand.
 
 The official installer also accepts a ZIP URL and these full GitHub URL forms:
 repository, `/tree/<ref>`, `/releases/tag/<tag>` and `/commit/<sha>`. A bare
 repository URL selects its latest release, falling back to the default branch.
 Choose a ref that actually contains this candidate's Kimi manifest; an older
-release is not assumed to include it. Remote installation requires source access;
-private-repository authentication is not verified here.
+release is not assumed to include it. Remote installation requires source access:
+the repository is private today, so a GitHub URL install needs the public
+repository; private-repository authentication is not verified here.
 
 To browse the prepared custom catalog:
 
@@ -45,8 +57,9 @@ Editing the original directory does not update the managed copy.
 
 For a changed local package, repeat `/plugins install <package-directory>`.
 For an available remote update, open `/plugins`, select the Installed tab and
-press Enter; then `/reload` or `/new`. Repeating installation with the intended
-source is also documented. There is no `/plugins update` command promised here.
+press Enter; then `/reload` or `/new` (this remote update path has not been
+natively verified). Repeating installation with the intended source is also
+documented. There is no `/plugins update` command promised here.
 
 ## Skills, agents and helper paths
 
@@ -74,7 +87,8 @@ The manifest's `skillInstructions` supplies runtime mappings:
 
 ## Hooks and side effects
 
-The manifest declares inline `PreToolUse` rules for `Bash`:
+The manifest declares inline `PreToolUse` rules for `Bash`. They run as soon as
+the plugin is installed:
 
 | Handler | Timeout (seconds) |
 |---|---|
@@ -95,12 +109,21 @@ Write scanning and Claude/Codex transcript-based Stop/flow readers remain
 unwired because this candidate has no verified Kimi input/reader contract.
 Startup uses `sessionStart.skill` rather than the Claude `session-start.mjs`
 hook. Static packaging and relocated handler replays do not prove installer,
-router invocation, frontmatter tolerance, update or native lifecycle behavior.
-A manually copied managed directory is not an installer transcript.
+router invocation, frontmatter tolerance, update or native lifecycle behavior;
+the native lifecycle evidence is listed below. A manually copied managed
+directory is not an installer transcript.
 
-Native Kimi 2.1.1 authenticated loopback management evidence now covers install,
-changed-source managed-copy refresh and removal while retaining bytes, with
-unrelated state preserved. See [current preparation](../docs/publication/marketplace-readiness-2026-10-11.md).
+## Native evidence
+
+Kimi Code 2.1.1 passed the native lifecycle on Windows, Linux and macOS on
+2026-10-12 in isolated profiles: install reporting 16 skills and 1 command (3 hooks
+reported on Windows, E4), reinstall of a changed (version-bumped) copy observed in the managed copy,
+and removal, with unrelated state preserved (E4, E7, E12 in the
+[compatibility matrix](../docs/publication/compatibility-matrix.md)). The runs
+drove Kimi's own plugin manager through the local authenticated `kimi web` API,
+not the TUI `/plugins install` command, and did not exercise the Enter-update
+path. Earlier preparation evidence is in
+[marketplace readiness](../docs/publication/marketplace-readiness-2026-10-11.md).
 This is native management evidence, without a model session or hook execution claim.
 
 ## Versioning and publication

@@ -1,8 +1,10 @@
 # AGENTIC-SDLC for Grok CLI (experimental adapter)
 
-Grok is included in the current five-platform distribution preparation. Its
-runtime coverage remains experimental: historically it was **not a 0.4.3 release target**.
-See the [current distribution guide](../docs/publication/multi-platform-distribution.md)
+Grok CLI is an experimental adapter. It was **not a 0.4.3 release target**; the
+next release includes it as an experimental adapter. Native install, discovery,
+refresh and uninstall passed on Grok CLI 1.0.50 on Windows, Linux and macOS (see
+[Native evidence](#native-evidence)); hook delivery and live skill behavior are not
+proven. See the [current distribution guide](../docs/publication/multi-platform-distribution.md)
 for installation, evidence limits and the remaining publication steps.
 
 This package shares the root `skills/`, `commands/` and `agents/` sources. The
@@ -12,22 +14,29 @@ including `hooks/`, `scripts/` and `contracts/`.
 
 ## Local install
 
-Use an extracted full package directory, with Grok and Node in the same OS
+Get the package: a package directory is an extracted copy of this repository's
+files. Clone the repository, or download and extract its source ZIP or a release
+archive (maintainers build one with `python3 scripts/build_release.py --output agentic-sdlc.zip`;
+GitHub Releases are not published yet). Prefer a path without `#`: Grok reads
+`#` specially (see the `#` note under [Update and versioning](#update-and-versioning)).
+Nothing inside the folder needs editing.
+
+Use the full package directory, with Grok and Node in the same OS
 environment and `node` available on the hook shell PATH. Helper workflows also
 need Python 3 (3.12 is tested; the helpers skills run are kept import-compatible with 3.8
 by a static check, not a runtime test) and Git. Run:
 
 ```text
 grok plugin install <package-directory> --trust
-grok plugin enable agentic-sdlc
 grok plugin details agentic-sdlc
 grok inspect --json
 ```
 
-The documented directory install does not depend on the maintainer's checkout.
-A historical Grok 1.0.34 clone install failed while copying `.git`; an extracted
-package avoids copying repository internals. That observation is not a fresh
-installer test on Grok 1.0.50.
+`grok inspect --json` lists 17 plugin skills. The directory install does not
+depend on the maintainer's checkout. The native runs on Grok 1.0.50 used an
+extracted package; a clone install was not tested on 1.0.50. Historical note: a Grok
+1.0.34 clone install failed while copying `.git`; if a clone install fails, use an
+extracted archive.
 
 The directory install also enables the plugin; `grok plugin enable agentic-sdlc`
 is only needed after a `grok plugin disable`. Use an absolute or `./`-relative
@@ -109,12 +118,6 @@ that directory.
 `scripts/bump_version.py` tracks both Grok manifest versions and `VERSION`;
 `tests/test_grok_packaging.py` checks their agreement.
 
-Native Windows install/remove, temporary trust and moving-branch update evidence
-is recorded in [current readiness](../docs/publication/marketplace-readiness-2026-10-11.md).
-It does not prove native hook delivery or skill-trigger behavior. No official catalog submission or
-release tagging is performed here. Follow the
-[publication checklist](../docs/publication/grok-marketplace.md).
-
 ## Uninstall
 
 Run `grok plugin uninstall agentic-sdlc` (Grok does not prompt). Add
@@ -122,6 +125,19 @@ Run `grok plugin uninstall agentic-sdlc` (Grok does not prompt). Add
 start a new session. Keep unrelated plugins/settings and the source directory;
 marketplace removal is a separate operation. See the
 [lifecycle guide](../docs/publication/multi-platform-distribution.md).
+
+## Native evidence
+
+Grok CLI 1.0.50 passed the native lifecycle on Windows, Linux and macOS on
+2026-10-12 in isolated profiles: `grok plugin install --trust`, `grok inspect --json`
+listing 17 plugin skills, uninstall plus reinstall of a version-bumped copy, and
+uninstall, with unrelated files kept (E3, E8, E13 in the
+[compatibility matrix](../docs/publication/compatibility-matrix.md)). Temporary
+trust and the moving-branch update fixture are recorded in
+[marketplace readiness](../docs/publication/marketplace-readiness-2026-10-11.md).
+None of this proves native hook delivery or skill-trigger behavior; no model turn ran.
+No official catalog submission or release tagging is performed here. Follow the
+[publication checklist](../docs/publication/grok-marketplace.md).
 
 ## Official sources (checked 2026-10-10)
 

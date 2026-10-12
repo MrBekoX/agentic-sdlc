@@ -2,16 +2,18 @@
 
 This file is the publish gate for `agentic-sdlc` version `0.4.3`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex. The current release decision and sanitized observations are in [release evidence](release-evidence-0.4.3.md); preparation or a metadata-only pass cannot replace its required results.
 
-The 2026-10-06 preparation fixes public hook removal and packaged instruction/helper closure; current native Codex 0.160.1 discovery is recorded in [current readiness](publication/codex-0.160.1-readiness.md). The historical ledger below is preserved. New local preparation does not erase historical failed/not-run live evaluations or claim portal acceptance. No upload, publication, commit, push, PR or merge is part of this preparation.
+The 2026-10-06 preparation fixes public hook removal and packaged instruction/helper closure; native Codex 0.160.1 discovery from that date is recorded in [current readiness](publication/codex-0.160.1-readiness.md). The historical ledger below is preserved. New local preparation does not erase historical failed/not-run live evaluations or claim portal acceptance. No upload, publication, commit, push, PR or merge is part of this preparation.
 
 ## Current multi-platform preparation
 
 The [2026-10-11 preparation record](publication/marketplace-readiness-2026-10-11.md)
 separates committed source, producer projections, official-tool fixtures and
 native lifecycle/event evidence from external publisher and review gates.
-macOS was skipped at the maintainer's request. No publication occurred.
+That record skipped macOS at the maintainer's request; macOS native lifecycle checks
+passed on 2026-10-12 ([compatibility matrix](publication/compatibility-matrix.md) E10–E14).
+No publication occurred.
 
-Kimi, ZCode and Grok are now included in the installation/portability candidate alongside Claude and Codex. The candidate artifacts, supported channels, update methods, official references and unverified native checks are in [multi-platform distribution](publication/multi-platform-distribution.md). This does not change the historical ledger below or approve publication.
+Kimi, ZCode and Grok are now included in the installation/portability candidate alongside Claude and Codex. The candidate artifacts, supported channels, update methods, official references and the checks that remain unverified are in [multi-platform distribution](publication/multi-platform-distribution.md). Native install, discovery, update and uninstall results for all five runtimes on Windows, Linux and macOS, bound to main `1a9ac73`, are in the [compatibility matrix](publication/compatibility-matrix.md); they ran no model turn and do not prove hook trust/delivery or live skill behavior. This does not change the historical ledger below or approve publication.
 
 ## Supported Release Scope (historical 0.4.3 verdict)
 
@@ -20,15 +22,15 @@ Kimi, ZCode and Grok are now included in the installation/portability candidate 
 | Claude Code | Supported | Local gate plus live routing/procedure transcript evidence before claiming live behavior. |
 | Codex | Supported | Local gate plus route-classifier/procedure transcript evidence before claiming live behavior. |
 | OpenCode, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.3`. |
-| ZCode (Z.ai) | Experimental adapter, not a 0.4.3 release target | Adapter files (`.zcode-plugin/plugin.json`, root `marketplace.json`, `hooks/hooks-zcode.json`) support marketplace installs from the root `marketplace.json` as a file source, or from a directory or GitHub-repository source read through `.claude-plugin/marketplace.json` first (experimental; no official submission); ZCode stays outside the supported scope above regardless of install evidence. |
-| Grok CLI | Experimental adapter, not a 0.4.3 release target | Adapter files (`.grok-plugin/plugin.json`, `.grok-plugin/marketplace.json`, `hooks/hooks-grok.json`) support local personal-marketplace installs only; Grok stays outside the supported scope above regardless of local-install evidence. `grok plugin validate .` green on the Claude layout is not Grok-native publish. |
-| Kimi Code | Experimental adapter, not a 0.4.3 release target | Adapter files (`.kimi-plugin/plugin.json`, root `marketplace-kimi.json`) support local installs only; Kimi Code stays outside the supported scope above regardless of local-install evidence. |
+| ZCode (Z.ai) | Experimental adapter; was not a 0.4.3 release target | Adapter files (`.zcode-plugin/plugin.json`, root `marketplace.json`, `hooks/hooks-zcode.json`) support marketplace installs from the root `marketplace.json` as a file source; a directory or GitHub-repository source is read through `.claude-plugin/marketplace.json` first and shows the Claude entry, and a GitHub source needs the public repository (experimental; no official submission). Native lifecycle passed on Windows, Linux and macOS with the desktop bundle's agent CLI, not the GUI ([compatibility matrix](publication/compatibility-matrix.md) E9, E15, E14). ZCode stays outside the supported scope above regardless of install evidence. |
+| Grok CLI | Experimental adapter; was not a 0.4.3 release target | Adapter files (`.grok-plugin/plugin.json`, `.grok-plugin/marketplace.json`, `hooks/hooks-grok.json`) support local-directory installs and Git-catalog installs (the catalog names this repository as a remote `url` source, so it needs the public repository). Native lifecycle of a local install passed on Windows, Linux and macOS ([compatibility matrix](publication/compatibility-matrix.md) E3, E8, E13); the Git-catalog update was exercised only against an offline Git fixture in the 2026-10-11 preparation record. Grok stays outside the supported scope above regardless of install evidence. `grok plugin validate .` green on the Claude layout is not Grok-native publish. |
+| Kimi Code | Experimental adapter; was not a 0.4.3 release target | Adapter files (`.kimi-plugin/plugin.json`, root `marketplace-kimi.json`) support local-directory installs, GitHub URL installs (they need the public repository) and the custom catalog. Native lifecycle of a local install passed on Windows, Linux and macOS through the `kimi web` API, not the TUI ([compatibility matrix](publication/compatibility-matrix.md) E4, E7, E12); the Enter-update path is not natively verified. Kimi Code stays outside the supported scope above regardless of install evidence. |
 
 ## Distribution paths and go/no-go
 
 The four distribution paths below each get their own go/no-go decision; the same labels are used in [`README.md`](../README.md) and both runtime READMEs. Each verdict stays no-go, pending maintainer review, until a recorded maintainer review of that path is linked in the ledger's [path verdicts](release-evidence-0.4.3.md#path-verdicts). The old 45/45 routing results, synthetic replay and marketplace-only validation never close a path.
 
-The experimental ZCode, Grok CLI, and Kimi Code local installs are not among these four paths and carry no 0.4.3 verdict; their notes live in `docs/publication/zcode-marketplace.md`, `docs/publication/grok-marketplace.md`, and `docs/publication/kimi-marketplace.md`.
+The experimental ZCode, Grok CLI, and Kimi Code installs (local directory, and repository or catalog sources once the repository is public) are not among these four paths and carry no 0.4.3 verdict; their notes live in `docs/publication/zcode-marketplace.md`, `docs/publication/grok-marketplace.md`, and `docs/publication/kimi-marketplace.md`.
 
 ### Claude own marketplace
 
@@ -56,11 +58,11 @@ Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.
 
 ### Codex personal marketplace
 
-**Prerequisites.** Codex CLI 0.154.0, `node` on `PATH`, and the plugin at `~/plugins/agentic-sdlc`.
+**Prerequisites.** Codex CLI with plugin marketplace support (the 0.4.3 verdict was recorded on 0.154.0; the 2026-10-12 native lifecycle ran on codex-cli 0.162.1 and 0.156.1), `node` on `PATH`, and a package directory.
 
-**Steps.** Create the personal catalog, run `codex plugin add agentic-sdlc@personal`, open `/hooks` in Codex and trust each agentic-sdlc hook, then run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@personal`, which prints `codex_hook_trust=trusted` for a fully trusted install ([Codex hook trust](troubleshooting.md#codex-hook-trust)).
+**Steps.** Run `codex plugin marketplace add <package-directory>` and `codex plugin add agentic-sdlc@mrbekox` (a personal catalog at `~/.agents/plugins/marketplace.json` with `codex plugin add agentic-sdlc@personal` is an optional alternative), open `/hooks` in Codex and trust each agentic-sdlc hook, then run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@<marketplace-name>`, which prints `codex_hook_trust=trusted` for a fully trusted install ([Codex hook trust](troubleshooting.md#codex-hook-trust)).
 
-**Go condition.** A catalog at `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`; install through `codex plugin add agentic-sdlc@personal`; native `plugin/read` showing 16 skills and `hooks/list` showing 8 hooks; and hook trust granted through the native `/hooks` trust protocol as a required step.
+**Go condition.** Install through `codex plugin add agentic-sdlc@<marketplace-name>` from a catalog Codex recognizes (the package's own `mrbekox` catalog or a personal catalog); native discovery showing 16 skills and `hooks/list` showing 8 hooks; and hook trust granted through the native `/hooks` trust protocol as a required step.
 
 State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded in the ledger.
 

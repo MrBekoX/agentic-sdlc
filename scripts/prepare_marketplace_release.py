@@ -134,10 +134,10 @@ def _zcode_readme(version, chinese=False):
 ## 依赖和安装
 
 需要 ZCode、同一操作系统环境中的 Node.js，以及 Hook shell PATH 上的 node。
-辅助流程需要 Python 3.12+ 和 Git。使用宿主正常的模型提供商与身份验证；插件不需要额外的
-API 服务、凭据或 MCP 服务器。保留完整插件，包括 skills、agents、commands、hooks、scripts、contracts 和 docs。
+辅助流程需要 Python 3（已在 3.12 上测试；技能运行的辅助脚本经静态检查保持与 3.8 的导入兼容）和 Git。使用宿主正常的模型提供商与身份验证；
+插件不需要额外的 API 服务、凭据或 MCP 服务器。保留完整插件，包括 skills、agents、commands、hooks、scripts、contracts 和 docs。
 在 ZCode 的 Settings → Plugins → Discover 中添加提供此包的 marketplace，选择 agentic-sdlc，
-然后 Install、Enable 并开启新会话。官方市场接受和发布是单独的维护者操作。
+然后 Install 并开启新会话。ZCode 默认启用新安装的插件。官方市场接受和发布是单独的维护者操作。
 
 ## 使用、更新和卸载
 
@@ -148,7 +148,7 @@ agentic-sdlc-pipeline；git-safety-check 是手动只读评审命令。
 
 ## 副作用与安全边界
 
-启用插件允许其确定性 Hook 执行本地 Node.js 和 Git 命令，并读取 Hook stdin 与项目状态。
+插件安装后默认启用，其确定性 Hook 随即可以执行本地 Node.js 和 Git 命令，并读取 Hook stdin 与项目状态。
 PreToolUse 对 Bash 使用 scan-commit、destructive-command-guard 和 branch-guard。
 PostToolUse 对 Write|Edit 使用 scan-write；SessionStart 使用 session-start。
 这些 Hook 不调用网络；未声明 MCP 服务器。技能执行可使用宿主的模型和网络工具，并在获得授权后
@@ -178,11 +178,13 @@ trust or model behavior.
 ## Prerequisites and installation
 
 Use ZCode and Node.js in the same OS environment, with node on the hook shell PATH.
-Helper workflows require Python 3.12+ and Git. Use the host's ordinary model provider and authentication;
-the plugin needs no additional API service, credentials or MCP server. Keep the full plugin, including
-skills, agents, commands, hooks, scripts, contracts and docs.
+Helper workflows require Python 3 (3.12 tested; the helpers skills run are kept import-compatible with 3.8 by a static check) and Git.
+Use the host's ordinary model provider and authentication; the plugin needs no additional API service,
+credentials or MCP server. Keep the full plugin, including skills, agents, commands, hooks, scripts,
+contracts and docs.
 In ZCode Settings → Plugins → Discover, add the marketplace supplying this package, select agentic-sdlc,
-then Install, Enable and start a new session. Official acceptance and publication are separate maintainer actions.
+then Install and start a new session. ZCode enables newly installed plugins by default.
+Official acceptance and publication are separate maintainer actions.
 
 ## Use, update and uninstall
 
@@ -194,7 +196,8 @@ host configuration, catalogs or shared data.
 
 ## Side effects and security boundaries
 
-Enabling the plugin permits deterministic hooks to execute local Node.js/Git commands and read hook stdin/project state.
+The plugin is enabled by default once installed, which permits deterministic hooks to execute local Node.js/Git commands
+and read hook stdin/project state.
 PreToolUse on Bash runs scan-commit, destructive-command-guard and branch-guard.
 PostToolUse on Write|Edit runs scan-write; SessionStart runs session-start.
 These hooks make no network calls; no MCP server is declared. Skills may use the host's model/web tools and

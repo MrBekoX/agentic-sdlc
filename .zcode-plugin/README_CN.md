@@ -3,13 +3,19 @@
 > ZCode 是**适配器目标，不是 0.4.3 受支持的发布目标**。受支持的发布目标仍然是
 > Claude Code 和 Codex（见仓库 `README.md` 与 `docs/runtime-adapter.md`）。本清单与
 > Hook 接线是 ZCode marketplace 安装（以文件源添加根目录的 `marketplace.json`，或以本地
-> 目录或 GitHub 添加本仓库）的基础设施；不得将其引用为发布支持。
+> 目录或 GitHub 添加本仓库）的基础设施，并不构成发布支持。
 
 AGENTIC-SDLC 将带门禁的规格/计划/TDD/安全/评审流程打包为 16 个技能、1 个手动命令和
 确定性的守护 Hook。本目录是 ZCode 插件清单（`.zcode-plugin/plugin.json`）；共享的技能
 源代码仍在仓库根目录 `skills/`（扁平的 `skills/<name>/SKILL.md` 布局，无分组文件夹）。
 
 ## 安装
+
+获取软件包：文件源是包目录中根目录下的 `marketplace.json`，包目录即本仓库文件的解压副本。
+可以克隆仓库，或下载并解压其源码 ZIP 或发布归档（维护者使用
+`python3 scripts/build_release.py --output agentic-sdlc.zip` 构建；GitHub Releases 尚未发布）。
+目录内的文件无需编辑。ZCode 桌面版提供 Windows（x64/ARM64）、macOS（Apple Silicon/Intel
+DMG）和 Linux（x64 AppImage）版本。
 
 1. 打开 ZCode **Settings → Plugins**，**Discover** 标签页，点击 **+**
    （**Create → Add marketplace**）。
@@ -21,13 +27,18 @@ AGENTIC-SDLC 将带门禁的规格/计划/TDD/安全/评审流程打包为 16 �
    点击 **Install**。只有在停用后才需要在「Manage installed」中再次点击 **Enable**。
 4. 开启新会话（或重新加载），使技能、命令与 Hook 被发现。
 
-没有本仓库克隆时，在第 2 步改为将 GitHub 仓库 `MrBekoX/agentic-sdlc`（或其 URL）添加为
-marketplace 源。厂商插件页面将 GitHub 仓库列为 marketplace 源（2026-10-08 核对）。如第 2 步
-所述，ZCode 会先通过 `.claude-plugin/marketplace.json` 读取该源：插件以 Claude 条目安装，
-没有 ZCode 的类别、标签与翻译。
+没有本地包目录时，在第 2 步改为将 GitHub 仓库 `MrBekoX/agentic-sdlc`（或其 URL）添加为
+marketplace 源。这需要公开仓库（目前仓库为私有），且尚未经过原生验证。厂商插件页面将
+GitHub 仓库列为 marketplace 源（2026-10-08 核对）。如第 2 步所述，ZCode 会先通过
+`.claude-plugin/marketplace.json` 读取该源：插件以 Claude 条目安装，没有 ZCode 的类别、
+标签与翻译。
 
 前提条件：`node` 必须在 `PATH` 上——每个 Hook 执行器都是通过 argv 运行
-`node <script>`。
+`node <script>`。辅助工作流还需要 Python 3（已测试 3.12；技能运行的辅助脚本经静态检查
+保持与 3.8 的导入兼容）和 Git；在 Windows 上，若 `python3` 缺失或是 Microsoft Store 别名，
+请使用 `py -3`。在 macOS 上，从 Finder 或 Dock 启动的图形界面应用可能不会继承 shell 的
+`PATH`；若 ZCode 找不到 `node`，Hook 会以放行方式失败（fail open），守护脚本将静默失效。
+请确认 ZCode 应用本身（而不只是终端）能找到 `node`（此处未验证）。
 
 ## 使用方式
 
@@ -64,9 +75,8 @@ Code 的约定）。在线 Hook 文档称 ZCode 会忽略未知字段，而内�
 下，而不是安装目录。
 
 ZCode 上未接线（已记录的缺口，见 `docs/runtime-adapter.md`）：Stop 完成/流程守护
-（它们读取 Claude transcript / Codex rollout）、flow-order 守护、工作区 Stop 扫描，
-Claude 与 Codex 的 Hook 文件（`hooks-claude.json`、
-`hooks-codex.json`）不与 ZCode 共享。
+（它们读取 Claude transcript / Codex rollout）、flow-order 守护与工作区 Stop 扫描。
+Claude 与 Codex 的 Hook 文件（`hooks-claude.json`、`hooks-codex.json`）不与 ZCode 共享。
 
 ## 编排回退
 
@@ -83,16 +93,34 @@ ZCode 在客户端 3.14.0 中新增了动态工作流（官方更新日志，202
 
 `.zcode-plugin/plugin.json` 与根目录 `marketplace.json` 条目中的 `version` 由
 `scripts/bump_version.py` 统一维护，`tests/test_zcode_packaging.py` 检查二者与 `VERSION` 一致。
-只有 marketplace 中的版本号变化时，ZCode 才会提供更新：刷新 marketplace，然后在
-「Manage installed → Check for updates」中应用更新，并开启新会话。
+只有版本号变化时，ZCode 才会提供更新：刷新 marketplace，然后在
+「Manage installed → Check for updates」中应用更新，并开启新会话。当前范围与发布要求见
+[分发准备](../docs/publication/multi-platform-distribution.md)。
 
 ## 卸载
 
-打开「Settings → Plugins → Manage installed」，进入插件详情后点击 **Uninstall**。现有官方文档
-未说明持久数据是否保留，因此不要承诺卸载会删除这些数据；请保留其他插件与设置。详见
-`docs/publication/multi-platform-distribution.md`。
+打开「Settings → Plugins → Manage installed」，进入插件详情后点击 **Uninstall**；ZCode
+会先请求确认，再移除插件。现有厂商文档未说明持久数据是否保留，因此不要假定卸载会删除
+这些数据。请使用原生界面，并保留其他插件与设置。详见
+[生命周期指南](../docs/publication/multi-platform-distribution.md)。
+
+## 原生验证证据
+
+已签名的 ZCode 桌面版 3.14.5 所附带的 agent CLI 0.16.9 于 2026-10-12 在隔离环境中通过了
+原生的校验、以由根目录 `marketplace.json` 派生的目录添加 marketplace（目录源，而非图形界面的文件源步骤）、安装（已启用，16 个技能、5 个
+Hook 声明）、版本递增后的更新以及经确认的卸载：Windows（E9）、Linux x64 AppImage（E15）
+与 macOS Apple Silicon DMG（E14），见[兼容性矩阵](../docs/publication/compatibility-matrix.md)。
+该 CLI 只在 Electron 的 Node 模式下管理插件，这不是文档化的用户路径，因此上述证据只验证了
+附带的插件管理器；桌面 GUI 流程、GitHub 源、实际的 Hook 投递与模型行为仍未验证。更早的
+准备证据见 [marketplace 就绪记录](../docs/publication/marketplace-readiness-2026-10-11.md)。
 
 ## 官方市场提交
 
 未提交，也未声称已提交。未来 `zai-org/zcode-plugins` PR 仍需补齐的内容见
 `docs/publication/zcode-marketplace.md`。
+
+## 许可与致谢
+
+采用 MIT 许可，见 [LICENSE](../LICENSE)。[obra/superpowers](https://github.com/obra/superpowers)
+（同样采用 MIT 许可）影响了部分技能流程的设计；详见
+[仓库 README](../README.md#related-work-and-acknowledgements)。

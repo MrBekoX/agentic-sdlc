@@ -53,7 +53,7 @@ The portal resets `author.name` and `interface.developerName` to defaults when t
 
 - The current submission field reference requires website/support/privacy/terms URLs for MCP review; skills-only metadata validation does not require all four. This plugin has no MCP server; do not invent account or link prerequisites for its skills-only format ([submission reference](https://developers.openai.com/plugins/deploy/submission#listing-metadata), checked 2026-10-06).
 - Public source links and a GitHub security-report mechanism remain maintainer distribution decisions for a future public repository. The public ZIP does not advertise the currently private repository URLs.
-- Historical ledger rows `skills_only_archive` and `portal_normalized_manifest` remain historical/not-run or BLOCKED. New local build/verify/native evidence is recorded separately in [current readiness](codex-0.160.1-readiness.md); local verification is not portal acceptance.
+- Historical ledger row `skills_only_archive` reads PASS at `2a3d6ac` (static gate: `archive_kind=skills-only`, byte-identical rebuild, `verify=passed`); it binds that commit only, so the skills-only archive must be rebuilt and verified at the release commit. Row `portal_normalized_manifest` is BLOCKED because no upload was performed. New local build/verify/native evidence is recorded separately in [current readiness](codex-0.160.1-readiness.md); local verification is not portal acceptance.
 
 ## Maintainer-evening items (D24)
 

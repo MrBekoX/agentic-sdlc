@@ -13,12 +13,15 @@ python3 -m unittest discover -s tests -v
 python3 scripts/bump_version.py --check
 ```
 
-On Windows, use `py -3` in place of `python3` when the Python launcher is configured. Pull requests
-also run the same deterministic gate on Windows and Linux in `.github/workflows/ci.yml`; attach local
-output when a platform-specific failure cannot be reproduced in CI.
+On Windows, use `py -3` in place of `python3` when `python3` is missing or is the Microsoft Store
+alias. `.github/workflows/ci.yml` runs the same deterministic gate on Windows, Linux and macOS, but
+it is currently started by hand (`workflow_dispatch`) and does not run on pushes or pull requests,
+so attach local gate output to the PR, and name the OS when a failure is platform-specific.
 
 ## Rules
 
-- Supported runtimes are Claude Code and Codex only.
+- Supported runtimes are Claude Code and Codex. Kimi Code, Grok CLI and ZCode are experimental
+  adapters with narrower hook wiring; a change that touches a runtime adapter names the runtimes
+  it was checked on.
 - Skills use the Assertion-contract house voice (`skills/skill-authoring/references/house-voice.md`); do not import borrowed law/flag/rationalization-style section labels from other plugins.
 - No completion claim without fresh evidence. Commit/push only on request.

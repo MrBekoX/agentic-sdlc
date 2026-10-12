@@ -1,41 +1,41 @@
 # AGENTIC-SDLC Plugin Reference
 
-> Version: `0.4.3`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md) or [Codex](../.codex-plugin/README.md).
+> Version: `0.4.3`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md), [Codex](../.codex-plugin/README.md), [Kimi Code](../.kimi-plugin/README.md), [Grok CLI](../.grok-plugin/README.md) or [ZCode](../.zcode-plugin/README.md).
 
-AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It routes each prompt to the smallest sufficient skill and reserves the full SDLC envelope for work that actually needs it.
+AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**, with experimental adapters for **Kimi Code**, **Grok CLI** and **ZCode**. It routes each prompt to the smallest sufficient skill and reserves the full SDLC envelope for work that actually needs it.
 
 ## Supported Runtime Scope
 
 | Runtime | Status | Runtime notes |
 |---|---|---|
 | Claude Code | Supported | Native `Skill`, `Workflow`, `Agent`/`Task`, commands, and full hook wiring. See [`../.claude-plugin/README.md`](../.claude-plugin/README.md). |
-| Codex | Supported | Shared skills, Codex manifest metadata, personal-marketplace install flow, and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
-| ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Marketplace install through the root ZCode-schema `marketplace.json` added as a file source; a directory or GitHub source (`MrBekoX/agentic-sdlc`, for an install without a clone) is read through `.claude-plugin/marketplace.json` first and shows the Claude entry. A narrow verified-event hook wire. ZCode 3.14.0 added dynamic workflows, but Z.ai publishes no script API and `plugin.json` has no `workflows` key, so none ships here. See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
-| Grok CLI | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through `.grok-plugin/marketplace.json`; a narrow verified-event hook wire (`hooks/hooks-grok.json`); project-catalog Rhai at `.grok/workflows/*.rhai` (not a plugin component). See [`../.grok-plugin/README.md`](../.grok-plugin/README.md). |
-| Kimi Code | Packaged adapter with limited runtime coverage | `.kimi-plugin/plugin.json`, `marketplace-kimi.json`, startup router and three inline command guards; see [Kimi](../.kimi-plugin/README.md). |
+| Codex | Supported | Shared skills, Codex manifest metadata, install through `codex plugin marketplace add <package-directory>` then `codex plugin add agentic-sdlc@mrbekox` (a personal catalog is optional), and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
+| ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Marketplace install through the root ZCode-schema `marketplace.json` added as a file source; a directory or GitHub source (`MrBekoX/agentic-sdlc`) is read through `.claude-plugin/marketplace.json` first and shows the Claude entry, and the GitHub source needs the public repository and is not natively verified. A narrow verified-event hook wire. ZCode 3.14.0 added dynamic workflows, but Z.ai publishes no script API and `plugin.json` has no `workflows` key, so none ships here. See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
+| Grok CLI | Adapter / experimental (not a 0.4.3 release target) | Local install with `grok plugin install <package-directory> --trust`; the shipped catalog `.grok-plugin/marketplace.json` carries a remote `url` entry that needs the public repository; a narrow verified-event hook wire (`hooks/hooks-grok.json`); project-catalog Rhai at `.grok/workflows/*.rhai` (not a plugin component). See [`../.grok-plugin/README.md`](../.grok-plugin/README.md). |
+| Kimi Code | Adapter / experimental, limited runtime coverage (not a 0.4.3 release target) | `/plugins install <package-directory>` in the TUI; `.kimi-plugin/plugin.json`, `marketplace-kimi.json`, startup router and three inline command guards; see [Kimi](../.kimi-plugin/README.md). |
 | OpenCode / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.3`. |
 
-All five platform adapters are included in [distribution preparation](publication/multi-platform-distribution.md); packaging/replay evidence does not replace native/live validation.
+All five platform adapters are included in [distribution preparation](publication/multi-platform-distribution.md); packaging/replay evidence does not replace native/live validation. Native install, discovery, update and uninstall passed for all five on Windows, Linux and macOS in isolated profiles with no model turn ([compatibility matrix](publication/compatibility-matrix.md), E1–E15); hook trust and delivery inside a live session, live skill behavior and ZCode's desktop GUI flow are not proven there.
 
 ## Installation Model
 
 | File | Runtime | Purpose |
 |---|---|---|
 | `.claude-plugin/plugin.json` | Claude Code | Plugin metadata. |
-| `.claude-plugin/marketplace.json` | Claude Code | Local marketplace source; the repo root is the source. |
+| `.claude-plugin/marketplace.json` | Claude Code, Codex | Claude-schema marketplace `mrbekox`; its `source: "./"` makes the package root the plugin source. Codex reads this layout too. |
 | `.kimi-plugin/plugin.json` | Kimi Code | Skills, commands, agents, startup router, tool mapping and inline hooks. |
 | `marketplace-kimi.json` | Kimi Code | Custom catalog schema version 2; plugin version lives in its manifest. |
 | `.codex-plugin/plugin.json` | Codex | Codex plugin metadata, `skills`, `hooks`, and `interface` block. |
 | `hooks/hooks-claude.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
 | `hooks/hooks-codex.json` | Codex | Blocking `PreToolUse`, bootstrap `SessionStart`, and advisory/env-gated `Stop` wiring, subject to Codex hook review/trust. |
 | `.zcode-plugin/plugin.json` | ZCode | Adapter plugin metadata; `skills`, `commands`, `agents`, and the ZCode hook wire. |
-| `marketplace.json` (repository root) | ZCode | Local marketplace source in the ZCode schema, added as a file source; the repo root is the source. A directory or GitHub source (`MrBekoX/agentic-sdlc`) is read through `.claude-plugin/marketplace.json` first. |
+| `marketplace.json` (repository root) | ZCode | Local marketplace source in the ZCode schema, added as a file source; its `source: "./"` makes the package root the plugin source. A directory or GitHub source (`MrBekoX/agentic-sdlc`; needs the public repository) is read through `.claude-plugin/marketplace.json` first. |
 | `hooks/hooks-zcode.json` | ZCode | Verified-event wiring only: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, `SessionStart` bootstrap on `startup\|resume\|clear\|compact`. Each handler passes `--zcode-runtime`, so the scripts emit only ZCode-documented hook-output keys (`hooks/hook-output.mjs`). |
 | `.grok-plugin/plugin.json` | Grok CLI | Adapter plugin metadata and the Grok hook wire. |
-| `.grok-plugin/marketplace.json` | Grok CLI | Local marketplace source in the Grok schema; the repo root is the source. |
+| `.grok-plugin/marketplace.json` | Grok CLI | Grok-schema catalog whose single entry is a remote `url` source (`https://github.com/MrBekoX/agentic-sdlc.git`), so it needs the public repository; Grok skips an entry that points at the catalog's own root. A local install uses `grok plugin install <package-directory> --trust` instead. |
 | `hooks/hooks-grok.json` | Grok CLI | Verified-event wiring only: `PreToolUse` command guards on `Bash\|run_terminal_command`. |
 
-`.claude-plugin/marketplace.json` is Claude's marketplace schema and not the supported Codex install path. Codex 0.154.0 can read it as a legacy-compatible layout, and `codex plugin marketplace add MrBekoX/agentic-sdlc` surfacing the `mrbekox` marketplace has been observed, but that route is unsupported. Installing both routes can list the plugin twice, once from `mrbekox` and once from `personal`. The supported Codex install remains `codex plugin add agentic-sdlc@personal`.
+`.claude-plugin/marketplace.json` is Claude's marketplace schema; current Codex reads it as a legacy-compatible layout named `mrbekox`. The primary Codex install is `codex plugin marketplace add <package-directory>` (no `#` in the path; Codex reads `#` as a ref separator) followed by `codex plugin add agentic-sdlc@mrbekox`. That route installed, discovered, recopied and removed the package natively on codex-cli 0.162.1 on Windows (E2 in the [compatibility matrix](publication/compatibility-matrix.md)); the Linux and macOS runs (E6, E11) installed the same package through a personal catalog. Once the repository is public, `codex plugin marketplace add MrBekoX/agentic-sdlc` surfaces the same `mrbekox` marketplace. A personal catalog (`~/.agents/plugins/marketplace.json`, installed with `codex plugin add agentic-sdlc@personal`) is an optional alternative. Installing from both catalogs can list the plugin twice, once from `mrbekox` and once from `personal`.
 
 Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Runtime root variables are:
 
@@ -61,7 +61,7 @@ These variables are set only in hook processes. None reaches the model's Bash or
 | `commands/` | Manual slash-command definitions such as `/agentic-sdlc:git-safety-check`. |
 | `scripts/` | Deterministic probes, validators, eval runners, version helpers, and review-package helpers. |
 | `tests/` | Unit tests, harness, fixtures, golden references, and eval seeds. |
-| `.claude-plugin/` / `.codex-plugin/` | Runtime manifests and runtime README files. |
+| `.claude-plugin/` / `.codex-plugin/` / `.kimi-plugin/` / `.zcode-plugin/` / `.grok-plugin/` | Runtime manifests and runtime README files. The root `marketplace.json` (ZCode) and `marketplace-kimi.json` (Kimi Code) are the other catalogs. |
 
 ## Entry Points
 
@@ -93,10 +93,12 @@ Gate skills feed the pipeline at control points: `dispatch-strategy`, `security-
 | Claude Code | Uses the named Workflow `agentic-sdlc:spec-plan-draft` for both spec and plan phases. |
 | Codex | Uses the embedded author -> critic -> revise adapter inside `agentic-sdlc-pipeline`; validates saved artifacts with `validate_artifacts.py`. |
 | Grok CLI (experimental) | Uses `/workflow spec-plan-draft` (project catalog `.grok/workflows/spec-plan-draft.rhai`) when present; otherwise `spawn_subagent` author -> critic -> revise plus `validate_artifacts.py`. Not a plugin-shipped workflow. |
+| Kimi Code (experimental) | No Claude Workflow runtime: `Agent` author -> critic -> revise with saved artifacts plus `validate_artifacts.py`, or an inline pass marked degraded. |
+| ZCode (experimental) | A plugin cannot deliver a ZCode workflow (`workflows/zcode/spec-plan-draft.dwf.ts` is an unverified port); uses the embedded author -> critic -> revise adapter, as on Codex, plus `validate_artifacts.py`. |
 
 The pipeline must not call standalone `spec-authoring` or `plan-authoring` for its internal steps 4-5.
 
-Both runtimes use the same depth contract for spec/plan work. `spec-plan-author` carries the concrete bar for Given/When/Then criteria, input-to-sink security notes, RED test points, and runnable verification. `spec-plan-critic` is the adversarial pass and cannot return clean when a draft is shallow, leaks HOW into a spec, invents WHAT in a plan, omits verification, or hand-waves security.
+Every runtime uses the same depth contract for spec/plan work. `spec-plan-author` carries the concrete bar for Given/When/Then criteria, input-to-sink security notes, RED test points, and runnable verification. `spec-plan-critic` is the adversarial pass and cannot return clean when a draft is shallow, leaks HOW into a spec, invents WHAT in a plan, omits verification, or hand-waves security.
 
 ## Focused Skills
 
@@ -141,11 +143,13 @@ The scripts are shared, but runtime wiring differs.
 | `flow-evidence.mjs` | Shared library | Shared library | Evidence engine used by the flow guards. |
 | `secret-patterns.mjs` | Shared library | Shared library | Secret-pattern scanner used by hook scripts. |
 
+The experimental adapters wire a subset of the same scripts. Kimi Code (inline hooks in `.kimi-plugin/plugin.json`) and Grok CLI (`hooks/hooks-grok.json`) run `scan-commit.mjs`, `destructive-command-guard.mjs` and `branch-guard.mjs` as `PreToolUse` command guards; ZCode (`hooks/hooks-zcode.json`) runs the same three plus `scan-write.mjs` on `PostToolUse` and `session-start.mjs` on `SessionStart`. None of them wires a Stop or flow guard; see [`runtime-adapter.md`](./runtime-adapter.md).
+
 `hooks/flow-requirements.json` is the shared source for which steps each active flow must evidence. It covers `root-cause-fix`, `feature-build`, `safe-refactor`, and `agentic-sdlc-pipeline`; the offline gate validates that every referenced skill, workflow, agent, and validator exists.
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
-## 11. Deterministic scripts (23)
+## Deterministic scripts (23)
 
 | Script | Purpose |
 |---|---|
@@ -196,7 +200,7 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 
 ## Known Limitations
 
-- `0.4.3` supports Claude Code and Codex only.
+- The `0.4.3` release supported Claude Code and Codex only. The current tree also packages Kimi Code, Grok CLI and ZCode as experimental adapters with narrower hook wiring; their native install, discovery, update and uninstall pass on Windows, Linux and macOS ([compatibility matrix](publication/compatibility-matrix.md)), but hook delivery inside a live session and model behavior are not proven.
 - Codex hook wiring is declared via `.codex-plugin/plugin.json` -> `hooks/hooks-codex.json`; non-managed plugin-bundled command hooks require Codex review/trust before they run. It is deliberately not named `hooks/hooks.json`, which Claude Code would auto-load with an undefined `${PLUGIN_ROOT}`.
 - Codex trigger evals are classifier evidence, not Claude-style `Skill` event evidence.
 - Hooks fail open where necessary so a hook fault does not break a session.
@@ -218,6 +222,8 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 - Project overview: [`../README.md`](../README.md)
 - Claude runtime README: [`../.claude-plugin/README.md`](../.claude-plugin/README.md)
 - Codex runtime README: [`../.codex-plugin/README.md`](../.codex-plugin/README.md)
+- Kimi Code, Grok CLI and ZCode adapter READMEs: [`../.kimi-plugin/README.md`](../.kimi-plugin/README.md), [`../.grok-plugin/README.md`](../.grok-plugin/README.md), [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md)
+- Compatibility matrix: [`publication/compatibility-matrix.md`](publication/compatibility-matrix.md)
 - Skill boundaries: [`skill-boundaries.md`](./skill-boundaries.md)
 - Testing: [`testing.md`](./testing.md)
 - Troubleshooting: [`troubleshooting.md`](./troubleshooting.md)

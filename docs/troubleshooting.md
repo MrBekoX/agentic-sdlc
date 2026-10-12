@@ -21,6 +21,7 @@ Check:
 5. The manifest contains `"skills": "./skills/"` and `"hooks": "./hooks/hooks-codex.json"`.
 6. Skills are under root `skills/`, not `.codex/skills/`.
 7. The runtime guide in [`../.codex-plugin/README.md`](../.codex-plugin/README.md) matches the installed path.
+8. A local source path contains no `#`: Codex splits a marketplace source on `#` to read a ref, so move or rename the folder.
 
 The `@personal` catalog in the [Codex guide](../.codex-plugin/README.md#install) is a local authoring example, not an install-path requirement. Current Codex supports Git/repo marketplace sources and the legacy `.claude-plugin/marketplace.json` layout ([packaging guide](https://developers.openai.com/plugins/build/plugins), checked 2026-10-08); Git access still depends on repository visibility and authentication. Installing the same plugin from two sources can list it twice. Hook paths come from the installed `PLUGIN_ROOT`, not the marketplace source path or this checkout.
 
@@ -69,6 +70,40 @@ The check starts `codex app-server --stdio`, sends only `initialize`, `initializ
 A bare `--codex` name (the default `codex`) is resolved only on absolute `PATH` entries and never from the current directory; relative or `~` entries are skipped, so a `codex` reachable only through one reports `error:codex_not_found`. Pass an explicit path with `--codex` in that case. On a timeout the check kills the server's whole process tree; on Windows it starts `taskkill` by its absolute `System32` path. On Windows the check needs Python 3.12 or newer, whose `shutil.which` handles `PATHEXT` for a path that has a directory part.
 
 The check reports trust state only: it does not prove that a hook runs, that `node` is on `PATH`, or that a trusted hook has an effect. Trust is granted only through the `/hooks` review; no hand edit of `config.toml` and no trust-bypass flag is a trust step.
+
+## Kimi Code Does Not See The Plugin Or A Change
+
+Check:
+
+1. The plugin was installed in the Kimi TUI with `/plugins install <package-directory>` (or `/plugins install https://github.com/MrBekoX/agentic-sdlc` once the repository is public), and `/plugins info agentic-sdlc` lists it.
+2. After editing the source folder, install it again. Kimi runs a managed copy (`$KIMI_CODE_HOME/plugins/managed/<id>/`) that does not follow source edits, and `/plugins reload` does not copy changed files. Then run `/reload` or `/new`.
+3. Skills are invoked by bare name (`/skill:mind-spark`); Kimi does not resolve `agentic-sdlc:mind-spark`.
+4. On Windows, Git for Windows is installed: Kimi's Bash tool needs it.
+5. `node` is on the `PATH` of the shell Kimi runs hooks with; without it the three PreToolUse command guards fail open.
+
+`/plugins remove agentic-sdlc` removes the installed record; the managed copy stays on disk.
+
+## Grok CLI Does Not Load The Plugin Or A Change
+
+Check:
+
+1. The install passed `--trust`: `grok plugin install <package-directory> --trust`. Installation requires it, and the same command enables the plugin; `grok plugin enable agentic-sdlc` is needed only after a `grok plugin disable`.
+2. For a path containing `#`, change into that directory and run `grok plugin install . --trust`: Grok 1.0.50 treats `#` in an absolute source operand as a subdirectory suffix.
+3. A changed local package is not picked up by `grok plugin update` (it reports the plugin as already live) or by installing over it (AlreadyInstalled). Run `grok plugin uninstall agentic-sdlc`, then install the new folder.
+4. `grok plugin details agentic-sdlc` or `grok inspect --json` lists the plugin's skills.
+5. `node` is on the `PATH` of the shell Grok runs hooks with; without it the three command guards fail open.
+
+Then press `r` in the Plugins tab or start a new session.
+
+## ZCode Shows The Claude Entry Or Hooks Do Not Run
+
+Check:
+
+1. The marketplace was added from the root `marketplace.json` as a file source (Settings → Plugins → Add marketplace). A directory or GitHub source is read through `.claude-plugin/marketplace.json` first and shows the Claude entry without ZCode's category, tags and translations; remove that marketplace and add the file instead. A GitHub source also needs the public repository and has not been verified natively.
+2. `node` is on the `PATH` the ZCode app itself sees. On macOS, an app started from the Dock or Finder may not inherit the `PATH` a shell profile sets (for example nvm, or a Homebrew path added in `.zshrc`); without `node` the hooks fail open and no guard runs.
+3. An update is offered only when the catalog version changes; after applying it, start a new session.
+
+See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md) for the install steps.
 
 ## Branch Guard Only Warns
 

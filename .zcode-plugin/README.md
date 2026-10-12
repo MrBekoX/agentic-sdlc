@@ -13,6 +13,13 @@ root `skills/` (flat `skills/<name>/SKILL.md` layout — no grouping folders).
 
 ## Install
 
+Get the package: the file source is the root `marketplace.json` inside a package
+directory, an extracted copy of this repository's files. Clone the repository, or
+download and extract its source ZIP or a release archive (maintainers build one with
+`python3 scripts/build_release.py --output agentic-sdlc.zip`; GitHub Releases are not
+published yet). Nothing inside the folder needs editing. ZCode desktop builds exist for
+Windows (x64/ARM64), macOS (Apple Silicon/Intel DMG) and Linux (x64 AppImage).
+
 1. Open ZCode **Settings → Plugins**, **Discover** tab, and click **+**
    (**Create → Add marketplace**).
 2. Add the root `marketplace.json` (the ZCode marketplace schema) **as a file source**.
@@ -25,13 +32,20 @@ root `skills/` (flat `skills/<name>/SKILL.md` layout — no grouping folders).
    **Install**. It is enabled at once; use **Enable** in Manage installed only after a disable.
 4. Start a new session (or reload) so skills, commands, and hooks are discovered.
 
-Without a clone of this repository, add the GitHub repository `MrBekoX/agentic-sdlc` (or
-its URL) as the marketplace source in step 2. The vendor plugin page lists a GitHub
+Without a local package directory, add the GitHub repository `MrBekoX/agentic-sdlc` (or
+its URL) as the marketplace source in step 2. This needs the public repository (it is
+private today) and has not been natively verified. The vendor plugin page lists a GitHub
 repository as a marketplace source (checked 2026-10-08). ZCode reads that source through
 `.claude-plugin/marketplace.json` first, as step 2 describes: the plugin installs with the
 Claude entry, without the ZCode category, tags and translations.
 
-Prerequisite: `node` must be on `PATH` — every hook executor is `node <script>` via argv.
+Prerequisites: `node` must be on `PATH` — every hook executor is `node <script>` via argv.
+Helper workflows also need Python 3 (3.12 is tested; the helpers skills run are kept
+import-compatible with 3.8 by a static check) and Git; on Windows, use `py -3` when
+`python3` is missing or is the Microsoft Store alias. On macOS, a GUI app started from
+Finder or the Dock may not inherit your shell `PATH`; if ZCode cannot find `node`, the
+hooks fail open and the guards silently do nothing. Check that `node` is visible to the
+ZCode app, not only to your terminal (not verified here).
 
 ## Using it
 
@@ -95,23 +109,39 @@ supported path.
 
 `version` in `.zcode-plugin/plugin.json` and in the root `marketplace.json` entry is
 tracked by `scripts/bump_version.py` and pinned to `VERSION` by
-`tests/test_zcode_packaging.py`. Refresh the marketplace, then use Manage installed
-→ Check for updates and apply the update. See [distribution preparation](../docs/publication/multi-platform-distribution.md) for current scope and publishing requirements.
+`tests/test_zcode_packaging.py`. ZCode offers an update only when the version changes:
+refresh the marketplace, then use Manage installed → Check for updates, apply the
+update and start a new session. See [distribution preparation](../docs/publication/multi-platform-distribution.md)
+for current scope and publishing requirements.
+
+## Uninstall
+
+Open Settings → Plugins → Manage installed → the plugin details, then Uninstall; ZCode
+asks for confirmation before it removes the plugin. Persistent-data retention is not
+specified in the reviewed vendor documentation, so do not assume uninstall deletes it.
+Use the native UI and preserve unrelated plugins/settings. See the
+[lifecycle guide](../docs/publication/multi-platform-distribution.md).
+
+## Native evidence
+
+The signed ZCode desktop 3.14.5 distribution's bundled agent CLI 0.16.9 passed isolated
+native validate, marketplace add of a catalog folder derived from the root
+`marketplace.json` (a directory source, not the GUI file-source step), install (enabled,
+16 skills, five hook declarations), version-bumped update and confirmed uninstall on
+2026-10-12: Windows (E9), Linux x64 AppImage (E15) and macOS Apple Silicon DMG (E14) in
+the [compatibility matrix](../docs/publication/compatibility-matrix.md). That CLI manages
+plugins only in Electron's Node mode, which is not a documented user path, so this
+verifies the bundled plugin manager only; the desktop GUI flow, a GitHub source, actual
+hook delivery and model behavior remain unverified. Earlier preparation evidence is in
+[marketplace readiness](../docs/publication/marketplace-readiness-2026-10-11.md).
 
 ## Official marketplace submission
-
-The signed desktop 3.14.5 distribution's bundled agent CLI 0.16.9 has isolated
-native validate/install/discovery/versioned-update/uninstall evidence, including
-16 skills and five hook declarations. This verifies the bundled manager only;
-desktop GUI, actual hook delivery and model behavior remain unverified. See
-[current preparation](../docs/publication/marketplace-readiness-2026-10-11.md).
 
 Not done and not claimed. What a future `zai-org/zcode-plugins` PR would still need is
 listed in `docs/publication/zcode-marketplace.md`.
 
-## Uninstall
+## License and attribution
 
-Open Settings → Plugins → Manage installed → the plugin details, then Uninstall.
-Persistent-data retention is not specified in the reviewed vendor documentation.
-Use the native UI and preserve unrelated plugins/settings. See the
-[lifecycle guide](../docs/publication/multi-platform-distribution.md).
+MIT; see [LICENSE](../LICENSE). [obra/superpowers](https://github.com/obra/superpowers)
+(also MIT licensed) influenced parts of the skill procedure; see the
+[repository README](../README.md#related-work-and-acknowledgements).

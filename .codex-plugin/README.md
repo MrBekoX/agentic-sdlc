@@ -24,7 +24,7 @@ The `interface` block supplies display metadata, capabilities, default prompts a
 
 ![Agentic SDLC workflow overview](../assets/workflow-overview.png)
 
-The [official packaging guide](https://developers.openai.com/plugins/build/plugins) supports a standalone compatibility manifest as well as portable root `plugin.json`. This package retains its existing format; no migration is required for the current local contract. An isolated **0.160.1** installation discovered 16 skills and eight untrusted hooks. The **0.154.0** portable comparison (16 skills, zero portable hooks versus eight compatibility hooks) is historical evidence, not a current portable-loader claim. See [current preparation evidence](../docs/publication/codex-0.160.1-readiness.md) and [runtime evidence and limits](../docs/runtime-adapter.md).
+The [official packaging guide](https://developers.openai.com/plugins/build/plugins) supports a standalone compatibility manifest as well as portable root `plugin.json`. This package retains its existing format; no migration is required for the current local contract. Native install, discovery, recopy and removal passed on 2026-10-12 with codex-cli **0.162.1** (Windows, macOS) and **0.156.1** (Linux); see the [compatibility matrix](../docs/publication/compatibility-matrix.md) (E2, E6, E11). An earlier isolated 0.160.1 installation discovered 16 skills and eight untrusted hooks. The **0.154.0** portable comparison (16 skills, zero portable hooks versus eight compatibility hooks) is historical evidence, not a current portable-loader claim. See [0.160.1 preparation evidence](../docs/publication/codex-0.160.1-readiness.md) and [runtime evidence and limits](../docs/runtime-adapter.md).
 
 ## Distribution paths
 
@@ -34,18 +34,27 @@ Public directory distribution uses a separate `--skills-only` projection: the ma
 
 | Path | Prerequisites | Steps | Go condition | State |
 |---|---|---|---|---|
-| Claude own marketplace | Claude Code; see [`../.claude-plugin/README.md`](../.claude-plugin/README.md). | `claude plugin marketplace add MrBekoX/agentic-sdlc`, then `claude plugin install agentic-sdlc@mrbekox`. | Go condition: a public repository, both strict Claude manifest validations passing, and a recorded clean install. | State: BLOCKED. The repository is private and its unauthenticated URL returns 404. |
+| Claude own marketplace | Claude Code; see [`../.claude-plugin/README.md`](../.claude-plugin/README.md). | `claude plugin marketplace add <package-directory>` (or `MrBekoX/agentic-sdlc` once the repository is public), then `claude plugin install agentic-sdlc@mrbekox`. | Go condition: a public repository, both strict Claude manifest validations passing, and a recorded clean install. | State: BLOCKED. The repository is private and its unauthenticated URL returns 404. |
 | Claude community marketplace submission | A public repository, a clean-package validation result and maintainer form access. | Submit through the Anthropic form; packet [`docs/publication/claude-community.md`](../docs/publication/claude-community.md). | Go condition: public repository and a passing `claude plugin validate` on the submitted root; acceptance is not guaranteed. | State: BLOCKED. Needs a public repository, validation and form access. |
-| Codex personal marketplace | Codex with marketplace support; Node on the hook `PATH`; a discoverable marketplace source. | Install `agentic-sdlc@<marketplace-name>`; open `/hooks` and trust each hook; run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@<marketplace-name> --cwd <target-project>` from the installed plugin root and expect `codex_hook_trust=trusted` ([Codex hook trust](../docs/troubleshooting.md#codex-hook-trust)). | Go condition: discoverable catalog; native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; native `/hooks` trust review completed. `@personal` below is a local authoring example. | State: GAP. Final-package discovery and real-profile trust are not yet recorded. |
+| Codex personal marketplace | Codex with marketplace support; Node on the hook `PATH`; a package directory or another discoverable marketplace source. | `codex plugin marketplace add <package-directory>`, then `codex plugin add agentic-sdlc@mrbekox` (see [Install](#install)); open `/hooks` and trust each hook; run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@<marketplace-name> --cwd <target-project>` from the installed plugin root or any package copy (a standalone script; needs Python 3.12) and expect `codex_hook_trust=trusted` ([Codex hook trust](../docs/troubleshooting.md#codex-hook-trust)). | Go condition: discoverable catalog; native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; native `/hooks` trust review completed. The `@personal` catalog below is an optional alternative. | State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the [compatibility matrix](../docs/publication/compatibility-matrix.md); `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded in the ledger. |
 | OpenAI public directory | Maintainer-verified identity and Apps Management Write (`api.apps.write`). | Build the deterministic skills-only projection (Codex manifest, skills and merged references, three required stdlib helpers, contracts, assets and `LICENSE`; lifecycle hooks are excluded) with `python3 scripts/build_release.py --output <zip> --skills-only`, verify it with `--verify`, then upload; packet [`docs/publication/openai-skills-only.md`](../docs/publication/openai-skills-only.md). | Go condition: a verified skills-only archive (`archive_kind=skills-only`); submission, acceptance and publication are three separate stages; after publication the listing changes only through a newly reviewed version ([app review](https://developers.openai.com/plugins/deploy/app-review)). | State: BLOCKED. Needs verified identity, `api.apps.write` and a verified skills-only archive. |
 
 ## Install
 
-Install `agentic-sdlc` from the selected marketplace with `codex plugin add agentic-sdlc@<marketplace-name>`, replacing the marketplace name. Codex installs a package copy and supplies its `PLUGIN_ROOT` to hook processes; no maintainer checkout, fixed drive, home directory, or cache location is required. See the [marketplace launch contract](../docs/runtime-adapter.md#codex-marketplace-hook-launch-contract).
+Get the package: a package directory is an extracted copy of this repository's files. Clone the repository, or download and extract its source ZIP or a release archive (maintainers build one with `python3 scripts/build_release.py --output agentic-sdlc.zip`; GitHub Releases are not published yet). Keep `#` out of the path: Codex reads `#` as a ref separator. Nothing inside the folder needs editing.
 
-For local authoring, Codex discovers the default personal marketplace at `~/.agents/plugins/marketplace.json`. The example below points at `~/plugins/agentic-sdlc`, which can be a real copy or a symlink/junction to this clone. The personal catalog root is the home directory, so its `./plugins/agentic-sdlc` source path resolves to `~/plugins/agentic-sdlc`. These paths describe the example source, not the installed hook location.
+```bash
+codex plugin marketplace add <package-directory>
+codex plugin add agentic-sdlc@mrbekox
+```
 
-A simpler local route is `codex plugin marketplace add <package-directory>` (keep `#` out of the path: Codex reads `#` as a ref separator), then `codex plugin add agentic-sdlc@mrbekox`.
+`mrbekox` is the catalog name in the package's `.claude-plugin/marketplace.json`, which uses Claude's marketplace schema; current Codex recognizes that legacy layout as well as native `.agents/plugins/marketplace.json`. Once the repository is public, `codex plugin marketplace add MrBekoX/agentic-sdlc` can replace the directory source; repository visibility/authentication governs Git installation, and the repository is private today. Codex installs a package copy and supplies its `PLUGIN_ROOT` to hook processes; no maintainer checkout, fixed drive, home directory, or cache location is required. See the [marketplace launch contract](../docs/runtime-adapter.md#codex-marketplace-hook-launch-contract).
+
+Start a new Codex thread after install or reinstall so the runtime reloads plugin skills and hooks. Each bundled hook must be trusted before it runs: open `/hooks`, review the plugin commands, trust each agentic-sdlc hook, then run the hook trust check from the distribution table above and expect `codex_hook_trust=trusted`.
+
+### Optional: personal catalog
+
+Instead of adding the package directory, you can list the plugin in Codex's default personal marketplace at `~/.agents/plugins/marketplace.json`. This needs manual path setup. The example below points at `~/plugins/agentic-sdlc`, which can be a real copy of the package directory or a symlink/junction to it. The personal catalog root is the home directory, so its `./plugins/agentic-sdlc` source path resolves to `~/plugins/agentic-sdlc`. These paths describe the example source, not the installed hook location.
 
 Example `~/.agents/plugins/marketplace.json` — if the file already exists, add only the `agentic-sdlc` entry to its `plugins` array; do not replace the file or other entries:
 
@@ -76,14 +85,16 @@ Example `~/.agents/plugins/marketplace.json` — if the file already exists, add
 codex plugin add agentic-sdlc@personal
 ```
 
-`@personal` is this repository's local authoring example. `.claude-plugin/marketplace.json` uses Claude's marketplace schema; current Codex recognizes that legacy layout as well as native `.agents/plugins/marketplace.json` and supports `codex plugin marketplace add owner/repo`. Repository visibility/authentication still governs Git installation. Avoid installing the same plugin from both sources.
+`@personal` is an optional local authoring alternative, not a requirement. Avoid installing the same plugin from both sources; Codex can then list it twice.
 
-Start a new Codex thread after install or reinstall so the runtime reloads plugin skills and hooks. If Codex reports bundled hooks pending review, open `/hooks` and review the plugin commands before relying on them.
+### Update and uninstall
 
 For update/uninstall, distinguish catalog refresh from recopying the installed
 plugin. Use the [five-platform lifecycle guide](../docs/publication/multi-platform-distribution.md).
 For a refreshed local source, repeat `codex plugin add agentic-sdlc@<marketplace-name>`;
-native 0.162.1 recopied it in the isolated lifecycle test.
+native 0.162.1 and 0.156.1 recopied it in the isolated lifecycle tests (E2, E6, E11).
+For a Git catalog, `codex plugin marketplace upgrade <marketplace-name>` refreshes the
+catalog; that path has not been natively verified.
 `codex plugin remove agentic-sdlc@<marketplace-name>` removes this plugin's local
 cache and configuration; retain unrelated plugins and settings. CLI 0.162.1 has
 no `codex plugin update` command.
@@ -150,9 +161,9 @@ The Codex manifest declares `"hooks": "./hooks/hooks-codex.json"`. It wires bloc
 
 ## Requirements
 
-- Codex CLI/runtime with plugin marketplace support. Current Windows native discovery: 0.160.1, checked 2026-10-06. Historical 0.154.0 live captures retain their original platform and scope. Neither the captured historical CLI nor current 0.160.1 exposes `codex plugin validate`.
+- Codex CLI/runtime with plugin marketplace support. Native install, discovery, recopy and removal passed on 2026-10-12 with codex-cli 0.162.1 (Windows, macOS) and 0.156.1 (Linux); see the [compatibility matrix](../docs/publication/compatibility-matrix.md). No model turn ran and no hook trust was granted in those checks. Earlier 0.160.1 Windows discovery (2026-10-06) and historical 0.154.0 live captures retain their original platform and scope. Neither the captured 0.154.0 CLI nor 0.160.1 exposes `codex plugin validate`.
 - Node.js on the hook process `PATH`: `node.exe` on native Windows, `node` on POSIX/WSL. A marketplace install does not install Node.
-- Python 3 for validators, probes, and local gates.
+- Python 3 for helper scripts (3.12 tested; the helpers skills run are kept import-compatible with Python 3.8 by a static check). The hook trust check and other maintainer tooling (`build_release.py`, `bump_version.py`, eval runners) need Python 3.12. On Windows, use `py -3` when `python3` is missing or is the Microsoft Store alias.
 - Git for branch, diff, commit, PR, and worktree flows.
 
 ## Evaluation
