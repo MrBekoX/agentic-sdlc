@@ -791,7 +791,7 @@ class TestCurrentReleaseLedger(unittest.TestCase):
 
     def test_carried_commits_exist(self):
         shallow = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=REPO,
-                                 capture_output=True, text=True)
+                                 capture_output=True, text=True, encoding="utf-8")
         if shallow.returncode != 0 or shallow.stdout.strip() != "false":
             self.skipTest("no full git history here (extracted archive or shallow clone)")
         for row_id, row in required_rows(self.text)[0].items():
