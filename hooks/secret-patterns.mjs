@@ -55,6 +55,12 @@ export const ALLOW_MARKER = /agentic-sdlc:allow-secret|gitleaks:allow/i;
 // Published documentation samples, matched EXACTLY. An exact-value allowlist cannot suppress a
 // class of tokens the way a substring rule can; this is the mechanism gitleaks uses for the
 // octokit README sample and the Stripe docs keys.
+//
+// These are vendor-published example values, not credentials of this repo. GitHub secret scanning
+// flags the Google and Stripe ones (alerts #1 and #2, dismissed as "used in tests"); a new alert on
+// one of these exact strings is the same false positive. Where each is published:
+//   Google: docs.cloud.google.com/docs/authentication/api-keys, "API key components" > String
+//   Stripe: the sk_test_ key in Stripe's public code samples (e.g. stripe.com/payment-links)
 export const DOC_SAMPLES = new Set([
   'AKIAIOSFODNN7EXAMPLE',                        // AWS docs
   'AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe',     // Google docs
