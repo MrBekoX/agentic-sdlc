@@ -3,14 +3,15 @@
 > ZCode is an **adapter target, not a supported 0.4.3 release target**. The supported
 > release targets remain Claude Code and Codex (see the repository `README.md` and
 > `docs/runtime-adapter.md`). This manifest and its hook wire are infrastructure for
-> local ZCode installs; do not cite them as release support.
+> ZCode marketplace installs — the root `marketplace.json` as a file source, or this
+> repository from a local directory or GitHub — and are not release support.
 
 AGENTIC-SDLC packages gated spec/plan/TDD/security/review procedure as 16 skills, one
 manual command, and deterministic guard hooks. This directory is the ZCode plugin
 manifest (`.zcode-plugin/plugin.json`); the shared skill source stays at the repository
 root `skills/` (flat `skills/<name>/SKILL.md` layout — no grouping folders).
 
-## Local install
+## Install
 
 1. Open ZCode **Settings → Plugins**, **Discover** tab, and click **+**
    (**Create → Add marketplace**).
@@ -23,6 +24,12 @@ root `skills/` (flat `skills/<name>/SKILL.md` layout — no grouping folders).
    find the `agentic-sdlc` card (name, version, category `developer-tools`) and click
    **Install**. It is enabled at once; use **Enable** in Manage installed only after a disable.
 4. Start a new session (or reload) so skills, commands, and hooks are discovered.
+
+Without a clone of this repository, add the GitHub repository `MrBekoX/agentic-sdlc` (or
+its URL) as the marketplace source in step 2. The vendor plugin page lists a GitHub
+repository as a marketplace source (checked 2026-10-08). ZCode reads that source through
+`.claude-plugin/marketplace.json` first, as step 2 describes: the plugin installs with the
+Claude entry, without the ZCode category, tags and translations.
 
 Prerequisite: `node` must be on `PATH` — every hook executor is `node <script>` via argv.
 
@@ -53,10 +60,16 @@ Enabling this plugin is a decision to let its hooks run code. The wired hooks
 Effects: the guards read the hook stdin JSON (`tool_input.command`, `tool_input` write
 fields, `cwd`) and local `git` state. Denial uses the documented
 `hookSpecificOutput.permissionDecision` field and the SessionStart bootstrap uses the
-documented `additionalContext` field. The write scanner also emits model-visible
-`hookSpecificOutput.additionalContext`; the parallel `systemMessage` user channel
-is a Claude Code convention and ZCode ignores that unknown field. Native display
-and invocation remain unverified. There is **no network
+documented `additionalContext` field. The write scanner's advisory reaches the model as
+`hookSpecificOutput.additionalContext`. The scripts detect ZCode through two documented
+mechanisms — the wire passes a literal `--zcode-runtime` argv element and ZCode injects
+`ZCODE_PLUGIN_ROOT` as an environment variable — and in that mode emit only documented
+keys (`hooks/hook-output.mjs`): warns move into `hookSpecificOutput.additionalContext`,
+and the advisory top-level `systemMessage` channel (a Claude Code convention) is never
+written. The live hook doc says ZCode ignores unknown fields, while the bundled
+`diagnosing-hooks` skill says any extra key fails the run and discards its effect; the
+output is safe under either reading. Native display and invocation remain unverified.
+There is **no network
 access** (no MCP servers are declared) and no data leaves the machine. Long-lived
 writable data would belong under `ZCODE_PLUGIN_DATA`, not the install directory.
 

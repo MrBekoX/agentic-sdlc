@@ -2,13 +2,14 @@
 
 > ZCode 是**适配器目标，不是 0.4.3 受支持的发布目标**。受支持的发布目标仍然是
 > Claude Code 和 Codex（见仓库 `README.md` 与 `docs/runtime-adapter.md`）。本清单与
-> Hook 接线仅用于本地 ZCode 安装的基础设施；不得将其引用为发布支持。
+> Hook 接线是 ZCode marketplace 安装（以文件源添加根目录的 `marketplace.json`，或以本地
+> 目录或 GitHub 添加本仓库）的基础设施；不得将其引用为发布支持。
 
 AGENTIC-SDLC 将带门禁的规格/计划/TDD/安全/评审流程打包为 16 个技能、1 个手动命令和
 确定性的守护 Hook。本目录是 ZCode 插件清单（`.zcode-plugin/plugin.json`）；共享的技能
 源代码仍在仓库根目录 `skills/`（扁平的 `skills/<name>/SKILL.md` 布局，无分组文件夹）。
 
-## 本地安装
+## 安装
 
 1. 打开 ZCode **Settings → Plugins**，**Discover** 标签页，点击 **+**
    （**Create → Add marketplace**）。
@@ -19,6 +20,11 @@ AGENTIC-SDLC 将带门禁的规格/计划/TDD/安全/评审流程打包为 16 �
    运行。在 **Personal** 分区找到 `agentic-sdlc` 卡片（名称、版本、类别 `developer-tools`），
    点击 **Install**。只有在停用后才需要在「Manage installed」中再次点击 **Enable**。
 4. 开启新会话（或重新加载），使技能、命令与 Hook 被发现。
+
+没有本仓库克隆时，在第 2 步改为将 GitHub 仓库 `MrBekoX/agentic-sdlc`（或其 URL）添加为
+marketplace 源。厂商插件页面将 GitHub 仓库列为 marketplace 源（2026-10-08 核对）。如第 2 步
+所述，ZCode 会先通过 `.claude-plugin/marketplace.json` 读取该源：插件以 Claude 条目安装，
+没有 ZCode 的类别、标签与翻译。
 
 前提条件：`node` 必须在 `PATH` 上——每个 Hook 执行器都是通过 argv 运行
 `node <script>`。
@@ -46,9 +52,14 @@ AGENTIC-SDLC 将带门禁的规格/计划/TDD/安全/评审流程打包为 16 �
 
 副作用：守护脚本读取 Hook stdin JSON（`tool_input.command`、`tool_input` 写入字段、
 `cwd`）与本地 `git` 状态。拒绝操作使用已文档的 `hookSpecificOutput.permissionDecision`
-字段，SessionStart 引导使用已文档的 `additionalContext` 字段；建议消息所用的
-`systemMessage` 用户通道是 Claude Code 的约定，ZCode 会忽略这个未知字段；写入扫描器同时输出
-模型可见的 `hookSpecificOutput.additionalContext`，其原生投递尚未验证。**没有网络访问**
+字段，SessionStart 引导使用已文档的 `additionalContext` 字段。写入扫描器的建议以
+`hookSpecificOutput.additionalContext` 送达模型。脚本以两种已文档的方式识别 ZCode ——
+wire 传入字面量 `--zcode-runtime` argv 参数，且 ZCode 会把 `ZCODE_PLUGIN_ROOT` 作为环境
+变量注入 —— 在该模式下只输出已文档的键（`hooks/hook-output.mjs`）：警告移入
+`hookSpecificOutput.additionalContext`，绝不写出顶层的 `systemMessage` 建议通道（Claude
+Code 的约定）。在线 Hook 文档称 ZCode 会忽略未知字段，而内置的 `diagnosing-hooks` 技能称
+任何多余的键都会使运行失败并丢弃其效果；两种读法下输出都安全。原生显示与调用尚未验证。
+**没有网络访问**
 （未声明任何 MCP 服务器），数据不会离开本机。长期可写数据应放在 `ZCODE_PLUGIN_DATA`
 下，而不是安装目录。
 

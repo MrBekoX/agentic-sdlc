@@ -1,5 +1,5 @@
 {
-  "description": "ZCode hook wiring (experimental adapter, not a 0.4.3 release target). Only events and tool names verified against the fetched ZCode hook schema (zcode.z.ai/en/docs/hooks, 2026-09-19) and tools observed in a live session are wired: process executors via argv (no shell), ${ZCODE_PLUGIN_ROOT} paths, Bash and Write|Edit matchers, SessionStart startup|resume|clear|compact. The Claude-transcript and Codex-rollout Stop readers and the flow-order guard stay unwired (see docs/runtime-adapter.md).",
+  "description": "ZCode hook wiring (experimental adapter, not a 0.4.3 release target). Only events and tool names verified against the fetched ZCode hook schema (zcode.z.ai/en/docs/hooks, 2026-09-19) and tools observed in a live session are wired: process executors via argv (no shell), ${ZCODE_PLUGIN_ROOT} paths, Bash and Write|Edit matchers, SessionStart startup|resume|clear|compact. The Claude-transcript and Codex-rollout Stop readers and the flow-order guard stay unwired (see docs/runtime-adapter.md). Each handler passes --zcode-runtime as a literal second argv element: together with ZCODE_PLUGIN_ROOT, which plugin hook processes receive as an environment variable (live hook doc, 2026-10-08), it flips the shared scripts to ZCode output mode (hooks/hook-output.mjs) so stdout carries only documented keys - a decision as hookSpecificOutput alone, a warn as hookSpecificOutput.additionalContext. The advisory top-level systemMessage channel is a Claude Code convention the live doc reports as ignored and the bundled diagnosing-hooks skill reports as a failed run with the effect discarded (strict schema, pitfall 8); a marketplace install runs these scripts on machines this repo does not control, so the wire depends on no machine-specific path and emits no undeclared channel.",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,19 +8,19 @@
           {
             "type": "process",
             "command": "node",
-            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/scan-commit.mjs"],
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/scan-commit.mjs", "--zcode-runtime"],
             "timeoutMs": 20000
           },
           {
             "type": "process",
             "command": "node",
-            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/destructive-command-guard.mjs"],
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/destructive-command-guard.mjs", "--zcode-runtime"],
             "timeoutMs": 15000
           },
           {
             "type": "process",
             "command": "node",
-            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/branch-guard.mjs"],
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/branch-guard.mjs", "--zcode-runtime"],
             "timeoutMs": 15000
           }
         ]
@@ -33,7 +33,7 @@
           {
             "type": "process",
             "command": "node",
-            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/scan-write.mjs"],
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/scan-write.mjs", "--zcode-runtime"],
             "timeoutMs": 15000
           }
         ]
@@ -46,7 +46,7 @@
           {
             "type": "process",
             "command": "node",
-            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/session-start.mjs"],
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/session-start.mjs", "--zcode-runtime"],
             "timeoutMs": 15000
           }
         ]

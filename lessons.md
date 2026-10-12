@@ -148,6 +148,18 @@ Each entry includes:
 
 ---
 
+## 2026-10-08 — An advisory channel written for one runtime's hook protocol is not portable to another
+
+- **Date:** 2026-10-08
+- **Task / context:** Making the ZCode adapter safe to install from a marketplace, where the wired hook scripts run on machines this repo does not control. Every command guard emitted Claude Code's advisory top-level `systemMessage` channel, and two warn paths emitted ONLY that channel.
+- **Symptom:** Under ZCode, `branch-guard.mjs` on a protected branch and `scan-commit.mjs`'s unreadable-repo warning wrote a payload whose only key is outside ZCode's documented set; the deny paths of all three command guards wrote a documented decision PLUS that same undocumented key.
+- **Root cause:** Two official sources disagree on how ZCode parses hook stdout: the live hook doc (fetched 2026-10-08) says "unknown fields are ignored" while the bundled `diagnosing-hooks` skill says the schema is strict — "any extra key fails validation ... its effect was discarded and the run marked failed" (pitfall 8). Under the lenient reading the advisory key is a silent no-op and a `systemMessage`-only warn reaches nobody; under the strict reading every emission that carries it is a failed run whose effect — including a deny — is discarded. Either way, output written for Claude Code's protocol does not port to ZCode's.
+- **Correct fix:** Detect ZCode through two documented mechanisms (the wire passes a literal `--zcode-runtime` argv element; ZCode injects `ZCODE_PLUGIN_ROOT` as an environment variable) and route all guard stdout through `hooks/hook-output.mjs`: under ZCode write only documented keys — decisions as `hookSpecificOutput` alone, warns moved into `hookSpecificOutput.additionalContext` — and give every other runtime the payload byte-identically.
+- **Preventive rule / automated check:** `tests/test_zcode_hook_output.py` runs every wired emission path in ZCode mode (env var and argv marker, each alone) and pins "documented keys only", with Claude-mode regression pins that the advisory channel survives on the other runtimes. `tests/test_zcode_packaging.py::TestZcodeHookWire::test_executors_are_process_argv_with_plugin_root` pins the `--zcode-runtime` second argv element on every wired handler.
+- **Related files & tests:** `hooks/hook-output.mjs`, `hooks/scan-commit.mjs`, `hooks/branch-guard.mjs`, `hooks/destructive-command-guard.mjs`, `hooks/scan-write.mjs`, `hooks/hooks-zcode.json`; `tests/test_zcode_hook_output.py`, `tests/test_zcode_packaging.py`, `tests/test_codex_write_guard.py::TestScanWriteAdvisoryChannels`.
+
+---
+
 ## 2026-10-08 — A hook-field audience copied from an older page stays wrong after the page changes
 
 - **Date:** 2026-10-08

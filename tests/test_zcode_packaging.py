@@ -162,8 +162,12 @@ class TestZcodeHookWire(unittest.TestCase):
         for hook in wired_hooks(self.wire):
             self.assertEqual(hook["type"], "process")
             self.assertEqual(hook["command"], "node")
-            self.assertEqual(len(hook["args"]), 1)
+            self.assertEqual(len(hook["args"]), 2)
             self.assertRegex(hook["args"][0], r"^\$\{ZCODE_PLUGIN_ROOT\}/hooks/[a-z-]+\.mjs$")
+            # The literal second element flips the shared scripts to ZCode
+            # output mode (hooks/hook-output.mjs) independently of env-var
+            # injection: runtime detection must not hinge on one mechanism.
+            self.assertEqual(hook["args"][1], "--zcode-runtime")
             self.assertIsInstance(hook["timeoutMs"], int)
 
     def test_wired_scripts_exist_and_are_the_verified_set(self):
@@ -197,6 +201,14 @@ class TestAdapterFilesKeepHouseContracts(unittest.TestCase):
         for name in ("README.md", "README_CN.md"):
             text = (REPO / ".zcode-plugin" / name).read_text(encoding="utf-8")
             for marker in ("Add marketplace", "Install", "Enable", "$using-agentic-sdlc", "node"):
+                self.assertIn(marker, text, f".zcode-plugin/{name} missing {marker}")
+
+    def test_adapter_readmes_document_marketplace_install(self):
+        # A marketplace download is the product path: both READMEs must name the
+        # GitHub marketplace source, not only the maintainer's local clone.
+        for name in ("README.md", "README_CN.md"):
+            text = (REPO / ".zcode-plugin" / name).read_text(encoding="utf-8")
+            for marker in ("MrBekoX/agentic-sdlc", "GitHub"):
                 self.assertIn(marker, text, f".zcode-plugin/{name} missing {marker}")
 
     def test_adapter_status_is_recorded_not_promoted(self):

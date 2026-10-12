@@ -7,6 +7,7 @@ import { resolve as resolvePath } from 'node:path';
 import { readStdin } from './secret-patterns.mjs';
 import { commandCwd, resolveGitCommands, targetCwdsFor } from './git-invocation.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
+import { emitHookResult } from './hook-output.mjs';
 
 const BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_BRANCH_GUARD_BLOCK || ''));
 const PROTECTED = /^(main|master)$/i;
@@ -64,12 +65,12 @@ if (branch && PROTECTED.test(branch)) {
     `Protected branch '${branch}': commit/push directly to ${branch} is risky (contract 08 — git-safety). ` +
     `Prefer a feature branch and a reviewed PR.` + (forcePush ? ' FORCE-PUSH detected — extra caution.' : '');
   if (BLOCK) {
-    process.stdout.write(JSON.stringify({
+    emitHookResult({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: msg },
       systemMessage: `🚧 branch-guard: blocked on '${branch}'.`,
-    }));
+    }, 'PreToolUse');
   } else {
-    process.stdout.write(JSON.stringify({ systemMessage: `🚧 branch-guard: ${msg}` }));
+    emitHookResult({ systemMessage: `🚧 branch-guard: ${msg}` }, 'PreToolUse');
   }
 }
 

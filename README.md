@@ -115,15 +115,15 @@ The same skills run through the embedded author/critic adapter where Claude-only
 
 State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded in the ledger.
 
-### ZCode personal marketplace (experimental, not a release-gated path)
+### ZCode marketplace installs (experimental, not a release-gated path)
 
-> **Experimental adapter.** ZCode is not a supported 0.4.3 release target; this local install path carries no go/no-go verdict and no official submission exists. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
+> **Experimental adapter.** ZCode is not a supported 0.4.3 release target; these install paths carry no go/no-go verdict and no official submission exists. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
 
-**Prerequisites.** The ZCode desktop client, `node` on `PATH`, and this clone.
+**Prerequisites.** The ZCode desktop client and `node` on `PATH`; a file or local-directory marketplace add additionally needs this clone.
 
 **Steps.** ZCode discovers `.zcode-plugin/plugin.json`, a flat `skills/<name>/SKILL.md` layout, and loads the separate [`hooks/hooks-zcode.json`](hooks/hooks-zcode.json) wire declared by the manifest (`hooks/hooks.json` is never created — ZCode auto-loads that standard location).
 
-1. **Settings → Plugins → Discover**, click **+** (**Create → Add marketplace**), and add the root [`marketplace.json`](marketplace.json) **as a file source** — the ZCode marketplace schema (`name=mrbekox`, `source="./"`, `category=developer-tools`). A directory or GitHub source is read through `.claude-plugin/marketplace.json` first and shows the Claude entry instead.
+1. **Settings → Plugins → Discover**, click **+** (**Create → Add marketplace**), and add the root [`marketplace.json`](marketplace.json) **as a file source** — the ZCode marketplace schema (`name=mrbekox`, `source="./"`, `category=developer-tools`). A directory or GitHub source is read through `.claude-plugin/marketplace.json` first and shows the Claude entry instead. Without this clone, add the GitHub repository `MrBekoX/agentic-sdlc` as that source: the vendor plugin page lists a GitHub repository as a marketplace source (checked 2026-10-08), and the plugin installs with the Claude entry.
 2. Review the wired hooks first: ZCode enables newly installed plugins by default, which lets their hooks run. In the **Personal** segment, **Install** the `agentic-sdlc` card.
 3. Start a new session, then check **Settings → Skills** (16 plugin skills), **Settings → Hooks** (plugin hook entries), and invoke `$using-agentic-sdlc` once.
 

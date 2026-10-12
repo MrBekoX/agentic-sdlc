@@ -22,23 +22,22 @@ REPO = Path(__file__).resolve().parents[1]
 # tautology. Values, normalization and assertion are unchanged.
 LOCK_DIGESTS = {
     # LF-normalized (working-tree CRLF on Windows must not fail a Linux checkout).
-    # Rebaselined 2026-09-20 by the ZCode adapter-correctness work. The guard emitted only
-    # `systemMessage`, which is not a field in ZCode's documented hook protocol — and that
-    # protocol ignores unknown fields. Since this is the only PostToolUse hook wired on
-    # ZCode, a secret written to disk produced no observable output there at all. The
-    # guard now also emits `hookSpecificOutput.additionalContext`, ZCode's documented
-    # model-visible channel. This is NOT inert on Claude Code: `systemMessage` is shown
-    # to the USER, while `hookSpecificOutput.additionalContext` is injected into the
-    # MODEL's context, so the model now also learns it wrote a secret — a deliberate
-    # behavior change on the supported runtime, and the half of the audience that can
-    # act on it. The sibling command guards' deny paths already ship this dual shape.
+    # Rebaselined 2026-10-08 by the ZCode marketplace hook-output work. The guard's Claude-side
+    # PAYLOAD is unchanged (both advisory channels, pinned by TestScanWriteAdvisoryChannels);
+    # the emission now routes through hooks/hook-output.mjs, which under ZCode writes only the
+    # documented hookSpecificOutput key. The top-level `systemMessage` key is a Claude Code
+    # convention: the live 2026-10-08 hook doc reports unknown fields as ignored, while the
+    # bundled diagnosing-hooks skill reports them as a failed run with the effect discarded
+    # (pitfall 8) - on a marketplace install the payload must carry only documented keys under
+    # either reading.
     # Covered by TestScanWriteAdvisoryChannels below.
     # Rebased for cross-platform-distribution (2026-10-11): the skip list matched `(^|/)hooks/`
     # anywhere, which exempted every user folder named hooks (React `src/hooks/`, deploy hooks)
     # from the secret scan. Only this plugin's own hooks directory, resolved from import.meta.url,
     # is exempt now. Covered by test_a_users_own_hooks_folder_is_scanned and
     # test_this_plugins_own_hook_sources_stay_exempt.
-    "hooks/scan-write.mjs": "0ca31dab8c2b03c3f94f7fcb9b6aa2c5b986a9102137b4743e86e82d95013550",
+    # Rebased 2026-10-12 by merging main into PR #59: own-hooks exemption plus the hook-output emitter.
+    "hooks/scan-write.mjs": "e39f68e42748225c747b29386bcac70684d53126645bba313b9356e1fc3faadc",
     # Refreshed by the 2026-08-22 guard-bypass fix: the Bash-only matcher and the
     # `if: Bash(git commit*)` filters were removed (a Bash-only matcher is inert on a
     # Windows host with no Git Bash, and a subcommand-level `if` never starts the hook

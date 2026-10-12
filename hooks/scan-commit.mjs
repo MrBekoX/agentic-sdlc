@@ -8,6 +8,7 @@ import { resolve as resolvePath } from 'node:path';
 import { commandCwd, resolveGitCommands, targetCwdsFor, resolveTargetCwd, commitMessages, commitMessageFiles, commitSweepsUnstaged } from './git-invocation.mjs';
 import { addedDiffLines, displayPath, isCredentialFilename } from './scan-commit-names.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
+import { emitHookResult } from './hook-output.mjs';
 
 // No shell: git is called with an argument array (no command-injection surface, no Windows quoting issues).
 // On a read failure we still fail open (never break the commit), but record it so the commit isn't
@@ -130,23 +131,23 @@ if (contentFindings.length || fileFindings.length || messageFindings.length) {
   const reason =
     `Commit blocked: possible secret found in added diff lines (values masked).\n${list}\n` +
     `→ If it is a real secret, move it to an env var or secret store (or unstage a flagged credential file) and remove it from the commit. If you believe this is a false positive, stop and ask the user.`;
-  process.stdout.write(JSON.stringify({
+  emitHookResult({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
       permissionDecisionReason: reason,
     },
     systemMessage: '🔒 secret scan: commit blocked (possible secret).',
-  }));
+  }, 'PreToolUse');
   process.exit(0);
 }
 
 // Fail-open is deliberate (never break a commit), but surface it: if a git read failed, the commit
 // was not actually scanned, so don't let its silence read as "scanned & clean". Non-blocking.
 if (gitReadFailed) {
-  process.stdout.write(JSON.stringify({
+  emitHookResult({
     systemMessage: '⚠️ secret scan: could not read `git diff` — this commit was NOT scanned for secrets.',
-  }));
+  }, 'PreToolUse');
 }
 
 process.exit(0);

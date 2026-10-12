@@ -20,7 +20,7 @@ Kimi, ZCode and Grok are now included in the installation/portability candidate 
 | Claude Code | Supported | Local gate plus live routing/procedure transcript evidence before claiming live behavior. |
 | Codex | Supported | Local gate plus route-classifier/procedure transcript evidence before claiming live behavior. |
 | OpenCode, Kimi Code, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.3`. |
-| ZCode (Z.ai) | Experimental adapter, not a 0.4.3 release target | Adapter files (`.zcode-plugin/plugin.json`, root `marketplace.json`, `hooks/hooks-zcode.json`) support local installs only; ZCode stays outside the supported scope above regardless of local-install evidence. |
+| ZCode (Z.ai) | Experimental adapter, not a 0.4.3 release target | Adapter files (`.zcode-plugin/plugin.json`, root `marketplace.json`, `hooks/hooks-zcode.json`) support marketplace installs from the root `marketplace.json` as a file source, or from a directory or GitHub-repository source read through `.claude-plugin/marketplace.json` first (experimental; no official submission); ZCode stays outside the supported scope above regardless of install evidence. |
 | Grok CLI | Experimental adapter, not a 0.4.3 release target | Adapter files (`.grok-plugin/plugin.json`, `.grok-plugin/marketplace.json`, `hooks/hooks-grok.json`) support local personal-marketplace installs only; Grok stays outside the supported scope above regardless of local-install evidence. `grok plugin validate .` green on the Claude layout is not Grok-native publish. |
 
 ## Distribution paths and go/no-go

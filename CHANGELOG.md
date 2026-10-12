@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Emit only documented hook-output keys under ZCode: a shared `hooks/hook-output.mjs` emitter driven by the `--zcode-runtime` wire marker and the injected `ZCODE_PLUGIN_ROOT` environment variable, so warn paths reach the model through `hookSpecificOutput.additionalContext` and deny paths carry no undeclared key on a marketplace install; other runtimes keep their channels byte-identically.
+- Document the portable ZCode install path — adding the GitHub repository (`MrBekoX/agentic-sdlc`) as a marketplace source when there is no clone, beside the root `marketplace.json` file source — and align the distribution wording across the README, adapter readmes and release docs; adapter components (skills, agents, command frontmatter) verified against the current ZCode discovery rules.
+
 ## 0.4.3 - 2026-09-13
 
 - Select the authoring toolkit by required validation, evaluation, viewer and packaging capabilities, with explicit diagnostics for incomplete installations.

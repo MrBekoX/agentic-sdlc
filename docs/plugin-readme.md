@@ -10,7 +10,7 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**. It
 |---|---|---|
 | Claude Code | Supported | Native `Skill`, `Workflow`, `Agent`/`Task`, commands, and full hook wiring. See [`../.claude-plugin/README.md`](../.claude-plugin/README.md). |
 | Codex | Supported | Shared skills, Codex manifest metadata, personal-marketplace install flow, and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
-| ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through the root ZCode-schema `marketplace.json`; a narrow verified-event hook wire. ZCode 3.14.0 added dynamic workflows, but Z.ai publishes no script API and `plugin.json` has no `workflows` key, so none ships here. See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
+| ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Marketplace install through the root ZCode-schema `marketplace.json` added as a file source; a directory or GitHub source (`MrBekoX/agentic-sdlc`, for an install without a clone) is read through `.claude-plugin/marketplace.json` first and shows the Claude entry. A narrow verified-event hook wire. ZCode 3.14.0 added dynamic workflows, but Z.ai publishes no script API and `plugin.json` has no `workflows` key, so none ships here. See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
 | Grok CLI | Adapter / experimental (not a 0.4.3 release target) | Local personal-marketplace install through `.grok-plugin/marketplace.json`; a narrow verified-event hook wire (`hooks/hooks-grok.json`); project-catalog Rhai at `.grok/workflows/*.rhai` (not a plugin component). See [`../.grok-plugin/README.md`](../.grok-plugin/README.md). |
 | Kimi Code | Packaged adapter with limited runtime coverage | `.kimi-plugin/plugin.json`, `marketplace-kimi.json`, startup router and three inline command guards; see [Kimi](../.kimi-plugin/README.md). |
 | OpenCode / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.3`. |
@@ -29,8 +29,8 @@ All five platform adapters are included in [distribution preparation](publicatio
 | `hooks/hooks-claude.json` | Claude Code | `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` wiring. |
 | `hooks/hooks-codex.json` | Codex | Blocking `PreToolUse`, bootstrap `SessionStart`, and advisory/env-gated `Stop` wiring, subject to Codex hook review/trust. |
 | `.zcode-plugin/plugin.json` | ZCode | Adapter plugin metadata; `skills`, `commands`, `agents`, and the ZCode hook wire. |
-| `marketplace.json` (repository root) | ZCode | Local marketplace source in the ZCode schema; the repo root is the source. |
-| `hooks/hooks-zcode.json` | ZCode | Verified-event wiring only: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, `SessionStart` bootstrap on `startup\|resume\|clear\|compact`. |
+| `marketplace.json` (repository root) | ZCode | Local marketplace source in the ZCode schema, added as a file source; the repo root is the source. A directory or GitHub source (`MrBekoX/agentic-sdlc`) is read through `.claude-plugin/marketplace.json` first. |
+| `hooks/hooks-zcode.json` | ZCode | Verified-event wiring only: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, `SessionStart` bootstrap on `startup\|resume\|clear\|compact`. Each handler passes `--zcode-runtime`, so the scripts emit only ZCode-documented hook-output keys (`hooks/hook-output.mjs`). |
 | `.grok-plugin/plugin.json` | Grok CLI | Adapter plugin metadata and the Grok hook wire. |
 | `.grok-plugin/marketplace.json` | Grok CLI | Local marketplace source in the Grok schema; the repo root is the source. |
 | `hooks/hooks-grok.json` | Grok CLI | Verified-event wiring only: `PreToolUse` command guards on `Bash\|run_terminal_command`. |

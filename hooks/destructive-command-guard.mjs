@@ -29,6 +29,7 @@
 import { readStdin } from './secret-patterns.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
 import { skipCommandPrefix } from './shell-prefix.mjs';
+import { emitHookResult } from './hook-output.mjs';
 
 const BLOCKED = [
   {
@@ -662,14 +663,14 @@ function deny(finding) {
   const msg =
     `Blocked destructive command (${finding.label}): ${finding.reason} ` +
     'Ask for explicit approval and use a scoped, reviewed command if this is intentional.';
-  process.stdout.write(JSON.stringify({
+  emitHookResult({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
       permissionDecisionReason: msg,
     },
     systemMessage: `🛑 destructive-command-guard: ${msg}`,
-  }));
+  }, 'PreToolUse');
 }
 
 const raw = await readStdin();
