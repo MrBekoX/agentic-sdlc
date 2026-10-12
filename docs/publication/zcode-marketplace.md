@@ -68,5 +68,5 @@ requirements fetched on 2026-09-19
 
 No zip artifacts, `sha256`, or `_artifact` fields have been fabricated for the local
 directory source — those belong to the official distribution's zip channel and are
-produced by the maintainers' `build_dist.py`. No PR, fork, version bump, or
+produced by the maintainers' `build_dist.py`. No PR, fork, official-catalog version entry, or
 marketplace submission has been performed.

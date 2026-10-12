@@ -4,7 +4,7 @@
 
 > An AGENTIC-SDLC skill library with adapters for **Claude Code**, **Codex**, **Kimi Code**, **ZCode** and **Grok CLI**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
-> `Version 0.4.3` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
+> `Version 0.5.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
 
 ---
 
@@ -20,7 +20,7 @@ All five platforms are in packaging and portability scope. Claude Code and Codex
 | ZCode | [`.zcode-plugin/README.md`](.zcode-plugin/README.md) | [`.zcode-plugin/plugin.json`](.zcode-plugin/plugin.json) + [marketplace](marketplace.json) |
 | Grok CLI | [`.grok-plugin/README.md`](.grok-plugin/README.md) | [`.grok-plugin/plugin.json`](.grok-plugin/plugin.json) + [marketplace](.grok-plugin/marketplace.json) |
 
-Installation/update/uninstall steps, verified root contracts and publishing limits for all five platforms are in [multi-platform distribution](docs/publication/multi-platform-distribution.md); the per-platform and per-OS verification results are in the [compatibility matrix](docs/publication/compatibility-matrix.md). Requirements on every platform: Node.js on the hook `PATH` (22 and 24 tested; a missing `node` silently disables the guards), Python 3 for helper workflows (3.12 tested; the helpers that skills run are kept import-compatible with Python 3.8 by a static check; maintainer and release tooling such as `build_release.py`, `bump_version.py`, the Codex trust check and the eval runners needs Python 3.12; `py -3` on Windows when `python3` is missing or is the Microsoft Store alias) and Git. Repository-URL installs need a public or authorized repository; an extracted package directory installs from any local path without developer-specific setup, as long as the path contains no `#` (Codex and Grok read `#` specially). Kimi, ZCode and Grok are packaged adapters with limited runtime coverage; they do not inherit Claude/Codex transcript or Workflow behavior. Historical 0.4.3 certification covers Claude Code and Codex and does not certify the other adapters' native lifecycle. Other harnesses remain deferred.
+Installation/update/uninstall steps, verified root contracts and publishing limits for all five platforms are in [multi-platform distribution](docs/publication/multi-platform-distribution.md); the per-platform and per-OS verification results are in the [compatibility matrix](docs/publication/compatibility-matrix.md). Requirements on every platform: Node.js on the hook `PATH` (22 and 24 tested; a missing `node` silently disables the guards), Python 3 for helper workflows (3.12 tested; the helpers that skills run are kept import-compatible with Python 3.8 by a static check; maintainer and release tooling such as `build_release.py`, `bump_version.py`, the Codex trust check and the eval runners needs Python 3.12; `py -3` on Windows when `python3` is missing or is the Microsoft Store alias) and Git. Repository-URL installs need a public or authorized repository; an extracted package directory installs from any local path without developer-specific setup, as long as the path contains no `#` (Codex and Grok read `#` specially). Kimi, ZCode and Grok are packaged adapters with limited runtime coverage; they do not inherit Claude/Codex transcript or Workflow behavior. The 0.4.3 release evaluation covered only Claude Code and Codex (its verdict was do-not-publish) and does not certify the other adapters' native lifecycle. Other harnesses remain deferred.
 
 The [2026-10-11 marketplace preparation](docs/publication/marketplace-readiness-2026-10-11.md)
 records isolated native checks and clean-source/vendor packet preparation; macOS was
@@ -97,7 +97,7 @@ Native install, discovery, update and uninstall of a package directory passed in
 
 ## Distribution paths
 
-`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.4.3.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. A BLOCKED or GAP state concerns publication or a release gate; it does not mean the [Install](#install) steps above fail. Kimi, ZCode and Grok adapters are included in this distribution candidate; the historical four-path 0.4.3 verdict does not establish their native lifecycle or public-directory acceptance.
+`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.5.0.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. A BLOCKED or GAP state concerns publication or a release gate; it does not mean the [Install](#install) steps above fail. Kimi, ZCode and Grok adapters are included in this distribution candidate; the historical four-path 0.4.3 verdict does not establish their native lifecycle or public-directory acceptance.
 
 ### Claude own marketplace
 
@@ -121,7 +121,7 @@ After install, the `using-agentic-sdlc` router is available as a skill. Claude C
 
 **Go condition.** Anonymous users need a public repository. A private repository installs only through a git credential helper or SSH; a token supplied only in an environment variable does not authenticate the install ([private repositories](https://code.claude.com/docs/en/plugin-marketplaces.md#private-repositories), observed 2026-09-14). `claude plugin validate .claude-plugin/marketplace.json --strict` and `claude plugin validate .claude-plugin/plugin.json --strict` pass as two separate checks. Since Claude Code 2.1.289, `claude plugin validate .` also checks the plugin beside a marketplace manifest ([plugins/publish](https://code.claude.com/docs/en/plugins/publish) and the 2.1.289 changelog, fetched 2026-10-07). Hook-config validity comes from the repository tests. A strict `plugin.json` exit 1 in a working tree, caused by the untracked `CLAUDE.md`, is not the clean-package result. The clean install starts from an empty profile: `claude plugin marketplace add MrBekoX/agentic-sdlc`, `claude plugin install agentic-sdlc@mrbekox`, a new session or `/reload-plugins`, then skill, command and hook discovery plus one real invocation, with the clone transport (SSH or HTTPS) recorded.
 
-State: BLOCKED. The repository is private, its unauthenticated URL returns 404 in [`docs/publication/link-checks.json`](docs/publication/link-checks.json), and visibility stays blocked by an unresolved Git history finding (ledger row `history_private_path_finding`). Installs from a package directory are unaffected; native install, discovery, update and uninstall passed on Claude Code 2.1.296 (Windows), 2.1.282 (Linux) and 2.1.293 (macOS) (E1, E5, E10 in the [compatibility matrix](docs/publication/compatibility-matrix.md)).
+State: BLOCKED. The repository is private, its unauthenticated URL returns 404 in [`docs/publication/link-checks.json`](docs/publication/link-checks.json), and on 2026-10-12 the maintainer decided that this repository stays private: its Git history holds an unresolved finding (ledger row `history_private_path_finding`), so publication goes through a new public repository built from clean source. Installs from a package directory are unaffected; native install, discovery, update and uninstall passed on Claude Code 2.1.296 (Windows), 2.1.282 (Linux) and 2.1.293 (macOS) (E1, E5, E10 in the [compatibility matrix](docs/publication/compatibility-matrix.md)).
 
 ### Claude community marketplace submission
 
@@ -431,7 +431,7 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 
 ## Versioning
 
-Current version: `0.4.3`.
+Current version: `0.5.0`.
 
 ```bash
 python3 scripts/bump_version.py --check

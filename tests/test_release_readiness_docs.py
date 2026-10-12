@@ -202,6 +202,7 @@ class TestReleaseReadinessDocs(unittest.TestCase):
             set(BASELINE_GITIGNORE_NEGATIONS)
             | {
                 "!docs/data-handling.md",
+                "!docs/release-evidence-0.5.0.md",
                 "!docs/publication/",
                 "!docs/publication/*.md",
                 "!docs/publication/link-checks.json",

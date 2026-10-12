@@ -2,7 +2,8 @@
 
 The pure helpers return named violations, so the synthetic cases prove each rule fires without
 editing a real file. The real-file tests read README.md, .codex-plugin/README.md,
-docs/troubleshooting.md, docs/runtime-adapter.md and the ledger row state in docs/release-evidence-0.4.3.md.
+docs/troubleshooting.md, docs/runtime-adapter.md and the ledger row state in the current release's
+docs/release-evidence-<VERSION>.md.
 """
 import re
 import unittest
@@ -157,7 +158,8 @@ class TestTrustSectionRules(unittest.TestCase):
 class TestRealTrustDocs(unittest.TestCase):
     def test_troubleshooting_trust_section_covers_every_environment(self):
         text = (REPO / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
-        ledger = (REPO / "docs" / "release-evidence-0.4.3.md").read_text(encoding="utf-8")
+        version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
+        ledger = (REPO / "docs" / f"release-evidence-{version}.md").read_text(encoding="utf-8")
         state = ledger_row_state(ledger, LEDGER_ROW)
         self.assertIsNotNone(state)
         self.assertEqual(trust_section_violations(text, state), [])

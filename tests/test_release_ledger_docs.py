@@ -1,4 +1,8 @@
-"""Ledger format contract for docs/release-evidence-0.4.3.md (decision D1; spec AC113, AC116, AC117, AC129).
+"""Ledger format contract for docs/release-evidence-<VERSION>.md (decision D1; spec AC113, AC116, AC117, AC129).
+
+The historical 0.4.3 ledger keeps its own checks (annotations, original rows, its 0.4.3 decision block);
+TestCurrentReleaseLedger applies the row, decision, path-verdict and identity rules to the ledger of the
+version in VERSION.
 
 Tasks 83-85 write this format and the release envelope parses it when it fills live rows:
 - Row ids are backticked lowercase snake_case in the first cell of the table under `## Required release rows`.
@@ -9,6 +13,7 @@ Tasks 83-85 write this format and the release envelope parses it when it fills l
 
 The helpers are pure and return named violations, so the synthetic cases prove each rule fires.
 """
+import hashlib
 import re
 import subprocess
 import unittest
@@ -428,6 +433,34 @@ def identity_check_violations(text):
     return violations
 
 
+ROUTING_DIGEST = re.compile(r"routing input digest ([0-9a-f]{64})")
+STALE_PASS_MARKERS = ("measured at", "not repeated", "not re-measured")
+
+
+def codex_routing_input_digest(root, routing_eval):
+    """SHA-256 of everything the Codex routing classifier reads besides its argv: the prompt that
+    `routing_eval` (scripts/run_routing_eval.py) builds from the skills' name/description lines with an
+    empty user prompt, a newline, and the scenario set read as text (CRLF checkouts give the same digest)."""
+    prompt = routing_eval.build_codex_prompt("", routing_eval.load_skills(root / "skills"))
+    scenarios = (root / "tests" / "skills" / "routing" / "using-agentic-sdlc.json").read_text(encoding="utf-8")
+    return hashlib.sha256((prompt + "\n" + scenarios).encode("utf-8")).hexdigest()
+
+
+def carried_state_violations(rows):
+    """A PASS taken from another commit must say it is carried from byte-identical inputs."""
+    violations = []
+    for row_id, row in rows.items():
+        if _row_state(row) != "PASS":
+            continue
+        state = row["state"]
+        carried = "carried" in state
+        if carried and "byte-identical" not in state:
+            violations.append("carried_pass_without_identity:" + row_id)
+        if not carried and any(marker in state for marker in STALE_PASS_MARKERS):
+            violations.append("stale_pass_not_carried:" + row_id)
+    return violations
+
+
 def packet_dependency_violations(packet, skill_texts, command_names, agent_names, packaged=None):
     """The OpenAI packet states the no-commands/agents rule as a guide requirement and names each GAP."""
     violations = []
@@ -603,8 +636,8 @@ class TestDecisionBlock(unittest.TestCase):
         self.assertEqual(offered("verdict"), ["publish", "do-not-publish"])
 
     def test_real_decision_block_is_bound_to_rows(self):
-        version = _real("VERSION").strip()
-        violations = decision_block_violations(_real("docs/release-evidence-0.4.3.md"), version, _real("docs/runtime-adapter.md"))
+        # The historical ledger stays bound to its own release; the current ledger is checked below.
+        violations = decision_block_violations(_real("docs/release-evidence-0.4.3.md"), "0.4.3", _real("docs/runtime-adapter.md"))
         self.assertEqual(violations, [])
 
     def test_path_verdict_rule_synthetic_cases(self):
@@ -649,6 +682,50 @@ class TestReleaseIdentityCheck(unittest.TestCase):
 
     def test_real_identity_check_records_a_dated_recheck(self):
         self.assertEqual(identity_check_violations(_real("docs/release-evidence-0.4.3.md")), [])
+
+
+class TestCurrentReleaseLedger(unittest.TestCase):
+    """The ledger of the version in VERSION obeys the same row, decision, verdict and identity rules."""
+
+    def setUp(self):
+        self.version = _real("VERSION").strip()
+        self.text = _real(f"docs/release-evidence-{self.version}.md")
+
+    def test_required_rows_table_is_complete(self):
+        self.assertEqual(required_rows(self.text)[1], [])
+
+    def test_decision_block_is_bound_to_rows(self):
+        self.assertEqual(decision_block_violations(self.text, self.version, _real("docs/runtime-adapter.md")), [])
+
+    def test_path_verdicts_are_no_go_or_reviewed(self):
+        self.assertEqual(path_verdict_violations(self.text), [])
+
+    def test_identity_check_records_a_dated_recheck(self):
+        self.assertEqual(identity_check_violations(self.text), [])
+
+    def test_ledger_names_its_own_version(self):
+        self.assertEqual(self.text.splitlines()[0], f"# Release evidence — {self.version}")
+
+    def test_carried_states_name_byte_identical_inputs(self):
+        self.assertEqual(carried_state_violations(required_rows(self.text)[0]), [])
+
+    def test_carried_codex_routing_pass_matches_current_inputs(self):
+        row = required_rows(self.text)[0]["codex_routing_eval"]
+        if _row_state(row) != "PASS" or "carried" not in row["state"]:
+            self.skipTest("codex_routing_eval is not a carried PASS in this ledger")
+        from scripts import run_routing_eval
+        recorded = ROUTING_DIGEST.search(row["identity"])
+        self.assertIsNotNone(recorded, "a carried routing PASS records its routing input digest")
+        self.assertEqual(recorded.group(1), codex_routing_input_digest(REPO, run_routing_eval))
+
+    def test_carried_state_rule_synthetic_cases(self):
+        def rows(state):
+            return {"x": {"state": state}}
+
+        self.assertEqual(carried_state_violations(rows("PASS (carried from byte-identical routing inputs)")), [])
+        self.assertEqual(carried_state_violations(rows("not-run (measured at 1a9ac73)")), [])
+        self.assertIn("carried_pass_without_identity:x", carried_state_violations(rows("PASS (carried from 1a9ac73)")))
+        self.assertIn("stale_pass_not_carried:x", carried_state_violations(rows("PASS (measured at 1a9ac73)")))
 
 
 class TestOpenAIPacketDependencies(unittest.TestCase):
