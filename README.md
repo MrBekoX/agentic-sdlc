@@ -183,7 +183,7 @@ The same skills run through the embedded author/critic adapter where Claude-only
 
 **Go condition.** Install through `codex plugin add agentic-sdlc@<marketplace-name>` from a catalog Codex recognizes (the package's own `mrbekox` catalog or a personal catalog); native discovery showing 16 skills (the app-server `skills/list` reports 17 entries, the `git-safety-check` command included) and `hooks/list` showing 8 hooks; and hook trust granted through the native `/hooks` trust protocol as a required step.
 
-State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the [compatibility matrix](docs/publication/compatibility-matrix.md); `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded in the ledger.
+State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the [compatibility matrix](docs/publication/compatibility-matrix.md); `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.5.0 package; the ledger carries the 26b0fe1 results.
 
 ### ZCode marketplace installs (experimental, not a release-gated path)
 

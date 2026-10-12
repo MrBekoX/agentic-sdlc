@@ -278,6 +278,8 @@ def decision_block_violations(ledger, version, runtime_adapter):
                 violations.append("publish_with_nonpass_required_row:" + row_id)
             if row is None or not row["evidence"] or row["evidence"].startswith("not recorded"):
                 violations.append("publish_without_inspected_evidence:" + row_id)
+            if row is not None and "carried" in row["state"] and "byte-identical" not in row["state"]:
+                violations.append("publish_with_carried_required_row:" + row_id)
     return violations
 
 
@@ -434,7 +436,7 @@ def identity_check_violations(text):
 
 
 ROUTING_DIGEST = re.compile(r"routing input digest ([0-9a-f]{64})")
-STALE_PASS_MARKERS = ("measured at", "not repeated", "not re-measured")
+STALE_PASS_MARKERS = ("measured at", "not repeated", "not re-measured", "not re-run")
 
 
 def codex_routing_input_digest(root, routing_eval):
@@ -446,18 +448,91 @@ def codex_routing_input_digest(root, routing_eval):
     return hashlib.sha256((prompt + "\n" + scenarios).encode("utf-8")).hexdigest()
 
 
+CARRIED_SOURCE = re.compile(r"carried from ([0-9a-f]{7,40}\b|the \d{4}-\d{2}-\d{2} )")
+
+
 def carried_state_violations(rows):
-    """A PASS taken from another commit must say it is carried from byte-identical inputs."""
+    """A state taken from an earlier run names that run (`carried from <commit>` or `carried from the
+    <date> ...`) and says how it relates to this release: byte-identical inputs, or `not re-run on`.
+    A PASS that reads as measured elsewhere without saying `carried` is rejected."""
     violations = []
     for row_id, row in rows.items():
-        if _row_state(row) != "PASS":
-            continue
         state = row["state"]
-        carried = "carried" in state
-        if carried and "byte-identical" not in state:
-            violations.append("carried_pass_without_identity:" + row_id)
-        if not carried and any(marker in state for marker in STALE_PASS_MARKERS):
+        if "carried" in state:
+            if not CARRIED_SOURCE.search(state):
+                violations.append("carried_state_without_source:" + row_id)
+            if "byte-identical" not in state and "not re-run on" not in state:
+                violations.append("carried_state_without_scope:" + row_id)
+        elif _row_state(row) == "PASS" and any(marker in state for marker in STALE_PASS_MARKERS):
             violations.append("stale_pass_not_carried:" + row_id)
+    return violations
+
+
+# Carried states whose source is a result row of the 0.4.3 ledger's older result table rather than
+# a row of the same id; a FAIL in any listed result makes the source a FAIL.
+HISTORICAL_RESULT_ROWS = {
+    "claude_routing_eval": ("Claude standalone routing",),
+    "claude_pipeline_procedure": ("Claude flat-layout pipeline", "Claude per-package pipeline"),
+}
+MATRIX_HEADING = "## Verification by platform and operating system"
+
+
+def historical_result_state(ledger, names):
+    states = []
+    for name in names:
+        line = next((l for l in ledger.splitlines() if l.startswith("| " + name + " |")), None)
+        cells = _row_cells(line) if line else []
+        if len(cells) < 3 or not cells[2]:
+            return None
+        states.append(cells[2].split()[0].rstrip(".,;:"))
+    if "FAIL" in states:
+        return "FAIL"
+    return states[0] if set(states) == {"PASS"} else None
+
+
+def matrix_state(matrix):
+    lines = matrix.splitlines()
+    if MATRIX_HEADING not in lines:
+        return None
+    table = [l for l in _section(lines, lines.index(MATRIX_HEADING)) if l.startswith("|")][2:]
+    cells = [cell for line in table for cell in _row_cells(line)[2:-1]]
+    if not cells:
+        return None
+    if all(cell.startswith("passed") for cell in cells):
+        return "PASS"
+    return "FAIL" if any(cell.startswith("failed") for cell in cells) else None
+
+
+def carried_source_violations(text, version, ledger_043, matrix):
+    """A carried PASS or FAIL must equal its source result, name the commit it came from, and say it
+    was not re-run on this version; a PASS measured on another commit must say it is carried."""
+    rows = required_rows(text)[0]
+    old = required_rows(ledger_043)[0]
+    anchor = rows.get("local_gate", {}).get("commit", "")
+    violations = []
+    for row_id, row in rows.items():
+        state, token = row["state"], _row_state(row)
+        if "carried" not in state:
+            if token == "PASS" and re.fullmatch(r"[0-9a-f]{40}", row["commit"]) and row["commit"] != anchor:
+                violations.append("pass_from_other_commit_not_carried:" + row_id)
+            continue
+        if "byte-identical" not in state and "not re-run on " + version not in state:
+            violations.append("carried_state_without_version_scope:" + row_id)
+        commit = re.search(r"carried from ([0-9a-f]{7,40})\b", state)
+        if commit and not row["commit"].startswith(commit.group(1)):
+            violations.append("carried_commit_mismatch:" + row_id)
+        if token not in ("PASS", "FAIL"):
+            continue  # a GAP claims no result
+        if row_id == "native_lifecycle_matrix":
+            source = matrix_state(matrix)
+        elif row_id in HISTORICAL_RESULT_ROWS:
+            source = historical_result_state(ledger_043, HISTORICAL_RESULT_ROWS[row_id])
+        else:
+            source = _row_state(old[row_id]) if row_id in old else None
+        if source is None:
+            violations.append("carried_state_without_checked_source:" + row_id)
+        elif source != token:
+            violations.append("carried_state_contradicts_source:" + row_id)
     return violations
 
 
@@ -706,13 +781,31 @@ class TestCurrentReleaseLedger(unittest.TestCase):
     def test_ledger_names_its_own_version(self):
         self.assertEqual(self.text.splitlines()[0], f"# Release evidence — {self.version}")
 
-    def test_carried_states_name_byte_identical_inputs(self):
+    def test_carried_states_name_source_and_scope(self):
         self.assertEqual(carried_state_violations(required_rows(self.text)[0]), [])
+
+    def test_carried_states_match_their_sources(self):
+        violations = carried_source_violations(self.text, self.version, _real("docs/release-evidence-0.4.3.md"),
+                                               _real("docs/publication/compatibility-matrix.md"))
+        self.assertEqual(violations, [])
+
+    def test_carried_commits_exist(self):
+        shallow = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=REPO,
+                                 capture_output=True, text=True, encoding="utf-8")
+        if shallow.returncode != 0 or shallow.stdout.strip() != "false":
+            self.skipTest("no full git history here (extracted archive or shallow clone)")
+        for row_id, row in required_rows(self.text)[0].items():
+            commit = re.search(r"carried from ([0-9a-f]{7,40})\b", row["state"])
+            if commit:
+                with self.subTest(row=row_id):
+                    found = subprocess.run(["git", "cat-file", "-e", commit.group(1) + "^{commit}"], cwd=REPO,
+                                           capture_output=True)
+                    self.assertEqual(found.returncode, 0, commit.group(1))
 
     def test_carried_codex_routing_pass_matches_current_inputs(self):
         row = required_rows(self.text)[0]["codex_routing_eval"]
-        if _row_state(row) != "PASS" or "carried" not in row["state"]:
-            self.skipTest("codex_routing_eval is not a carried PASS in this ledger")
+        if _row_state(row) != "PASS" or "byte-identical" not in row["state"]:
+            self.skipTest("codex_routing_eval is not a PASS carried from byte-identical inputs in this ledger")
         from scripts import run_routing_eval
         recorded = ROUTING_DIGEST.search(row["identity"])
         self.assertIsNotNone(recorded, "a carried routing PASS records its routing input digest")
@@ -722,10 +815,68 @@ class TestCurrentReleaseLedger(unittest.TestCase):
         def rows(state):
             return {"x": {"state": state}}
 
-        self.assertEqual(carried_state_violations(rows("PASS (carried from byte-identical routing inputs)")), [])
+        self.assertEqual(carried_state_violations(rows("PASS (carried from 1d06ffc84d66; byte-identical routing inputs)")), [])
+        self.assertEqual(carried_state_violations(rows("PASS (carried from 1a9ac73; not re-run on 0.5.0)")), [])
+        self.assertEqual(carried_state_violations(rows("FAIL (carried from the 2026-09-13 runs; not re-run on 0.5.0)")), [])
         self.assertEqual(carried_state_violations(rows("not-run (measured at 1a9ac73)")), [])
-        self.assertIn("carried_pass_without_identity:x", carried_state_violations(rows("PASS (carried from 1a9ac73)")))
+        self.assertIn("carried_state_without_scope:x", carried_state_violations(rows("PASS (carried from 1a9ac73)")))
+        self.assertIn("carried_state_without_source:x", carried_state_violations(rows("PASS (carried; not re-run on 0.5.0)")))
+        self.assertIn("carried_state_without_source:x", carried_state_violations(rows("FAIL (carried from an old run; not re-run on 0.5.0)")))
         self.assertIn("stale_pass_not_carried:x", carried_state_violations(rows("PASS (measured at 1a9ac73)")))
+        self.assertIn("stale_pass_not_carried:x", carried_state_violations(rows("PASS (2026-09-13 run; not re-run on 0.5.0)")))
+
+    def test_carried_source_rule_synthetic_cases(self):
+        release, other = "a" * 40, "26b0fe1983b379bb2dc70d2192d52f9572b0f52a"
+
+        def ledger(*lines):
+            return "\n".join(["## Required release rows", "", ROWS_HEADER, "|" + "---|" * 10, *lines, ""])
+
+        def line(row_id, state, commit):
+            return f"| `{row_id}` | yes | {state} | id | {commit} | cli | os | n/a | native live | evidence |"
+
+        gate = line("local_gate", "PASS", release)
+        old = ledger(line("codex_pipeline_procedure", "FAIL", other)) + "\n".join([
+            "| Claude standalone routing | PASS: 45/45 | criterion |",
+            "| Claude flat-layout pipeline | FAIL: smoke | criterion |",
+            "| Claude per-package pipeline | FAIL: per-package | criterion |",
+        ])
+        matrix = "\n".join([MATRIX_HEADING, "", "| Platform | Windows | Linux | macOS |", "|---|---|---|---|",
+                            "| Claude Code | passed (E1) | passed (E5) | passed (E10) |", ""])
+
+        def check(*lines, version="9.9.9", matrix_text=matrix):
+            return carried_source_violations(ledger(gate, *lines), version, old, matrix_text)
+
+        fail = line("codex_pipeline_procedure", "FAIL (carried from 26b0fe1983b3; not re-run on 9.9.9)", other)
+        self.assertEqual(check(fail), [])
+        self.assertEqual(check(line("claude_pipeline_procedure", "FAIL (carried from the 2026-09-13 batch; not re-run on 9.9.9)", "x"),
+                               line("claude_routing_eval", "PASS (carried from the 2026-09-13 batch; not re-run on 9.9.9)", "x"),
+                               line("native_lifecycle_matrix", "PASS (carried from 1a9ac73b47f4; not re-run on 9.9.9)", "1a9ac73b47f4" + "0" * 28)), [])
+        cases = [
+            ("carried_state_contradicts_source:codex_pipeline_procedure", check(fail.replace("FAIL (", "PASS ("))),
+            ("carried_state_contradicts_source:claude_pipeline_procedure",
+             check(line("claude_pipeline_procedure", "PASS (carried from the 2026-09-13 batch; not re-run on 9.9.9)", "x"))),
+            ("carried_state_without_version_scope:codex_pipeline_procedure", check(fail, version="9.9.10")),
+            ("carried_commit_mismatch:codex_pipeline_procedure", check(fail.replace("carried from 26b0fe1983b3", "carried from 0000000"))),
+            ("carried_state_without_checked_source:hook_effects_allowed_denied",
+             check(line("hook_effects_allowed_denied", "PASS (carried from 26b0fe1983b3; not re-run on 9.9.9)", other))),
+            ("carried_state_without_checked_source:native_lifecycle_matrix",
+             check(line("native_lifecycle_matrix", "PASS (carried from 1a9ac73b47f4; not re-run on 9.9.9)", "1a9ac73b47f4" + "0" * 28),
+                   matrix_text=matrix.replace("passed (E10)", "not-run (macOS skipped)"))),
+            ("pass_from_other_commit_not_carried:archive_verify", check(line("archive_verify", "PASS", other))),
+        ]
+        for name, violations in cases:
+            with self.subTest(name=name):
+                self.assertIn(name, violations)
+        self.assertEqual(check(line("coexistence_group", "GAP (carried from the 2026-09-13 observations; not re-run on 9.9.9)", "x")), [])
+
+    def test_publish_rejects_carried_required_rows(self):
+        carried = _pass_everything().replace("| `claude_routing_eval` | yes | PASS |",
+                                             "| `claude_routing_eval` | yes | PASS (carried from abcdef1; not re-run on 0.4.3) |")
+        self.assertIn("publish_with_carried_required_row:claude_routing_eval",
+                      decision_block_violations(carried, "0.4.3", GOOD_ADAPTER))
+        identical = carried.replace("not re-run on 0.4.3", "byte-identical inputs")
+        self.assertNotIn("publish_with_carried_required_row:claude_routing_eval",
+                         decision_block_violations(identical, "0.4.3", GOOD_ADAPTER))
 
 
 class TestOpenAIPacketDependencies(unittest.TestCase):

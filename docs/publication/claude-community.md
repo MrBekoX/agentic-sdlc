@@ -25,7 +25,7 @@ Sources: the [Anthropic Software Directory Policy](https://support.claude.com/en
 | 3.A | Directory Policy clause 3.A (privacy and data handling disclosure) | GAP | Decision DP10: link `docs/data-handling.md` once it is reachable. It is linked only through a URL whose `docs/publication/link-checks.json` entry records `http_status` 200 with `auth` `none`; no such entry exists today. |
 | 3.B | Directory Policy clause 3.B (verified contact) | GAP | No verified public contact yet; the repository URL returns 404 unauthenticated. |
 | 3.D | Directory Policy clause 3.D (test account) | not needed | No test account is needed: the plugin operates locally and calls no hosted service of its own. |
-| 3.E | Directory Policy clause 3.E (usage examples) | GAP | The 5 positive cases are in `tests/skills/submission/cases.json`; their live runs are not-run (AC84). |
+| 3.E | Directory Policy clause 3.E (usage examples) | GAP | The 5 positive cases are in `tests/skills/submission/cases.json`; none of them has run live (ledger row `submission_cases_group`, BLOCKED; AC84). |
 | Directory Terms security-report mechanism | A mechanism for reporting security vulnerabilities | GAP | The GitHub private vulnerability reporting API returns 404 while the repository is private. `LICENSE` (MIT) and `SECURITY.md` are unchanged since 5801cb9. |
 
 ## Hook data access facts
