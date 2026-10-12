@@ -64,7 +64,7 @@ Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.
 
 **Go condition.** Install through `codex plugin add agentic-sdlc@<marketplace-name>` from a catalog Codex recognizes (the package's own `mrbekox` catalog or a personal catalog); native discovery showing 16 skills and `hooks/list` showing 8 hooks; and hook trust granted through the native `/hooks` trust protocol as a required step.
 
-State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded in the ledger.
+State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.5.0 package; the ledger carries the 26b0fe1 results.
 
 Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.5.0.md#path-verdicts)).
 
