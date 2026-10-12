@@ -434,7 +434,7 @@ def identity_check_violations(text):
 
 
 ROUTING_DIGEST = re.compile(r"routing input digest ([0-9a-f]{64})")
-STALE_PASS_MARKERS = ("measured at", "not repeated", "not re-measured")
+STALE_PASS_MARKERS = ("measured at", "not repeated", "not re-measured", "not re-run")
 
 
 def codex_routing_input_digest(root, routing_eval):
@@ -446,17 +446,22 @@ def codex_routing_input_digest(root, routing_eval):
     return hashlib.sha256((prompt + "\n" + scenarios).encode("utf-8")).hexdigest()
 
 
+CARRIED_SOURCE = re.compile(r"carried from ([0-9a-f]{7,40}\b|the \d{4}-\d{2}-\d{2} )")
+
+
 def carried_state_violations(rows):
-    """A PASS taken from another commit must say it is carried from byte-identical inputs."""
+    """A state taken from an earlier run names that run (`carried from <commit>` or `carried from the
+    <date> ...`) and says how it relates to this release: byte-identical inputs, or `not re-run on`.
+    A PASS that reads as measured elsewhere without saying `carried` is rejected."""
     violations = []
     for row_id, row in rows.items():
-        if _row_state(row) != "PASS":
-            continue
         state = row["state"]
-        carried = "carried" in state
-        if carried and "byte-identical" not in state:
-            violations.append("carried_pass_without_identity:" + row_id)
-        if not carried and any(marker in state for marker in STALE_PASS_MARKERS):
+        if "carried" in state:
+            if not CARRIED_SOURCE.search(state):
+                violations.append("carried_state_without_source:" + row_id)
+            if "byte-identical" not in state and "not re-run on" not in state:
+                violations.append("carried_state_without_scope:" + row_id)
+        elif _row_state(row) == "PASS" and any(marker in state for marker in STALE_PASS_MARKERS):
             violations.append("stale_pass_not_carried:" + row_id)
     return violations
 
@@ -711,8 +716,8 @@ class TestCurrentReleaseLedger(unittest.TestCase):
 
     def test_carried_codex_routing_pass_matches_current_inputs(self):
         row = required_rows(self.text)[0]["codex_routing_eval"]
-        if _row_state(row) != "PASS" or "carried" not in row["state"]:
-            self.skipTest("codex_routing_eval is not a carried PASS in this ledger")
+        if _row_state(row) != "PASS" or "byte-identical" not in row["state"]:
+            self.skipTest("codex_routing_eval is not a PASS carried from byte-identical inputs in this ledger")
         from scripts import run_routing_eval
         recorded = ROUTING_DIGEST.search(row["identity"])
         self.assertIsNotNone(recorded, "a carried routing PASS records its routing input digest")
@@ -722,10 +727,15 @@ class TestCurrentReleaseLedger(unittest.TestCase):
         def rows(state):
             return {"x": {"state": state}}
 
-        self.assertEqual(carried_state_violations(rows("PASS (carried from byte-identical routing inputs)")), [])
+        self.assertEqual(carried_state_violations(rows("PASS (carried from 1d06ffc84d66; byte-identical routing inputs)")), [])
+        self.assertEqual(carried_state_violations(rows("PASS (carried from 1a9ac73; not re-run on 0.5.0)")), [])
+        self.assertEqual(carried_state_violations(rows("FAIL (carried from the 2026-09-13 runs; not re-run on 0.5.0)")), [])
         self.assertEqual(carried_state_violations(rows("not-run (measured at 1a9ac73)")), [])
-        self.assertIn("carried_pass_without_identity:x", carried_state_violations(rows("PASS (carried from 1a9ac73)")))
+        self.assertIn("carried_state_without_scope:x", carried_state_violations(rows("PASS (carried from 1a9ac73)")))
+        self.assertIn("carried_state_without_source:x", carried_state_violations(rows("PASS (carried; not re-run on 0.5.0)")))
+        self.assertIn("carried_state_without_source:x", carried_state_violations(rows("FAIL (carried from an old run; not re-run on 0.5.0)")))
         self.assertIn("stale_pass_not_carried:x", carried_state_violations(rows("PASS (measured at 1a9ac73)")))
+        self.assertIn("stale_pass_not_carried:x", carried_state_violations(rows("PASS (2026-09-13 run; not re-run on 0.5.0)")))
 
 
 class TestOpenAIPacketDependencies(unittest.TestCase):
