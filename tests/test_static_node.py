@@ -51,12 +51,14 @@ def _role_of(label):
     return "other"
 
 
-def _run_workflow(name, args, null_role=None):
+def _run_workflow(name, args, null_role=None, critic_verdict="clean"):
     """Execute one workflow body under the runtime wrapper with a stubbed `agent`.
 
     `null_role` is author / critic / reviser / final-critic; that role's `agent()`
     returns null. Other roles return a valid draft or critique so the body can reach
-    the targeted call. The driver prints one JSON object: ok, name, message, result, calls.
+    the targeted call. `critic_verdict="issues"` makes every critic report one issue, so the
+    revision loop runs through to its final audit. The driver prints one JSON object: ok,
+    name, message, result, calls.
     """
     if NODE is None:
         raise unittest.SkipTest("node not available - static JS check skipped (not passed)")
@@ -65,6 +67,8 @@ def _run_workflow(name, args, null_role=None):
         _runtime_wrap(src)
         + "\nconst NULL_ROLE = "
         + json.dumps(null_role)
+        + ";\nconst CRITIC_VERDICT = "
+        + json.dumps(critic_verdict)
         + ";\nconst ARGS = "
         + json.dumps(args)
         + ";\n"
@@ -83,7 +87,7 @@ async function stubAgent(prompt, opts) {
   calls.push({ label, prompt: String(prompt) });
   if (NULL_ROLE && roleOf(label) === NULL_ROLE) return null;
   if (roleOf(label) === 'critic' || roleOf(label) === 'final-critic') {
-    if (NULL_ROLE === 'reviser' || NULL_ROLE === 'final-critic') {
+    if (NULL_ROLE === 'reviser' || NULL_ROLE === 'final-critic' || CRITIC_VERDICT === 'issues') {
       return {
         verdict: 'issues',
         issues: [{ category: 'gap', severity: 'high', whatsMissing: 'x', where: 'body', fix: 'y' }],
@@ -287,6 +291,41 @@ class TestWorkflowNullAgentResults(unittest.TestCase):
                     ]
                     self.assertTrue(null_calls, f"{workflow} {role}: stub never returned null")
                     self.assertIn(null_calls[0]["label"], message)
+
+
+@unittest.skipIf(NODE is None, "node not available — static JS check skipped (not passed)")
+class TestSpecPlanDraftFinalCriticContext(unittest.TestCase):
+    """The last audit of a draft must see the same approved context as every earlier call.
+
+    The final critic used to receive only the plugin-root line, so a requirement that the
+    earlier critic rounds could check (it lives in the context) was invisible to the call
+    whose findings go to the main loop as the residual notes."""
+
+    MARKER = "final-critic-context-marker-7f3a"
+
+    def _calls(self):
+        payload = _run_workflow(
+            "spec-plan-draft.js",
+            {"mode": "spec", "context": {"intent": self.MARKER}, "depth": "full", "maxRevisionRounds": 1},
+            critic_verdict="issues",
+        )
+        self.assertTrue(payload.get("ok"), payload)
+        return payload["calls"]
+
+    def test_every_call_carries_the_fenced_context(self):
+        calls = self._calls()
+        labels = [call["label"] for call in calls]
+        self.assertEqual(
+            labels, ["author:spec", "critic:spec:r1", "author-revise:spec:r1", "critic:spec:final"], labels,
+        )
+        for call in calls:
+            with self.subTest(label=call["label"]):
+                self.assertIn("[UNTRUSTED CONTEXT]", call["prompt"])
+                self.assertIn(self.MARKER, call["prompt"])
+
+    def test_the_final_critic_still_gets_the_plugin_root_line(self):
+        final = [c for c in self._calls() if c["label"] == "critic:spec:final"][0]
+        self.assertIn("Plugin root", final["prompt"])
 
 
 @unittest.skipIf(NODE is None, "node not available — static JS check skipped (not passed)")

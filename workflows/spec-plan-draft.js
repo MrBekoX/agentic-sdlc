@@ -143,6 +143,6 @@ for (let round = 1; round <= maxRevisionRounds; round++) {
 }
 // max revision rounds reached: audit the revised draft one last time (residual findings go to the main loop)
 const finalCritique = requireAgentResult(`critic:${mode}:final`, await agent(
-  `Mode=${mode}. Audit the final draft (residual findings will be reported to the main loop):\n${draft.draftMarkdown}${rootLine}`,
+  `Mode=${mode}. Audit the final draft (residual findings will be reported to the main loop):\n${draft.draftMarkdown}${ctxBlock}`,
   { label:`critic:${mode}:final`, phase:'Draft', schema: CRIT, agentType:'agentic-sdlc:spec-plan-critic' }))
 return { mode, draftMarkdown: draft.draftMarkdown, decisionPoints: draft.decisionPoints || [], residualCriticNotes: (finalCritique && finalCritique.issues) || []}

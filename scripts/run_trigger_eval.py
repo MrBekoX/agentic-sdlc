@@ -17,7 +17,10 @@ cannot be measured. `--plugin-dir` disables the shim so it does not duplicate th
 Usage:
   python run_trigger_eval.py --skill-path <dir> --eval-set <json> [--runs N] [--threshold 0.5] [--model M]
 eval-set JSON: {"queries": [{"query": "...", "should_trigger": true}, ...]}
-Output: sorted key=value lines + trigger_eval=passed|failed; exit 1 if any query fails.
+Output: sorted key=value lines + trigger_eval=passed|failed|unmeasured.
+Exit 0 passed; 1 a measured query missed its expectation; 2 --bare rejected; 3 some run produced no
+measurement (CLI missing or failed, timeout, error result) and no measured query failed. A run that
+produced no measurement is never counted as "the skill did not trigger".
 """
 import argparse
 import json
@@ -38,6 +41,26 @@ try:
 except ModuleNotFoundError:  # direct `python3 scripts/...` execution
     from eval_safety import require_slug, resolve_under
     from sensitive_redaction import redact_text
+
+
+EXIT_UNMEASURED = 3
+
+
+class UnmeasuredRun(Exception):
+    """A live run that yielded no trigger measurement, as opposed to "the skill did not trigger"."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def result_is_error(line):
+    """True for a stream-json `result` event the CLI flagged as an error (no model answer to judge)."""
+    try:
+        event = json.loads(line)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(event, dict) and event.get("type") == "result" and event.get("is_error") is True
 
 
 def read_skill(skill_path):
@@ -238,19 +261,28 @@ def kill_process_tree(proc):
 
 
 def run_streaming(cmd, project_root, env, timeout, detector, transcript_path=None):
+    """Return True/False once the detector decides; raise UnmeasuredRun when no decision can be made.
+
+    "The skill did not trigger" is a measurement (the model answered, or took another action first).
+    A missing CLI, a non-zero exit, an error result, a timeout or an empty stream is NOT: counting it
+    as False made a negative query pass whenever the CLI failed."""
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
-    proc = subprocess.Popen(
-        cmd,
-        cwd=project_root,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        creationflags=creationflags,
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=project_root,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=creationflags,
+        )
+    except OSError as exc:
+        reason = "claude_missing" if isinstance(exc, FileNotFoundError) else "spawn_failed"
+        raise UnmeasuredRun(reason) from exc
     deadline = time.monotonic() + timeout
     lines = queue.Queue()
 
@@ -264,19 +296,34 @@ def run_streaming(cmd, project_root, env, timeout, detector, transcript_path=Non
     captured = []
     if transcript_path:
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    received = 0
     try:
         while True:
             if time.monotonic() > deadline:
                 kill_process_tree(proc)
-                return False
+                raise UnmeasuredRun("timeout")
             try:
                 line = lines.get(timeout=0.1)
             except queue.Empty:
-                if proc.poll() is not None:
-                    return False
-                continue
+                exit_code = proc.poll()
+                if exit_code is None:
+                    continue
+                # The child has exited: let the reader thread hand over what is still buffered
+                # before deciding that nothing else is coming.
+                reader.join(timeout=2)
+                if not lines.empty():
+                    continue
+                if exit_code != 0:
+                    raise UnmeasuredRun(f"exit_{exit_code}")
+                if received == 0:
+                    raise UnmeasuredRun("no_output")
+                return False
+            received += 1
             if transcript_path:
                 captured.append(line)
+            if result_is_error(line):
+                kill_process_tree(proc)
+                raise UnmeasuredRun("result_error")
             decision = detector.feed(line)
             if decision is not None:
                 kill_process_tree(proc)
@@ -380,24 +427,47 @@ def main(argv=None):
     if args.plugin_dir:
         fields["command_shim"] = "disabled:plugin-dir"
     passed = 0
+    mismatches = 0
+    unmeasured = 0
     with tempfile.TemporaryDirectory(prefix="agentic-sdlc-trigger-") as td:
         project_root = args.project_root.resolve() if args.project_root else Path(td)
         for i, q in enumerate(queries):
-            triggers = sum(run_once(q["query"], skill_name, skill_desc, project_root, args.timeout, args.model, args.max_budget_usd, args.plugin_dir, args.transcript_dir, False, use_shim)
-                           for _ in range(args.runs))
+            triggers = 0
+            reasons = []
+            for _ in range(args.runs):
+                try:
+                    triggers += bool(run_once(q["query"], skill_name, skill_desc, project_root, args.timeout, args.model, args.max_budget_usd, args.plugin_dir, args.transcript_dir, False, use_shim))
+                except UnmeasuredRun as exc:
+                    reasons.append(exc.reason)
+            should = str(q["should_trigger"]).lower()
+            if reasons:
+                # A rate over the runs that did measure would hide the ones that did not: the whole
+                # query is reported as unmeasured, never as passed or failed.
+                unmeasured += 1
+                fields[f"q{i}_should={should}_rate"] = "unmeasured"
+                errors.append(f"q{i}_unmeasured:runs={len(reasons)},reason={'+'.join(sorted(set(reasons)))}")
+                continue
             rate = triggers / args.runs
             ok = (rate >= args.threshold) if q["should_trigger"] else (rate < args.threshold)
-            fields[f"q{i}_should={str(q['should_trigger']).lower()}_rate"] = f"{rate:.2f}"
+            fields[f"q{i}_should={should}_rate"] = f"{rate:.2f}"
             if ok:
                 passed += 1
             else:
+                mismatches += 1
                 errors.append(f"q{i}_mismatch:should_trigger={q['should_trigger']},rate={rate:.2f}")
     fields["queries_passed"] = f"{passed}/{len(queries)}"
-    fields["trigger_eval"] = "failed" if errors else "passed"
+    if mismatches:
+        fields["trigger_eval"] = "failed"
+    elif unmeasured:
+        fields["trigger_eval"] = "unmeasured"
+    else:
+        fields["trigger_eval"] = "passed"
 
     for line in sorted([f"{k}={v}" for k, v in fields.items()] + [f"error={e}" for e in errors]):
         print(line)
-    return 1 if errors else 0
+    if mismatches:
+        return 1
+    return EXIT_UNMEASURED if unmeasured else 0
 
 
 if __name__ == "__main__":

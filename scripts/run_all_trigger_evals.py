@@ -31,9 +31,13 @@ DEFAULT_MAX_BUDGET_USD = "0.10"
 DEFAULT_CODEX_MODEL = "gpt-5.4-mini"
 DEFAULT_REASONING_EFFORT = "low"
 
+# Exit code scripts/run_trigger_eval.py uses when a run produced no measurement (see its docstring).
+EXIT_UNMEASURED = 3
+
 # Output format constants
 STATUS_PASSED = "passed"
 STATUS_FAILED = "failed"
+STATUS_UNMEASURED = "unmeasured"
 PREFIX_TRIGGER_MATRIX = "trigger_matrix"
 PREFIX_MATRIX_PASSED = "matrix_passed"
 PREFIX_ERROR = "error"
@@ -219,7 +223,7 @@ def run_evaluations(pairs: list[tuple[str, Path, Path]], runtimes: tuple[str, ..
 
             # Run evaluation
             code, output = run_single_eval(runtime, skill_name, skill_path, eval_path, args)
-            status = STATUS_PASSED if code == 0 else STATUS_FAILED
+            status = STATUS_PASSED if code == 0 else (STATUS_UNMEASURED if code == EXIT_UNMEASURED else STATUS_FAILED)
 
             # Track results
             if code == 0:

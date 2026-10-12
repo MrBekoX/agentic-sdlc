@@ -70,20 +70,42 @@ if (!root) quiet();
 const findings = [];
 let budget = MAX_TOTAL_BYTES;
 
+// Record one scanned text. `fp` is the matched line itself: it goes into the suppression key (so a
+// DIFFERENT secret at the same place is not mistaken for an old finding) and is never printed.
+function report(text, where) {
+  const lines = String(text).split(/\r?\n/);
+  for (const f of scanLines(text, HIGH)) findings.push({ what: f.label, where, fp: lines[f.line - 1] ?? '' });
+}
+
+// Before the first commit there is no HEAD to diff against, and `git diff HEAD` fails. The delta
+// then is everything staged (against the empty tree) plus the unstaged edits on top of it.
+let hasHead = true;
+try { git(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']); } catch { hasHead = false; }
+const trackedDelta = (extra) => (hasHead
+  ? git(['diff', 'HEAD', ...extra])
+  : git(['diff', '--cached', ...extra]) + git(['diff', ...extra]));
+
+// Each stage fails open ON ITS OWN. One failing git call used to abort the whole scan through a
+// single outer catch, so a broken diff also skipped the untracked and ignored files.
+
+// 1) Tracked changes, staged AND unstaged, against the last commit. This is the whole
+//    uncommitted delta regardless of which tool produced it.
 try {
-  // 1) Tracked changes, staged AND unstaged, against the last commit. This is the whole
-  //    uncommitted delta regardless of which tool produced it.
-  const diff = git(['diff', 'HEAD', '--unified=0']);
-  const added = addedDiffLines(diff);
+  const added = addedDiffLines(trackedDelta(['--unified=0']));
   budget -= added.length;
-  for (const f of scanLines(added, HIGH)) findings.push({ what: f.label, where: 'uncommitted change' });
+  report(added, 'uncommitted change');
+} catch { /* stage 1 produced nothing; stages 2 and 3 still run */ }
 
-  // -z (here and in the listings below): NUL-separated, verbatim names. Without it git C-quotes any
-  // name with non-ASCII, `"`, `\` or control characters ("\347\233\256..."); reading the quoted
-  // string as a file failed silently, so nothing under such a folder was scanned.
-  const changed = git(['diff', 'HEAD', '--name-only', '-z', '--diff-filter=ACMRT'])
-    .split('\0').filter(Boolean);
+// -z (here and in the listings below): NUL-separated, verbatim names. Without it git C-quotes any
+// name with non-ASCII, `"`, `\` or control characters ("\347\233\256..."); reading the quoted
+// string as a file failed silently, so nothing under such a folder was scanned.
+let changed = [];
+try {
+  changed = trackedDelta(['--name-only', '-z', '--diff-filter=ACMRT']).split('\0').filter(Boolean);
+} catch { changed = []; }
 
+let listed = [];
+try {
   // 2) Untracked files, INCLUDING gitignored ones. A secret written to a brand-new file never
   //    appears in `git diff` at all — and `.env` is both the likeliest home for one and almost
   //    always gitignored, so `--exclude-standard` alone skipped exactly the file that matters.
@@ -108,7 +130,7 @@ try {
   const ignored = listing(['ls-files', '-z', '--others', '--ignored', '--exclude-standard'])
     .sort((a, b) => rank(a) - rank(b) || a.split('/').length - b.split('/').length);
   const others = listing(['ls-files', '-z', '--others', '--exclude-standard']);
-  const listed = [...ignored, ...others];
+  listed = [...ignored, ...others];
 
   //    Two content-scan budgets, files and bytes: when there are new untracked files, ignored files
   //    may use at most half of each, and whatever a class leaves unused goes to the other. Ignored
@@ -130,7 +152,7 @@ try {
         text = buf.toString('utf8');
       } catch { continue; }
       spent += text.length;
-      for (const f of scanLines(text, HIGH)) findings.push({ what: f.label, where: displayPath(rel) });
+      report(text, displayPath(rel));
     }
     return { used, spent };
   };
@@ -139,15 +161,13 @@ try {
     shared ? Math.max(MAX_UNTRACKED_FILES / 2, MAX_UNTRACKED_FILES - others.length) : MAX_UNTRACKED_FILES,
     shared ? budget / 2 : budget);
   scanFiles(others, MAX_UNTRACKED_FILES - ignoredUse.used, budget - ignoredUse.spent);
+} catch { /* fail open: a broken scan must not wedge the turn */ }
 
-  // 3) Credential files by name, whether tracked-changed or brand new — a DER/binary key body has
-  //    no header for the content scan to find, so the name is the only signal. Names are cheap, so
-  //    every listed file is checked, not only those within the content-scan cap.
-  for (const rel of [...changed, ...listed]) {
-    if (isCredentialFilename(rel)) findings.push({ what: 'credential file', where: displayPath(rel) });
-  }
-} catch {
-  quiet();                                   // fail open: a broken scan must not wedge the turn
+// 3) Credential files by name, whether tracked-changed or brand new — a DER/binary key body has
+//    no header for the content scan to find, so the name is the only signal. Names are cheap, so
+//    every listed file is checked, not only those within the content-scan cap.
+for (const rel of [...changed, ...listed]) {
+  if (isCredentialFilename(rel)) findings.push({ what: 'credential file', where: displayPath(rel), fp: '' });
 }
 
 if (!findings.length) quiet();
@@ -164,7 +184,9 @@ const seenSet = new Set(Array.isArray(seen) ? seen : []);
 
 const keyed = findings.map((f) => ({
   ...f,
-  key: createHash('sha256').update(f.what + '\u0000' + f.where).digest('hex').slice(0, 16),
+  // The matched line is part of the key: label + location alone cannot tell a new secret from an old
+  // one when they sit in the same file (or, for the uncommitted diff, under one shared label).
+  key: createHash('sha256').update(f.what + '\u0000' + f.where + '\u0000' + f.fp).digest('hex').slice(0, 16),
 }));
 const fresh = keyed.filter((f) => !seenSet.has(f.key));
 if (!fresh.length) quiet();

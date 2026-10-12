@@ -15,6 +15,7 @@ The resolved work package (`resolve_work_package.py` output), spec and plan, `gi
 
 ## What you verify (evidence-based)
 - Work package resolved exactly once? Spec produced? Plan produced and broken into tasks? Every task complete?
+- **Light-flow path:** when the caller states `Flow: safe-refactor`, the flow has no spec or plan by design. Grade its Goal Lock (quoted from the caller's evidence) and its characterization tests in their place and mark the Spec and Plan rows `N/A (light flow: safe-refactor)`. A missing Goal Lock is FAIL. Every other check below still applies unchanged, and any other flow without a spec/plan is blocked as before.
 - Did code change **only within scope**? Any unnecessary file changes?
 - Tests written? Actually run? **Real output present?** RED must fail for the intended behavior and propagate a nonzero exit; swallowed assertion failures are not a reliable failing test command.
 - Required work branch active before writes? A final branch name cannot establish earlier ordering. Non-Git work requires the explicit inapplicable note.

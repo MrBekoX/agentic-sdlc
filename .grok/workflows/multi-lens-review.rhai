@@ -166,9 +166,16 @@ let results = parallel(jobs);
 
 let findings = [];
 let seen = [];
+// A lens whose agent returned nothing did NOT look and find nothing: it is recorded as incomplete
+// so a missing answer can never read as a clean review.
+let incomplete = [];
 let ri = 0;
 for r in results {
-    if r != () && r.success && r.output != () && r.output.findings != () {
+    let answered = r != () && r.success && r.output != () && r.output.findings != ();
+    if answered == false {
+        incomplete.push(lens_keys[ri]);
+    }
+    if answered {
         for f in r.output.findings {
             let title = if f.title != () { f.title } else { "" };
             let loc = if f.location != () { f.location } else { "" };
@@ -197,6 +204,20 @@ for r in results {
     ri += 1;
 }
 
+let incomplete_names = "";
+for name in incomplete {
+    if incomplete_names != "" {
+        incomplete_names += ", ";
+    }
+    incomplete_names += name;
+}
+if incomplete.len() == lens_keys.len() {
+    pause("verification", "multi-lens-review: no lens returned an answer (" + incomplete_names + ") — refusing to report an empty review as a clean one.");
+}
+if incomplete.len() > 0 {
+    log("lens(es) without an answer: " + incomplete_names + " — the review is incomplete");
+}
+
 if findings.len() == 0 {
     complete(#{
         preset: preset,
@@ -205,6 +226,8 @@ if findings.len() == 0 {
         confirmed: [],
         dropped: [],
         unverified: [],
+        incompleteLenses: incomplete,
+        complete: incomplete.len() == 0,
     });
 }
 
@@ -240,7 +263,12 @@ for f in ordered {
     if fi < max_verify {
         to_verify.push(f);
     } else {
-        unverified.push(#{ title: f.title, lens: f.lens, severity: f.severity });
+        unverified.push(#{
+            title: f.title,
+            lens: f.lens,
+            severity: f.severity,
+            reason: "verify cap " + max_verify.to_string() + ": not verified",
+        });
     }
     fi += 1;
 }
@@ -292,7 +320,15 @@ for f in to_verify {
         }
         vi += 1;
     }
-    if total_votes > 0 && refuted_votes * 2 > total_votes {
+    if total_votes == 0 {
+        // A finding nobody could check is UNVERIFIED, never confirmed: zero votes is not a pass.
+        unverified.push(#{
+            title: f.title,
+            lens: f.lens,
+            severity: f.severity,
+            reason: "no verifier answered (" + votes.to_string() + " requested)",
+        });
+    } else if refuted_votes * 2 > total_votes {
         dropped.push(#{
             title: f.title,
             lens: f.lens,
@@ -301,7 +337,11 @@ for f in to_verify {
             totalVotes: total_votes,
         });
     } else {
-        confirmed.push(f);
+        // votes < requestedVotes shows the finding was judged by fewer skeptics than asked for.
+        let kept = f;
+        kept.votes = total_votes;
+        kept.requestedVotes = votes;
+        confirmed.push(kept);
     }
     ji += 1;
 }
@@ -313,4 +353,7 @@ complete(#{
     confirmed: confirmed,
     dropped: dropped,
     unverified: unverified,
+    incompleteLenses: incomplete,
+    // complete = every lens answered and every finding was judged by at least one skeptic.
+    complete: incomplete.len() == 0 && unverified.len() == 0,
 });

@@ -110,6 +110,27 @@ class TestGrokRhaiCatalog(unittest.TestCase):
         self.assertIn("agentic-sdlc:software-architect", text)
         self.assertIn("unverified, not dropped", text)
 
+    def test_multi_lens_missing_answers_are_not_a_clean_or_confirmed_review(self):
+        """Parity with workflows/multi-lens-review.js (behaviour tested in
+        test_multi_lens_review_workflow.py). Rhai cannot run here, so the structure is pinned."""
+        text = _read(GROK_WF / "multi-lens-review.rhai")
+        # Every lens silent: pause, never a clean `complete(...)` with zero findings.
+        self.assertIn(
+            'pause("verification", "multi-lens-review: no lens returned an answer (" + incomplete_names', text,
+        )
+        self.assertLess(
+            text.index("no lens returned an answer"), text.index("if findings.len() == 0"),
+            "the all-lenses-silent pause must come before the no-findings result",
+        )
+        # A lens without an answer is reported, and the result says whether the review is complete.
+        self.assertIn("incompleteLenses: incomplete", text)
+        self.assertIn("complete: incomplete.len() == 0 && unverified.len() == 0", text)
+        # Zero verifier votes: unverified, decided before anything can be confirmed.
+        tail = text.split("let verdicts = parallel(vjobs);", 1)[1]
+        self.assertIsNone(re.search(r"total_votes\s*>\s*0\s*&&", tail), "zero votes must not be a pass")
+        self.assertLess(tail.index("if total_votes == 0"), tail.index("confirmed.push("))
+        self.assertIn("no verifier answered", tail)
+
     def test_multi_lens_find_splices_each_lens_key_into_the_stem(self):
         """The Find loop must build each lens prompt via splice_marker, not str.replace.
 
