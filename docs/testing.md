@@ -281,6 +281,8 @@ python3 scripts/run_trigger_eval.py \
 
 `--bare` is rejected with exit 2 and does not start `claude`. Use real plugin skills only (no command shim): `--no-command-shim`, or pass `--plugin-dir` so the shim stays off.
 
+**Exit codes and the unmeasured outcome.** `0` every query met its expectation; `1` a measured query missed it (`trigger_eval=failed`); `2` `--bare` was rejected; `3` at least one run produced no measurement and no measured query failed (`trigger_eval=unmeasured`). "The skill did not trigger" is a measurement: the model answered, or took another action first. A missing or failing `claude`, a non-zero exit, a stream that ends without a verdict, an `is_error` result or a timeout is not, so such a run is never counted as "did not trigger" and a negative query can no longer pass on it. The output names the query and the reason (`error=q0_unmeasured:runs=2,reason=exit_1`). When a measured query also missed its expectation, `failed` and exit 1 win. The batch wrapper `run_all_trigger_evals.py` labels such a skill `status=unmeasured`, prints `trigger_matrix=unmeasured` when nothing worse happened, and exits 3.
+
 The Claude trigger runner uses a fresh temporary project by default. Running against a real writable
 checkout requires both `--project-root <path>` and `--allow-writable-project`. Relative
 `--plugin-dir .` is resolved before switching to the temporary project.

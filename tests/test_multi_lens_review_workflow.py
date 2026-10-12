@@ -38,7 +38,8 @@ async function stubAgent(prompt, opts) {
   const index = Number(parts[2]);
   const mode = SCENARIO.verify;
   if (mode === 'null') return null;
-  if (mode === 'first-only' && index > 0) return null;
+  if ((mode === 'first-only' || mode === 'first-refute-only') && index > 0) return null;
+  if (mode === 'first-refute-only') return { refuted: true, reason: 'false positive' };
   if (mode === 'refute') return { refuted: true, reason: 'false positive' };
   return { refuted: false, reason: 'holds' };
 }
@@ -121,6 +122,23 @@ class TestMultiLensReviewMissingAnswers(unittest.TestCase):
         confirmed = payload["result"]["confirmed"]
         self.assertEqual(len(confirmed), 1)
         self.assertEqual((confirmed[0]["votes"], confirmed[0]["requestedVotes"]), (1, 3))
+        self.assertIs(payload["result"]["complete"], False, "a finding judged by fewer skeptics than asked")
+
+    def test_one_refute_among_silent_skeptics_neither_drops_nor_confirms(self):
+        # 3 requested, 1 answered and refuted it, 2 silent: a missing answer must not decide the verdict.
+        payload = run_review({"find": {"injection": "one", "*": "none"}, "verify": "first-refute-only"})
+        self.assertTrue(payload["ok"], payload)
+        result = payload["result"]
+        self.assertEqual(result["dropped"], [], f"a minority of the requested skeptics dropped a finding: {result}")
+        self.assertEqual(result["confirmed"], [])
+        self.assertEqual([u["title"] for u in result["unverified"]], ["injection-issue"])
+        self.assertIn("1 of 1 answering skeptics refuted it, 3 requested", result["unverified"][0]["reason"])
+        self.assertIs(result["complete"], False)
+
+    def test_a_majority_of_the_requested_skeptics_still_drops_a_finding(self):
+        # CONTROL: all three answered and refuted -> dropped, exactly as before.
+        payload = run_review({"find": {"injection": "one", "*": "none"}, "verify": "refute"})
+        self.assertEqual([d["title"] for d in payload["result"]["dropped"]], ["injection-issue"])
 
     def test_control_confirmed_and_dropped_behaviour_is_unchanged(self):
         kept = run_review({"find": {"injection": "one", "*": "none"}, "verify": "keep"})["result"]

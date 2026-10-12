@@ -317,7 +317,9 @@ def run_streaming(cmd, project_root, env, timeout, detector, transcript_path=Non
                     raise UnmeasuredRun(f"exit_{exit_code}")
                 if received == 0:
                     raise UnmeasuredRun("no_output")
-                return False
+                # A finished run ends with a `result` event (the detector decides on it) or with a
+                # decision made earlier; a stream that just stops has no verdict to trust.
+                raise UnmeasuredRun("no_decision")
             received += 1
             if transcript_path:
                 captured.append(line)

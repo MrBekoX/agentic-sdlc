@@ -16,7 +16,7 @@
 // block, matching the opt-in pattern of the other gates in this plugin.
 
 import { runGit } from './git-exec.mjs';
-import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -81,9 +81,14 @@ function report(text, where) {
 // then is everything staged (against the empty tree) plus the unstaged edits on top of it.
 let hasHead = true;
 try { git(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']); } catch { hasHead = false; }
-const trackedDelta = (extra) => (hasHead
-  ? git(['diff', 'HEAD', ...extra])
-  : git(['diff', '--cached', ...extra]) + git(['diff', ...extra]));
+const trackedDelta = (extra) => {
+  if (hasHead) return git(['diff', 'HEAD', ...extra]);
+  let out = '';
+  for (const base of [['diff', '--cached'], ['diff']]) {
+    try { out += git([...base, ...extra]); } catch { /* the other half of the delta is still scanned */ }
+  }
+  return out;
+};
 
 // Each stage fails open ON ITS OWN. One failing git call used to abort the whole scan through a
 // single outer catch, so a broken diff also skipped the untracked and ignored files.
@@ -92,7 +97,7 @@ const trackedDelta = (extra) => (hasHead
 //    uncommitted delta regardless of which tool produced it.
 try {
   const added = addedDiffLines(trackedDelta(['--unified=0']));
-  budget -= added.length;
+  budget = Math.max(0, budget - added.length);
   report(added, 'uncommitted change');
 } catch { /* stage 1 produced nothing; stages 2 and 3 still run */ }
 
@@ -192,8 +197,14 @@ const fresh = keyed.filter((f) => !seenSet.has(f.key));
 if (!fresh.length) quiet();
 
 try {
-  mkdirSync(join(tmpdir(), 'agentic-sdlc'), { recursive: true });
-  writeFileSync(stateFile, JSON.stringify([...seenSet, ...fresh.map((f) => f.key)]), 'utf8');
+  // The keys are digests of secret-bearing lines, so the directory and file are owner-only (POSIX; the
+  // mode is ignored on Windows, where the temp directory is per-user). chmod covers a file or folder an
+  // earlier version created with the default umask.
+  const stateDir = join(tmpdir(), 'agentic-sdlc');
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  try { chmodSync(stateDir, 0o700); } catch { /* not ours to change */ }
+  writeFileSync(stateFile, JSON.stringify([...seenSet, ...fresh.map((f) => f.key)]), { encoding: 'utf8', mode: 0o600 });
+  try { chmodSync(stateFile, 0o600); } catch { /* best effort */ }
 } catch { /* dedup is a convenience; losing it must never change the verdict */ }
 
 // Values are never printed, only the pattern label and where it was seen.

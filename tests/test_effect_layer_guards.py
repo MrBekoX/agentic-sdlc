@@ -435,6 +435,19 @@ class TestWorktreeScan(unittest.TestCase):
         readme.write_text("# hi\nTOKEN = " + GH_OTHER + "\n", encoding="utf-8")
         self.assertTrue(self._run(td, state=shared), "a different secret in the diff was suppressed as old")
 
+    def test_the_state_file_holds_digests_only_and_is_owner_only(self):
+        td = self._repo()
+        state = Path(td, "dedup.json")
+        Path(td, "out.txt").write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        self.assertTrue(self._run(td, state=state))
+        raw = state.read_text(encoding="utf-8")
+        self.assertNotIn(GH_CLEAN, raw, "the state file must never hold the secret")
+        self.assertNotIn("TOKEN", raw, "the state file must never hold the matched line")
+        keys = json.loads(raw)
+        self.assertTrue(keys and all(len(k) == 16 and set(k) <= set("0123456789abcdef") for k in keys), keys)
+        if os.name != "nt":
+            self.assertEqual(state.stat().st_mode & 0o777, 0o600, "the suppression state must be owner-only")
+
     def test_the_same_secret_moving_to_another_line_is_not_a_new_finding(self):
         # CONTROL: a fingerprint of the matched line, not of its position, so editing around an
         # unchanged secret does not make the hook repeat itself every turn.

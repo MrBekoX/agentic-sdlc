@@ -54,6 +54,25 @@ class TestSafeRefactorAuditPath(unittest.TestCase):
         self.assertIn("Goal Lock", step[0])
         self.assertIn("no spec or plan", step[0])
 
+    def test_safe_refactor_does_not_claim_the_light_path_when_a_spec_or_plan_exists(self):
+        # agentic-sdlc-pipeline delegates a step to safe-refactor AFTER a real spec and plan exist.
+        step = [line for line in self.refactor.splitlines() if "Implementation control" in line][0]
+        self.assertIn("When a spec or plan already exists", step)
+        self.assertIn("agentic-sdlc-pipeline", step)
+        self.assertRegex(step, r"do not claim the light path")
+
+    def test_the_flow_line_is_a_claim_not_evidence_in_both_contracts(self):
+        for name, text in (("implementation-control", self.procedure), ("implementation-auditor", self.auditor)):
+            with self.subTest(contract=name):
+                self.assertRegex(text, r"(?i)caller's (?:`Flow: safe-refactor` line is a )?claim, not evidence")
+                self.assertRegex(text, r"exactly `no_plan`")
+                self.assertRegex(text, r"(?i)if a spec or plan resolves|resolver returns a spec or a plan")
+
+    def test_the_resolution_row_and_task_checks_are_covered_by_the_light_path(self):
+        self.assertIn("N/A (light flow: no_plan)", self.procedure)
+        self.assertIn("N/A (light flow: no_plan)", self.auditor)
+        self.assertRegex(self.auditor, r"every task complete[^.]*do not apply")
+
     def test_the_auditor_contract_knows_the_goal_lock_substitute(self):
         self.assertIn("safe-refactor", self.auditor)
         self.assertIn("Goal Lock", self.auditor)

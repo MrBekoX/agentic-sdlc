@@ -166,11 +166,21 @@ def print_missing_skill_error(runtime: str, skill_name: str) -> None:
     print(f"{runtime}:{skill_name}:error=missing_skill", flush=True)
 
 
+def real_failures(failures: list[str]) -> list[str]:
+    """Failures that are not just an unmeasured run (exit 3 means no measurement, not a failed one)."""
+    return [f for f in failures if not f.endswith(f":exit_{EXIT_UNMEASURED}")]
+
+
+def matrix_status_of(failures: list[str]) -> str:
+    if real_failures(failures):
+        return STATUS_FAILED
+    return STATUS_UNMEASURED if failures else STATUS_PASSED
+
+
 def print_final_results(passed: int, total: int, failures: list[str]) -> None:
     """Print summary of all evaluation results."""
     print(f"{PREFIX_MATRIX_PASSED}={passed}/{total}", flush=True)
-    matrix_status = STATUS_FAILED if failures else STATUS_PASSED
-    print(f"{PREFIX_TRIGGER_MATRIX}={matrix_status}", flush=True)
+    print(f"{PREFIX_TRIGGER_MATRIX}={matrix_status_of(failures)}", flush=True)
     for failure in failures:
         print(f"{PREFIX_ERROR}={failure}", flush=True)
 
@@ -257,7 +267,9 @@ def main(argv: list[str] | None = None) -> int:
     # Print final summary
     print_final_results(passed, total, failures)
 
-    return 1 if failures else 0
+    if real_failures(failures):
+        return 1
+    return EXIT_UNMEASURED if failures else 0
 
 
 if __name__ == "__main__":

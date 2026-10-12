@@ -171,7 +171,7 @@ let seen = [];
 let incomplete = [];
 let ri = 0;
 for r in results {
-    let answered = r != () && r.success && r.output != () && r.output.findings != ();
+    let answered = r != () && r.success && r.output != () && type_of(r.output.findings) == "array";
     if answered == false {
         incomplete.push(lens_keys[ri]);
     }
@@ -304,6 +304,7 @@ let verdicts = parallel(vjobs);
 
 let confirmed = [];
 let dropped = [];
+let short_votes = 0;
 let ji = 0;
 for f in to_verify {
     let refuted_votes = 0;
@@ -312,7 +313,8 @@ for f in to_verify {
     while vi < votes {
         let slot = ji * votes + vi;
         let v = verdicts[slot];
-        if v != () && v.success && v.output != () {
+        // Only a boolean verdict is a vote: a missing or malformed answer is a skeptic that did not answer.
+        if v != () && v.success && v.output != () && type_of(v.output.refuted) == "bool" {
             total_votes += 1;
             if v.output.refuted == true {
                 refuted_votes += 1;
@@ -328,7 +330,8 @@ for f in to_verify {
             severity: f.severity,
             reason: "no verifier answered (" + votes.to_string() + " requested)",
         });
-    } else if refuted_votes * 2 > total_votes {
+    } else if refuted_votes * 2 > votes {
+        // Drop only on a strict majority of the REQUESTED skeptics (a tie keeps the finding).
         dropped.push(#{
             title: f.title,
             lens: f.lens,
@@ -336,11 +339,22 @@ for f in to_verify {
             refutedVotes: refuted_votes,
             totalVotes: total_votes,
         });
+    } else if refuted_votes > 0 && total_votes < votes {
+        // A missing answer must not decide the verdict: neither dropped nor confirmed.
+        unverified.push(#{
+            title: f.title,
+            lens: f.lens,
+            severity: f.severity,
+            reason: refuted_votes.to_string() + " of " + total_votes.to_string() + " answering skeptics refuted it, " + votes.to_string() + " requested: cannot drop or confirm",
+        });
     } else {
         // votes < requestedVotes shows the finding was judged by fewer skeptics than asked for.
         let kept = f;
         kept.votes = total_votes;
         kept.requestedVotes = votes;
+        if total_votes < votes {
+            short_votes += 1;
+        }
         confirmed.push(kept);
     }
     ji += 1;
@@ -354,6 +368,6 @@ complete(#{
     dropped: dropped,
     unverified: unverified,
     incompleteLenses: incomplete,
-    // complete = every lens answered and every finding was judged by at least one skeptic.
-    complete: incomplete.len() == 0 && unverified.len() == 0,
+    // complete = every lens answered and every finding was judged by every skeptic asked.
+    complete: incomplete.len() == 0 && unverified.len() == 0 && short_votes == 0,
 });

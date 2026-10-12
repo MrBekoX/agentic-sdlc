@@ -146,7 +146,8 @@ const judged = await parallel(toVerify.map((f) => () =>
       { label: `verify:${f.lens}:${i}`, phase: 'Verify', schema: VERDICT, agentType: f.agentType },
     )
   )).then((vs) => {
-    const valid = vs.filter(Boolean)
+    // Only a boolean verdict is a vote: a null (or malformed) answer is a skeptic that did not answer.
+    const valid = vs.filter((v) => v && typeof v.refuted === 'boolean')
     return { finding: f, refutedVotes: valid.filter((v) => v.refuted).length, totalVotes: valid.length }
   })
 ))
@@ -161,9 +162,16 @@ toVerify.forEach((f, i) => {
     noAnswer.push({ title: f.title, lens: f.lens, severity: f.severity, reason: `no verifier answered (${votes} requested)` })
     return
   }
-  // Keep unless a strict majority refuted (a tie keeps the finding — conservative for security).
-  if (j.refutedVotes * 2 > j.totalVotes) {
+  // Drop only on a strict majority of the REQUESTED skeptics (a tie keeps the finding — conservative
+  // for security). A missing answer must not decide the verdict, so one refute among several silent
+  // skeptics is neither a drop nor a confirmation: the finding stays unverified.
+  if (j.refutedVotes * 2 > votes) {
     dropped.push({ title: f.title, lens: f.lens, severity: f.severity, refutedVotes: j.refutedVotes, totalVotes: j.totalVotes })
+  } else if (j.refutedVotes > 0 && j.totalVotes < votes) {
+    noAnswer.push({
+      title: f.title, lens: f.lens, severity: f.severity,
+      reason: `${j.refutedVotes} of ${j.totalVotes} answering skeptics refuted it, ${votes} requested: cannot drop or confirm`,
+    })
   } else {
     // votes < requestedVotes shows the finding was judged by fewer skeptics than asked for.
     confirmed.push({ ...f, votes: j.totalVotes, requestedVotes: votes })
@@ -179,6 +187,7 @@ return {
   dropped,
   unverified,
   incompleteLenses,
-  // complete = every lens answered and every finding was judged by at least one skeptic.
-  complete: incompleteLenses.length === 0 && unverified.length === 0,
+  // complete = every lens answered and every finding was judged by every skeptic asked.
+  complete: incompleteLenses.length === 0 && unverified.length === 0
+    && confirmed.every((c) => c.votes === c.requestedVotes),
 }

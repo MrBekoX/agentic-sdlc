@@ -130,6 +130,20 @@ class TestGrokRhaiCatalog(unittest.TestCase):
         self.assertIsNone(re.search(r"total_votes\s*>\s*0\s*&&", tail), "zero votes must not be a pass")
         self.assertLess(tail.index("if total_votes == 0"), tail.index("confirmed.push("))
         self.assertIn("no verifier answered", tail)
+        # A drop needs a strict majority of the REQUESTED skeptics, never of those that answered.
+        self.assertIn("refuted_votes * 2 > votes", tail)
+        self.assertIsNone(re.search(r"refuted_votes\s*\*\s*2\s*>\s*total_votes", tail))
+        self.assertIn("refuted_votes > 0 && total_votes < votes", tail)
+        # Only a boolean verdict is a vote, and only an array is a lens answer.
+        self.assertIn('type_of(v.output.refuted) == "bool"', tail)
+        self.assertIn('type_of(r.output.findings) == "array"', text)
+
+    def test_spec_plan_final_critic_receives_the_fenced_context(self):
+        """Parity with workflows/spec-plan-draft.js: the last audit sees the same context."""
+        text = _read(GROK_WF / "spec-plan-draft.rhai")
+        final = text.split("let final_prompt =", 1)[1].split("let final_critique", 1)[0]
+        self.assertIn("final_prompt += ctx_block;", final)
+        self.assertIn("final_prompt += draft_md;", final)
 
     def test_multi_lens_find_splices_each_lens_key_into_the_stem(self):
         """The Find loop must build each lens prompt via splice_marker, not str.replace.

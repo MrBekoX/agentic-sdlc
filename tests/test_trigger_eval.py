@@ -257,6 +257,12 @@ class TestUnmeasuredRuns(unittest.TestCase):
             self._stream(FakeProcess([], 0))
         self.assertEqual(caught.exception.reason, "no_output")
 
+    def test_a_truncated_stream_with_no_verdict_is_unmeasured(self):
+        garbled = '{"type": "system", "subtype": "init"}\n'
+        with self.assertRaises(runner.UnmeasuredRun) as caught:
+            self._stream(FakeProcess([garbled], 0))
+        self.assertEqual(caught.exception.reason, "no_decision")
+
     def test_a_timeout_is_unmeasured(self):
         with self.assertRaises(runner.UnmeasuredRun) as caught:
             self._stream(FakeRunningProcess([], None), timeout=0)
@@ -339,6 +345,35 @@ class TestUnmeasuredRuns(unittest.TestCase):
                 )
         self.assertEqual((total, passed, failures), (1, 0, ["claude:demo:exit_3"]))
         self.assertIn("claude:demo:status=unmeasured", out.getvalue())
+
+    def test_the_batch_summary_and_exit_code_tell_unmeasured_from_failed(self):
+        from scripts import run_all_trigger_evals as batch
+
+        self.assertEqual(batch.matrix_status_of([]), "passed")
+        self.assertEqual(batch.matrix_status_of(["claude:a:exit_3"]), "unmeasured")
+        self.assertEqual(batch.matrix_status_of(["claude:a:exit_3", "claude:b:exit_1"]), "failed")
+        self.assertEqual(batch.matrix_status_of(["claude:a:missing_skill"]), "failed")
+
+        def main_with(failures):
+            with tempfile.TemporaryDirectory() as td:
+                evals = Path(td) / "evals"
+                evals.mkdir()
+                (evals / "demo.json").write_text("{}", encoding="utf-8")
+                skill = Path(td) / "skills" / "demo"
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text("---\nname: demo\n---\n", encoding="utf-8")
+                out = io.StringIO()
+                with mock.patch.object(batch, "run_evaluations", return_value=(1, 0, failures)), \
+                        redirect_stdout(out):
+                    code = batch.main(["--skills-dir", str(Path(td) / "skills"), "--evals-dir", str(evals)])
+            return code, out.getvalue()
+
+        code, out = main_with(["claude:demo:exit_3"])
+        self.assertEqual(code, 3, out)
+        self.assertIn("trigger_matrix=unmeasured", out)
+        code, out = main_with(["claude:demo:exit_1"])
+        self.assertEqual(code, 1, out)
+        self.assertIn("trigger_matrix=failed", out)
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ Sources: the [Anthropic Software Directory Policy](https://support.claude.com/en
 
 - The Stop hooks read the session transcript named by `transcript_path` (exercised by `tests/test_flow_guards.py` `TestFlowStepGuard` and `tests/test_codex_completion_claim_guard.py` `TestGuardBehavior`).
 - The SessionStart hooks add the plugin bootstrap context through `additionalContext` (asserted by `tests/test_hooks_policy.py` `TestSessionStartHook` and `TestCodexSessionStartHook`). The Git status summary they include is read by running `git` in `hooks/session-start.mjs` and `hooks/session-start-codex.mjs` (code-cited).
-- `worktree-scan` keeps a per-session deduplication state file holding finding keys only (`tests/test_effect_layer_guards.py` `TestWorktreeScan.test_does_not_repeat_the_same_finding_in_one_session`, which points the state at a temporary path). Its default location, `<os tmpdir>/agentic-sdlc/worktree-scan-<session>.json`, is code-cited from `hooks/worktree-scan.mjs:126`, not asserted by a test.
+- `worktree-scan` keeps a per-session deduplication state file holding finding keys only (`tests/test_effect_layer_guards.py` `TestWorktreeScan.test_does_not_repeat_the_same_finding_in_one_session`, which points the state at a temporary path). Its default location, `<os tmpdir>/agentic-sdlc/worktree-scan-<session>.json`, is code-cited from `hooks/worktree-scan.mjs:183-184`, not asserted by a test.
 - The full inventory of what hooks and eval helpers read, write and mask is in `docs/data-handling.md` (by repository path).
 
 ## How to disable hooks

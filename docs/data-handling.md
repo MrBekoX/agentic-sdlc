@@ -49,7 +49,7 @@ When `hooks/scan-write.mjs` finds something, it emits its advisory on two channe
 
 ## What hooks write
 
-`hooks/worktree-scan.mjs:178-196` writes one per-session deduplication state file under the operating system's temporary directory, at `agentic-sdlc/worktree-scan-<session>.json`, or at the path set in the `AGENTIC_WORKTREE_SCAN_STATE` environment variable. The file holds finding keys only: the first 16 hexadecimal characters of a SHA-256 digest over a finding's pattern label, its location and the matched line of text. The location is a file path or, for a finding in the tracked diff, the literal `uncommitted change`. The matched line is hashed so that a different secret at the same place counts as new; it is never written to the file itself.
+`hooks/worktree-scan.mjs:183-208` writes one per-session deduplication state file under the operating system's temporary directory, at `agentic-sdlc/worktree-scan-<session>.json`, or at the path set in the `AGENTIC_WORKTREE_SCAN_STATE` environment variable. The file holds finding keys only: the first 16 hexadecimal characters of a SHA-256 digest over a finding's pattern label, its location and the matched line of text. The location is a file path or, for a finding in the tracked diff, the literal `uncommitted change`. The matched line is hashed so that a different secret at the same place counts as new; it is never written to the file itself. The digest is unsalted and truncated, so it is not reversible, but someone who can read the file could confirm a guess of the line; for that reason the folder is created owner-only (mode 0700) and the file mode 0600 on POSIX systems (Windows ignores the mode and keeps the temporary directory per user).
 
 The Claude Stop hooks `hooks/completion-claim-guard.mjs` and `hooks/flow-step-guard.mjs` also read `last_assistant_message` and `background_tasks` from the Stop payload. Shell entries in `background_tasks` can carry command lines. `scripts/run_trigger_eval.py` writes a command shim into the selected project's `.claude/commands/` for the duration of a query when `--plugin-dir` is absent, then removes the file and any directory that run created.
 
@@ -57,7 +57,7 @@ Hooks report their results to the runtime as JSON on standard output.
 
 ## Masking
 
-Hook findings show a pattern label and a location, such as a file path, an added-line number or the commit message (`hooks/scan-commit.mjs`, `hooks/scan-write.mjs`, `hooks/worktree-scan.mjs:200`). The matched value is left out of the message.
+Hook findings show a pattern label and a location, such as a file path, an added-line number or the commit message (`hooks/scan-commit.mjs`, `hooks/scan-write.mjs`, `hooks/worktree-scan.mjs:211`). The matched value is left out of the message.
 
 Eval and review artifacts that the helper scripts persist pass through `scripts/sensitive_redaction.py`. It is a fail-closed adapter to `hooks/redact-sensitive.mjs`: it raises an error when `node` is missing or the redactor fails, so unredacted output is not written. Its behavior is covered by `tests/test_sensitive_redaction.py`. The callers are `scripts/run_trigger_eval.py`, `scripts/run_codex_trigger_eval.py`, `scripts/run_routing_eval.py`, `scripts/run_procedure_eval.py`, `scripts/run_glm_trigger_eval.py`, `scripts/review_package.py` and `scripts/task_brief.py`.
 
