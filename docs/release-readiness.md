@@ -19,15 +19,16 @@ Kimi, ZCode and Grok are now included in the installation/portability candidate 
 |---|---|---|
 | Claude Code | Supported | Local gate plus live routing/procedure transcript evidence before claiming live behavior. |
 | Codex | Supported | Local gate plus route-classifier/procedure transcript evidence before claiming live behavior. |
-| OpenCode, Kimi Code, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.3`. |
+| OpenCode, GLM-style harnesses | Experimental / deferred | Adapter guidance may exist, but these are not release-blocking supported runtimes for `0.4.3`. |
 | ZCode (Z.ai) | Experimental adapter, not a 0.4.3 release target | Adapter files (`.zcode-plugin/plugin.json`, root `marketplace.json`, `hooks/hooks-zcode.json`) support marketplace installs from the root `marketplace.json` as a file source, or from a directory or GitHub-repository source read through `.claude-plugin/marketplace.json` first (experimental; no official submission); ZCode stays outside the supported scope above regardless of install evidence. |
 | Grok CLI | Experimental adapter, not a 0.4.3 release target | Adapter files (`.grok-plugin/plugin.json`, `.grok-plugin/marketplace.json`, `hooks/hooks-grok.json`) support local personal-marketplace installs only; Grok stays outside the supported scope above regardless of local-install evidence. `grok plugin validate .` green on the Claude layout is not Grok-native publish. |
+| Kimi Code | Experimental adapter, not a 0.4.3 release target | Adapter files (`.kimi-plugin/plugin.json`, root `marketplace-kimi.json`) support local installs only; Kimi Code stays outside the supported scope above regardless of local-install evidence. |
 
 ## Distribution paths and go/no-go
 
 The four distribution paths below each get their own go/no-go decision; the same labels are used in [`README.md`](../README.md) and both runtime READMEs. Each verdict stays no-go, pending maintainer review, until a recorded maintainer review of that path is linked in the ledger's [path verdicts](release-evidence-0.4.3.md#path-verdicts). The old 45/45 routing results, synthetic replay and marketplace-only validation never close a path.
 
-The experimental ZCode and Grok CLI local installs are not among these four paths and carry no 0.4.3 verdict; their notes live in `docs/publication/zcode-marketplace.md` and `docs/publication/grok-marketplace.md`.
+The experimental ZCode, Grok CLI, and Kimi Code local installs are not among these four paths and carry no 0.4.3 verdict; their notes live in `docs/publication/zcode-marketplace.md`, `docs/publication/grok-marketplace.md`, and `docs/publication/kimi-marketplace.md`.
 
 ### Claude own marketplace
 
