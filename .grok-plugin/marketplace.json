@@ -1,6 +1,6 @@
 {
   "name": "mrbekox",
-  "description": "AGENTIC-SDLC — gated spec/plan/TDD/security/review skills. Experimental Grok CLI personal marketplace; not a 0.4.3 supported release target.",
+  "description": "AGENTIC-SDLC — gated spec/plan/TDD/security/review skills. Experimental Grok CLI catalog; its entry installs from the GitHub repository, which needs public or authorized access.",
   "owner": {
     "name": "Beko",
     "url": "https://github.com/MrBekoX"
@@ -10,7 +10,10 @@
       "name": "agentic-sdlc",
       "description": "Gated SDLC skills for spec, plan, TDD, security review, and evidence-backed delivery on Grok CLI.",
       "version": "0.4.3",
-      "source": "./",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/MrBekoX/agentic-sdlc.git"
+      },
       "author": {
         "name": "Beko",
         "url": "https://github.com/MrBekoX"

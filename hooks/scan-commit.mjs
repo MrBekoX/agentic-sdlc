@@ -1,21 +1,24 @@
 // PreToolUse (shell commit) — scans secrets ADDED in the commit; BLOCKS if found.
 // Only scans lines ADDED to the diff -> doesn't trigger on already-committed secrets.
 // On error, fail-open (does not break the commit).
-import { execFileSync, } from 'node:child_process';
+import { runGit } from './git-exec.mjs';
 import { readFileSync } from 'node:fs';
 import { HIGH, scanLines, readStdin } from './secret-patterns.mjs';
 import { resolve as resolvePath } from 'node:path';
-import { resolveGitCommands, targetCwdsFor, resolveTargetCwd, commitMessages, commitMessageFiles, commitSweepsUnstaged } from './git-invocation.mjs';
-import { isCredentialFilename } from './scan-commit-names.mjs';
+import { commandCwd, resolveGitCommands, targetCwdsFor, resolveTargetCwd, commitMessages, commitMessageFiles, commitSweepsUnstaged } from './git-invocation.mjs';
+import { addedDiffLines, displayPath, isCredentialFilename } from './scan-commit-names.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
 
 // No shell: git is called with an argument array (no command-injection surface, no Windows quoting issues).
 // On a read failure we still fail open (never break the commit), but record it so the commit isn't
 // silently treated as "scanned & clean" — see the non-blocking warning at the end.
+// Same bound as the repository pre-commit scan; the 1 MiB default turned a lockfile-sized change into
+// "NOT scanned".
+const MAX_DIFF_BYTES = 5 * 1024 * 1024;
 let gitReadFailed = false;
 function gitDiff(args, cwd) {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return runGit(args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: MAX_DIFF_BYTES });
   } catch {
     gitReadFailed = true;
     return '';
@@ -51,7 +54,7 @@ if (!/\bgit\b/i.test(expandAnsiCQuotes(cmd).replace(/['"\\]/g, ''))) process.exi
 // hook payload's own `cwd`) can select a different repo than the hook process's cwd; parsing `-C`
 // syntactically without propagating it left alias lookup AND `git diff` pointed at the wrong
 // repository, so the guard saw neither the alias nor the staged secret.
-const baseCwd = typeof input?.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
+const baseCwd = commandCwd(input);
 const info = resolveGitCommands(cmd, { cwd: baseCwd });
 
 // Resolve what git will ACTUALLY run, expanding git aliases the way git does: `git ci` where
@@ -73,18 +76,17 @@ let diff = '';
 let names = '';
 for (const cwd of repoCwds) {
   diff += gitDiff(['diff', '--cached', '--unified=0'], cwd) + '\n';
-  names += gitDiff(['diff', '--cached', '--name-only', '--diff-filter=ACMR'], cwd) + '\n';
+  // -z: NUL-separated, verbatim names. Without it git C-quotes any name with non-ASCII, `"`, `\` or
+  // control characters ("klas\303\266r/id_rsa"), and a quoted name never matches the filename rules.
+  // T: a type change (a committed symlink replaced by a real key file) adds a new body under the name.
+  names += gitDiff(['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMRT'], cwd) + '\0';
   if (sweepsUnstaged) {
     diff += gitDiff(['diff', '--unified=0'], cwd) + '\n';
-    names += gitDiff(['diff', '--name-only', '--diff-filter=ACMR'], cwd) + '\n';
+    names += gitDiff(['diff', '--name-only', '-z', '--diff-filter=ACMRT'], cwd) + '\0';
   }
 }
 
-const added = diff
-  .split(/\r?\n/)
-  .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
-  .map((l) => l.slice(1))
-  .join('\n');
+const added = addedDiffLines(diff);
 
 // The commit MESSAGE is part of the commit and git persists it forever (`git log`/`git show`), but
 // it never appears in `git diff --cached`. A secret pasted into `-m` therefore reached permanent,
@@ -114,11 +116,10 @@ const messageText = (info.calls || []).flatMap((call) => {
 const contentFindings = scanLines(added, HIGH);
 const messageFindings = scanLines(messageText, HIGH).map((f) => ({ ...f, inMessage: true }));
 const fileFindings = names
-  .split(/\r?\n/)
-  .map((s) => s.trim())
+  .split('\0')
   .filter(Boolean)
   .filter((p) => isCredentialFilename(p))
-  .map((p) => ({ file: p, label: 'secret-file' }));
+  .map((p) => ({ file: displayPath(p), label: 'secret-file' }));
 
 if (contentFindings.length || fileFindings.length || messageFindings.length) {
   const list = [

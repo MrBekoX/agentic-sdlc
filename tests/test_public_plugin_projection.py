@@ -43,6 +43,24 @@ class TestPublicPluginProjection(unittest.TestCase):
         self.assertFalse(any(path.startswith("hooks/") for path in members))
         self.assertFalse(any(path.startswith(("agents/", "commands/", "workflows/")) for path in members))
 
+    def test_public_skills_resolve_the_plugin_root_inside_the_package(self):
+        # The skills-only package has no hooks, so no runtime exports a root variable for it; its
+        # text uses the portable `<runtime-root>` rule, and every rooted reference must name a file
+        # or folder the public package actually ships (relocated docs/roles included).
+        members = self.projected()
+        for path, (_mode, data) in sorted(members.items()):
+            if not path.endswith(".md"):
+                continue
+            text = data.decode("utf-8")
+            with self.subTest(path=path):
+                if path.endswith("/SKILL.md"):
+                    # Instructions, not documentation of Codex's hook variable: nothing exports it here.
+                    self.assertNotIn("${PLUGIN_ROOT}", text)
+                for ref in re.findall(r"<runtime-root>/([A-Za-z0-9_./-]+)", text):
+                    target = ref.rstrip("/")
+                    shipped = target in members or any(p.startswith(target + "/") for p in members)
+                    self.assertTrue(shipped, f"<runtime-root>/{ref} is not in the public package")
+
     def test_public_role_instructions_are_available(self):
         members = self.projected()
         for name in ("spec-plan-author", "spec-plan-critic", "implementation-auditor", "security-reviewer"):
@@ -68,6 +86,9 @@ class TestPublicPluginProjection(unittest.TestCase):
         self.assertIn("before printing", text)
         for block in re.findall(r"```bash\n(.*?)```", text, re.DOTALL):
             self.assertNotIn("\ngit diff\n", "\n" + block)
+        # The command block is replaced by prose; nothing may still point at it.
+        for stale in ("first command", "second command", "<staged files>", "```bash"):
+            self.assertNotIn(stale, text)
         pipeline = self.text(members, "skills/agentic-sdlc-pipeline/playbook.md")
         self.assertIn(path, pipeline)
         self.assertNotIn("Run the read-only **git-safety-check** command", pipeline)

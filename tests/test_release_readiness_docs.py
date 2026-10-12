@@ -46,16 +46,26 @@ BASELINE_GITIGNORE_NEGATIONS = (
 # (fragment of the doc sentence, cited source path with an optional :line, source fragment).
 _FLOW_VALIDATOR_HOOKS = ("hooks/flow-evidence.mjs", "hooks/codex-flow-evidence.mjs", "hooks/flow-order-guard-codex.mjs")
 DATA_HANDLING_FACTS = (
+    # The interpreter search lives once, in the shared runValidator of hooks/flow-evidence.mjs; the
+    # two Codex engines import it instead of carrying copies (cross-platform-distribution).
     *[
-        (doc, hook, src)
-        for hook in _FLOW_VALIDATOR_HOOKS
+        (doc, "hooks/flow-evidence.mjs", src)
         for doc, src in (
             ("run `scripts/validate_artifacts.py` on it", "'validate_artifacts.py'"),
-            ("try the interpreter named by the `AGENTIC_SDLC_PYTHON` environment variable first", "process.env.AGENTIC_SDLC_PYTHON"),
-            ("then `python3`, `python` and, on Windows, `py -3` from `PATH`", "['py', '-3']"),
-            ("Each attempt has a 10-second timeout.", "timeout: 10000"),
+            ("the interpreter named by the `AGENTIC_SDLC_PYTHON` environment variable first", "process.env.AGENTIC_SDLC_PYTHON"),
+            ("then `python3`, `python` and, on Windows, `py -3`", "['py', '-3']"),
+            ("a `-c` probe reports Python 3.8 or newer (3-second timeout)", "sys.version_info >= (3, 8)"),
+            ("a `-c` probe reports Python 3.8 or newer (3-second timeout)", "timeout: 3000"),
+            ("The validator run itself has a 10-second timeout.", "timeout: 10000"),
+            ("the hooks treat the validator as unavailable and fail open", "if (!python) return null;"),
         )
     ],
+    *[
+        ("through the shared `runValidator` in `hooks/flow-evidence.mjs`", hook, "runValidator } from './flow-evidence.mjs'")
+        for hook in _FLOW_VALIDATOR_HOOKS[1:]
+    ],
+    ("The bootstrap names the plugin's absolute install path", "hooks/session-start.mjs", "fileURLToPath(import.meta.url)"),
+    ("The bootstrap names the plugin's absolute install path", "hooks/session-start-codex.mjs", "fileURLToPath(import.meta.url)"),
     ("`hooks/flow-evidence.mjs` and `hooks/codex-flow-evidence.mjs` list the directory entries", "hooks/flow-evidence.mjs", "readdirSync(join(cwd, pp.base))"),
     ("`hooks/flow-evidence.mjs` and `hooks/codex-flow-evidence.mjs` list the directory entries", "hooks/codex-flow-evidence.mjs", "readdirSync(join(cwd, pp.base))"),
     ("`docs/agentic-sdlc/specs`, `docs/agentic-sdlc/plans`", "hooks/flow-requirements.json", '"spec": "docs/agentic-sdlc/specs"'),
@@ -101,7 +111,9 @@ DATA_HANDLING_FACTS = (
     ("caps the scan at 200 files, 256 KiB per file and 4 MiB in total", "hooks/worktree-scan.mjs", "MAX_TOTAL_BYTES = 4 * 1024 * 1024;"),
     ("binary files and files over the per-file cap are skipped", "hooks/worktree-scan.mjs", "if (buf.includes(0)) continue;"),
     ("binary files and files over the per-file cap are skipped", "hooks/worktree-scan.mjs", "if (buf.length > MAX_FILE_BYTES) continue;"),
-    ("It also flags changed or untracked files whose names mark them as credential files", "hooks/worktree-scan.mjs", "{ what: 'credential file', where: rel }"),
+    ("It also flags changed or untracked files whose names mark them as credential files", "hooks/worktree-scan.mjs", "{ what: 'credential file', where: displayPath(rel) }"),
+    ("resolving each name only through absolute `PATH` entries", "hooks/git-exec.mjs", "if (!ABSOLUTE.test(entry)) continue;"),
+    ("resolving each name only through absolute `PATH` entries", "hooks/flow-evidence.mjs", "import { programOnAbsolutePath } from './git-exec.mjs';"),
     ("a SHA-256 digest over a finding's pattern label and its location", "hooks/worktree-scan.mjs", "update(f.what + '\\u0000' + f.where)"),
     ("for a finding in the tracked diff, the literal `uncommitted change`", "hooks/worktree-scan.mjs", "where: 'uncommitted change'"),
     ("writes a review package into `--out-dir` when it is given", "scripts/review_package.py", "args.out_dir or default_out_dir()"),

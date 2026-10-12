@@ -20,6 +20,62 @@ Each entry includes:
 
 ---
 
+## 2026-10-12 — A bounded scan needs a budget per class for every bounded resource
+
+- **Date:** 2026-10-12
+- **Task / context:** Keeping the Stop-time worktree scan from missing an ignored `.env` behind 200 new untracked files.
+- **Symptom:** Two reorderings each fixed the reported layout and broke another: "ignored first, half the file cap" let large ignored logs spend the 4 MiB byte budget before a new source file was read; "alternate ignored and new files" still let coverage HTML spend the bytes before the last file of a 30-file feature. A large `node_modules` also overflowed the listing buffer and dropped every ignored file.
+- **Root cause:** The scan has two bounded resources (file slots and bytes) and two classes of files with very different sizes. Changing the order only moved which class starved; neither attempt bounded each class's share of BOTH resources.
+- **Correct fix:** Two passes with explicit budgets: ignored files (likely secret homes first, then shallow paths) get at most half the slots and half the bytes when new files exist, unused capacity flows to the other class, over-cap files are skipped by size before taking a slot, and vendor trees are excluded by pathspec before listing.
+- **Preventive rule / automated check:** After one failed reordering of a bounded scan, stop reshuffling: list every bounded resource and every class competing for it, give each class an explicit share, and replay a fixed set of adversarial layouts against the old and new code (`tests/test_hook_spawn_hardening.py::TestScannerReach` pins the layouts).
+- **Related files & tests:** `hooks/worktree-scan.mjs`; `tests/test_hook_spawn_hardening.py` (`test_a_new_multi_file_feature_is_read_despite_large_ignored_artifacts`, `test_a_deep_ignored_cache_does_not_hide_a_top_level_env`, `test_a_large_vendor_tree_does_not_overflow_the_ignored_listing`).
+
+---
+
+## 2026-10-12 — A narrower setting or rule is not a closed door until the later override is checked
+
+- **Date:** 2026-10-12
+- **Task / context:** Hardening the hooks' git calls and the `git-safety-check` command's pre-approved tools during the cross-platform distribution work.
+- **Symptom:** After `-c color.ui=never` was added, `git config color.diff always` still coloured every added line and all three diff scanners missed a staged key. After the `git grep` permission was narrowed to `git grep --cached:*` (git refuses `-O<pager>` with `--cached`), `git grep --cached --no-cached -O"<cmd>"` matched the rule and ran `<cmd>`.
+- **Root cause:** Both fixes assumed the narrow form wins. git resolves the more specific `color.diff` key over `color.ui`, and a later `--no-cached` undoes `--cached` on the same command line, so a prefix-matched permission still admits it.
+- **Correct fix:** Pin every key that feeds the behaviour (`color.ui`, `color.diff`, `diff.relative`, `core.hooksPath`), and remove a command with a shell-running option from pre-approved tools instead of scoping it by a flag; list secret-marker hits with `git diff --cached --name-only -G` and read files with the Read/Grep tools.
+- **Preventive rule / automated check:** When a fix narrows behaviour with one setting or flag, test the specific overrides (a more specific config key, a negating flag later on the line) before calling it closed. Never pre-approve a command whose options can run a program. `tests/test_hook_spawn_hardening.py` covers `color.diff`/`diff.color`/`diff.relative`; `tests/test_runtime_documentation.py` rejects any `git grep` allow rule.
+- **Related files & tests:** `hooks/git-exec.mjs`, `commands/git-safety-check.md`, `scripts/build_release.py`; `tests/test_hook_spawn_hardening.py`, `tests/test_runtime_documentation.py`, `tests/test_public_plugin_projection.py`.
+
+---
+
+## 2026-10-12 — A runtime's hook variable is not the model's plugin root
+
+- **Date:** 2026-10-12
+- **Task / context:** Make the plugin installable and usable on Claude Code, Codex, Kimi Code, Grok CLI and ZCode without developer-machine setup.
+- **Symptom:** Skills told the model to run `python3 "${PLUGIN_ROOT}/scripts/validate_artifacts.py"` (and Grok/ZCode "alias" variants). On Codex, Kimi, Grok and ZCode the variable was empty in the model's shell, PowerShell expanded `${X}` to an empty string, and `docs/runtime-adapter.md` fell back to the *current repo root* — the user's project, where a same-named script could be planted.
+- **Root cause:** Root variables are exported to hook processes; only Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` in skill text, ZCode/Claude substitute `${CLAUDE_SKILL_DIR}`, Kimi `${KIMI_SKILL_DIR}`, and Codex/Grok substitute nothing. Docs had generalized one runtime's behavior to the others.
+- **Correct fix:** One canonical **Plugin root** rule in every skill that names plugin files (two levels above the loaded `SKILL.md`, per-runtime tokens as shortcuts, never the working directory, stop with `plugin root unresolved`), `<runtime-root>/` on every plugin path, SessionStart hooks printing the root resolved from `import.meta.url`, and the root passed explicitly to workflows and role files.
+- **Preventive rule / automated check:** `tests/skills/harness.py` requires the canonical rule verbatim wherever `<runtime-root>` appears, fails on a bare plugin-relative path or a dangling rooted path, and `tests/test_public_plugin_projection.py` checks the skills-only package. Verify substitution claims against vendor source, not hook documentation.
+- **Related files & tests:** `skills/*/SKILL.md`, `agents/spec-plan-*.md`, `hooks/session-start*.mjs`, `workflows/spec-plan-draft.js`; `tests/test_harness_negative_controls.py`, `tests/test_hooks_policy.py`.
+
+## 2026-10-12 — Ignore rules and interpreter lookup must not depend on where things live
+
+- **Date:** 2026-10-12
+- **Task / context:** Same five-platform portability work.
+- **Symptom:** A project under `~/work/build/shop` was classified greenfield with 0 files; the harness hid every `marketplace.json` of a plugin installed under `~/.claude/plugins/cache`; flow hooks read the Windows Store `python3` alias (exit 9009) as a failed validation, and a bare `python3` could resolve to a file planted in the project directory.
+- **Root cause:** Ignore names were matched against absolute path parts, so the folders *containing* the scanned root counted; interpreter candidates were spawned by bare name (Windows searches the working directory first) and any non-null exit was trusted as a verdict.
+- **Correct fix:** Match ignore names on parts relative to the scanned root; resolve interpreters only through absolute `PATH` entries (`.exe` on Windows), require a `-c` probe reporting Python 3.8+, and fail open when none qualifies.
+- **Preventive rule / automated check:** Fixtures nest the project/package under an ignored-name parent; interpreter tests use fake Store-alias/Python-2 executables and a planted project `python3`; the resolver test runs on every OS.
+- **Related files & tests:** `scripts/detect_context.py`, `tests/skills/harness.py`, `hooks/flow-evidence.mjs`; `tests/test_detect_context.py`, `tests/test_harness_negative_controls.py`, `tests/test_flow_validator_interpreter.py`.
+
+## 2026-10-12 — A packaging test that pins a value does not prove the runtime accepts it
+
+- **Date:** 2026-10-12
+- **Task / context:** Native lifecycle verification of the Grok catalog.
+- **Symptom:** `tests/test_grok_packaging.py` pinned the catalog entry `"source": "./"` and passed, but Grok 1.0.50 listed no available plugin from that catalog (`plugin list --available` returned `[]`).
+- **Root cause:** Grok's `MarketplaceRelativePath` strips `./`, the remainder is empty, and the scanner logs the error and skips the entry; the test encoded the author's assumption, not the runtime's behavior.
+- **Correct fix:** The catalog names the repository as a remote `{"source": "url", ...}` entry (the official catalog's form); local installs use the directory install.
+- **Preventive rule / automated check:** Verify catalogs with the vendor CLI in an isolated home (`GROK_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `KIMI_CODE_HOME`) before pinning their shape; `scripts/check_native_lifecycle.py` records install, discovery, refresh and uninstall per platform.
+- **Related files & tests:** `.grok-plugin/marketplace.json`; `tests/test_grok_packaging.py`, `docs/publication/compatibility-matrix.md`.
+
+---
+
 ## 2026-10-11 — Containment checks must cover actual Git roots and internal junctions
 
 - **Date:** 2026-10-11

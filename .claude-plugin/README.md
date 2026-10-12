@@ -26,12 +26,24 @@ Claude hook and script paths resolve through:
 ${CLAUDE_PLUGIN_ROOT}
 ```
 
-Examples:
+Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` (and `${CLAUDE_SKILL_DIR}`) in hook commands and in the skill, agent and command text it loads, so these skill-text examples reach the model as absolute paths:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/detect_context.py" --path .
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode spec --file docs/agentic-sdlc/specs/example.md
 ```
+
+The variable is not set in your own terminal or in the model's Bash tool. To run a helper yourself, use the `installPath` printed by `claude plugin list --json` (on Windows, `py -3` when `python3` is missing or is the Microsoft Store alias).
+
+## Update and uninstall
+
+```bash
+claude plugin marketplace update mrbekox
+claude plugin update agentic-sdlc@mrbekox
+claude plugin uninstall agentic-sdlc@mrbekox
+```
+
+An update is delivered only when the manifest version changes; run `/reload-plugins` or start a new session afterwards. Uninstall removes the installed record (add `--keep-data` to keep the plugin's data directory); the marketplace registration and your other plugins stay. `claude plugin details agentic-sdlc@mrbekox` lists the installed skills, agents and hook events without starting a session.
 
 Do not hard-code machine-specific absolute paths into skills, hooks, evals, or generated artifacts.
 

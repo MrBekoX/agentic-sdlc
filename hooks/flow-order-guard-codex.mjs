@@ -20,46 +20,21 @@
 // "No in-session validated spec+plan pair found" is the DENY trigger, NOT a fail-open state (BR4) -
 // and an unresolvable artifact root (wrong/absent cwd) likewise DENIES (BR4b).
 //
-// The validator remains local because the byte-locked evidence engine does not export it. Artifact
-// lookup, per-package role classification, and work-id extraction are imported from that engine so
-// the Stop and pre-edit gates cannot drift on flat vs per-package resolution.
+// The validator runner (interpreter resolution, probe, fail-open) comes from flow-evidence.mjs, and
+// artifact lookup, per-package role classification and work-id extraction from codex-flow-evidence.mjs,
+// so the Stop and pre-edit gates cannot drift on flat vs per-package resolution or on Python handling.
 import { realpathSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { readStdin } from './secret-patterns.mjs';
 import { extractWrittenContent } from './codex-write-signal.mjs';
 import { readRolloutSignals, preciseWriteTargetsOf } from './codex-rollout.mjs';
-import { loadRequirements, isSourceFile, isRealRunnerInvocation } from './flow-evidence.mjs';
+import { loadRequirements, isSourceFile, isRealRunnerInvocation, runValidator } from './flow-evidence.mjs';
 import { findArtifactFile, perPackageRole, workIdOf } from './codex-flow-evidence.mjs';
-
-const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
 
 // A2/DP-ENV decouple: flow-order has its OWN opt-in switch, independent of the flow-step Stop guard's
 // AGENTIC_FLOW_GATE_BLOCK. Setting AGENTIC_FLOW_GATE_BLOCK alone (to harden flow-step warn->block) no
 // longer silently turns this pre-edit gate on; an operator opts into ordering enforcement explicitly.
 const ORDER_BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_FLOW_ORDER_BLOCK || ''));
-
-// Local re-implementation of the byte-locked engines' private runValidator. Read-only subprocess:
-// the artifact path is a SEPARATE argv (no shell). Returns the exit code, or null when no
-// interpreter can run -> caller fails open (BR3a/AC19).
-function runValidator(mode, file, specFile, cwd) {
-  const configured = String(process.env.AGENTIC_SDLC_PYTHON || '').trim();
-  const candidates = (configured ? [[configured]] : []).concat(process.platform === 'win32'
-    ? [['python3'], ['python'], ['py', '-3']]
-    : [['python3'], ['python']]);
-  const script = join(HOOK_DIR, '..', 'scripts', 'validate_artifacts.py');
-  const tail = ['--mode', mode, '--file', file, '--strict'];
-  if (mode === 'plan' && specFile) tail.push('--spec', specFile);
-  for (const c of candidates) {
-    const r = spawnSync(c[0], [...c.slice(1), script, ...tail], { encoding: 'utf8', cwd, timeout: 10000 });
-    if (r.error) continue;           // interpreter not found -> try next
-    if (r.status === null) continue; // spawn failed
-    if (/unable to create process using/i.test(String(r.stderr || ''))) continue;
-    return r.status;                 // 0 = pass, non-zero = fail (e.g. a stub)
-  }
-  return null; // could not run any interpreter -> caller fails open
-}
 
 // A same-work-id spec exists on disk AND re-validates strict (or no interpreter -> fail-open).
 function specValidates(workId, req, cwd) {

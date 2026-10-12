@@ -170,7 +170,9 @@ class TestKimiHookWire(unittest.TestCase):
 
     def test_matchers_are_bash_only(self):
         for entry in self.hooks:
-            self.assertEqual(entry["matcher"], "Bash")
+            # Kimi evaluates matchers with an unanchored `new RegExp(pattern).test(toolName)`;
+            # anchor so only the Bash tool (not any name containing "Bash") runs the guards.
+            self.assertEqual(entry["matcher"], "^Bash$")
 
     def test_executors_are_quoted_relative_node_commands_with_second_timeouts(self):
         # Decision, made before pinning (see lessons.md 2026-09-20 anchored-assertion

@@ -13,7 +13,8 @@ directories. Keep the complete plugin, including `hooks/`, `scripts/` and
 ## Install and update
 
 Use Kimi and Node in the same OS environment, with `node` on the hook shell PATH.
-Helper workflows require Python 3.12+ and Git. In the Kimi TUI, run:
+Helper workflows require Python 3 (3.12 is tested; the helpers skills run are kept
+import-compatible with 3.8 by a static check, not a runtime test) and Git. In the Kimi TUI, run:
 
 ```text
 /plugins install <package-directory>
@@ -50,7 +51,8 @@ source is also documented. There is no `/plugins update` command promised here.
 ## Skills, agents and helper paths
 
 `sessionStart.skill` selects the `using-agentic-sdlc` router. Use
-`/skill:<name>` for a skill and `/agentic-sdlc:git-safety-check` for the command.
+`/skill:<name>` with the bare skill name (Kimi does not resolve `agentic-sdlc:<name>`)
+for a skill and `/agentic-sdlc:git-safety-check` for the command.
 The manifest's `skillInstructions` supplies runtime mappings:
 
 - Map `TaskCreate`/`TaskUpdate`/`TodoWrite` to `TodoList` when exposed.
@@ -60,7 +62,8 @@ The manifest's `skillInstructions` supplies runtime mappings:
 - Kimi does not execute the Claude JS `Workflow` facade. Use Agent author →
   critic → revise with saved artifacts and `scripts/validate_artifacts.py`,
   or record the degraded inline pass.
-- Resolve helper roots from the loaded installed
+- Kimi substitutes `${KIMI_SKILL_DIR}` in skill text, so the shared **Plugin root**
+  rule resolves the root as `${KIMI_SKILL_DIR}/../..`. Otherwise resolve helper roots from the loaded installed
   `skills/<name>/SKILL.md` path. Root notation from another runtime means that
   installed root; it is not a promised shell environment alias.
 - `KIMI_PLUGIN_ROOT` is documented for hook processes. Do not assume Bash has
@@ -80,10 +83,12 @@ The manifest declares inline `PreToolUse` rules for `Bash`:
 | `branch-guard.mjs` | 15 |
 
 Each command is `node "./hooks/<handler>.mjs"` with process cwd equal to the
-installed plugin root. The stdin `cwd` identifies the target project for Git
+installed plugin root. The Bash tool's own `tool_input.cwd` (or else the stdin `cwd`)
+identifies the repository the command runs in for Git
 checks. Guards read `tool_input.command` and local Git state, and can return
 `hookSpecificOutput.permissionDecision: "deny"`. Branch warning/block behavior
-follows the configured house policy. Hook errors fail open, so Node availability
+follows the configured house policy; Kimi shows only blocking decisions, so warn-mode
+messages are not visible there. Hook errors fail open, so Node availability
 is required. No MCP server or network integration is declared.
 
 Write scanning and Claude/Codex transcript-based Stop/flow readers remain

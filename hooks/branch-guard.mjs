@@ -2,10 +2,10 @@
 // Generic, tech-agnostic. Non-blocking by default; set AGENTIC_BRANCH_GUARD_BLOCK=true
 // to deny protected-branch commit/push without editing this file.
 // On error, fail-open (does not break the command).
-import { execFileSync } from 'node:child_process';
+import { runGit } from './git-exec.mjs';
 import { resolve as resolvePath } from 'node:path';
 import { readStdin } from './secret-patterns.mjs';
-import { resolveGitCommands, targetCwdsFor } from './git-invocation.mjs';
+import { commandCwd, resolveGitCommands, targetCwdsFor } from './git-invocation.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
 
 const BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_BRANCH_GUARD_BLOCK || ''));
@@ -13,7 +13,7 @@ const PROTECTED = /^(main|master)$/i;
 
 function git(args, cwd) {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return runGit(args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return '';
   }
@@ -43,7 +43,7 @@ if (!/\bgit\b/i.test(expandAnsiCQuotes(cmd).replace(/['"\\]/g, ''))) process.exi
 // `alias.ci = commit -a`) is seen. The old raw-substring test skipped the whole guard for it.
 // `-C <dir>` and the payload cwd select the repository whose branch actually matters; parsing `-C`
 // without propagating it to the git reads meant reporting the wrong repo's branch.
-const baseCwd = typeof input?.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
+const baseCwd = commandCwd(input);
 const info = resolveGitCommands(cmd, { cwd: baseCwd });
 // EVERY repository the command commits or pushes into. scan-commit.mjs was moved to the plural
 // resolver when a second `-C` commit was found to go unscanned; this guard was left on the

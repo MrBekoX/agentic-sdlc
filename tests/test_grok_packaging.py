@@ -10,10 +10,13 @@ test_packaging_metadata.py.
 Version binding: scripts/bump_version.py tracks the Grok manifest and marketplace
 entry; these tests independently bind their values to VERSION.
 """
+import importlib.util
 import json
 import subprocess
 import shutil
 import re
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -126,15 +129,16 @@ class TestGrokMarketplace(unittest.TestCase):
         self.assertEqual(entry["name"], "agentic-sdlc")
         self.assertEqual(entry["version"], current_version())
         self.assertNotIn(CLAUDE_ONLY_DESCRIPTION, entry.get("description", ""))
+        # Grok cannot point a catalog entry at the catalog's own root: MarketplaceRelativePath strips
+        # "./", the remainder is empty, and the scanner logs MarketplacePathError::Empty and SKIPS the
+        # entry (observed on grok 1.0.50: `plugin list --available` returned []). The catalog therefore
+        # names the repository as a remote `url` source, the form the official xAI catalog uses.
         source = entry["source"]
-        local_ok = source == "./" or (
-            isinstance(source, dict)
-            and source.get("type") == "local"
-            and source.get("path") in {"./", "."}
-        )
-        self.assertTrue(local_ok, f"unexpected marketplace source: {source!r}")
+        self.assertEqual(source, {"source": "url", "url": "https://github.com/MrBekoX/agentic-sdlc.git"})
 
-    def test_no_zip_artifact_fields_invented_for_a_local_source(self):
+    def test_no_artifact_or_pinned_sha_invented_for_the_personal_catalog(self):
+        # A pinned 40-char sha belongs in the reviewed xAI catalog PR for a release commit; this
+        # personal catalog follows the default branch and must not carry an invented one.
         entry = self.market["plugins"][0]
         self.assertNotIn("_artifact", entry)
         self.assertNotIn("sha256", entry)
@@ -235,22 +239,45 @@ class TestAdapterFilesKeepHouseContracts(unittest.TestCase):
         self.assertIn("run_terminal_command", adapter)
 
 
+def load_lifecycle_checker():
+    spec = importlib.util.spec_from_file_location(
+        "check_native_lifecycle", REPO / "scripts" / "check_native_lifecycle.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 class TestGrokVendorValidator(unittest.TestCase):
     """The vendor's own manifest check, when the vendor CLI is installed.
 
-    Opt-in by presence, never a silent pass: absent CLI skips with a named reason. This is the
-    same check xAI's tooling runs, so it catches a manifest defect the house tests do not model.
-    `grok plugin validate` is read-only and offline.
+    Opt-in by presence, never a silent pass: an absent CLI (or a .cmd/.bat shim) skips with a
+    named reason. This is the same check xAI's tooling runs, so it catches a manifest defect the
+    house tests do not model. `grok plugin validate` is read-only and offline, and it runs in a
+    disposable profile: GROK_HOME, HOME and USERPROFILE point into a temporary directory, the
+    environment is the lifecycle checker's allowlist (no provider keys), and the working directory
+    is outside every repository, so neither the real ~/.grok nor this checkout's .grok/ is read.
     """
 
     def test_vendor_validate_accepts_the_manifest(self):
-        grok = shutil.which("grok")
-        if grok is None:
-            self.skipTest("grok CLI not installed - vendor manifest validation not run")
-        proc = subprocess.run(
-            [grok, "plugin", "validate", str(REPO)],
-            cwd=str(REPO), capture_output=True, text=True, encoding="utf-8", timeout=120,
-        )
+        checker = load_lifecycle_checker()
+        try:
+            grok = checker.resolve_cli("grok")
+        except checker.NotRun as exc:
+            self.skipTest("grok CLI not usable (%s) - vendor manifest validation not run" % exc.reason)
+        with tempfile.TemporaryDirectory(prefix="grok-validate-", ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            env = checker.build_child_env(root, home=root / "home")
+            cwd = root / "cwd"
+            cwd.mkdir()
+            for key in ("GROK_HOME", "HOME", "USERPROFILE"):
+                self.assertTrue(Path(env[key]).resolve().is_relative_to(root.resolve()), key)
+            self.assertFalse(cwd.resolve().is_relative_to(REPO.resolve()))
+            proc = subprocess.run(
+                [grok, "plugin", "validate", str(REPO)],
+                cwd=str(cwd), env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                text=True, encoding="utf-8", timeout=120,
+            )
         self.assertEqual(proc.returncode, 0, (proc.stdout or "") + (proc.stderr or ""))
         self.assertIn("valid", (proc.stdout or "").lower())
 

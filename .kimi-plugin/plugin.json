@@ -32,19 +32,19 @@
   "hooks": [
     {
       "event": "PreToolUse",
-      "matcher": "Bash",
+      "matcher": "^Bash$",
       "command": "node \"./hooks/scan-commit.mjs\"",
       "timeout": 20
     },
     {
       "event": "PreToolUse",
-      "matcher": "Bash",
+      "matcher": "^Bash$",
       "command": "node \"./hooks/destructive-command-guard.mjs\"",
       "timeout": 15
     },
     {
       "event": "PreToolUse",
-      "matcher": "Bash",
+      "matcher": "^Bash$",
       "command": "node \"./hooks/branch-guard.mjs\"",
       "timeout": 15
     }

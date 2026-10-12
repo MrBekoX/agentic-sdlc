@@ -66,9 +66,12 @@ class TestSkillCrossReferences(unittest.TestCase):
         self.assertIn("runtime-adapter.md", text)
         self.assertIn("Codex", text)
         self.assertIn("Portable capability", text)
-        # Claude+Codex-only scope: the pipeline no longer enumerates other runtimes inline.
+        # Five-platform scope (cross-platform-distribution): the Plugin root rule names exactly the
+        # five packaged runtimes; harnesses outside that set stay out of the pipeline text.
         self.assertNotIn("OpenCode", text)
-        self.assertNotIn("Kimi Code", text)
+        rule = next(ln for ln in text.splitlines() if ln.startswith("**Plugin root (`<runtime-root>`):**"))
+        for runtime in ("Claude Code", "Codex", "Kimi Code", "Grok CLI", "ZCode"):
+            self.assertIn(runtime, rule)
 
     def test_pipeline_documents_codex_adapter_gate_evidence(self):
         skill = (h.SKILLS_DIR / "agentic-sdlc-pipeline" / "SKILL.md").read_text(encoding="utf-8")
@@ -339,17 +342,14 @@ class TestPowerShellToolLists(unittest.TestCase):
     """AC22: git-safety-check pre-approves PowerShell git reads; debugger and test-engineer list it."""
 
     def test_ac22_git_safety_check_preapproves_powershell_git_reads(self):
+        # Exact rules since security analysis #2: the earlier prefix rules (`Bash(git diff:*)`)
+        # also pre-approved `git diff --output=<file>`, which overwrites any file.
         text = (h.REPO / "commands" / "git-safety-check.md").read_text(encoding="utf-8")
-        for rule in (
-            "Bash(git status:*)",
-            "Bash(git diff:*)",
-            "Bash(git log:*)",
-            "PowerShell(git status *)",
-            "PowerShell(git diff *)",
-            "PowerShell(git log *)",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
+        for command in ("git status", "git diff --no-ext-diff --no-textconv --stat",
+                        "git diff --no-ext-diff --no-textconv", "git log --oneline -n 10"):
+            for rule in (f"Bash({command})", f"PowerShell({command})"):
+                with self.subTest(rule=rule):
+                    self.assertIn(rule, text)
 
     def test_ac22_debugger_and_test_engineer_list_powershell_beside_bash(self):
         for name in ("debugger", "test-engineer"):

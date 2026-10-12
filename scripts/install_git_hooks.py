@@ -26,6 +26,8 @@ WHAT IT DOES NOT PROMISE
 `prepare-commit-msg` backstop. No client hook sees commits made in another clone or server-side
 history rewrites. Non-negotiable enforcement belongs in pre-receive policy or CI.
 """
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -111,8 +113,8 @@ def _legacy_hook_body(name: str) -> str:
     )
 
 
-def git_dir(repo: Path) -> Path:
-    out = subprocess.run(["git", "rev-parse", "--git-dir"], cwd=str(repo),
+def _rev_parse_path(repo: Path, *args: str) -> Path:
+    out = subprocess.run(["git", "rev-parse", *args], cwd=str(repo),
                          capture_output=True, text=True, encoding="utf-8")
     if out.returncode != 0:
         raise SystemExit("not a git repository: " + str(repo))
@@ -120,19 +122,29 @@ def git_dir(repo: Path) -> Path:
     return p if p.is_absolute() else (repo / p)
 
 
+def git_dir(repo: Path) -> Path:
+    return _rev_parse_path(repo, "--git-dir")
+
+
+def git_common_dir(repo: Path) -> Path:
+    """The git directory every worktree of this repository shares (the shared hooks live here)."""
+    return _rev_parse_path(repo, "--git-common-dir")
+
+
 def hooks_dir(repo: Path) -> Path:
-    """Honour core.hooksPath, or git silently ignores anything written to .git/hooks."""
-    out = subprocess.run(["git", "config", "--get", "core.hooksPath"], cwd=str(repo),
-                         capture_output=True, text=True, encoding="utf-8")
-    configured = out.stdout.strip()
-    if configured:
-        p = Path(configured)
-        return (p if p.is_absolute() else (repo / p)).resolve()
-    return (git_dir(repo) / "hooks").resolve()
+    """The folder git runs hooks from, as git itself resolves it (`git rev-parse --git-path hooks`).
+
+    That honours core.hooksPath (anything written to .git/hooks is otherwise ignored) with git's own
+    rules: a leading `~/` is the user's home (read raw, it became a folder named `~` in the
+    checkout), a relative value is relative to the top of the working tree (not to a subdirectory
+    `--repo`), and a linked worktree uses the shared `.git/hooks`, not `.git/worktrees/<name>/hooks`.
+    """
+    return _rev_parse_path(repo, "--git-path", "hooks").resolve()
 
 
 def ownership_manifest_path(repo: Path) -> Path:
-    return git_dir(repo).resolve() / MANIFEST_NAME
+    # One record per repository: the hooks it describes are shared by every worktree.
+    return git_common_dir(repo).resolve() / MANIFEST_NAME
 
 
 def _file_digest(path: Path) -> str:
@@ -182,13 +194,46 @@ def _is_below(path: Path, root: Path) -> bool:
         return False
 
 
+def _work_tree(repo: Path) -> Path:
+    """The top of the working tree (`--repo` may be a subdirectory); a bare repository has none."""
+    out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=str(repo),
+                         capture_output=True, text=True, encoding="utf-8")
+    top = out.stdout.strip()
+    return Path(top) if out.returncode == 0 and top else repo
+
+
+def _shared_hooks_path(repo: Path) -> bool:
+    """True when the global or system configuration sets core.hooksPath to one fixed folder.
+
+    `git config --show-scope` (git 2.26+) prints `<scope>\\t<value>`; older git fails and the
+    location rule alone applies. A relative value resolves inside each repository, so it is not
+    shared; an absolute or `~` value is one folder for every repository on the machine.
+    """
+    out = subprocess.run(["git", "config", "--show-scope", "--get", "core.hooksPath"], cwd=str(repo),
+                         capture_output=True, text=True, encoding="utf-8")
+    if out.returncode != 0 or "\t" not in out.stdout:
+        return False
+    scope, value = out.stdout.rstrip("\r\n").split("\t", 1)
+    return scope in {"global", "system"} and (value.startswith("~") or Path(value).is_absolute()
+                                              or value.startswith(("/", "\\")))
+
+
 def external_hooks_path(repo: Path, path: Path) -> bool:
-    """True for a hooks directory outside both this checkout and its private git directory."""
-    return not (_is_below(path, repo) or _is_below(path, git_dir(repo)))
+    """True for a hooks directory outside this checkout and its repository's git directories, or a
+    fixed folder set by the global or system configuration: every repository on the machine shares
+    it, even when it happens to sit inside this checkout (a dotfiles repository)."""
+    if _shared_hooks_path(repo):
+        return True
+    roots = (repo, _work_tree(repo), git_dir(repo), git_common_dir(repo))
+    return not any(_is_below(path, root) for root in roots)
 
 
 def hook_state(path: Path, name: str, recorded_hash: str | None = None) -> str:
     """Classify a hook; only the repo-local manifest establishes mutable ownership."""
+    # A symlink is never ours: a dangling one reads as missing to exists(), and writing the hook body
+    # would follow it to a target outside the repository, past the external-path opt-in.
+    if path.is_symlink():
+        return "foreign"
     if not path.exists():
         return "absent"
     try:
@@ -303,7 +348,8 @@ def main() -> int:
     ap.add_argument(
         "--allow-external-hooks-path",
         action="store_true",
-        help="allow writes/deletes when core.hooksPath resolves outside this repository",
+        help="allow writes/deletes when core.hooksPath resolves outside this repository or names "
+             "one fixed folder in the global/system configuration",
     )
     a = ap.parse_args()
     repo = Path(a.repo).resolve()

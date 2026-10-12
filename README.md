@@ -20,7 +20,7 @@ All five platforms are in packaging and portability scope. Claude Code and Codex
 | ZCode | [`.zcode-plugin/README.md`](.zcode-plugin/README.md) | [`.zcode-plugin/plugin.json`](.zcode-plugin/plugin.json) + [marketplace](marketplace.json) |
 | Grok CLI | [`.grok-plugin/README.md`](.grok-plugin/README.md) | [`.grok-plugin/plugin.json`](.grok-plugin/plugin.json) + [marketplace](.grok-plugin/marketplace.json) |
 
-Installation/update/uninstall steps, verified root contracts and publishing limits for all five platforms are in [multi-platform distribution](docs/publication/multi-platform-distribution.md). Kimi, ZCode and Grok are packaged adapters with limited runtime coverage; they do not inherit Claude/Codex transcript or Workflow behavior. Historical 0.4.3 certification covers Claude Code and Codex and does not certify the other adapters' native lifecycle. Other harnesses remain deferred.
+Installation/update/uninstall steps, verified root contracts and publishing limits for all five platforms are in [multi-platform distribution](docs/publication/multi-platform-distribution.md); the per-platform and per-OS verification results are in the [compatibility matrix](docs/publication/compatibility-matrix.md). Requirements on every platform: Node.js on the hook `PATH` (22 and 24 tested; a missing `node` silently disables the guards), Python 3 for helper workflows (3.12 tested; `py -3` on Windows when `python3` is missing or is the Microsoft Store alias) and Git. Repository-URL installs need a public or authorized repository; extracted package directories install anywhere without developer-specific setup. Kimi, ZCode and Grok are packaged adapters with limited runtime coverage; they do not inherit Claude/Codex transcript or Workflow behavior. Historical 0.4.3 certification covers Claude Code and Codex and does not certify the other adapters' native lifecycle. Other harnesses remain deferred.
 
 The [2026-10-11 marketplace preparation](docs/publication/marketplace-readiness-2026-10-11.md)
 records current isolated native checks and clean-source/vendor packet preparation.
@@ -70,7 +70,7 @@ State: BLOCKED. The path needs a public repository, the clean-package validation
 
 **Local authoring example.** The personal catalog root is the home directory, so the `./plugins/agentic-sdlc` source path below resolves to `~/plugins/agentic-sdlc`. That copy or symlink/junction is an example source for a personal marketplace, not a product install requirement.
 
-Example `~/.agents/plugins/marketplace.json`:
+Example `~/.agents/plugins/marketplace.json` — if the file already exists, add only the `agentic-sdlc` entry to its `plugins` array; do not replace the file or other entries. (`codex plugin marketplace add <package-directory>`, with no `#` in the path, is a simpler local route.)
 
 ```json
 {
@@ -123,13 +123,31 @@ State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile ho
 
 **Steps.** ZCode discovers `.zcode-plugin/plugin.json`, a flat `skills/<name>/SKILL.md` layout, and loads the separate [`hooks/hooks-zcode.json`](hooks/hooks-zcode.json) wire declared by the manifest (`hooks/hooks.json` is never created — ZCode auto-loads that standard location).
 
-1. **Settings → Plugins → Discover**, click **+** (**Create → Add marketplace**), and add this repository root — the folder containing the root [`marketplace.json`](marketplace.json), written in the ZCode marketplace schema (`name=mrbekox`, `source="./"`, `category=developer-tools`).
-2. In the **Personal** segment, **Install** then **Enable** the `agentic-sdlc` card.
+1. **Settings → Plugins → Discover**, click **+** (**Create → Add marketplace**), and add the root [`marketplace.json`](marketplace.json) **as a file source** — the ZCode marketplace schema (`name=mrbekox`, `source="./"`, `category=developer-tools`). A directory or GitHub source is read through `.claude-plugin/marketplace.json` first and shows the Claude entry instead.
+2. Review the wired hooks first: ZCode enables newly installed plugins by default, which lets their hooks run. In the **Personal** segment, **Install** the `agentic-sdlc` card.
 3. Start a new session, then check **Settings → Skills** (16 plugin skills), **Settings → Hooks** (plugin hook entries), and invoke `$using-agentic-sdlc` once.
 
 **Go condition (adapter only).** Discovery evidence: the plugin card lists name/version/category, all 16 skills appear under plugin skills, the wired hooks appear read-only under Hooks, and one router invocation routes to a focused skill. Recorded evidence does not upgrade ZCode to a supported release target.
 
 State: GAP. The manifest, marketplace and hook wire exist and pass `tests/test_zcode_packaging.py`; live marketplace-add / install / discovery evidence has not been recorded yet. The official-marketplace gap list is in [`docs/publication/zcode-marketplace.md`](docs/publication/zcode-marketplace.md).
+
+### Kimi Code plugin install (experimental, not a release-gated path)
+
+> **Limited runtime coverage.** Kimi Code is included in current distribution preparation with PreToolUse command guards only; no submission has been performed. See [`.kimi-plugin/README.md`](.kimi-plugin/README.md).
+
+**Prerequisites.** Kimi Code CLI 2.1+, `node` on the hook shell `PATH`, Python 3 and Git for helper workflows, and the extracted plugin directory (or a public/authorized repository URL).
+
+**Steps.** Kimi reads `.kimi-plugin/plugin.json` (skills, command, agents, inline `^Bash$` hooks and the `sessionStart.skill` router). In the Kimi TUI:
+
+```text
+/plugins install <package-directory>
+/plugins info agentic-sdlc
+/reload
+```
+
+`/plugins install https://github.com/MrBekoX/agentic-sdlc` and the custom catalog [`marketplace-kimi.json`](marketplace-kimi.json) (`/plugins marketplace <path-or-url>`) need a public or authorized source. Invoke skills by bare name (`/skill:using-agentic-sdlc`). Update: reinstall a changed local directory, or press Enter on an available update in the `/plugins` Installed tab; uninstall: `/plugins remove agentic-sdlc` (the managed copy stays on disk).
+
+State: packaging and relocated hook replays pass; native installer results are in the [compatibility matrix](docs/publication/compatibility-matrix.md).
 
 ### Grok CLI personal marketplace (experimental, not a release-gated path)
 
@@ -140,14 +158,12 @@ State: GAP. The manifest, marketplace and hook wire exist and pass `tests/test_z
 **Steps.** Grok discovers `.grok-plugin/plugin.json` and `.grok-plugin/marketplace.json`, a shared `skills/<name>/SKILL.md` layout, and loads the separate [`hooks/hooks-grok.json`](hooks/hooks-grok.json) wire declared by the manifest (`hooks/hooks.json` is never created — that is Grok's auto-discovered hook file).
 
 ```text
-grok plugin marketplace add .
 grok plugin install <package-directory> --trust
-grok plugin enable agentic-sdlc
 grok plugin details agentic-sdlc
 grok inspect
 ```
 
-After install, press `r` in the Plugins tab or start a new session. The router is `/using-agentic-sdlc` (qualified `/agentic-sdlc:using-agentic-sdlc` on collision).
+The install also enables the plugin (`grok plugin enable agentic-sdlc` only re-enables after a disable). After install, press `r` in the Plugins tab or start a new session. The router is `/using-agentic-sdlc` (qualified `/agentic-sdlc:using-agentic-sdlc` on collision). The shipped catalog `.grok-plugin/marketplace.json` names this repository as a remote `url` source (Grok skips a catalog entry that points at the catalog's own root), so `grok plugin marketplace add https://github.com/MrBekoX/agentic-sdlc` works once the repository is public.
 
 **Go condition (adapter only).** Discovery evidence: `grok plugin details` / `grok inspect` list all 16 house skills including `using-agentic-sdlc`, command `git-safety-check`, and `agents/*`. Recorded evidence does not upgrade Grok to a supported release target.
 
@@ -222,7 +238,7 @@ workflows/         Claude Code dynamic workflow scripts; workflows/zcode/ holds 
 hooks/             Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/  Durable behavior contracts
 commands/          Manual slash-command definitions
-scripts/           22 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check
+scripts/           23 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check, native lifecycle check
 tests/             Unit tests, harness, fixtures, golden refs, eval seeds
 docs/              Component reference, boundaries, testing, release notes
 ```
@@ -275,7 +291,7 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 |---|---|
 | Claude Code | [`hooks/hooks-claude.json`](hooks/hooks-claude.json), declared by `.claude-plugin/plugin.json`: `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` guards. The command guards match `Bash|PowerShell` and carry no `if` filter — a `Bash`-only matcher is inert on a Windows host without Git Bash, and a subcommand-level `if` never starts the hook for a git alias, so each guard self-gates internally instead. |
 | Codex | [`hooks/hooks-codex.json`](hooks/hooks-codex.json), declared in `.codex-plugin/plugin.json`, after Codex hook review/trust: `SessionStart` bootstrap **plus** native blocking `PreToolUse` command guards, a pre-write secret guard, and two `Stop` backstops. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md) for the exact set and its documented coverage gaps. |
-| ZCode (experimental adapter) | [`hooks/hooks-zcode.json`](hooks/hooks-zcode.json), declared by `.zcode-plugin/plugin.json`: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, and the `SessionStart` bootstrap on `startup\|clear\|compact`, each a `process` executor (`node` on `PATH` required). Stop completion/flow guards and the flow-order guard stay unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
+| ZCode (experimental adapter) | [`hooks/hooks-zcode.json`](hooks/hooks-zcode.json), declared by `.zcode-plugin/plugin.json`: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, and the `SessionStart` bootstrap on `startup\|resume\|clear\|compact`, each a `process` executor (`node` on `PATH` required). Stop completion/flow guards and the flow-order guard stay unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
 | Grok CLI (experimental adapter) | [`hooks/hooks-grok.json`](hooks/hooks-grok.json), declared by `.grok-plugin/plugin.json`: `PreToolUse` command guards on `Bash\|run_terminal_command`; fixed Node code reads `process.env.GROK_PLUGIN_ROOT` as data. Write-scan, Stop, and SessionStart remain unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
 
 Claude Code wires flow enforcement through `flow-order-guard.mjs` and `flow-step-guard.mjs`. Codex uses its own `flow-order-guard-codex.mjs` and `flow-step-guard-codex.mjs` adapters over the same [`hooks/flow-requirements.json`](hooks/flow-requirements.json); the Codex order gate is opt-in and its Stop gate can continue the turn but cannot undo effects.

@@ -264,6 +264,45 @@ class TestPluginRootAndHookControls(NegativeControl):
         self._hooks("{}")
         self.assertSilent(h.validate_plugin_root_refs(self.root))
 
+    # The harness's canonical Plugin root rule; a SKILL.md that uses <runtime-root> must carry it.
+    ROOT_RULE = h.PLUGIN_ROOT_RULE + "\n"
+
+    def test_a_copy_that_drops_a_safety_clause_is_rejected(self):
+        # Marker checks let a copy lose "never pass it to a shell" and stay green; verbatim does not.
+        weakened = self.ROOT_RULE.replace(" A `${…}` token still shown literally is unresolved: never "
+                                          "pass it to a shell.", "")
+        self.assertNotEqual(weakened, self.ROOT_RULE)
+        self._rooted_skill(weakened + "Run `<runtime-root>/scripts/validate_artifacts.py`.\n")
+        self.assertFires("runtime_root_definition_incomplete", h.validate_plugin_root_refs(self.root))
+
+    def _rooted_skill(self, body):
+        (self.root / "scripts").mkdir(parents=True, exist_ok=True)
+        (self.root / "scripts" / "validate_artifacts.py").write_text("", encoding="utf-8")
+        (self.root / "contracts" / "skills").mkdir(parents=True, exist_ok=True)
+        (self.root / "contracts" / "skills" / "03-plan-mode.md").write_text("x", encoding="utf-8")
+        _skill(self.root, "example-skill", None, body="# T\n\n" + body)
+        self._hooks("{}")
+
+    def test_runtime_root_ref_missing(self):
+        self._rooted_skill(self.ROOT_RULE + "Run `<runtime-root>/scripts/ghost.py`.\n")
+        self.assertFires("runtime_root_ref_missing", h.validate_plugin_root_refs(self.root))
+
+    def test_runtime_root_definition_incomplete(self):
+        # Uses <runtime-root> without the shared rule: the model has no way to resolve it.
+        self._rooted_skill("Run `<runtime-root>/scripts/validate_artifacts.py`.\n")
+        self.assertFires("runtime_root_definition_incomplete", h.validate_plugin_root_refs(self.root))
+
+    def test_plugin_relative_ref_without_root(self):
+        # A bare plugin path resolves against the user's project, not the installed plugin.
+        self._rooted_skill(self.ROOT_RULE + "Apply `contracts/skills/03-plan-mode.md`.\n")
+        self.assertFires("plugin_relative_ref_without_root", h.validate_plugin_root_refs(self.root))
+
+    def test_rooted_refs_with_the_shared_rule_are_silent(self):
+        self._rooted_skill(self.ROOT_RULE + "Apply `<runtime-root>/contracts/skills/03-plan-mode.md`; "
+                           "save `docs/agentic-sdlc/specs/x.md` in the project.\n")
+        errors, _warnings = h.validate_plugin_root_refs(self.root)
+        self.assertEqual(errors, [])
+
     def test_hooks_json_missing(self):
         (self.root / "hooks").mkdir(parents=True)
         self.assertFires("hooks_json_missing", h.validate_hooks_json(self.root))
@@ -390,6 +429,32 @@ class TestDocConsistencyControls(NegativeControl):
         (self.root / "hooks").mkdir(parents=True)
         (self.root / "hooks" / "README.md").write_text("No settings here.\n", encoding="utf-8")
         self.assertSilent(h.check_doc_consistency(self.root))
+
+    def test_shipped_files_are_found_wherever_the_package_is_installed(self):
+        # The exclusions (.claude/, artifacts/, .git/) describe folders INSIDE the package. A
+        # Claude Code install lives under ~/.claude/plugins/cache/..., and this repository's own
+        # worktrees under .claude/worktrees/...; matching the exclusions against the absolute
+        # path hid every real marketplace.json there and raised a false warning.
+        for parent in (".claude/plugins/cache/mrbekox/agentic-sdlc/0.4.3", "artifacts/run", ".git/x"):
+            with self.subTest(parent=parent):
+                root = self.root / parent
+                (root / ".claude-plugin").mkdir(parents=True)
+                (root / ".claude-plugin" / "marketplace.json").write_text("{}", encoding="utf-8")
+                (root / "README.md").write_text("Install from marketplace.json.\n", encoding="utf-8")
+                errors, warnings = h.check_doc_consistency(root)
+                self.assertNotIn("readme_claims_missing_marketplace_json", warnings)
+
+    def test_excluded_folders_inside_the_package_still_do_not_count(self):
+        # Relative exclusion keeps its purpose: a snapshot under the package's own artifacts/ or a
+        # contributor's local .claude/ folder is not a shipped file.
+        for inner in (".claude", "tests/artifacts/run-1"):
+            with self.subTest(inner=inner), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / inner).mkdir(parents=True)
+                (root / inner / "marketplace.json").write_text("{}", encoding="utf-8")
+                (root / "README.md").write_text("Install from marketplace.json.\n", encoding="utf-8")
+                self.assertFires("readme_claims_missing_marketplace_json",
+                                 h.check_doc_consistency(root), where="warnings")
 
 
 class TestConflictMarkerControls(NegativeControl):

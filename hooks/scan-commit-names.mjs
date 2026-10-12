@@ -1,4 +1,5 @@
-// Credential-filename recognition for scan-commit.mjs.
+// Credential-filename recognition for scan-commit.mjs, plus the diff and display helpers the three
+// diff scanners (scan-commit, git-hook-scan, worktree-scan) share.
 //
 // WHY THIS IS NOT A REGEX
 // The first attempt at supporting DERIVED credential names (`cp id_rsa id_rsa.bak`, `.npmrc.old`,
@@ -43,7 +44,10 @@ export function isCredentialFilename(path) {
   let name = String(path ?? '').replace(/\\/g, '/');
   const slash = name.lastIndexOf('/');
   if (slash !== -1) name = name.slice(slash + 1);
-  while (name.endsWith('~')) name = name.slice(0, -1);       // emacs-style backup
+  // Verbatim (NUL-separated) git listings keep surrounding blanks: ` id_rsa` or `cert.p12 ` is the
+  // same credential, so judge the trimmed name.
+  name = name.trim();
+  while (name.endsWith('~')) name = name.slice(0, -1).trimEnd(); // emacs-style backup
   if (!name) return false;
 
   // Split into a leading name and its dotted parts. A dotfile keeps its leading dot in part 0.
@@ -73,4 +77,27 @@ export function isCredentialFilename(path) {
   }
   // Otherwise a credential EXTENSION anywhere in the dotted tail marks it (`server.key.bak`).
   return rest.some((p) => CRED_EXTENSIONS.has(p.toLowerCase()));
+}
+
+/**
+ * A file name made safe to print in guard output: control characters (ESC sequences can rewrite or
+ * hide a terminal's block message) become visible `\xNN` escapes; everything else is kept verbatim.
+ */
+export function displayPath(path) {
+  return String(path ?? '').replace(/[\u0000-\u001f\u007f]/g,
+    (ch) => '\\x' + ch.charCodeAt(0).toString(16).padStart(2, '0'));
+}
+
+// The added lines of a unified diff, joined by newlines. `+++` is a file header only between a
+// `diff ` line and its first `@@` hunk; inside a hunk every `+` line is added content, including
+// content that itself starts with `++` (a `!startsWith('+++')` filter dropped those unscanned).
+export function addedDiffLines(diff) {
+  const added = [];
+  let inHunk = false;
+  for (const line of String(diff ?? '').split(/\r?\n/)) {
+    if (line.startsWith('diff ')) inHunk = false;
+    else if (line.startsWith('@@')) inHunk = true;
+    else if (inHunk && line.startsWith('+')) added.push(line.slice(1));
+  }
+  return added.join('\n');
 }

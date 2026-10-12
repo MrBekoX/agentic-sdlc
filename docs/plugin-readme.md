@@ -30,7 +30,7 @@ All five platform adapters are included in [distribution preparation](publicatio
 | `hooks/hooks-codex.json` | Codex | Blocking `PreToolUse`, bootstrap `SessionStart`, and advisory/env-gated `Stop` wiring, subject to Codex hook review/trust. |
 | `.zcode-plugin/plugin.json` | ZCode | Adapter plugin metadata; `skills`, `commands`, `agents`, and the ZCode hook wire. |
 | `marketplace.json` (repository root) | ZCode | Local marketplace source in the ZCode schema; the repo root is the source. |
-| `hooks/hooks-zcode.json` | ZCode | Verified-event wiring only: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, `SessionStart` bootstrap on `startup\|clear\|compact`. |
+| `hooks/hooks-zcode.json` | ZCode | Verified-event wiring only: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, `SessionStart` bootstrap on `startup\|resume\|clear\|compact`. |
 | `.grok-plugin/plugin.json` | Grok CLI | Adapter plugin metadata and the Grok hook wire. |
 | `.grok-plugin/marketplace.json` | Grok CLI | Local marketplace source in the Grok schema; the repo root is the source. |
 | `hooks/hooks-grok.json` | Grok CLI | Verified-event wiring only: `PreToolUse` command guards on `Bash\|run_terminal_command`. |
@@ -43,8 +43,11 @@ Skills live in root `skills/`, not in `.claude/skills/` or `.codex/skills/`. Run
 |---|---|
 | Claude Code | `${CLAUDE_PLUGIN_ROOT}` |
 | Codex | `${PLUGIN_ROOT}` |
+| Kimi Code | `${KIMI_PLUGIN_ROOT}` |
 | ZCode | `${ZCODE_PLUGIN_ROOT}` (ZCode also injects the `${CLAUDE_PLUGIN_ROOT}` alias, per the fetched hook documentation) |
 | Grok CLI | `${GROK_PLUGIN_ROOT}` (Grok also injects the `${CLAUDE_PLUGIN_ROOT}` alias, per `09-plugins.md`) |
+
+These variables are set only in hook processes. None reaches the model's Bash or PowerShell, where a reference such as `${PLUGIN_ROOT}` expands to an empty string. Skills find the root through their **Plugin root** rule: `<runtime-root>` is the installed folder two levels above the loaded `SKILL.md`. Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` and `${CLAUDE_SKILL_DIR}` in skill text, ZCode only `${CLAUDE_SKILL_DIR}` / `${ZCODE_SKILL_DIR}`, and Kimi Code `${KIMI_SKILL_DIR}`; Codex substitutes nothing but shows the skill's absolute path in the skill listing, and Grok CLI substitutes only when a slash command expands the skill. The `SessionStart` hooks on Claude Code, Codex and ZCode print `Plugin root (resolved by this hook; use this absolute path wherever a skill says <runtime-root>, quoted for your shell): <path>`. If the root cannot be confirmed, the skill stops and reports `plugin root unresolved`.
 
 ## Layered Components
 
@@ -142,7 +145,7 @@ The scripts are shared, but runtime wiring differs.
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
-## 11. Deterministic scripts (22)
+## 11. Deterministic scripts (23)
 
 | Script | Purpose |
 |---|---|
@@ -150,6 +153,7 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | `build_release.py` | Builds the release or skills-only (`--skills-only`) archive from the recorded HEAD commit (`--output`), verifies an archive against its recorded commit (`--verify`), and scans a local bare mirror's history (`--scan-history`). |
 | `strict_flow_evidence.py` | Offline strict evaluation of one Codex rollout (`--rollout`, `--cwd`), printing `strict_evidence=`, `strict_completion=` and `strict_branch=`. |
 | `check_codex_hook_trust.py` | Read-only post-install Codex hook trust check over `codex app-server --stdio` `hooks/list`, printing `codex_hook_trust=`. |
+| `check_native_lifecycle.py` | No-model native install, discovery, refresh and uninstall of a package (`--package`) through each vendor's own plugin manager in a disposable profile (`--platform`, `--require`), printing one `native_<platform>=passed\|failed:<reason>\|not-run:<reason>` line per platform. |
 | `eval_safety.py` | Shared eval slug and path-containment boundaries. |
 | `sensitive_redaction.py` | Canonical high-confidence redaction adapter for persisted artifacts. |
 | `validate_artifacts.py` | Spec/plan validation: structure, AC coverage, placeholders/secrets, task verification, deferral, and security hand-wave checks. |

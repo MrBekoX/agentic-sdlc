@@ -139,12 +139,14 @@ class TestRelocatedAdapters(unittest.TestCase):
             return [executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command']
         return ['/bin/sh', '-c']
 
-    def execute(self, runtime, handler, command):
+    def execute(self, runtime, handler, command, tool_cwd=None):
         payload = {'cwd': str(self.project), 'hook_event_name': 'PreToolUse'}
         if runtime == 'grok':
             payload.update(toolName='run_terminal_command', toolInput={'command': command})
         else:
             payload.update(tool_name='Bash', tool_input={'command': command})
+        if tool_cwd is not None:
+            payload['tool_input']['cwd'] = str(tool_cwd)
         env = {k: v for k, v in os.environ.items() if not k.startswith('AGENTIC_')}
         env.update(GROK_PLUGIN_ROOT=str(self.root), KIMI_PLUGIN_ROOT=str(self.root),
                    ZCODE_PLUGIN_ROOT=str(self.root), AGENTIC_BRANCH_GUARD_BLOCK='true')
@@ -192,6 +194,52 @@ class TestRelocatedAdapters(unittest.TestCase):
             handler = next(h for h in self.guards(runtime) if 'branch-guard.mjs' in json.dumps(h))
             with self.subTest(runtime=runtime, branch='feature'):
                 self.assertEqual(self.execute(runtime, handler, 'git commit -m test'), {})
+
+    @unittest.skipUnless(shutil.which('git'), 'git not available')
+    def test_kimi_tool_cwd_selects_the_repository(self):
+        # Kimi's Bash tool takes its own tool_input.cwd; the command runs THERE, not in the session
+        # cwd. Guards that read only the session cwd checked the wrong repository's branch and
+        # staged content, so a commit on `main` in the tool cwd passed as if it were elsewhere.
+        subprocess.run(['git', 'init', '-q', '-b', 'feature', str(self.project)], check=True,
+                       capture_output=True)
+        other = self.base / 'other repo ğ'
+        other.mkdir()
+        subprocess.run(['git', 'init', '-q', '-b', 'main', str(other)], check=True, capture_output=True)
+        (other / 'config.txt').write_text('TOKEN = ghp_' + 'a1B2' * 9 + '\n', encoding='utf-8')
+        subprocess.run(['git', '-C', str(other), 'add', 'config.txt'], check=True, capture_output=True)
+        guards = self.guards('kimi')
+        for name, reason in (('branch-guard.mjs', "'main'"), ('scan-commit.mjs', None)):
+            handler = next(h for h in guards if name in json.dumps(h))
+            with self.subTest(handler=name):
+                out = self.execute('kimi', handler, 'git commit -m test', tool_cwd=other)
+                self.assertEqual(out.get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
+                if reason:
+                    self.assertIn(reason, out['hookSpecificOutput']['permissionDecisionReason'])
+
+    @unittest.skipUnless(shutil.which('git'), 'git not available')
+    def test_tool_cwd_is_ignored_outside_kimi(self):
+        # Only Kimi's Bash tool runs in tool_input.cwd. On another runtime a model-supplied `cwd`
+        # argument must not move the guards off the repository the command actually runs in.
+        subprocess.run(['git', 'init', '-q', '-b', 'main', str(self.project)], check=True,
+                       capture_output=True)
+        clean = self.base / 'clean feature repo'
+        clean.mkdir()
+        subprocess.run(['git', 'init', '-q', '-b', 'feature', str(clean)], check=True, capture_output=True)
+        guard = str(self.root / 'hooks' / 'branch-guard.mjs')
+        payload = {'cwd': str(self.project), 'hook_event_name': 'PreToolUse', 'tool_name': 'Bash',
+                   'tool_input': {'command': 'git commit -m test', 'cwd': str(clean)}}
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith('AGENTIC_') and k not in ('KIMI_PLUGIN_ROOT', 'KIMI_CODE_HOME')}
+        env['AGENTIC_BRANCH_GUARD_BLOCK'] = 'true'
+        node = shutil.which('node')
+        self.assertTrue(node, 'node missing')
+        proc = subprocess.run([node, guard], input=json.dumps(payload),
+                              cwd=self.project, env=env, capture_output=True, text=True,
+                              encoding='utf-8', timeout=25)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        self.assertEqual(out.get('hookSpecificOutput', {}).get('permissionDecision'), 'deny')
+        self.assertIn("'main'", out['hookSpecificOutput']['permissionDecisionReason'])
 
 
 if __name__ == '__main__':

@@ -52,7 +52,9 @@ ZCODE_HOOK_EVENTS = {
 }
 # Only tool names observed in a live ZCode session and SessionStart source
 # values from the fetched hooks example may appear as matchers.
-ALLOWED_MATCHERS = {"Bash", "Write|Edit", "startup|clear|compact"}
+# SessionStart sources per the vendor CLI README (zai-org/ZCode apps/zcode-cli/README.md): the matcher
+# sees `startup` or `resume`; without `resume` a resumed session got no bootstrap context.
+ALLOWED_MATCHERS = {"Bash", "Write|Edit", "startup|resume|clear|compact"}
 WIRED_SCRIPTS = {
     "scan-commit.mjs",
     "destructive-command-guard.mjs",

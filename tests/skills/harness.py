@@ -321,6 +321,65 @@ def validate_plugin_root_refs(root=None):
         for rel in PLUGIN_ROOT_REF_RE.findall(text):
             if not (root / rel).exists():
                 errors.append(f"plugin_root_ref_missing:{src.relative_to(root).as_posix()}:{rel}")
+    e, w = _validate_runtime_root_text(root)
+    return errors + e, warnings + w
+
+
+# `<runtime-root>` is the portable plugin-root placeholder in model-facing text. No runtime puts the
+# installed root into the model's shell, and only Claude Code substitutes a root variable in skill
+# text, so every file that uses the placeholder must carry (or point at) the shared rule, and every
+# plugin file a skill names must be reached through it - a bare `contracts/...` resolves against
+# the user's project, where a same-named file may be planted.
+RUNTIME_ROOT_REF_RE = re.compile(r"<runtime-root>/([A-Za-z0-9_./*-]+)")
+BARE_PLUGIN_REF_RE = re.compile(
+    r"(?<![\w/>}.$-])((?:docs|contracts|agents|hooks|workflows|scripts)/[A-Za-z0-9_./-]*[A-Za-z0-9_-]"
+    r"\.(?:md|py|mjs|json|js|ts))")
+# The one canonical rule. Every SKILL.md that uses `<runtime-root>` carries it VERBATIM (a skill may
+# add sentences after it), so no copy can silently lose a safety clause: never shell-run a literal
+# `${...}`, confirm the helper exists, never run a same-named project file, the Windows interpreter.
+PLUGIN_ROOT_RULE = (
+    "**Plugin root (`<runtime-root>`):** the installed agentic-sdlc folder, two levels above this "
+    "`SKILL.md` (`<runtime-root>/skills/<name>/SKILL.md`) — never the user's working directory. "
+    "Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}`; Claude Code and ZCode substitute "
+    "`${CLAUDE_SKILL_DIR}/../..`; Kimi Code substitutes `${KIMI_SKILL_DIR}/../..`; a SessionStart line "
+    "`Plugin root (resolved by this hook…)` names it on Claude Code, Codex and ZCode; Codex and Grok "
+    "CLI show this skill's absolute path in the skill listing. A `${…}` token still shown literally is "
+    "unresolved: never pass it to a shell. Confirm `<runtime-root>/scripts/validate_artifacts.py` "
+    "exists and write that absolute path, quoted for your shell, into commands; if it cannot be "
+    "confirmed, stop the step and report `plugin root unresolved` — never run a same-named file from "
+    "the user's project. Run helpers with `python3` (Python 3.8+), or `py -3` on Windows when "
+    "`python3` is missing or is the Microsoft Store alias."
+)
+SUPPORTING_ROOT_RULE_REFERENCES = ("`<runtime-root>` as defined in", "**Plugin root** rule")
+ROLE_ROOT_RULE_MARKERS = ("dispatcher supplied", "${CLAUDE_PLUGIN_ROOT}", "plugin root unresolved")
+
+
+def _validate_runtime_root_text(root):
+    errors, warnings = [], []
+    sources = sorted((root / "skills").rglob("*.md"))
+    for sub in ("agents", "commands"):
+        if (root / sub).is_dir():
+            sources += sorted((root / sub).glob("*.md"))
+    for src in sources:
+        rel_src = src.relative_to(root).as_posix()
+        text = src.read_text(encoding="utf-8")
+        if "<runtime-root>" in text:
+            if src.name == "SKILL.md":
+                if PLUGIN_ROOT_RULE not in text:
+                    errors.append(f"runtime_root_definition_incomplete:{rel_src}:canonical_rule_not_verbatim")
+            elif rel_src.startswith("agents/"):
+                missing = [m for m in ROLE_ROOT_RULE_MARKERS if m not in text]
+                if missing:
+                    errors.append(f"runtime_root_definition_incomplete:{rel_src}:{missing[0]}")
+            elif not any(ref in text for ref in SUPPORTING_ROOT_RULE_REFERENCES):
+                errors.append(f"runtime_root_definition_incomplete:{rel_src}:no_reference_to_rule")
+        for ref in RUNTIME_ROOT_REF_RE.findall(text):
+            target = ref.split("*", 1)[0].rstrip("/")
+            if target and not (root / target).exists():
+                errors.append(f"runtime_root_ref_missing:{rel_src}:{ref}")
+        for ref in BARE_PLUGIN_REF_RE.findall(text):
+            if (root / ref).is_file():
+                errors.append(f"plugin_relative_ref_without_root:{rel_src}:{ref}")
     return errors, warnings
 
 
@@ -462,9 +521,15 @@ def _shipped(root, name):
     unreachable - the README named no settings.json AND one existed, so both conjuncts were
     false whatever the documentation said.
     """
-    return [p for p in root.rglob(name)
-            if "artifacts" not in p.parts and ".git" not in p.parts
-            and ".claude" not in p.parts]
+    # Exclusions are judged on the parts BELOW root: an installed copy lives under
+    # ~/.claude/plugins/cache/..., and a worktree under .claude/worktrees/..., so testing the
+    # absolute path hid every real file there.
+    shipped = []
+    for p in root.rglob(name):
+        parts = p.relative_to(root).parts
+        if "artifacts" not in parts and ".git" not in parts and ".claude" not in parts:
+            shipped.append(p)
+    return shipped
 
 
 def check_doc_consistency(root=None):

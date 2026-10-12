@@ -15,13 +15,13 @@
 // Default is a non-blocking advisory. `AGENTIC_WORKTREE_SCAN_BLOCK=true` escalates it to a Stop
 // block, matching the opt-in pattern of the other gates in this plugin.
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { runGit } from './git-exec.mjs';
+import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { createHash } from 'node:crypto';
 import { HIGH, scanLines, readStdin } from './secret-patterns.mjs';
-import { isCredentialFilename } from './scan-commit-names.mjs';
+import { addedDiffLines, displayPath, isCredentialFilename } from './scan-commit-names.mjs';
 
 const BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_WORKTREE_SCAN_BLOCK || ''));
 
@@ -34,6 +34,10 @@ const BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_WORKTREE_SCAN_BL
 // Bounds keep this linear and cheap: a Stop hook runs every turn, and a timed-out hook renders
 // no decision at all, so a slow scan is the same as no scan.
 const VENDOR_DIR = /(?:^|\/)(?:node_modules|\.venv|venv|vendor|dist|build|target|\.next|\.nuxt|__pycache__|\.mypy_cache|\.pytest_cache|\.tox|\.gradle|Pods|\.git|\.claude|\.codex|\.opencode|\.idea|\.vscode)\//i;
+// The same names as git exclude pathspecs (case-insensitive, at any depth), derived from VENDOR_DIR
+// so the two lists cannot drift apart.
+const VENDOR_PATHSPECS = VENDOR_DIR.source.split('(?:')[2].split(')')[0].split('|')
+  .map((name) => `:(exclude,glob,icase)**/${name.replace(/\\/g, '')}/**`);
 const MAX_UNTRACKED_FILES = 200;
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
@@ -49,9 +53,9 @@ if (input?.stop_hook_active) quiet();
 
 const cwd = typeof input?.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
 
-function git(args) {
-  return execFileSync('git', args, {
-    cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: MAX_TOTAL_BYTES,
+function git(args, dir = cwd) {
+  return runGit(args, {
+    cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: MAX_TOTAL_BYTES,
   });
 }
 
@@ -70,48 +74,77 @@ try {
   // 1) Tracked changes, staged AND unstaged, against the last commit. This is the whole
   //    uncommitted delta regardless of which tool produced it.
   const diff = git(['diff', 'HEAD', '--unified=0']);
-  const added = diff
-    .split(/\r?\n/)
-    .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
-    .map((l) => l.slice(1))
-    .join('\n');
+  const added = addedDiffLines(diff);
   budget -= added.length;
   for (const f of scanLines(added, HIGH)) findings.push({ what: f.label, where: 'uncommitted change' });
 
-  const changed = git(['diff', 'HEAD', '--name-only', '--diff-filter=ACMR'])
-    .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  // -z (here and in the listings below): NUL-separated, verbatim names. Without it git C-quotes any
+  // name with non-ASCII, `"`, `\` or control characters ("\347\233\256..."); reading the quoted
+  // string as a file failed silently, so nothing under such a folder was scanned.
+  const changed = git(['diff', 'HEAD', '--name-only', '-z', '--diff-filter=ACMRT'])
+    .split('\0').filter(Boolean);
 
   // 2) Untracked files, INCLUDING gitignored ones. A secret written to a brand-new file never
   //    appears in `git diff` at all — and `.env` is both the likeliest home for one and almost
   //    always gitignored, so `--exclude-standard` alone skipped exactly the file that matters.
   //    Vendored dependency trees are excluded instead: a token in node_modules is the vendor's
   //    fixture, not the user's secret, and walking them on every turn would blow the time budget.
-  const listed = new Set([
-    ...git(['ls-files', '--others', '--exclude-standard']).split(/\r?\n/),
-    ...git(['ls-files', '--others', '--ignored', '--exclude-standard']).split(/\r?\n/),
-  ]);
-  const untracked = [...listed]
-    .map((s) => s.trim()).filter(Boolean)
-    .filter((rel) => !VENDOR_DIR.test(rel))
-    .slice(0, MAX_UNTRACKED_FILES);
-
-  for (const rel of untracked) {
-    if (budget <= 0) break;
-    let text = '';
+  //    ls-files names are relative to its cwd, so it runs at the root the files are read from: from a
+  //    subdirectory, `app/notes.txt` was listed as `notes.txt` and read from the wrong place.
+  //    Vendor trees are also excluded by pathspec, so git never lists them: a large node_modules
+  //    overflowed the listing buffer and dropped every ignored file. A listing that still fails
+  //    yields nothing, instead of throwing away the tracked-change findings above.
+  const listing = (args) => {
     try {
-      const buf = readFileSync(resolvePath(root, rel));
-      if (buf.length > MAX_FILE_BYTES) continue;      // over-cap: skipped, reported below as a gap
-      if (buf.includes(0)) continue;                  // binary: no text lines to scan
-      text = buf.toString('utf8');
-    } catch { continue; }
-    budget -= text.length;
-    for (const f of scanLines(text, HIGH)) findings.push({ what: f.label, where: rel });
-  }
+      return git([...args, '--', '.', ...VENDOR_PATHSPECS], root).split('\0').filter(Boolean)
+        .filter((rel) => !VENDOR_DIR.test(rel));
+    } catch {
+      return [];
+    }
+  };
+  // Likely secret homes first among ignored files (`.env`-style and credential names), then
+  // shallow paths (stable sort): caches, logs and build output sit deeper.
+  const rank = (rel) => (/^\.env/i.test(rel.split('/').pop()) || isCredentialFilename(rel) ? 0 : 1);
+  const ignored = listing(['ls-files', '-z', '--others', '--ignored', '--exclude-standard'])
+    .sort((a, b) => rank(a) - rank(b) || a.split('/').length - b.split('/').length);
+  const others = listing(['ls-files', '-z', '--others', '--exclude-standard']);
+  const listed = [...ignored, ...others];
+
+  //    Two content-scan budgets, files and bytes: when there are new untracked files, ignored files
+  //    may use at most half of each, and whatever a class leaves unused goes to the other. Ignored
+  //    artifacts (coverage HTML, logs) are large, so sharing only file slots let them spend the bytes
+  //    before a new multi-file feature was read; new files alone pushed `.env` past the file cap.
+  //    An over-cap file is skipped by size before it takes a slot.
+  const scanFiles = (files, maxFiles, maxBytes) => {
+    let used = 0;
+    let spent = 0;
+    for (const rel of files) {
+      if (used >= maxFiles || spent >= maxBytes) break;
+      let text = '';
+      try {
+        if (statSync(resolvePath(root, rel)).size > MAX_FILE_BYTES) continue;  // over-cap, before taking a slot
+        const buf = readFileSync(resolvePath(root, rel));
+        if (buf.length > MAX_FILE_BYTES) continue;      // over-cap: skipped to keep the Stop hook bounded
+        used += 1;
+        if (buf.includes(0)) continue;                  // binary: no text lines to scan
+        text = buf.toString('utf8');
+      } catch { continue; }
+      spent += text.length;
+      for (const f of scanLines(text, HIGH)) findings.push({ what: f.label, where: displayPath(rel) });
+    }
+    return { used, spent };
+  };
+  const shared = others.length > 0;
+  const ignoredUse = scanFiles(ignored,
+    shared ? Math.max(MAX_UNTRACKED_FILES / 2, MAX_UNTRACKED_FILES - others.length) : MAX_UNTRACKED_FILES,
+    shared ? budget / 2 : budget);
+  scanFiles(others, MAX_UNTRACKED_FILES - ignoredUse.used, budget - ignoredUse.spent);
 
   // 3) Credential files by name, whether tracked-changed or brand new — a DER/binary key body has
-  //    no header for the content scan to find, so the name is the only signal.
-  for (const rel of [...changed, ...untracked]) {
-    if (isCredentialFilename(rel)) findings.push({ what: 'credential file', where: rel });
+  //    no header for the content scan to find, so the name is the only signal. Names are cheap, so
+  //    every listed file is checked, not only those within the content-scan cap.
+  for (const rel of [...changed, ...listed]) {
+    if (isCredentialFilename(rel)) findings.push({ what: 'credential file', where: displayPath(rel) });
   }
 } catch {
   quiet();                                   // fail open: a broken scan must not wedge the turn

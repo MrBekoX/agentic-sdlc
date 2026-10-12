@@ -198,12 +198,14 @@ Scan staged and unstaged diffs for tokens, private keys, connection strings, and
 These skills depend on companion plugin resources, so they are not offered as universal standalone `.skill` packages. A skill counts when any `.md`, `.py` or `.json` file under `skills/<skill>/` references `<runtime-root>/scripts`, `/contracts` or `/hooks`, or the same paths under `${PLUGIN_ROOT}` or `${CLAUDE_PLUGIN_ROOT}`:
 
 - `agentic-sdlc-pipeline`: `SKILL.md` and `playbook.md` run plugin scripts and read plugin contracts.
+- `dispatch-strategy`: the **Plugin root** rule in `SKILL.md` confirms `<runtime-root>/scripts/validate_artifacts.py` before any helper command.
 - `implementation-control`: `SKILL.md` runs a plugin script.
 - `plan-authoring`: `SKILL.md` reads plugin contracts and runs the plan validator script.
 - `skill-authoring`: `references/house-notes.md` points at `<runtime-root>/scripts`, and `SKILL.md` states that the runtime eval runners require companion plugin resources.
 - `spec-authoring`: `SKILL.md` reads plugin contracts and runs the spec validator script.
+- `using-agentic-sdlc`: the **Plugin root** rule in `SKILL.md` confirms `<runtime-root>/scripts/validate_artifacts.py` and resolves `contracts/skills/`, `scripts/` and `hooks/` through that root.
 
-`mind-spark` and `using-agentic-sdlc` are not in this list: their `${PLUGIN_ROOT}/skills/<skill>/SKILL.md` references are catalog-fallback paths, not companion resources.
+`mind-spark` is not in this list: its only plugin path, `skills/mind-spark/SKILL.md` under the installed folder (`${CLAUDE_PLUGIN_ROOT}/skills/mind-spark/SKILL.md` in Claude Code), is a catalog-fallback path, not a companion resource. The same holds for the `<runtime-root>/skills/<skill>/SKILL.md` fallback in `using-agentic-sdlc`, which counts only through its **Plugin root** rule.
 
 The skill-creator toolkit is BLOCKED until reviewed. `skills/skill-authoring/scripts/resolve_skill_creator.py` reports `skill_creator_status=missing_capabilities` for the WSL toolkit and `explicit-unverified` for the Windows cache. No archive is produced from an unreviewed toolkit, and a reviewed toolkit commit is recorded only as a full 40-hex commit together with its ledger row.
 

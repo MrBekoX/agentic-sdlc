@@ -6,10 +6,14 @@ See [multi-platform distribution](multi-platform-distribution.md) for the curren
 scope. No catalog PR, release tag or external publication has been performed.
 
 The current manifest and catalog use `.grok-plugin/plugin.json` and
-`.grok-plugin/marketplace.json`. The catalog's `source: "./"` points at the
-package root. Hook commands read the installed root from `GROK_PLUGIN_ROOT`
-inside Node; no maintainer drive path is required. Both Grok versions are tracked
-by `scripts/bump_version.py`.
+`.grok-plugin/marketplace.json`. The catalog entry names this repository as a remote
+`{"source": "url", "url": "https://github.com/MrBekoX/agentic-sdlc.git"}` source:
+Grok cannot point an entry at the catalog's own root (`MarketplaceRelativePath`
+strips `./`, the remainder is empty and the scanner skips the entry; on Grok 1.0.50
+an isolated `plugin list --available` returned `[]` for the former `"./"` entry and
+listed the plugin for a sub-directory or `url` entry). Hook commands read the
+installed root from `GROK_PLUGIN_ROOT` inside Node; no maintainer drive path is
+required. Both Grok versions are tracked by `scripts/bump_version.py`.
 
 ## Install and update a prepared directory
 
@@ -18,53 +22,50 @@ Ensure `node` is on the selected hook shell PATH:
 
 ```text
 grok plugin install <package-directory> --trust
-grok plugin enable agentic-sdlc
 grok plugin details agentic-sdlc
 grok inspect --json
 ```
 
-Registering a marketplace is optional for this directory install:
+The install enables the plugin; `grok plugin enable agentic-sdlc` is needed only after
+a `grok plugin disable`. Use an absolute or `./`-relative directory. A local install
+is refreshed by `grok plugin uninstall agentic-sdlc` and a new directory install:
+`grok plugin update` reports it as already live, and installing over it reports
+AlreadyInstalled.
 
-```text
-grok plugin marketplace add <package-directory>
-grok plugin marketplace list
-grok plugin list --json --available
-```
-
-Install by name only after the available list shows `agentic-sdlc`. Historical
-Grok 1.0.34 name lookup did not expose this catalog's local `source: "./"` entry;
-directory installation was the recorded fallback. Copying the live checkout
-also hit a Windows `.git` access error. These are historical observations,
-not a native installer result for the current candidate or Grok 1.0.50.
-
-For a reachable repository, the documented GitHub shorthand can register its
-marketplace:
+For a reachable (public or credential-backed) repository, register the catalog:
 
 ```text
 grok plugin marketplace add MrBekoX/agentic-sdlc
+grok plugin marketplace list
+grok plugin list --json --available
+grok plugin install agentic-sdlc --trust
 ```
 
-Grok documents GitHub shorthand, git URLs and local directories as sources;
-private repositories depend on each installer's git credentials. An official
-catalog remote source must instead be public and pinned as described below.
-Source visibility and policy restrictions are separate installation gates.
+Grok names a marketplace after its source's last path segment, not the catalog's
+`name` field; use the name `grok plugin marketplace list` prints. Grok documents
+GitHub shorthand, git URLs and local directories as sources; private repositories
+depend on each installer's git credentials. An official catalog remote source must
+be public and pinned as described below. Source visibility and policy restrictions
+are separate installation gates.
 
-For an added marketplace and installed plugin:
+For an added Git marketplace and installed plugin:
 
 ```text
-grok plugin marketplace update mrbekox
+grok plugin marketplace update <source-name>
 grok plugin update agentic-sdlc
 ```
 
+A copied live checkout once hit a Windows `.git` access error on Grok 1.0.34; install
+from an extracted package directory instead.
 On native Grok 1.0.50, local `plugin update` does not recopy the installed
-directory, and reinstalling the same source reports "already installed".
-Use the documented session reload (`r` in Plugins or a new session), then verify
-the installed bytes; that reload path has not been exercised here. A moving Git branch
-supports a genuine fetch/update, verified with a disposable offline Git fixture.
-If a local refresh remains unavailable, explicitly uninstall and install the new
-directory after reviewing retained data. For a path containing `#`, change into
-that directory and run `grok plugin install . --trust`: 1.0.50 treats `#` in an
-absolute source operand as a subdirectory suffix. Review trust before enabling;
+directory, and reinstalling the same source reports "already installed". Refresh a
+local install by uninstalling and installing the new directory after reviewing
+retained data (verified natively on 1.0.50, see the
+[compatibility matrix](compatibility-matrix.md)); then press `r` in Plugins or start a
+new session. A moving Git branch supports a genuine fetch/update, verified with a
+disposable offline Git fixture. For a path containing `#`, change into that directory
+and run `grok plugin install . --trust`: 1.0.50 treats `#` in an absolute source
+operand as a subdirectory suffix. Review trust before enabling;
 do not silently change organization policy or experimental settings.
 
 ## Official xAI catalog submission

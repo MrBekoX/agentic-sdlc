@@ -179,6 +179,41 @@ class TestIgnoreDirectories(unittest.TestCase):
             self.assertIn("source_files=1", out)
 
 
+class TestIgnoreRulesAreRelativeToTheScannedRoot(unittest.TestCase):
+    """IGNORE names apply below the scanned root only, never to the folders that contain it.
+
+    A user's project can live anywhere: `~/work/build/shop`, `D:\\dist\\api`, a CI checkout under
+    `/home/runner/work/venv/...`. Matching IGNORE against the absolute path made every file in such
+    a project look ignored, so a real codebase was classified as greenfield with zero files.
+    """
+
+    def _project(self, parent):
+        root = Path(parent) / "shop"
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "app.py").write_text("pass\n", encoding="utf-8")
+        (root / "src" / "views.py").write_text("pass\n", encoding="utf-8")
+        (root / "node_modules").mkdir()
+        (root / "node_modules" / "dep.js").write_text("x\n", encoding="utf-8")
+        return root
+
+    def test_project_nested_under_an_ignored_name_is_still_counted(self):
+        for container in ("build", "dist", "venv", "node_modules"):
+            with self.subTest(container=container), tempfile.TemporaryDirectory() as tmp:
+                root = self._project(Path(tmp) / container)
+                result = dc.detect([str(root)])
+                self.assertEqual(result["context_detection"], "brownfield")
+                self.assertEqual(result["source_files"], 2)
+                self.assertIn("src", result["layers"])
+
+    def test_project_nested_under_an_ignored_name_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(Path(tmp) / "build")
+            rc, out, err = run_cli("--path", str(root))
+            self.assertEqual(rc, 0, err)
+            self.assertIn("context_detection=brownfield", out)
+            self.assertIn("source_files=2", out)
+
+
 class TestNonExistentPath(unittest.TestCase):
     """Case 6: non-existent path => greenfield + greenfield_inline, exit 0."""
 

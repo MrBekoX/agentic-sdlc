@@ -407,7 +407,7 @@ def emit(fields):
 
 
 def _read(path):
-    return Path(path).read_text(encoding="utf-8")
+    return Path(path).read_text(encoding="utf-8-sig")
 
 
 def run(mode, file_path, spec_path, strict):
@@ -480,7 +480,17 @@ def build_parser():
     return p
 
 
+def _utf8_output():
+    """Print UTF-8 whatever the console code page: an echoed non-ASCII value must not crash a gate."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
+    _utf8_output()
     args = build_parser().parse_args(argv)
     code, fields = run(args.mode, args.file, args.spec, args.strict)
     emit(fields)

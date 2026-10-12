@@ -1,15 +1,25 @@
 // PostToolUse (Write|Edit|MultiEdit) — scans the WRITTEN/CHANGED text for secrets; WARNS (does not block).
 // Only scans the new/changed text -> existing secrets don't re-warn on every edit.
 import { readFileSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { BROAD, scanLines, readStdin } from './secret-patterns.mjs';
 
-// These paths are not scanned (the hooks themselves, vcs internals, deps).
+// These paths are not scanned (vcs internals, deps).
 // Path is normalized (backslash -> slash); matches relative and absolute paths via (^|/).
 const SKIP = [
-  /(^|\/)hooks\//i,
   /(^|\/)\.git\//i,
   /node_modules/i,
 ];
+
+// This plugin's own guard sources carry secret-shaped pattern text, so they are exempt - but only
+// THIS directory, resolved from the module location. A name match on `hooks/` also exempted every
+// user folder called hooks (React `src/hooks/`, deploy hooks, webhooks/hooks).
+const OWN_HOOKS = dirname(fileURLToPath(import.meta.url));
+function isOwnHookSource(file, cwd) {
+  const rel = relative(OWN_HOOKS, resolve(cwd, file));
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
 
 const raw = await readStdin();
 let input = {};
@@ -17,8 +27,9 @@ try { input = JSON.parse(raw || '{}'); } catch { /* ignore */ }
 const ti = input?.tool_input || {};
 const file = String(ti.file_path || '');
 const normFile = file.replace(/\\/g, '/');
+const cwd = typeof input?.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
 
-if (!file || SKIP.some((re) => re.test(normFile))) process.exit(0);
+if (!file || SKIP.some((re) => re.test(normFile)) || isOwnHookSource(file, cwd)) process.exit(0);
 
 // Collect only the new/changed text.
 let text = '';

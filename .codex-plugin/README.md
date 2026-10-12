@@ -41,11 +41,13 @@ Public directory distribution uses a separate `--skills-only` projection: the ma
 
 ## Install
 
-Install `agentic-sdlc` from the selected marketplace with `codex plugin add agentic-sdlc@<marketplace-name>`, replacing the marketplace name. Codex installs a package copy and supplies its `PLUGIN_ROOT`; no maintainer checkout, fixed drive, home directory, or cache location is required. See the [marketplace launch contract](../docs/runtime-adapter.md#codex-marketplace-hook-launch-contract).
+Install `agentic-sdlc` from the selected marketplace with `codex plugin add agentic-sdlc@<marketplace-name>`, replacing the marketplace name. Codex installs a package copy and supplies its `PLUGIN_ROOT` to hook processes; no maintainer checkout, fixed drive, home directory, or cache location is required. See the [marketplace launch contract](../docs/runtime-adapter.md#codex-marketplace-hook-launch-contract).
 
 For local authoring, Codex discovers the default personal marketplace at `~/.agents/plugins/marketplace.json`. The example below points at `~/plugins/agentic-sdlc`, which can be a real copy or a symlink/junction to this clone. The personal catalog root is the home directory, so its `./plugins/agentic-sdlc` source path resolves to `~/plugins/agentic-sdlc`. These paths describe the example source, not the installed hook location.
 
-Example `~/.agents/plugins/marketplace.json`:
+A simpler local route is `codex plugin marketplace add <package-directory>` (keep `#` out of the path: Codex reads `#` as a ref separator), then `codex plugin add agentic-sdlc@mrbekox`.
+
+Example `~/.agents/plugins/marketplace.json` — if the file already exists, add only the `agentic-sdlc` entry to its `plugins` array; do not replace the file or other entries:
 
 ```json
 {
@@ -88,17 +90,15 @@ no `codex plugin update` command.
 
 ## Runtime Root
 
-Codex resolves plugin paths through:
+Codex substitutes no plugin-root variable in skill text. Skills name bundled files as `<runtime-root>/...` and carry the **Plugin root** rule: `<runtime-root>` is the installed plugin folder, two levels above the loaded `SKILL.md`. The Codex skill listing shows that `SKILL.md` as an absolute path; after hook trust, the `SessionStart` hook also prints `Plugin root (resolved by this hook; use this absolute path wherever a skill says <runtime-root>, quoted for your shell): <path>`. If neither confirms the root, the skill stops and reports `plugin root unresolved`; it never falls back to the working directory.
 
-```text
-${PLUGIN_ROOT}
-```
+`PLUGIN_ROOT` is exported only to hook processes. In the model's Bash or PowerShell it is empty (PowerShell expands `${PLUGIN_ROOT}` to an empty string), so never run a `${PLUGIN_ROOT}` command there.
 
-Examples:
+Examples; replace `<runtime-root>` with the absolute path, quoted for your shell:
 
 ```bash
-python3 "${PLUGIN_ROOT}/scripts/detect_context.py" --path .
-python3 "${PLUGIN_ROOT}/scripts/validate_artifacts.py" --mode plan --file docs/agentic-sdlc/plans/example.md --spec docs/agentic-sdlc/specs/example.md --strict
+python3 "<runtime-root>/scripts/detect_context.py" --path .
+python3 "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/agentic-sdlc/plans/example.md --spec docs/agentic-sdlc/specs/example.md --strict
 ```
 
 Do not use `${CLAUDE_PLUGIN_ROOT}` in Codex-only examples.
@@ -116,7 +116,7 @@ Codex has no Claude Code Workflow runtime. Therefore `agentic-sdlc-pipeline` doe
 Emit `Runtime: Codex` once. At each gate below, emit `Codex Adapter Gate: <gate>` so `codex exec --json` transcripts have deterministic evidence. When Codex has no native `Skill` transcript event, record `Delegation Degraded: native Skill transcript events unavailable`; the adapter still runs the step by loading or activating the relevant `SKILL.md` instructions.
 
 1. Activate `dispatch-strategy` before heavy, independent, or parallel decisions.
-2. Run `detect_context.py` through `${PLUGIN_ROOT}`.
+2. Run `<runtime-root>/scripts/detect_context.py`, with `<runtime-root>` resolved as described under [Runtime Root](#runtime-root).
 3. Draft the spec inside `agentic-sdlc-pipeline` using the spec contract and `spec-plan-author` role instructions.
 4. Run a fresh-context critic pass with `spec-plan-critic` instructions when Codex subagents are available; otherwise record a degraded inline critic pass.
 5. Save `docs/agentic-sdlc/specs/<work_id>.md` and run `validate_artifacts.py --mode spec`.

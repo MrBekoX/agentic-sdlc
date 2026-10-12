@@ -388,9 +388,23 @@ def _public_references(text: str, source: str, destination: str, mapping: dict, 
         return "[" + label + "](" + relative + (separator + anchor if separator else "") + ")"
 
     text = re.sub(r"\[([^\]\n]+)\]\(([^()\s]+)\)", link, text)
+
+    def rooted(match):
+        # `<runtime-root>/<path>` is the portable plugin-root form the skills use. Relocate a moved
+        # path; a source-only path (a workflow port, a maintainer runner) is not in this package.
+        ref = match.group(1)
+        core = ref.rstrip(".")
+        key = core.rstrip("/")
+        if key in mapping:
+            return "<runtime-root>/" + mapping[key] + ("/" if core.endswith("/") else "") + ref[len(core):]
+        if key in source_paths:
+            return key + " (source checkout only)" + ref[len(core):]
+        return match.group(0)
+
+    text = re.sub(r"<runtime-root>/([A-Za-z0-9_./-]+)", rooted, text)
     # Do not rewrite already-relocated paths or relative Markdown links a second time.
     for old, new in sorted(mapping.items(), key=lambda item: -len(item[0])):
-        text = re.sub(r"(?<![\w/.-])" + re.escape(old) + r"(?![\w/.-])", lambda _m: new, text)
+        text = re.sub(r"(?<![\w/.-])" + re.escape(old) + r"(?![\w/.-])", lambda _m, new=new: new, text)
     return text
 
 
@@ -428,19 +442,26 @@ def _public_house_payload(members: dict, selected: dict) -> dict:
 
     review_path = mapping["commands/git-safety-check.md"]
     review = selected[review_path][1].decode("utf-8").replace("\r\n", "\n")
-    # The original Claude command remains unchanged. Its grep would print secret values before
-    # the following masking instruction; the public procedure requires redaction before output.
-    review = re.sub(r"```bash\ngit diff --cached \| grep -nEi[^\n]*\n```",
-                    "Inspect staged and unstaged changes in memory before printing any diff.\n"
+    # The native command lists staged names and secret-marker hits for the model to inspect; the
+    # public procedure requires redaction before any output instead. The whole section is replaced so
+    # no sentence still points at the removed commands.
+    review = re.sub(r"(## Secret scan \(read-only\)\n).*?(?=\n## )",
+                    lambda m: m.group(1)
+                    + "Inspect staged and unstaged changes in memory before printing any diff.\n"
                     "Use a redacting scanner when available; report only file:line and risk type.\n"
-                    "Replace any sensitive value with ***MASKED*** before printing it.", review)
-    review = re.sub(r"```bash\ngit status\n.*?\n```",
-                    "Use fixed Git argument arrays with Python `subprocess.run(..., capture_output=True)`\n"
-                    "to collect `git status`, `git diff --stat`, `git diff`, `git diff --cached`, and\n"
+                    "Replace any sensitive value with ***MASKED*** before printing it.\n", review, flags=re.DOTALL)
+    # The native section also names its pre-approved command forms, which mean nothing in a package
+    # without slash commands, so the whole section is replaced here too.
+    review = re.sub(r"(## Commands\n).*?(?=\n## )",
+                    lambda m: m.group(1)
+                    + "Use fixed Git argument arrays with Python `subprocess.run(..., capture_output=True)`\n"
+                    "to collect `git status`, `git diff --stat`, `git diff`, `git diff --cached` (each diff with\n"
+                    "`--no-ext-diff --no-textconv`, so no repository-configured diff program runs), and\n"
                     "`git log --oneline -n 10` in memory. Review all output and changes; redact sensitive\n"
-                    "values before printing any status, diff or history. Never stream raw output.",
+                    "values before printing any status, diff or history. Never stream raw output.\n",
                     review, flags=re.DOTALL)
-    if "git diff --cached | grep" in review:
+    if any(left in review for left in ("git diff --cached | grep", "git grep", "--name-only", "<staged files>",
+                                        "```bash", "pre-approved")):
         raise ReleaseError(["error=public_command_unconverted:commands/git-safety-check.md"])
     selected[review_path] = ("100644", review.encode("utf-8"))
 
@@ -495,7 +516,7 @@ def _public_house_payload(members: dict, selected: dict) -> dict:
         text = _public_references(text, source, path, reference_map, source_paths)
         if path.endswith("/SKILL.md"):
             notice = ("\nPreserve any required skill activation or dispatch-strategy-first gate below before reading other files.\n"
-                      "After that gate, read `${PLUGIN_ROOT}/" + guide_path + "`\n"
+                      "After that gate, read `<runtime-root>/" + guide_path + "`\n"
                       "before substantive phase work or named-role delegation. It defines packaged role instructions,\n"
                       "native delegation and public-runtime limits; it does not override the skill's first-action order.\n")
             match = re.match(r"\A---\r?\n.*?\r?\n---(?:\r?\n)?", text, re.DOTALL)

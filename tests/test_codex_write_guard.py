@@ -10,6 +10,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -32,7 +33,12 @@ LOCK_DIGESTS = {
     # behavior change on the supported runtime, and the half of the audience that can
     # act on it. The sibling command guards' deny paths already ship this dual shape.
     # Covered by TestScanWriteAdvisoryChannels below.
-    "hooks/scan-write.mjs": "d59c34a1b672deb289bc19d42440dcdbfa5bad24646f841093c195551d8fe6b0",
+    # Rebased for cross-platform-distribution (2026-10-11): the skip list matched `(^|/)hooks/`
+    # anywhere, which exempted every user folder named hooks (React `src/hooks/`, deploy hooks)
+    # from the secret scan. Only this plugin's own hooks directory, resolved from import.meta.url,
+    # is exempt now. Covered by test_a_users_own_hooks_folder_is_scanned and
+    # test_this_plugins_own_hook_sources_stay_exempt.
+    "hooks/scan-write.mjs": "0ca31dab8c2b03c3f94f7fcb9b6aa2c5b986a9102137b4743e86e82d95013550",
     # Refreshed by the 2026-08-22 guard-bypass fix: the Bash-only matcher and the
     # `if: Bash(git commit*)` filters were removed (a Bash-only matcher is inert on a
     # Windows host with no Git Bash, and a subcommand-level `if` never starts the hook
@@ -372,6 +378,35 @@ class TestScanWriteAdvisoryChannels(unittest.TestCase):
         self.assertTrue(hso.get("additionalContext"), "ZCode model-visible channel missing")
         self.assertEqual(hso["additionalContext"], out["systemMessage"],
                          "the two channels must carry the same warning")
+
+    def test_a_users_own_hooks_folder_is_scanned(self):
+        # The skip list used `(^|/)hooks/`, written for THIS repository's guard sources. In a
+        # user's project it silently exempted every React-style `src/hooks/useApi.ts`, a
+        # `.husky`-adjacent `hooks/` folder, or any `webhooks/hooks/...` path.
+        for path in ("src/hooks/useApi.ts", "hooks/deploy.sh", "/work/app/hooks/config.js"):
+            with self.subTest(path=path):
+                payload = {"hook_event_name": "PostToolUse", "tool_name": "Write",
+                           "tool_input": {"file_path": path, "content": "TOKEN = " + SECRET}}
+                out = self._run_in(payload, cwd=tempfile.gettempdir())
+                self.assertTrue(out.get("systemMessage"), "a secret under a user's hooks/ was not reported")
+
+    def test_this_plugins_own_hook_sources_stay_exempt(self):
+        # The guard sources legitimately contain secret-shaped pattern text.
+        own = REPO / "hooks" / "secret-patterns.mjs"
+        for path, cwd in ((str(own), tempfile.gettempdir()), ("hooks/secret-patterns.mjs", str(REPO))):
+            with self.subTest(path=path):
+                payload = {"hook_event_name": "PostToolUse", "tool_name": "Write",
+                           "tool_input": {"file_path": path, "content": "TOKEN = " + SECRET}}
+                self.assertEqual(self._run_in(payload, cwd=cwd), {})
+
+    def _run_in(self, payload, cwd):
+        payload = dict(payload, cwd=cwd)
+        proc = subprocess.run(
+            [NODE, str(self.WRITE_GUARD)], cwd=cwd,
+            input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout) if proc.stdout.strip() else {}
 
     def test_event_name_is_the_single_wired_event_not_the_payload(self):
         # This guard is wired to exactly ONE event on every runtime that wires it: PostToolUse,

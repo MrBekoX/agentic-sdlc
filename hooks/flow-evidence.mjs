@@ -8,12 +8,14 @@
 //   - branch   : the Stop-time working-directory branch is not main/master (warn-level step).
 //   - reviewResult : a dispatched reviewer returned a correlated non-error tool_result (warn-level).
 // Every reader fails OPEN (treats as allowed / satisfied) on its own error, matching the other guards.
-import { accessSync, constants as fsConstants, readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
+import { programOnAbsolutePath } from './git-exec.mjs';
 
 export const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
+const PLUGIN_ROOT = dirname(HOOK_DIR);
 
 export function loadRequirements() {
   try {
@@ -332,22 +334,51 @@ function listArtifacts(cwd, role, req) {
   return out;
 }
 
-function runValidator(mode, file, specFile, cwd) {
+// The first candidate that really is Python 3.8+, cached for this hook process (null = none).
+// A candidate qualifies only when its `-c` probe prints 1: the Microsoft Store alias (`python3.exe`
+// exits 9009 without running anything), a `py` launcher pointing at an uninstalled Python, and a
+// Python 2 `python` all used to be taken as the interpreter, and their non-zero exit then read as a
+// FAILED validation - fail-closed on exactly the machines the fail-open contract exists for.
+// A real interpreter answers the probe in well under a second; the 3 s cap bounds a hung candidate.
+// If probes plus validator runs ever exceed a hook's runtime timeout, the runtime kills the hook,
+// which fails open like an unavailable interpreter.
+let validatorPython;
+function findPython() {
+  if (validatorPython !== undefined) return validatorPython;
   const configured = String(process.env.AGENTIC_SDLC_PYTHON || '').trim();
   const candidates = (configured ? [[configured]] : []).concat(process.platform === 'win32'
     ? [['python3'], ['python'], ['py', '-3']]
     : [['python3'], ['python']]);
-  const script = join(HOOK_DIR, '..', 'scripts', 'validate_artifacts.py');
-  const tail = ['--mode', mode, '--file', file, '--strict'];
-  if (mode === 'plan' && specFile) tail.push('--spec', specFile);
-  for (const c of candidates) {
-    const r = spawnSync(c[0], [...c.slice(1), script, ...tail], { encoding: 'utf8', cwd, timeout: 10000 });
-    if (r.error) continue;          // interpreter not found — try next
-    if (r.status === null) continue; // spawn failed
-    if (/unable to create process using/i.test(String(r.stderr || ''))) continue;
-    return r.status;                 // 0 = pass, non-zero = fail (e.g. a stub)
+  validatorPython = null;
+  for (const [name, ...args] of candidates) {
+    const program = programOnAbsolutePath(name);
+    if (!program) continue;
+    const r = spawnSync(program, [...args, '-I', '-c', 'import sys; print(int(sys.version_info >= (3, 8)))'],
+      { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], cwd: PLUGIN_ROOT });
+    if (!r.error && r.status === 0 && String(r.stdout || '').trim() === '1') {
+      validatorPython = [program, ...args];
+      break;
+    }
   }
-  return null; // could not run any interpreter -> caller fails open
+  return validatorPython;
+}
+
+// Runs validate_artifacts.py on one artifact. Read-only subprocess: the artifact path is a SEPARATE
+// argv (no shell). Returns the exit code, or null when no Python 3 can run -> caller fails open.
+// Shared by the Codex engines (codex-flow-evidence.mjs, flow-order-guard-codex.mjs).
+// The probe and the validator run with `-I` from the plugin root, never the user's project: a
+// project `sitecustomize.py` (reached through an empty PYTHONPATH entry) or a version-shim file
+// (`.python-version` naming a missing version) must not run code or flip the gate to fail-open.
+export function runValidator(mode, file, specFile, cwd) {
+  const python = findPython();
+  if (!python) return null;
+  const script = join(PLUGIN_ROOT, 'scripts', 'validate_artifacts.py');
+  const tail = ['--mode', mode, '--file', resolvePath(cwd || '.', file), '--strict'];
+  if (mode === 'plan' && specFile) tail.push('--spec', resolvePath(cwd || '.', specFile));
+  const r = spawnSync(python[0], [...python.slice(1), '-I', script, ...tail],
+    { encoding: 'utf8', cwd: PLUGIN_ROOT, timeout: 10000 });
+  if (r.error || r.status === null) return null; // interpreter vanished or timed out -> fail open
+  return r.status;                               // 0 = pass, non-zero = fail (e.g. a stub artifact)
 }
 
 // Stop-path plan->spec pairing (BR10). A per-package plan pairs ONLY with its co-located
@@ -439,29 +470,10 @@ export const BRANCH_GIT_ARGV = Object.freeze({
     'rev-parse', '--verify', '--quiet', 'HEAD']),
 });
 
-// D25 model (5): a program is started only by an absolute path found in an absolute PATH entry, so
-// neither a relative entry nor the win32 cwd-first lookup can reach a program planted in the
-// untrusted cwd. On win32 only <name>.exe and <name>.com are tried (PATHEXT is not consulted, so a
-// batch file is never a candidate); elsewhere a candidate must be an executable regular file.
-function programOnAbsolutePath(name) {
-  const win = process.platform === 'win32';
-  const absolute = win ? /^(?:[A-Za-z]:[\\/]|\\\\|\/\/)/ : /^\//;
-  const names = win ? [`${name}.exe`, `${name}.com`] : [name];
-  for (const entry of String(process.env.PATH ?? '').split(win ? ';' : ':')) {
-    if (!absolute.test(entry)) continue;
-    for (const candidate of names) {
-      const full = join(entry, candidate);
-      try {
-        if (!statSync(full).isFile()) continue;
-        if (!win) accessSync(full, fsConstants.X_OK);
-        return full;
-      } catch {
-        // missing or not executable: try the next candidate
-      }
-    }
-  }
-  return null;
-}
+// D25 model (5): a program is started only by an absolute path found in an absolute PATH entry
+// (programOnAbsolutePath, shared from git-exec.mjs), so neither a relative entry nor the win32
+// cwd-first lookup can reach a program planted in the untrusted cwd. On win32 only <name>.exe and
+// <name>.com are tried; elsewhere a candidate must be an executable regular file.
 
 // SEC-5: the repository-selecting keys are DELETED from the child environment, not forwarded. They
 // override `cwd` for symbolic-ref/rev-parse, so an inherited GIT_DIR made a repository genuinely on

@@ -12,10 +12,12 @@ AGENTIC-SDLC 将带门禁的规格/计划/TDD/安全/评审流程打包为 16 �
 
 1. 打开 ZCode **Settings → Plugins**，**Discover** 标签页，点击 **+**
    （**Create → Add marketplace**）。
-2. 将本仓库根目录（包含 ZCode marketplace 模式文件 `marketplace.json` 的文件夹）作为
-   本地目录或文件源添加。ZCode 会在添加前进行校验。
-3. 在 **Personal** 分区找到 `agentic-sdlc` 卡片（名称、版本、类别 `developer-tools`），
-   点击 **Install**，然后 **Enable**。
+2. 将根目录的 `marketplace.json`（ZCode marketplace 模式）**作为文件源**添加。若以目录或
+   GitHub 源添加，ZCode 会先读取 `.claude-plugin/marketplace.json`，虽然仍可安装插件，但显示的是
+   Claude 条目，没有 ZCode 的类别、标签与翻译。ZCode 会在添加前进行校验。
+3. 请先查看下方「信任与副作用」中的 Hook 表：新安装的插件**默认即启用**，其 Hook 会立即
+   运行。在 **Personal** 分区找到 `agentic-sdlc` 卡片（名称、版本、类别 `developer-tools`），
+   点击 **Install**。只有在停用后才需要在「Manage installed」中再次点击 **Enable**。
 4. 开启新会话（或重新加载），使技能、命令与 Hook 被发现。
 
 前提条件：`node` 必须在 `PATH` 上——每个 Hook 执行器都是通过 argv 运行
@@ -25,6 +27,9 @@ AGENTIC-SDLC 将带门禁的规格/计划/TDD/安全/评审流程打包为 16 �
 
 - 在聊天输入框输入 `$using-agentic-sdlc`（或打开 `/` → Skills）调用路由器。路由器会
   选择最小充分的技能；仅完整的 SDLC 信封才使用 `agentic-sdlc-pipeline`。
+- Hook 进程会收到 `${ZCODE_PLUGIN_ROOT}` 及 `${CLAUDE_PLUGIN_ROOT}` 别名；技能正文中只会替换
+  `${CLAUDE_SKILL_DIR}` / `${ZCODE_SKILL_DIR}`，因此技能通过各自的 **Plugin root** 规则
+  （`${CLAUDE_SKILL_DIR}/../..`）或 SessionStart Hook 打印的插件根目录来定位脚本。
 - 手动命令 `git-safety-check` 从 `commands/` 发现（命令名来自文件名）。
 - `agents/` 下的子代理带有 ZCode 要求的 `name` + `description` frontmatter。
 
@@ -37,12 +42,13 @@ AGENTIC-SDLC 将带门禁的规格/计划/TDD/安全/评审流程打包为 16 �
 |---|---|---|
 | `PreToolUse` | `Bash` | `scan-commit.mjs`、`destructive-command-guard.mjs`、`branch-guard.mjs` |
 | `PostToolUse` | `Write\|Edit` | `scan-write.mjs` |
-| `SessionStart` | `startup\|clear\|compact` | `session-start.mjs` |
+| `SessionStart` | `startup\|resume\|clear\|compact` | `session-start.mjs` |
 
 副作用：守护脚本读取 Hook stdin JSON（`tool_input.command`、`tool_input` 写入字段、
 `cwd`）与本地 `git` 状态。拒绝操作使用已文档的 `hookSpecificOutput.permissionDecision`
 字段，SessionStart 引导使用已文档的 `additionalContext` 字段；建议消息所用的
-ZCode ignores the unknown `systemMessage` user channel. The write scanner also emits model-visible `hookSpecificOutput.additionalContext`; native delivery remains unverified.**没有网络访问**
+`systemMessage` 用户通道是 Claude Code 的约定，ZCode 会忽略这个未知字段；写入扫描器同时输出
+模型可见的 `hookSpecificOutput.additionalContext`，其原生投递尚未验证。**没有网络访问**
 （未声明任何 MCP 服务器），数据不会离开本机。长期可写数据应放在 `ZCODE_PLUGIN_DATA`
 下，而不是安装目录。
 
@@ -54,8 +60,9 @@ Claude 与 Codex 的 Hook 文件（`hooks-claude.json`、
 ## 编排回退
 
 ZCode 在客户端 3.14.0 中新增了动态工作流（官方更新日志，2026-09-19），可从输入框加号
-菜单或 `/workflow` 启动。但 Z.ai 尚未公开其脚本 API、文件格式或存储路径，且 `plugin.json`
-没有 `workflows` 组件键——因此**本插件无法为你分发工作流**。Claude Code 会运行
+菜单或 `/workflow` 启动。开源客户端把已保存的工作流存放在项目的 `.zcode/workflows/` 或用户的
+`~/.zcode/workflows/` 目录中，但 `plugin.json` 没有 `workflows` 组件键——因此**本插件无法为你
+分发工作流**。Claude Code 会运行
 `spec-plan-draft` 工作流、Codex 使用其内嵌适配器的地方，ZCode 会话在主循环中以相同的
 **作者 → 评审 → 修订**纪律运行，并保存工件和 `scripts/validate_artifacts.py` 证据。
 保留在 `workflows/zcode/spec-plan-draft.dwf.ts` 的移植版尚未验证，仅作为实机运行的起点，
@@ -64,7 +71,15 @@ ZCode 在客户端 3.14.0 中新增了动态工作流（官方更新日志，202
 ## 版本
 
 `.zcode-plugin/plugin.json` 与根目录 `marketplace.json` 条目中的 `version` 由
-`tests/test_zcode_packaging.py` checks agreement with `VERSION`. `scripts/bump_version.py` tracks both ZCode manifest versions. Use the native plugin details to uninstall; persistent-data retention is not documented. See `docs/publication/multi-platform-distribution.md`.
+`scripts/bump_version.py` 统一维护，`tests/test_zcode_packaging.py` 检查二者与 `VERSION` 一致。
+只有 marketplace 中的版本号变化时，ZCode 才会提供更新：刷新 marketplace，然后在
+「Manage installed → Check for updates」中应用更新，并开启新会话。
+
+## 卸载
+
+打开「Settings → Plugins → Manage installed」，进入插件详情后点击 **Uninstall**。现有官方文档
+未说明持久数据是否保留，因此不要承诺卸载会删除这些数据；请保留其他插件与设置。详见
+`docs/publication/multi-platform-distribution.md`。
 
 ## 官方市场提交
 

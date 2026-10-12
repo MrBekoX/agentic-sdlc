@@ -25,10 +25,10 @@
 // Detection reuses the SAME hardened primitives as the command guards, so every fix they received
 // applies here unchanged — there is exactly one secret-pattern implementation in this plugin.
 
-import { execFileSync } from 'node:child_process';
+import { runGit } from './git-exec.mjs';
 import { readFileSync } from 'node:fs';
 import { HIGH, scanLines } from './secret-patterns.mjs';
-import { isCredentialFilename } from './scan-commit-names.mjs';
+import { addedDiffLines, displayPath, isCredentialFilename } from './scan-commit-names.mjs';
 
 const MODE = process.argv[2] || '';
 const ARG = process.argv[3] || '';
@@ -38,17 +38,9 @@ const ARG = process.argv[3] || '';
 const MAX_BYTES = 5 * 1024 * 1024;
 
 function git(args) {
-  return execFileSync('git', args, {
+  return runGit(args, {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: MAX_BYTES,
   });
-}
-
-function addedLines(diff) {
-  return diff
-    .split(/\r?\n/)
-    .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
-    .map((l) => l.slice(1))
-    .join('\n');
 }
 
 function report(findings) {
@@ -67,12 +59,14 @@ function report(findings) {
 
 function stagedFindings() {
   const diff = git(['diff', '--cached', '--unified=0']);
-  const names = git(['diff', '--cached', '--name-only', '--diff-filter=ACMR']);
+  // -z: NUL-separated, verbatim names. Without it git C-quotes any name with non-ASCII, `"`, `\` or
+  // control characters, and a quoted credential file name never matches the filename rules.
+  const names = git(['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMRT']);
   return [
-    ...scanLines(addedLines(diff), HIGH).map((f) => ({ what: f.label, where: 'added line ~' + f.line })),
-    ...names.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+    ...scanLines(addedDiffLines(diff), HIGH).map((f) => ({ what: f.label, where: 'added line ~' + f.line })),
+    ...names.split('\0').filter(Boolean)
       .filter(isCredentialFilename)
-      .map((p) => ({ what: 'credential file', where: p })),
+      .map((p) => ({ what: 'credential file', where: displayPath(p) })),
   ];
 }
 

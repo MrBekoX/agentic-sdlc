@@ -7,17 +7,28 @@ The historical 0.4.3 release verdict remains in `../release-evidence-0.4.3.md`.
 ## Install, update and uninstall
 
 Prerequisites: use the runtime and Node.js in the same OS environment, with `node`
-on the hook shell PATH (`node.exe` is selected by Codex on native Windows). Python
-3.12+ and Git are needed for helper/validation workflows. Keep the full plugin
-directory: isolated SKILL.md copies omit shared contracts, scripts and reviewers.
+on the hook shell PATH (`node.exe` is selected by Codex on native Windows). Node.js
+22 (CI) and 24 (local) are the tested versions; hooks fail open, so a missing `node`
+silently disables the guards. Python 3 and Git are needed for helper and validation
+workflows (`python3`, or `py -3` on Windows when `python3` is missing or is the
+Microsoft Store alias). Python 3.12 is the tested version; the helpers skills run are
+kept import-compatible with 3.8 by a static check, not by a runtime test. Keep the full plugin directory: isolated SKILL.md copies
+omit shared contracts, scripts and reviewers. Skills locate the installed plugin with
+the **Plugin root** rule (two levels above the loaded `SKILL.md`); per-runtime
+fallbacks are in [runtime-adapter.md](../runtime-adapter.md#capability-fallbacks-on-all-five-runtimes).
+
+Repository-URL installs (`MrBekoX/agentic-sdlc`, `https://github.com/...`) need a
+public repository or credentials the runtime can use; until the repository is public,
+install from an extracted package directory. Current per-platform and per-OS results:
+[compatibility matrix](compatibility-matrix.md).
 
 | Platform | Install | Update | Included behavior and limits |
 |---|---|---|---|
 | Claude Code | In a shell, `claude plugin marketplace add MrBekoX/agentic-sdlc`, then `claude plugin install agentic-sdlc@mrbekox`; an extracted package also loads through `claude --plugin-dir <package>` | In a shell, `claude plugin marketplace update mrbekox`, then `claude plugin update agentic-sdlc@mrbekox`; in the session, `/reload-plugins` | Skills, command, agents, native JS workflows and Claude hooks; preserve native trust/permissions. |
-| Codex | `codex plugin marketplace add MrBekoX/agentic-sdlc` (source access required), then `codex plugin add agentic-sdlc@mrbekox`; for a local catalog use its actual marketplace name | For a configured Git source, `codex plugin marketplace upgrade <marketplace-name>` refreshes the catalog snapshot. Refresh the selected local package through the Plugins UI or the native recopy sequence below, then start a new chat and review changed hooks in `/hooks` | Shared skills and eight separately trusted hooks. Compatibility manifest retained; public directory projection excludes lifecycle hooks. |
-| Kimi Code | `/plugins install <package-directory>` or `/plugins install https://github.com/MrBekoX/agentic-sdlc`; `/plugins marketplace <marketplace-kimi.json-path-or-url>` browses the custom catalog | Reinstall a changed local source; in `/plugins` Installed tab press Enter for an available update, then `/reload` or `/new` | Skills, command, agents, sessionStart router and three PreToolUse command guards. No verified Kimi write/Stop readers or Claude Workflow runtime. |
-| ZCode | Settings → Plugins → Discover → + → Add marketplace; select the directory containing root `marketplace.json` or the GitHub repository, then Install and Enable | Refresh marketplace; Manage installed → Check for updates → apply; start a new session | Skills, command, agents, shell-free argv hooks for command guards, advisory writes and startup. No verified Stop/flow readers or distributable Workflow script API. |
-| Grok CLI | `grok plugin install <package-directory> --trust`, then `grok plugin enable agentic-sdlc`; `grok plugin marketplace add <source>` registers a catalog | `grok plugin marketplace update <name>` and `grok plugin update agentic-sdlc`; press r in Plugins or start a new session | Skills, command, agents and three command guards. Rhai workflows are separate project/user catalogs, not delivered to a customer's project by plugin install. No verified write/Stop/startup readers. |
+| Codex | `codex plugin marketplace add MrBekoX/agentic-sdlc` (public or authorized source), then `codex plugin add agentic-sdlc@mrbekox`; a local package directory also works with `codex plugin marketplace add <package-directory>` as long as the path contains no `#` (Codex reads `#` as a ref separator), and the personal catalog `~/.agents/plugins/marketplace.json` remains an option — add the entry to that file, do not replace other entries | `codex plugin marketplace upgrade <marketplace-name>` refreshes a Git catalog and reinstalls plugins installed from it; for a local source, repeat `codex plugin add agentic-sdlc@<marketplace-name>` to recopy; then start a new chat and review changed hooks in `/hooks` | Shared skills (the `git-safety-check` command is listed as a 17th skill) and eight separately trusted hooks. Compatibility manifest retained; public directory projection excludes lifecycle hooks. |
+| Kimi Code | `/plugins install <package-directory>` or `/plugins install https://github.com/MrBekoX/agentic-sdlc`; `/plugins marketplace <marketplace-kimi.json-path-or-url>` browses the custom catalog | Reinstall a changed local source; in `/plugins` Installed tab press Enter for an available update, then `/reload` or `/new` | Skills (invoke by bare name, e.g. `/skill:mind-spark`), command, agents, sessionStart router and three PreToolUse command guards. No verified Kimi write/Stop readers or Claude Workflow runtime; warn-only guard output is not shown. |
+| ZCode | Settings → Plugins → Discover → + → Add marketplace; choose the root `marketplace.json` **as a file source** (a directory or GitHub source is read through `.claude-plugin/marketplace.json` first and shows the Claude entry without ZCode's category, tags and translations), then Install. Newly installed plugins are **enabled by default**, which lets their hooks run: review the hook table before installing | Refresh marketplace; Manage installed → Check for updates → apply (offered only when the catalog version changes); start a new session | Skills, command, agents, shell-free argv hooks for command guards, advisory writes and startup. No verified Stop/flow readers; saved ZCode workflows (`.zcode/workflows/`) cannot be delivered by a plugin. |
+| Grok CLI | `grok plugin install <package-directory> --trust` (an absolute or `./`-relative path; the install also enables the plugin). The shipped `.grok-plugin/marketplace.json` entry installs from the public GitHub repository; a marketplace is named after its source's last path segment, not the catalog `name` | For a local install, `grok plugin uninstall agentic-sdlc` then install the new copy (`update` reports a local install as already live; reinstalling over it reports AlreadyInstalled). For a Git marketplace, `grok plugin marketplace update <source-name>` then `grok plugin update agentic-sdlc`; press r in Plugins or start a new session | Skills, command, agents and three command guards. Rhai workflows are separate project/user catalogs, not delivered to a customer's project by plugin install. No verified write/Stop/startup readers. |
 
 Local/extracted directory installs do not require this checkout or a maintainer
 drive. Repository installs require user access to the selected source. Anonymous
@@ -31,15 +42,24 @@ needed. Update is a shell subcommand. Install/uninstall default to user scope;
 update auto-detects the most specific installed scope. Supply `--scope` to select
 the intended installation explicitly.
 
-For Codex, adding or upgrading a marketplace is separate from copying a plugin
-into the install cache. Editing a local source does not edit the installed copy.
-After refreshing the source, repeat `codex plugin add agentic-sdlc@<marketplace-name>`
+For Codex, adding a local marketplace is separate from copying a plugin into the
+install cache. Editing a local source does not edit the installed copy. After
+refreshing the source, repeat `codex plugin add agentic-sdlc@<marketplace-name>`
 to recopy it; this sequence was verified on CLI 0.162.1. There is no `codex plugin update` command in
-CLI 0.162.1. Do not edit the cache or rewrite `config.toml` by hand.
-On that binary, `marketplace add <local-directory>` returned a Git-only ref error;
-the isolated test instead used the documented personal catalog at
-`~/.agents/plugins/marketplace.json`. Git-backed marketplace registration is a
-separate, untested transport in that check.
+CLI 0.162.1; `codex plugin marketplace upgrade <marketplace-name>` refreshes a Git catalog and
+reinstalls the plugins installed from it. Do not edit the cache or rewrite `config.toml` by hand.
+An earlier `marketplace add <local-directory>` failure was caused by a `#` in the test path:
+Codex splits a marketplace source on `#` to read a ref, so keep `#` out of local source paths.
+
+Releases: Claude Code, ZCode and Grok deliver an update only when the manifest/catalog
+version changes. A release therefore bumps the version with `python3 scripts/bump_version.py <next>`
+and moves the `Unreleased` CHANGELOG notes under it in the release pull request
+(`bump_version.py --release-check` requires an empty `Unreleased` section).
+The personal Grok catalog's remote `url` entry follows the repository's default branch, so
+every push reaches its installs; the official xAI catalog entry must pin the release
+commit's full `sha`. If the public repository ends up at a different URL than
+`https://github.com/MrBekoX/agentic-sdlc`, update the manifest `homepage`/`repository`
+fields, `marketplace-kimi.json` and the Grok catalog entry before publishing.
 
 | Platform | Uninstall | Retained data and configuration |
 |---|---|---|
@@ -47,7 +67,7 @@ separate, untested transport in that check.
 | Codex | `codex plugin remove agentic-sdlc@<marketplace-name>`, then start a new chat | Removes this plugin's configuration and local cache. Other plugins and unrelated settings must remain. Removing a catalog is a separate `codex plugin marketplace remove <marketplace-name>` operation; only remove an unused catalog. |
 | Kimi Code | In the TUI, `/plugins remove agentic-sdlc`, confirm the prompt, then `/reload` or `/new` | Removes the installed record; the managed copy remains on disk. Kimi does not delete those files automatically. |
 | ZCode | Settings → Plugins → Manage installed → plugin detail → Uninstall | Use the native UI. Persistent-data retention is not specified by the reviewed documentation; do not promise that uninstall deletes it. |
-| Grok CLI | `grok plugin uninstall agentic-sdlc`, confirm the native prompt, then reload Plugins or start a new session | Native uninstall supports `--keep-data` to retain plugin data. The marketplace and original source are separate. |
+| Grok CLI | `grok plugin uninstall agentic-sdlc` (no confirmation prompt), then reload Plugins or start a new session | Native uninstall supports `--keep-data` to retain plugin data. The marketplace and original source are separate. |
 
 Native managers own their configuration changes. Install only the selected plugin
 in the chosen scope; preserve unrelated catalog entries, plugins and settings.
@@ -61,7 +81,8 @@ Claude resolves `CLAUDE_PLUGIN_ROOT`; Codex exports `PLUGIN_ROOT`. Grok exports
 values, joins a fixed handler and imports a file URL, so installed-path bytes stay
 outside shell source. Codex alone supports `commandWindows`; Grok does not.
 Kimi executes `node "./hooks/<handler>.mjs"` with hook cwd equal to the plugin root;
-the stdin `cwd` still identifies the target project for git checks. `KIMI_PLUGIN_ROOT`
+git checks take the target project from the Bash tool's own `tool_input.cwd`
+(resolved against the session cwd), falling back to the stdin `cwd`. `KIMI_PLUGIN_ROOT`
 is a hook environment variable, not a promised Bash/skill-text alias. Its
 skillInstructions resolve helper paths from the loaded Skill file's installed path.
 ZCode passes `${ZCODE_PLUGIN_ROOT}/hooks/<handler>.mjs` as an argv element without a
@@ -97,19 +118,24 @@ the Grok manifest and listed its skill/command/agent directories and hooks. Code
 0.162.1 installed the extracted local package into an isolated empty test home;
 `plugin/read` exposed 16 skills and 8 hook declarations and `hooks/list` returned
 8 untrusted records with no errors. No hook trust was granted or model turn run;
-this does not prove hook execution. Kimi 2.1.1 is present but its interactive native
-installer was not exercised; ZCode CLI is absent. Windows and Linux serialized
+this does not prove hook execution. Kimi 2.1.1 was present but its native installer
+was not exercised that day (the 2026-10-12 lifecycle run below exercised it); ZCode CLI is absent. Windows and Linux serialized
 adapter replay each returned 15 tests / OK with no skips after runtime prerequisites
 were supplied. These observations bind the labelled candidate fixture; rebuild and
 repeat against the eventual release commit before publication.
 
-`tests/test_native_distribution_lifecycle.py` adds a no-model, isolated Codex
-local-catalog install/refresh/remove check, with unrelated plugin/profile
-sentinels. It does not grant hook trust or mutate the personal profile. Missing
-CLI support is an explicit skip. On Windows with CLI 0.162.1 it executed one
-test, OK: initial install, changed-source recopy via repeated `plugin add`,
-uninstall and preserved unrelated settings/plugin. This is local-copy evidence;
-it does not prove remote transport, hook execution or live skill behavior.
+`scripts/check_native_lifecycle.py --package <dir>` runs a no-model, isolated
+install, discovery, refresh and uninstall through each vendor's own plugin
+manager (Claude Code, Codex personal catalog, Grok, Kimi Code `kimi web` API;
+ZCode reports `not-run:no_headless_installer`) and prints one
+`native_<platform>=` line per platform. `tests/test_native_distribution_lifecycle.py`
+covers it with fail-closed fake CLIs and, where a vendor CLI is installed, real
+runs. The earlier Codex-only test it replaces executed one test, OK, on Windows
+with CLI 0.162.1 (install, changed-source recopy, uninstall, preserved unrelated
+settings). The 2026-10-12 results for the branch candidate are in the
+[compatibility matrix](compatibility-matrix.md#evidence-log); repeat on the release candidate before publication.
+This is local-copy evidence; it does not grant hook trust, mutate the personal
+profile, or prove remote transport, hook execution or live skill behavior.
 
 Archive member checks now also enforce Windows device-name, invalid-character
 and trailing-dot/space rules on every build host, before extraction can sanitize

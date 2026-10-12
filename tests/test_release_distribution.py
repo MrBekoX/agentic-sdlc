@@ -1380,10 +1380,12 @@ class TestRealTreeVerify(ScratchTestCase):
                 self.assertIn(reason, SUPPRESSION_REASONS, line)
                 suppressed.append((member, label, reason))
         self.assertIn(f"suppressed_count={len(suppressed)}", lines)
+        # commands/git-safety-check.md no longer carries an allow-marked pattern literal: its scan
+        # is described in prose and run with git alone (cross-platform-distribution).
+        self.assertNotIn("commands/git-safety-check.md", [s[0] for s in suppressed])
         for expected in (
             ("tests/test_sensitive_redaction.py", "private-key", "allow-marker"),
             ("hooks/secret-patterns.mjs", "aws-access-key-id", "documentation-sample"),
-            ("commands/git-safety-check.md", "password-literal", "allow-marker"),
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, suppressed)

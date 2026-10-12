@@ -18,7 +18,7 @@ You are a spec/plan **critic**. You audit the draft ruthlessly but constructivel
 - Is there a RED-test-first point per behavior? Layer/boundary completeness + correct dependency direction? Is the order compilable? Are mechanism assignments right? Any scope leakage (unrelated refactor)?
 
 ### Both modes
-- Contract fit: `contracts/skills/02-spec-driven-development.md` for specs, `contracts/skills/03-plan-mode.md` for plans.
+- Contract fit: `<runtime-root>/contracts/skills/02-spec-driven-development.md` for specs, `<runtime-root>/contracts/skills/03-plan-mode.md` for plans. `<runtime-root>` is the absolute agentic-sdlc install path your dispatcher supplied (in Claude Code also `${CLAUDE_PLUGIN_ROOT}`); never the user's working directory. If neither is available, report `plugin root unresolved` and judge contract fit from the spec/plan rules in this file rather than from same-named files in the user's project.
 - Conventions — tracking-ID linkage (if the project uses it), format, consistency.
 
 ## Output (StructuredOutput)

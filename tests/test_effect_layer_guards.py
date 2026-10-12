@@ -134,6 +134,22 @@ class TestPreCommitHook(unittest.TestCase):
         r = _git(["commit", "-m", "wip"], td)
         self.assertNotEqual(r.returncode, 0, "commit of a credential file was not blocked")
 
+    def test_blocks_a_credential_filename_under_a_non_ascii_folder(self):
+        # git C-quotes non-ASCII paths by default (core.quotePath): `"klas\303\266r/id_rsa"`. A
+        # quoted name never matched the credential-filename rules, so a user whose folders are
+        # named in Turkish, Chinese or any non-ASCII script could commit `id_rsa` unflagged.
+        td = self._repo(**{"klasör/id_rsa": "binary-key-body\n"})
+        r = _git(["commit", "-m", "wip"], td)
+        self.assertNotEqual(r.returncode, 0, "credential file under a non-ASCII folder was not blocked")
+
+    @unittest.skipIf(os.name == "nt", "a double quote is not a valid Windows file-name character")
+    def test_blocks_a_credential_filename_whose_folder_needs_quoting(self):
+        # core.quotePath=false stops octal-escaping non-ASCII, but git still C-quotes a name with a
+        # `"`, `\` or control character. NUL-separated listings (-z) deliver every name verbatim.
+        td = self._repo(**{'say "hi"/id_rsa': "binary-key-body\n"})
+        r = _git(["commit", "-m", "wip"], td)
+        self.assertNotEqual(r.returncode, 0, "credential file under a quoted folder name was not blocked")
+
     def test_allows_a_clean_commit(self):
         td = self._repo(**{"readme.md": "# hello\n"})
         r = _git(["commit", "-m", "docs: add readme"], td)
@@ -272,6 +288,28 @@ class TestWorktreeScan(unittest.TestCase):
         td = self._repo()
         Path(td, "id_rsa").write_text("binary-key-body\n", encoding="utf-8")
         self.assertTrue(self._run(td), "a credential file in the tree was not reported")
+
+    def test_detects_secrets_under_non_ascii_paths(self):
+        # With git's default core.quotePath, `git ls-files` prints `"\347\233\256\345\275\225/..."`;
+        # reading that quoted string as a path failed silently, so nothing under a non-ASCII
+        # folder was ever scanned - neither contents nor credential file names.
+        for folder in ("klasör", "目录"):
+            with self.subTest(folder=folder):
+                td = self._repo()
+                Path(td, folder).mkdir()
+                Path(td, folder, "notes.txt").write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+                self.assertTrue(self._run(td), "a secret under %s/ was not reported" % folder)
+                td = self._repo()
+                Path(td, folder).mkdir()
+                Path(td, folder, "id_rsa").write_text("binary-key-body\n", encoding="utf-8")
+                self.assertTrue(self._run(td), "a credential file under %s/ was not reported" % folder)
+
+    @unittest.skipIf(os.name == "nt", "a double quote is not a valid Windows file-name character")
+    def test_detects_secrets_under_a_folder_name_git_must_quote(self):
+        td = self._repo()
+        Path(td, 'say "hi"').mkdir()
+        Path(td, 'say "hi"', "notes.txt").write_text("TOKEN = " + GH_CLEAN + "\n", encoding="utf-8")
+        self.assertTrue(self._run(td), "a secret under a quoted folder name was not reported")
 
     def test_detects_a_secret_in_a_gitignored_file(self):
         # `.env` is where secrets actually live, and it is almost always gitignored. Enumerating

@@ -40,7 +40,8 @@ Scale depth to the change: a one-line tweak earns a short draft, a payment or au
 
 ## Rules
 - Respect the project's architecture and dependency directions; do not propose violations.
-- Follow this plugin's `contracts/skills/**` behavior contracts and the target project's own checked-in guidance when present; relate to any tracking IDs if the project uses them.
-- In spec mode, enforce `contracts/skills/02-spec-driven-development.md`: WHAT only, testable criteria, no HOW leakage.
-- In plan mode, enforce `contracts/skills/03-plan-mode.md`: HOW only, every acceptance criterion maps to concrete tasks and verification.
+- **Plugin root (`<runtime-root>`):** the absolute agentic-sdlc install path your dispatcher supplied (in Claude Code it is also `${CLAUDE_PLUGIN_ROOT}`). Never take it from the user's working directory; if neither is available, say `plugin root unresolved` and apply the contract rules below from this role file instead of reading files of the same name in the user's project.
+- Follow this plugin's `<runtime-root>/contracts/skills/**` behavior contracts and the target project's own checked-in guidance when present; relate to any tracking IDs if the project uses them.
+- In spec mode, enforce `<runtime-root>/contracts/skills/02-spec-driven-development.md`: WHAT only, testable criteria, no HOW leakage.
+- In plan mode, enforce `<runtime-root>/contracts/skills/03-plan-mode.md`: HOW only, every acceptance criterion maps to concrete tasks and verification.
 - **No placeholders** — "TBD", "as appropriate", "out of scope" without its reason, a stub section, or a single hand-wavy sentence disproportionate to the change are all forbidden. Be concrete or name the decision point.

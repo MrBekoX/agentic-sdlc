@@ -27,15 +27,15 @@ The flow hooks check whether a flow's spec and plan steps produced valid artifac
 
 `hooks/flow-evidence.mjs` and `hooks/codex-flow-evidence.mjs` list the directory entries of the artifact locations that `hooks/flow-requirements.json` configures, relative to the session working directory, to find Markdown artifact files: `docs/agentic-sdlc/specs`, `docs/agentic-sdlc/plans`, and the `spec` and `plan` folders of each work package under `docs/agentic-sdlc`.
 
-To validate a matched file, `hooks/flow-evidence.mjs`, `hooks/codex-flow-evidence.mjs` and `hooks/flow-order-guard-codex.mjs` start a Python interpreter and run `scripts/validate_artifacts.py` on it. They try the interpreter named by the `AGENTIC_SDLC_PYTHON` environment variable first when it is set, then `python3`, `python` and, on Windows, `py -3` from `PATH`. Each attempt has a 10-second timeout.
+To validate a matched file, `hooks/flow-evidence.mjs`, `hooks/codex-flow-evidence.mjs` and `hooks/flow-order-guard-codex.mjs` start a Python interpreter and run `scripts/validate_artifacts.py` on it, through the shared `runValidator` in `hooks/flow-evidence.mjs`. It tries the interpreter named by the `AGENTIC_SDLC_PYTHON` environment variable first when it is set, then `python3`, `python` and, on Windows, `py -3`, resolving each name only through absolute `PATH` entries, so an executable in the project directory is never run. A candidate is used only when a `-c` probe reports Python 3.8 or newer (3-second timeout); the Microsoft Store alias, a launcher without an installed Python and Python 2 are skipped. The validator run itself has a 10-second timeout. When no candidate qualifies, the hooks treat the validator as unavailable and fail open.
 
 ### Session context
 
-The `SessionStart` hooks `hooks/session-start.mjs` (Claude Code) and `hooks/session-start-codex.mjs` (Codex) run `git` to read the current branch and working-tree status. They add a one-line status summary and the plugin bootstrap text to the session context through `additionalContext`.
+The `SessionStart` hooks `hooks/session-start.mjs` (Claude Code and ZCode) and `hooks/session-start-codex.mjs` (Codex) run `git` to read the current branch and working-tree status. They add a one-line status summary and the plugin bootstrap text to the session context through `additionalContext`. The bootstrap names the plugin's absolute install path, resolved from the hook's own file location, so the model can run bundled helpers without a shell variable; that path can contain the operating-system user name and therefore reaches the session transcript.
 
 ### Commands and Git state
 
-The command guards `hooks/branch-guard.mjs`, `hooks/scan-commit.mjs` and `hooks/destructive-command-guard.mjs` read the shell command from the tool input (`tool_input.command`). `hooks/branch-guard.mjs` and `hooks/scan-commit.mjs` read Git alias definitions through `hooks/git-invocation.mjs`, which runs `git config --get alias.<name>`, so an aliased commit or push is recognized. `hooks/branch-guard.mjs` runs `git` to read the current branch. `hooks/scan-commit.mjs` runs `git diff` to read the added diff lines of a commit, takes the commit message from the `-m` text in the command, and reads the contents of any file named by `-F` or `--file`, resolved against the working directory of the statement that names it.
+The command guards `hooks/branch-guard.mjs`, `hooks/scan-commit.mjs` and `hooks/destructive-command-guard.mjs` read the shell command from the tool input (`tool_input.command`). `hooks/branch-guard.mjs` and `hooks/scan-commit.mjs` read Git alias definitions through `hooks/git-invocation.mjs`, which runs `git config --get alias.<name>`, so an aliased commit or push is recognized. `hooks/branch-guard.mjs` runs `git` to read the current branch. `hooks/scan-commit.mjs` runs `git diff` to read the added diff lines of a commit, takes the commit message from the `-m` text in the command, and reads the contents of any file named by `-F` or `--file`, resolved against the working directory of the statement that names it. Under Kimi Code (detected by the `KIMI_PLUGIN_ROOT` variable Kimi exports to its hooks), both guards take the repository from the Bash tool's own `tool_input.cwd` (resolved against the session `cwd`, which is the fallback when it is absent), because Kimi runs the command there. Every hook starts `git` through `hooks/git-exec.mjs`, which resolves it only through absolute `PATH` entries, so a `git` in the project directory is never run, and disables colour (`color.ui`, `color.diff`), relative diffs, fsmonitor and repository hooks (`core.hooksPath` pointed at a never-created folder inside the plugin; the flow guard's branch probe, which runs no hook-triggering command, keeps its own fixed argv); diffs use `--text --no-ext-diff --no-textconv` so repository settings cannot hide added lines.
 
 ### Written content
 
@@ -74,7 +74,7 @@ The helpers below write transcripts, review packages and task briefs, redacted a
 
 ## Model providers
 
-The skills run inside Claude Code or Codex. Content that the runtime sends to a model, including files the agent reads and tool output, is processed by the model provider the user configured in that runtime, under that provider's terms.
+The skills run inside Claude Code, Codex, Kimi Code, Grok CLI or ZCode. Content that the runtime sends to a model, including files the agent reads and tool output, is processed by the model provider the user configured in that runtime, under that provider's terms.
 
 ## Directory Policy 3.A
 

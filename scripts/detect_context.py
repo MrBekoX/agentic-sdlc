@@ -52,6 +52,15 @@ def _is_source(path):
     return path.suffix.lower() in SOURCE_EXTS
 
 
+def _ignored_below(path, root):
+    """Return True if a component of `path` relative to `root` is an IGNORE name."""
+    try:
+        parts = path.relative_to(root).parts
+    except ValueError:
+        parts = path.parts
+    return any(part in IGNORE for part in parts)
+
+
 def _count_source_files(root):
     """Recursively count source files under `root`, skipping IGNORE dirs.
 
@@ -63,8 +72,10 @@ def _count_source_files(root):
     count = 0
     try:
         for item in root.rglob("*"):
-            # Skip any path that has an IGNORE component.
-            if any(part in IGNORE for part in item.parts):
+            # Skip any path with an IGNORE component BELOW the scanned root. The folders that
+            # contain the root are not part of the project: a checkout at ~/work/build/shop is
+            # still a codebase, not an ignored build output.
+            if _ignored_below(item, root):
                 continue
             try:
                 if item.is_file() and _is_source(item):
@@ -122,7 +133,7 @@ def detect(paths):
                 has_source = any(
                     _is_source(f)
                     for f in child.rglob("*")
-                    if f.is_file() and not any(p in IGNORE for p in f.parts)
+                    if f.is_file() and not _ignored_below(f, root)
                 )
             except OSError:
                 continue  # unreadable child subtree: skip it, never crash
@@ -286,7 +297,7 @@ def probe_deps(paths):
             candidate = root / name
             if candidate.is_file():
                 try:
-                    text = candidate.read_text(encoding="utf-8", errors="replace")
+                    text = candidate.read_text(encoding="utf-8-sig", errors="replace")
                 except OSError:
                     continue  # unreadable manifest: skip, never crash
                 if name not in found_manifests:
@@ -301,7 +312,7 @@ def probe_deps(paths):
             csproj_files = []
         for csproj in csproj_files:
             try:
-                text = csproj.read_text(encoding="utf-8", errors="replace")
+                text = csproj.read_text(encoding="utf-8-sig", errors="replace")
             except OSError:
                 continue
             name = csproj.name
@@ -332,7 +343,7 @@ def _node_toolchain(root):
     pkg = root / "package.json"
     if pkg.is_file():
         try:
-            data = json.loads(pkg.read_text(encoding="utf-8", errors="replace"))
+            data = json.loads(pkg.read_text(encoding="utf-8-sig", errors="replace"))
             scripts = data.get("scripts", {})
             if any(k in _NODE_SCRIPT_KEYS for k in scripts):
                 return True
@@ -448,7 +459,17 @@ def _safe_default(probe):
     }
 
 
+def _utf8_output():
+    """Print UTF-8 whatever the console code page, so a non-ASCII manifest name keeps exit 0."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
+    _utf8_output()
     args = build_parser().parse_args(argv)
     paths = args.path
 

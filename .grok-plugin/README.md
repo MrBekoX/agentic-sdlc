@@ -14,7 +14,8 @@ including `hooks/`, `scripts/` and `contracts/`.
 
 Use an extracted full package directory, with Grok and Node in the same OS
 environment and `node` available on the hook shell PATH. Helper workflows also
-need Python 3.12+ and Git. Run:
+need Python 3 (3.12 is tested; the helpers skills run are kept import-compatible with 3.8
+by a static check, not a runtime test) and Git. Run:
 
 ```text
 grok plugin install <package-directory> --trust
@@ -28,22 +29,28 @@ A historical Grok 1.0.34 clone install failed while copying `.git`; an extracted
 package avoids copying repository internals. That observation is not a fresh
 installer test on Grok 1.0.50.
 
-To register this package as a personal marketplace, additionally run:
+The directory install also enables the plugin; `grok plugin enable agentic-sdlc`
+is only needed after a `grok plugin disable`. Use an absolute or `./`-relative
+package path.
+
+The shipped catalog `.grok-plugin/marketplace.json` names this repository as a
+remote `url` source: Grok cannot point a catalog entry at the catalog's own root
+(`"./"` parses as an empty path and the entry is skipped — observed on 1.0.50).
+Once the repository is public, register it with
+`grok plugin marketplace add https://github.com/MrBekoX/agentic-sdlc`, then:
 
 ```text
-grok plugin marketplace add <package-directory>
 grok plugin marketplace list
 grok plugin list --json --available
+grok plugin install agentic-sdlc --trust
 ```
 
-Use `grok plugin install agentic-sdlc --trust` only when the available list
-contains that entry. Historical name lookup for this catalog's `source: "./"`
-failed on Grok 1.0.34; use the directory install above if it is absent.
-Remote GitHub/git sources are documented too; source access and organization
-policy still apply. See [distribution details](../docs/publication/grok-marketplace.md).
+Grok names a marketplace after its source's last path segment, not the catalog
+`name`, so use the name `grok plugin marketplace list` prints. Source access and
+organization policy still apply. See [distribution details](../docs/publication/grok-marketplace.md).
 
-Installation requires `--trust`, and the plugin must be enabled. Pick up changes
-with `r` in the Plugins tab (`/plugins`) or a new session.
+Installation requires `--trust`. Pick up changes with `r` in the Plugins tab
+(`/plugins`) or a new session.
 
 ## Using it and paths
 
@@ -54,8 +61,9 @@ with `r` in the Plugins tab (`/plugins`) or a new session.
   joins a fixed handler name and imports a file URL; installed-path bytes never
   become shell command text. Grok does not provide Codex's `commandWindows` selector.
 - Grok supplies `GROK_PLUGIN_ROOT` and the `CLAUDE_PLUGIN_ROOT` alias to plugin
-  hooks. For skill helpers, resolve the installed skill/root rather than assuming
-  the working project contains this repository.
+  hooks only. A skill the model picks is read as plain text with no variable
+  substitution, so skills resolve helpers with their **Plugin root** rule: the
+  folder two levels above the `SKILL.md` path shown in the skill listing.
 
 ## Hooks and limits
 
@@ -82,20 +90,22 @@ If a named script is present and workflows are enabled, use
 
 ## Update and versioning
 
-For an added marketplace, refresh it; then update the installed plugin:
+For an added Git marketplace, refresh it by the name `grok plugin marketplace list`
+shows (the source's last path segment), then update the installed plugin:
 
 ```text
-grok plugin marketplace update mrbekox
+grok plugin marketplace update <source-name>
 grok plugin update agentic-sdlc
 ```
 
-On Grok 1.0.50, local `plugin update` does not recopy the installed directory;
-reinstalling the same source reports "already installed". Reload the Plugins tab
-or start a new session and verify the installed bytes. That reload path remains
-unverified here. A moving Git branch supports a genuine update, observed in an
-offline Git fixture. If necessary, explicitly uninstall and install the refreshed
-directory after reviewing retained data. Paths containing `#` should be installed
-with `grok plugin install . --trust` from inside that directory.
+On Grok 1.0.50, local `plugin update` does not recopy the installed directory (it
+reports the plugin as already live), and reinstalling the same source reports
+"already installed". To refresh a local install, review retained data, run
+`grok plugin uninstall agentic-sdlc`, then install the refreshed directory again
+(verified natively on 1.0.50); reload the Plugins tab or start a new session.
+A moving Git branch supports a genuine update, observed in an offline Git fixture. Paths
+containing `#` should be installed with `grok plugin install . --trust` from inside
+that directory.
 `scripts/bump_version.py` tracks both Grok manifest versions and `VERSION`;
 `tests/test_grok_packaging.py` checks their agreement.
 
@@ -107,7 +117,7 @@ release tagging is performed here. Follow the
 
 ## Uninstall
 
-Run `grok plugin uninstall agentic-sdlc` and confirm the native prompt. Add
+Run `grok plugin uninstall agentic-sdlc` (Grok does not prompt). Add
 `--keep-data` when plugin data must survive removal. Reload the Plugins tab or
 start a new session. Keep unrelated plugins/settings and the source directory;
 marketplace removal is a separate operation. See the

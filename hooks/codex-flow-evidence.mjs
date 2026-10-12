@@ -1,8 +1,8 @@
 // Codex flow-evidence engine (AP2b). Session-scoped, evidence-only port of the Claude flow-step
 // backstop: it re-derives whether an artifact-bearing SDLC flow finished THIS rollout with a required
-// step lacking observable evidence. It reuses the byte-locked Claude engine's read-only helpers
-// (loadRequirements / blockFlag / isSourceFile) and the additive rollout-signal reader, never editing
-// either. Pure derivation + a bounded read-only validator subprocess. Fail-open everywhere (BR8).
+// step lacking observable evidence. It reuses the Claude engine's read-only helpers
+// (loadRequirements / blockFlag / isSourceFile / runValidator) and the additive rollout-signal reader.
+// Pure derivation + a bounded read-only validator subprocess. Fail-open everywhere (BR8).
 //
 // Divergences from the Claude engine, all deliberate (see the spec):
 //   - Active-flow detection is by an IN-SESSION spec/plan WRITE (BR4), never on-disk presence -> a
@@ -11,10 +11,9 @@
 //   - A plan is paired with the spec of the SAME work-id with NO fallback to listArtifacts('spec')[0]
 //     (BR2); if no same-work-id spec exists on disk, the plan step is reported missing.
 import { readdirSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation, resolveBranchState } from './flow-evidence.mjs';
+import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation, resolveBranchState, runValidator } from './flow-evidence.mjs';
 import {
   readRolloutSignals, readRolloutRuns, splitBr6Statements, trailingOrRun, isVersionOrHelpOnly, hasUnquotedPipe,
   hasUnquotedBackground, inSafeBr6Grammar, hasUnmodeledShellSyntax, isBr6RunnerStatement, readRollout,
@@ -55,27 +54,6 @@ const ORDER = ['spec', 'plan', 'tests']; // canonical fixed emission order (DP-O
 function runIsGreen(r) {
   if (typeof r.exitCode === 'number') return r.exitCode === 0;
   return true; // substrate absent: fail-open to shape-only-satisfied
-}
-
-// Local re-implementation of the Claude engine's private runValidator (it is not exported, and the
-// byte-locked file must not change). Read-only subprocess: the artifact path is a SEPARATE argv (no
-// shell). Returns the exit code, or null when no interpreter can run -> caller fails open (BR2 exception).
-function runValidator(mode, file, specFile, cwd) {
-  const configured = String(process.env.AGENTIC_SDLC_PYTHON || '').trim();
-  const candidates = (configured ? [[configured]] : []).concat(process.platform === 'win32'
-    ? [['python3'], ['python'], ['py', '-3']]
-    : [['python3'], ['python']]);
-  const script = join(HOOK_DIR, '..', 'scripts', 'validate_artifacts.py');
-  const tail = ['--mode', mode, '--file', file, '--strict'];
-  if (mode === 'plan' && specFile) tail.push('--spec', specFile);
-  for (const c of candidates) {
-    const r = spawnSync(c[0], [...c.slice(1), script, ...tail], { encoding: 'utf8', cwd, timeout: 10000 });
-    if (r.error) continue;           // interpreter not found -> try next
-    if (r.status === null) continue; // spawn failed
-    if (/unable to create process using/i.test(String(r.stderr || ''))) continue;
-    return r.status;                 // 0 = pass, non-zero = fail (e.g. a stub)
-  }
-  return null; // could not run any interpreter -> caller fails open
 }
 
 // Per-package slug safety (BR2/BR11), mirroring hooks/flow-evidence.mjs. The rule is carried in

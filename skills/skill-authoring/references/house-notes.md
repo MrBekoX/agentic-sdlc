@@ -23,8 +23,8 @@ is one copy to keep correct:
   for the workflow; the Codex system edition does not necessarily include these eval schemas.
 - **House doctrine** (lean beats long, explain-the-why over caps-MUST stacking, a skill is a
   prompt that runs a million times, the authoring workflow, approval gates):
-  `docs/plugin-readme.md`, `docs/testing.md`, `docs/skill-boundaries.md`, and
-  `contracts/skills/00-global-behavior.md`.
+  `<runtime-root>/docs/plugin-readme.md`, `<runtime-root>/docs/testing.md`, `<runtime-root>/docs/skill-boundaries.md`, and
+  `<runtime-root>/contracts/skills/00-global-behavior.md` (`<runtime-root>` as defined in `SKILL.md`).
 
 This file holds only what those two do *not* cover: our register policy and the portable way to
 discover and run the reused scripts.
@@ -109,9 +109,9 @@ of calling absent files. Do not duplicate the companion runners into the skill.
 
 | Runtime and measurement | Command shape | Evidence limit |
 |---|---|---|
-| Claude real Skill/Read activation | `python3 scripts/run_trigger_eval.py --skill-path "<skill-path>" --eval-set "<eval-set>" --plugin-dir "<runtime-root>" --no-command-shim --model <model> --transcript-dir "<transcripts>"` | CLI + auth required; Windows-safe runner; inspect tool events |
-| Codex description routing | `python3 scripts/run_codex_trigger_eval.py --skill-path "<skill-path>" --eval-set "<eval-set>" --model <model> --reasoning-effort <effort> --transcript-dir "<transcripts>"` | Route-classifier proxy; does not prove installed-plugin discovery or procedure execution |
-| Either runtime's actual procedure | Capture an isolated native session/subagent transcript, then `python3 scripts/run_procedure_eval.py --eval-set "<procedure-fixture>" --transcript "<transcript>"` | Replay checks only the supplied transcript and fixture assertions; `--live` invokes Claude only |
+| Claude real Skill/Read activation | `python3 "<runtime-root>/scripts/run_trigger_eval.py" --skill-path "<skill-path>" --eval-set "<eval-set>" --plugin-dir "<runtime-root>" --no-command-shim --model <model> --transcript-dir "<transcripts>"` | CLI + auth required; Windows-safe runner; inspect tool events |
+| Codex description routing | `python3 "<runtime-root>/scripts/run_codex_trigger_eval.py" --skill-path "<skill-path>" --eval-set "<eval-set>" --model <model> --reasoning-effort <effort> --transcript-dir "<transcripts>"` | Route-classifier proxy; does not prove installed-plugin discovery or procedure execution |
+| Either runtime's actual procedure | Capture an isolated native session/subagent transcript, then `python3 "<runtime-root>/scripts/run_procedure_eval.py" --eval-set "<procedure-fixture>" --transcript "<transcript>"` | Replay checks only the supplied transcript and fixture assertions; `--live` invokes Claude only |
 
 Trigger fixtures use the repository `{"queries": [...]}` schema; do not pass them unchanged to
 the external toolkit, whose trigger schema is a JSON list. Repo trigger summary output is not

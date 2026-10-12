@@ -1,5 +1,5 @@
 {
-  "description": "ZCode hook wiring (experimental adapter, not a 0.4.3 release target). Only events and tool names verified against the fetched ZCode hook schema (zcode.z.ai/en/docs/hooks, 2026-09-19) and tools observed in a live session are wired: process executors via argv (no shell), ${ZCODE_PLUGIN_ROOT} paths, Bash and Write|Edit matchers, SessionStart startup|clear|compact. The Claude-transcript and Codex-rollout Stop readers and the flow-order guard stay unwired (see docs/runtime-adapter.md).",
+  "description": "ZCode hook wiring (experimental adapter, not a 0.4.3 release target). Only events and tool names verified against the fetched ZCode hook schema (zcode.z.ai/en/docs/hooks, 2026-09-19) and tools observed in a live session are wired: process executors via argv (no shell), ${ZCODE_PLUGIN_ROOT} paths, Bash and Write|Edit matchers, SessionStart startup|resume|clear|compact. The Claude-transcript and Codex-rollout Stop readers and the flow-order guard stay unwired (see docs/runtime-adapter.md).",
   "hooks": {
     "PreToolUse": [
       {
@@ -41,7 +41,7 @@
     ],
     "SessionStart": [
       {
-        "matcher": "startup|clear|compact",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "process",

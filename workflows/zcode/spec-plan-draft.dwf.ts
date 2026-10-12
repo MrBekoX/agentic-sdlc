@@ -1,6 +1,6 @@
 /* zcode-workflow
 description: AGENTIC-SDLC spec/plan drafting on ZCode — an author subagent drafts, a fresh-context critic reviews, up to two revise rounds run, and deterministic validators gate the result.
-whenToUse: Use when agentic-sdlc-pipeline runs its spec/plan phases (steps 4-5) on ZCode and the scripted author→critic adapter is preferred over the embedded main-loop adapter. Run inside an agentic-sdlc checkout or the installed plugin root so agents/ and scripts/ resolve.
+whenToUse: Use when agentic-sdlc-pipeline runs its spec/plan phases (steps 4-5) on ZCode and the scripted author→critic adapter is preferred over the embedded main-loop adapter. Pass pluginRoot so role files and the validator come from the installed plugin, never from the user's project.
 args:
   workId:
     type: string
@@ -15,6 +15,10 @@ args:
     required: false
     default: both
     description: 'spec, plan or both (default). plan requires an approved spec already on disk.'
+  pluginRoot:
+    type: string
+    required: true
+    description: Absolute path of the installed agentic-sdlc plugin (<runtime-root>). Role files and scripts/validate_artifacts.py are read from it; a same-named file in the project is never used.
 */
 
 interface CriticVerdict {
@@ -26,6 +30,17 @@ interface CriticVerdict {
 const workId = String(args.workId ?? "").trim();
 const requirement = String(args.requirement ?? "").trim();
 const mode = String(args.mode ?? "both").trim().toLowerCase();
+// The installed plugin root. Relative `agents/` and `scripts/` paths would resolve against the user's
+// project, which may carry its own planted files; an absolute local root is required instead. It is
+// spliced into the validator commands the author agent runs, so shell metacharacters, newlines and
+// UNC shares are rejected.
+const pluginRoot = String(args.pluginRoot ?? "").trim().replace(/[\\/]+$/, "");
+if (!/^(?:[A-Za-z]:[\\/]|\/)/.test(pluginRoot) || /^(?:\/\/|\\\\)/.test(pluginRoot)
+    || /[\r\n"'`$;&|<>]/.test(pluginRoot)) {
+  throw new Error("pluginRoot must be the plain absolute path of the installed agentic-sdlc plugin (plugin root unresolved)");
+}
+const rolePath = (name: string) => `${pluginRoot}/agents/${name}.md`;
+const validator = `${pluginRoot}/scripts/validate_artifacts.py`;
 
 if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(workId)) {
   throw new Error(`workId must be a short id of letters, digits, dot, dash or underscore (got "${workId}")`);
@@ -50,17 +65,17 @@ if (mode === "plan") {
 
 const validatorLines: string[] = [];
 if (mode !== "plan") {
-  validatorLines.push(`python3 scripts/validate_artifacts.py --mode spec --file ${specPath}`);
+  validatorLines.push(`python3 "${validator}" --mode spec --file ${specPath}`);
 }
 if (mode !== "spec") {
-  validatorLines.push(`python3 scripts/validate_artifacts.py --mode plan --file ${planPath} --spec ${specPath}`);
+  validatorLines.push(`python3 "${validator}" --mode plan --file ${planPath} --spec ${specPath} --strict`);
 }
 const scope = mode === "spec" ? specPath : mode === "plan" ? planPath : `${specPath} and ${planPath}`;
 
 phase("Author drafts the artifacts");
 const author = agent(
   "spec-author",
-  "You are the AGENTIC-SDLC spec-plan author. First read agents/spec-plan-author.md and follow its depth contract: every acceptance criterion is a Given/When/Then check plus the failure it guards, security notes trace input->sink, every plan task names a RED test point and a runnable verification command. Write real files with your tools; never only describe them.",
+  "You are the AGENTIC-SDLC spec-plan author. First read " + rolePath("spec-plan-author") + " (plugin root: " + JSON.stringify(pluginRoot) + ") and follow its depth contract: every acceptance criterion is a Given/When/Then check plus the failure it guards, security notes trace input->sink, every plan task names a RED test point and a runnable verification command. Write real files with your tools; never only describe them.",
 );
 
 const authorFocus = mode === "plan"
@@ -79,7 +94,7 @@ await author.ask<string>([
 phase("Fresh-context critic reviews");
 const critic = agent(
   "spec-critic",
-  'You are the AGENTIC-SDLC spec-plan critic. First read agents/spec-plan-critic.md and follow it. You never see the author\'s reasoning - only the artifacts on disk. Be adversarial: reject unfalsifiable acceptance criteria, tasks without runnable verification, and scope creep. Respond with JSON only, shaped {"verdict": "approve" | "revise", "findings": ["..."], "validated": "what you checked"}.',
+  'You are the AGENTIC-SDLC spec-plan critic. First read ' + rolePath("spec-plan-critic") + ' (plugin root: ' + JSON.stringify(pluginRoot) + ') and follow it. You never see the author\'s reasoning - only the artifacts on disk. Be adversarial: reject unfalsifiable acceptance criteria, tasks without runnable verification, and scope creep. Respond with JSON only, shaped {"verdict": "approve" | "revise", "findings": ["..."], "validated": "what you checked"}.',
 );
 
 function criticInstruction(): string {
@@ -115,10 +130,10 @@ while (verdict.verdict === "revise" && rounds < 2) {
 phase("Deterministic validation gate");
 const specGate = mode === "plan"
   ? null
-  : await world.run("python3", ["scripts/validate_artifacts.py", "--mode", "spec", "--file", specPath]);
+  : await world.run("python3", [validator, "--mode", "spec", "--file", specPath]);
 const planGate = mode === "spec"
   ? null
-  : await world.run("python3", ["scripts/validate_artifacts.py", "--mode", "plan", "--file", planPath, "--spec", specPath, "--strict"]);
+  : await world.run("python3", [validator, "--mode", "plan", "--file", planPath, "--spec", specPath, "--strict"]);
 
 const ok = verdict.verdict === "approve"
   && (specGate === null || specGate.exitCode === 0)

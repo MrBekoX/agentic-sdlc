@@ -167,7 +167,7 @@ def _malformed_offenders(repo, slug):
 
 
 def _parse_frontmatter(path):
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8-sig")
     if not text.startswith("---"):
         return {}, ["missing_frontmatter"]
     end = text.find("\n---", 3)
@@ -555,7 +555,17 @@ def build_parser():
     return parser
 
 
+def _utf8_output():
+    """Print UTF-8 whatever the console code page; a non-ASCII branch must never crash the resolver."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
+    _utf8_output()
     args = build_parser().parse_args(argv)
     repo = Path(args.repo).resolve(strict=False)
     result = resolve(

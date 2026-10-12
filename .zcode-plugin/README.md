@@ -14,10 +14,14 @@ root `skills/` (flat `skills/<name>/SKILL.md` layout — no grouping folders).
 
 1. Open ZCode **Settings → Plugins**, **Discover** tab, and click **+**
    (**Create → Add marketplace**).
-2. Add this repository root (the folder that contains `marketplace.json`, the ZCode
-   marketplace schema) as a local directory or file source. ZCode validates before adding.
-3. In the **Personal** segment, find the `agentic-sdlc` card (name, version, category
-   `developer-tools`) and click **Install**, then **Enable**.
+2. Add the root `marketplace.json` (the ZCode marketplace schema) **as a file source**.
+   A directory or GitHub source is read through `.claude-plugin/marketplace.json` first,
+   which still installs the plugin but shows the Claude entry without the ZCode category,
+   tags and translations. ZCode validates before adding.
+3. Review the hook table under **Trust and side effects** first: newly installed plugins
+   are **enabled by default**, which lets their hooks run. In the **Personal** segment,
+   find the `agentic-sdlc` card (name, version, category `developer-tools`) and click
+   **Install**. It is enabled at once; use **Enable** in Manage installed only after a disable.
 4. Start a new session (or reload) so skills, commands, and hooks are discovered.
 
 Prerequisite: `node` must be on `PATH` — every hook executor is `node <script>` via argv.
@@ -27,9 +31,10 @@ Prerequisite: `node` must be on `PATH` — every hook executor is `node <script>
 - Type `$using-agentic-sdlc` in the chat box (or open `/` → Skills) to invoke the router.
   The router picks the smallest sufficient skill; `agentic-sdlc-pipeline` only for the
   full SDLC envelope.
-- Scripts resolve `${ZCODE_PLUGIN_ROOT}`; ZCode also injects the `${CLAUDE_PLUGIN_ROOT}`
-  alias (per the fetched hook documentation), so house skill bodies that reference
-  `${CLAUDE_PLUGIN_ROOT}` keep resolving on ZCode.
+- Hook processes receive `${ZCODE_PLUGIN_ROOT}` and a `${CLAUDE_PLUGIN_ROOT}` alias. Skill
+  text gets only `${CLAUDE_SKILL_DIR}` / `${ZCODE_SKILL_DIR}` substituted, so skills locate
+  bundled helpers with their **Plugin root** rule (`${CLAUDE_SKILL_DIR}/../..`) or the
+  root line the SessionStart hook prints.
 - The manual command `git-safety-check` is discovered from `commands/` (the command name
   comes from the file name).
 - Sub-agents under `agents/` carry `name` + `description` frontmatter as ZCode requires.
@@ -43,7 +48,7 @@ Enabling this plugin is a decision to let its hooks run code. The wired hooks
 |---|---|---|
 | `PreToolUse` | `Bash` | `scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs` |
 | `PostToolUse` | `Write\|Edit` | `scan-write.mjs` |
-| `SessionStart` | `startup\|clear\|compact` | `session-start.mjs` |
+| `SessionStart` | `startup\|resume\|clear\|compact` | `session-start.mjs` |
 
 Effects: the guards read the hook stdin JSON (`tool_input.command`, `tool_input` write
 fields, `cwd`) and local `git` state. Denial uses the documented
@@ -63,9 +68,10 @@ and Codex hook files (`hooks-claude.json`, `hooks-codex.json`) are not shared wi
 ## Orchestration fallback
 
 ZCode added dynamic workflows in client 3.14.0 (official changelog, 2026-09-19),
-started from the input-box plus menu or `/workflow`. Z.ai publishes no script API,
-file format, or storage path for them, and `plugin.json` has no `workflows`
-component key — so **this plugin cannot ship you one**. Where Claude Code would run
+started from the input-box plus menu or `/workflow`. The open-source client stores
+saved workflows in the project's `.zcode/workflows/` or the user's `~/.zcode/workflows/`
+folder, but `plugin.json` has no `workflows` component key — so **this plugin cannot
+ship you one**. Where Claude Code would run
 the `spec-plan-draft` workflow and Codex its embedded adapter, a ZCode session runs
 the same **author → critic → revise** discipline in the main loop with saved
 artifacts and `scripts/validate_artifacts.py` evidence. The unverified port kept at

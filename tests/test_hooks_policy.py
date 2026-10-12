@@ -426,6 +426,44 @@ class TestSessionStartHook(unittest.TestCase):
 
 
 @unittest.skipIf(NODE is None, "node not available")
+class TestSessionStartNamesTheInstalledRoot(unittest.TestCase):
+    """The bootstrap must hand the model the plugin's real install path.
+
+    `${PLUGIN_ROOT}` exists only in the hook process. Injected literally, the model ran
+    `${PLUGIN_ROOT}/scripts/detect_context.py`, which PowerShell expands to `/scripts/...` and a
+    POSIX shell without the variable expands the same way. The hook knows where it lives, so it
+    resolves the root from its own module location - no environment variable, any install path.
+    """
+
+    def _run_relocated(self, hook):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td, "plug in ğ $x", "agentic-sdlc")
+            (root / "hooks").mkdir(parents=True)
+            for name in (hook, "git-exec.mjs"):
+                shutil.copy2(REPO / "hooks" / name, root / "hooks" / name)
+            proc = subprocess.run([NODE, str(root / "hooks" / hook)], cwd=td,
+                                  capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return root, json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+
+    def test_bootstraps_name_the_resolved_absolute_root(self):
+        for hook in ("session-start.mjs", "session-start-codex.mjs"):
+            with self.subTest(hook=hook):
+                root, context = self._run_relocated(hook)
+                self.assertIn(str(root), context)
+                # Data, not a ready-made shell word: inside double quotes bash and PowerShell would
+                # expand the `$x` in this path.
+                self.assertNotIn('"' + str(root), context)
+                self.assertNotIn("${PLUGIN_ROOT}", context)
+                self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", context)
+
+    def test_codex_bootstrap_points_helpers_at_the_resolved_root(self):
+        root, context = self._run_relocated("session-start-codex.mjs")
+        for rel in ("skills", "scripts"):
+            self.assertIn(str(root / rel), context)
+
+
+@unittest.skipIf(NODE is None, "node not available")
 class TestCodexSessionStartHook(unittest.TestCase):
     def test_injects_codex_specific_bootstrap_without_claude_tooling(self):
         proc = subprocess.run(
@@ -444,7 +482,7 @@ class TestCodexSessionStartHook(unittest.TestCase):
         # Phase 1: the bootstrap now names the natively-wired command guards (AC6).
         self.assertIn("block natively via hooks-codex.json", context)
         self.assertIn("embedded author -> critic -> revise adapter", context)
-        self.assertIn("${PLUGIN_ROOT}/skills/<skill>/SKILL.md", context)
+        self.assertIn(str(REPO / "skills" / "<skill>" / "SKILL.md"), context)
         self.assertIn("Codex Adapter Gate", context)
         self.assertIn("docs/agentic-sdlc/specs/", context)
         self.assertIn("do not use spec.md or plan.md", context)
@@ -743,6 +781,31 @@ class TestScanCommitCodexShape(unittest.TestCase):
         secret = "ghp_" + "a1B2" * 9
         out = self._scan({"config.txt": "TOKEN = " + secret + "\n"})
         self.assertNotIn(secret, json.dumps(out))
+
+    def test_credential_filename_under_a_non_ascii_folder_is_denied(self):
+        # git C-quotes non-ASCII names in `--name-only` output by default (core.quotePath), and the
+        # quoted form never matched the credential-filename rules.
+        self.assertEqual(self._scan_credential("klasör"), "deny")
+
+    @unittest.skipIf(os.name == "nt", "a double quote is not a valid Windows file-name character")
+    def test_credential_filename_under_a_folder_name_git_must_quote_is_denied(self):
+        # core.quotePath=false does not cover `"` or `\`; the -z listing does.
+        self.assertEqual(self._scan_credential('say "hi"'), "deny")
+
+    def _scan_credential(self, folder):
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-b", "main"], cwd=td, check=True, capture_output=True)
+            (Path(td) / folder).mkdir()
+            (Path(td) / folder / "id_rsa").write_text("binary-key-body\n", encoding="utf-8")
+            subprocess.run(["git", "add", "--", folder + "/id_rsa"], cwd=td, check=True, capture_output=True)
+            proc = subprocess.run(
+                [NODE, str(self.HOOK)], cwd=td,
+                input=json.dumps(_codex_bash_payload("git commit -m x", cwd=td)),
+                capture_output=True, text=True, encoding="utf-8",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+            return out.get("hookSpecificOutput", {}).get("permissionDecision")
 
 
 @unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")

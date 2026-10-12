@@ -24,7 +24,7 @@
 // what actually landed). This module makes the PreToolUse gate correct for everything git itself
 // resolves; it does not make a pre-execution string gate authoritative, which is impossible.
 
-import { execFileSync } from 'node:child_process';
+import { runGit } from './git-exec.mjs';
 import { resolve as resolvePath } from 'node:path';
 import { skipCommandPrefix } from './shell-prefix.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
@@ -247,7 +247,7 @@ function makeAliasLookup(cwd) {
     if (!/^[A-Za-z0-9._-]{1,64}$/.test(name)) return '';  // never pass odd text to git
     try {
       // Argument array, no shell: nothing here is interpolated into a command line.
-      return execFileSync('git', ['config', '--get', 'alias.' + name], {
+      return runGit(['config', '--get', 'alias.' + name], {
         cwd: cwd || process.cwd(),
         encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
       }).trim();
@@ -255,6 +255,18 @@ function makeAliasLookup(cwd) {
       return '';                                          // no such alias / not a repo
     }
   };
+}
+
+// The directory a shell command runs in. Kimi Code's Bash tool takes its own `tool_input.cwd`
+// (relative paths resolve against the session cwd); the command executes THERE, so a guard reading
+// only the payload's session `cwd` would check another repository's branch and staged content.
+// Only Kimi defines that field, and Kimi exports KIMI_PLUGIN_ROOT to its hook processes: honouring
+// a `cwd` argument on a runtime that ignores it when running the command would let a model point the
+// guards at a clean repository. Everything else uses the session cwd, then the hook process cwd.
+export function commandCwd(input, env = process.env) {
+  const session = typeof input?.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
+  const tool = env.KIMI_PLUGIN_ROOT ? input?.tool_input?.cwd : undefined;
+  return typeof tool === 'string' && tool ? resolvePath(session, tool) : session;
 }
 
 // `git -C a -C b` is CUMULATIVE: each non-absolute -C resolves against the PREVIOUS one, so

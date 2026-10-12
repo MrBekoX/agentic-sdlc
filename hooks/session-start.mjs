@@ -1,10 +1,17 @@
 // SessionStart - injects git status plus AGENTIC-SDLC bootstrap context.
 // On git errors, fall back to unknown state rather than breaking session startup.
-import { execFileSync } from 'node:child_process';
+import { runGit } from './git-exec.mjs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// The installed plugin root, from this module's own location: the model's shell has no plugin-root
+// variable on every runtime that wires this hook, and the install path differs per user and per
+// version, so the bootstrap names the real path.
+const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 function git(args) {
   try {
-    return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return runGit(args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return '';
   }
@@ -22,7 +29,8 @@ const behind = git(['rev-list', '--count', 'HEAD..@{u}']) || '0';
 
 const bootstrap = [
   '<AGENTIC_SDLC_BOOTSTRAP>',
-  'You are in the AGENTIC-SDLC skill plugin. Skills live in root skills/ (not .claude/skills/).',
+  'You are in the AGENTIC-SDLC skill plugin. Skills live in the plugin root skills/ folder (not .claude/skills/).',
+  'Plugin root (resolved by this hook; use this absolute path wherever a skill says <runtime-root>, quoted for your shell): ' + PLUGIN_ROOT,
   '<PROCESS_OWNER_POLICY>',
   'Before routing, choose one process owner per phase. The user\'s explicit plugin or skill choice wins, including superpowers:<skill> and AGENTIC-SDLC skills.',
   'Otherwise keep the established owner for the current phase. Loading a bootstrap, router, or focused skill does not switch it; preserve the owner across resume/compact in conversation context.',
