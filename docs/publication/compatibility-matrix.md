@@ -8,7 +8,8 @@ with `python3 scripts/check_native_lifecycle.py --package <extracted-package-dir
 [multi-platform distribution](multi-platform-distribution.md); capability fallbacks live in
 [runtime-adapter.md](../runtime-adapter.md#capability-fallbacks-on-all-five-runtimes).
 
-All evidence below binds to main commit `1a9ac73` (2026-10-12), after the ZCode hook-output change
+All evidence below binds to main commit `1a9ac73` (2026-10-12; an original-history id, see the
+[history map](history-map.md) for its id in this repository), after the ZCode hook-output change
 of #59: the local rows used a package built from it (full archive sha256
 `da1aaabbedbad216d7fef1f4d2a7a14c15004229ded10fc7168b5df122b1d26d`, archive verify and portability
 check passed), and the GitHub-hosted rows built and verified their package from the same commit on

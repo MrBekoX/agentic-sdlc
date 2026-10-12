@@ -470,6 +470,20 @@ def carried_state_violations(rows):
 
 # Carried states whose source is a result row of the 0.4.3 ledger's older result table rather than
 # a row of the same id; a FAIL in any listed result makes the source a FAIL.
+HISTORY_MAP_ROW = re.compile(r"^\| ([0-9a-f]{40}) \| ([0-9a-f]{40}) \| ")
+
+
+def history_map(text):
+    """Original commit id -> public commit id, from docs/publication/history-map.md (2026-10-12 rewrite)."""
+    return dict(m.groups() for m in map(HISTORY_MAP_ROW.match, text.splitlines()) if m)
+
+
+def resolve_commit(prefix, mapping):
+    """The public id for an original commit id prefix, or the prefix itself when it is not mapped."""
+    hits = [public for original, public in mapping.items() if original.startswith(prefix)]
+    return hits[0] if len(hits) == 1 else prefix
+
+
 HISTORICAL_RESULT_ROWS = {
     "claude_routing_eval": ("Claude standalone routing",),
     "claude_pipeline_procedure": ("Claude flat-layout pipeline", "Claude per-package pipeline"),
@@ -794,13 +808,23 @@ class TestCurrentReleaseLedger(unittest.TestCase):
                                  capture_output=True, text=True, encoding="utf-8")
         if shallow.returncode != 0 or shallow.stdout.strip() != "false":
             self.skipTest("no full git history here (extracted archive or shallow clone)")
+        # Ledger ids name the original history; the history map gives their ids in this repository.
+        mapping = history_map(_real("docs/publication/history-map.md"))
         for row_id, row in required_rows(self.text)[0].items():
             commit = re.search(r"carried from ([0-9a-f]{7,40})\b", row["state"])
             if commit:
                 with self.subTest(row=row_id):
-                    found = subprocess.run(["git", "cat-file", "-e", commit.group(1) + "^{commit}"], cwd=REPO,
+                    public = resolve_commit(commit.group(1), mapping)
+                    found = subprocess.run(["git", "cat-file", "-e", public + "^{commit}"], cwd=REPO,
                                            capture_output=True)
-                    self.assertEqual(found.returncode, 0, commit.group(1))
+                    self.assertEqual(found.returncode, 0, f"{commit.group(1)} -> {public}")
+
+    def test_history_map_rows_are_unique_and_resolve(self):
+        mapping = history_map(_real("docs/publication/history-map.md"))
+        self.assertEqual(len(mapping), 286)
+        self.assertEqual(len(set(mapping.values())), len(mapping))
+        self.assertEqual(resolve_commit("26b0fe1983b3", mapping), "408fa8c47a4a213b5d5f0e6538ff2132fc19d7fb")
+        self.assertEqual(resolve_commit("0000000", mapping), "0000000")
 
     def test_carried_codex_routing_pass_matches_current_inputs(self):
         row = required_rows(self.text)[0]["codex_routing_eval"]
