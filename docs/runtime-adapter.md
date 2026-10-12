@@ -134,7 +134,7 @@ Other limits remain material:
 
 ### Limits of branch, review-result and strict evidence
 
-The publication decision block in the [release ledger](release-evidence-0.4.3.md) links this section.
+The publication decision blocks in the [current release ledger](release-evidence-0.5.0.md) and the [0.4.3 ledger](release-evidence-0.4.3.md) link this section.
 
 - The live Codex Stop hook does not report the `branch` step. The Codex branch report is the `strict_branch=protected|ok|unknown` line of the offline `scripts/strict_flow_evidence.py --rollout <path> --cwd <dir>`.
 - Codex rollouts expose no reviewer dispatch event, so `review-result` is Claude-only.

@@ -13,8 +13,9 @@ of #59: the local rows used a package built from it (full archive sha256
 `da1aaabbedbad216d7fef1f4d2a7a14c15004229ded10fc7168b5df122b1d26d`, archive verify and portability
 check passed), and the GitHub-hosted rows built and verified their package from the same commit on
 the runner. Later commits change documentation, catalog `description` strings, the projected
-ZCode packet README text, `.gitignore`, the pinned ZCode download hashes and an unused image, not
-hooks, skills or manifest versions; the package bytes therefore differ from the tested archive.
+ZCode packet README text, `.gitignore`, the pinned ZCode download hashes and an unused image, and
+the 0.5.0 release bump changes the manifest and catalog version strings; hooks, skills, agents,
+workflows, commands and contracts are unchanged, but the package bytes differ from the tested archive.
 Linux and macOS rows ran
 `scripts/check_native_lifecycle.py` with every platform `--require`d; the ZCode rows drove the
 desktop bundle's agent CLI with `.github/scripts/zcode_agent_lifecycle.mjs`; the Windows test host has no

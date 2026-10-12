@@ -28,7 +28,7 @@ The [official packaging guide](https://developers.openai.com/plugins/build/plugi
 
 ## Distribution paths
 
-Four paths exist; each has its own go condition and state. Historical per-path verdicts are bound to the [release evidence ledger](../docs/release-evidence-0.4.3.md); new preparation results are recorded separately. `codex plugin --help` on 0.160.1 still lists no validate command, so use native discovery, the local gate and archive verification without inventing that subcommand.
+Four paths exist; each has its own go condition and state. Per-path verdicts are bound to the [release evidence ledger](../docs/release-evidence-0.5.0.md) (the 0.4.3 verdicts stay in the [0.4.3 ledger](../docs/release-evidence-0.4.3.md)); new preparation results are recorded separately. `codex plugin --help` on 0.160.1 still lists no validate command, so use native discovery, the local gate and archive verification without inventing that subcommand.
 
 Public directory distribution uses a separate `--skills-only` projection: the manifest has no hooks; reusable specialist and git-review instructions live in skill references; only required stdlib helpers ship. Public installation provides procedural guidance. Manual local distribution retains hooks and requires native review/trust. See the [public packet](../docs/publication/openai-skills-only.md).
 

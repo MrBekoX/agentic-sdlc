@@ -4,7 +4,7 @@
 
 > An AGENTIC-SDLC skill library with adapters for **Claude Code**, **Codex**, **Kimi Code**, **ZCode** and **Grok CLI**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
-> `Version 0.4.3` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
+> `Version 0.5.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
 
 ---
 
@@ -97,7 +97,7 @@ Native install, discovery, update and uninstall of a package directory passed in
 
 ## Distribution paths
 
-`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.4.3.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. A BLOCKED or GAP state concerns publication or a release gate; it does not mean the [Install](#install) steps above fail. Kimi, ZCode and Grok adapters are included in this distribution candidate; the historical four-path 0.4.3 verdict does not establish their native lifecycle or public-directory acceptance.
+`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.5.0.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. A BLOCKED or GAP state concerns publication or a release gate; it does not mean the [Install](#install) steps above fail. Kimi, ZCode and Grok adapters are included in this distribution candidate; the historical four-path 0.4.3 verdict does not establish their native lifecycle or public-directory acceptance.
 
 ### Claude own marketplace
 
@@ -431,7 +431,7 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 
 ## Versioning
 
-Current version: `0.4.3`.
+Current version: `0.5.0`.
 
 ```bash
 python3 scripts/bump_version.py --check

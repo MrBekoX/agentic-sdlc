@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-10-12
+
+- Add the 0.5.0 release evidence ledger (`docs/release-evidence-0.5.0.md`); its verdict is do-not-publish. The 0.4.3 ledger is kept unchanged, and the ledger tests check both.
 - Emit only documented hook-output keys under ZCode: a shared `hooks/hook-output.mjs` emitter driven by the `--zcode-runtime` wire marker and the injected `ZCODE_PLUGIN_ROOT` environment variable, so warn paths reach the model through `hookSpecificOutput.additionalContext` and deny paths carry no undeclared key on a marketplace install; other runtimes keep their channels byte-identically.
 - Document the portable ZCode install path — adding the GitHub repository (`MrBekoX/agentic-sdlc`) as a marketplace source when there is no clone, beside the root `marketplace.json` file source — and align the distribution wording across the README, adapter readmes and release docs; adapter components (skills, agents, command frontmatter) verified against the current ZCode discovery rules.
 - Add experimental Kimi Code, Grok CLI and ZCode adapters: `.kimi-plugin/plugin.json` with the `marketplace-kimi.json` catalog, `.grok-plugin/` with `hooks/hooks-grok.json`, and `.zcode-plugin/` with the root `marketplace.json` and `hooks/hooks-zcode.json`. Each wires a documented subset of the house hooks (PreToolUse command guards; ZCode adds the write scan and SessionStart bootstrap); Claude Code and Codex wiring is unchanged.

@@ -1,0 +1,110 @@
+# Release evidence — 0.5.0
+
+Status: release preparation for version 0.5.0. The publish verdict is **do-not-publish**. No tag, GitHub release, marketplace submission, portal upload or repository visibility change was made. On 2026-10-12 the maintainer decided that this repository will not be made public; a later publication goes through a new public repository built from clean source, and that repository needs its own release check.
+
+## Scope and what changed since 0.4.3
+
+The supported release runtimes stay Claude Code and Codex. Kimi Code, Grok CLI and ZCode ship as experimental adapters; they are not 0.5.0 release targets and carry no go/no-go verdict. The changes since 0.4.3 are listed under 0.5.0 in the [changelog](../CHANGELOG.md): runtime resolution of the plugin root, hook hardening, the three experimental adapters, the native lifecycle checker and the marketplace preparation script.
+
+No model run was made for 0.5.0. On 2026-10-12 the maintainer decided not to repeat live evaluations for this version, because the native lifecycle checks in the [compatibility matrix](publication/compatibility-matrix.md) had already run. Each row below therefore holds one of three kinds of evidence:
+
+- **Measured on 0.5.0**: static gates, archive build, verify and reproducibility, version checks and native manifest validation, all without a model call.
+- **Carried with an identity argument**: a result measured on an earlier commit whose measured inputs are byte-identical in 0.5.0 (`codex_routing_eval`); the non-BR3 row `native_lifecycle_matrix` also names what differs from its tested package.
+- **Not measured on 0.5.0**: the row states not-run, BLOCKED or the open FAIL, and its evidence cell keeps the 0.4.3 history. An old pass is never relabeled as a 0.5.0 pass.
+
+## Package deltas behind carried results
+
+- **Codex routing (measured at `1d06ffc84d66`)**: all 16 `skills/*/SKILL.md` frontmatter blocks, which hold the `name` and `description` routing fields, are byte-identical at the 0.5.0 commit after line-ending normalization. The scenario set `tests/skills/routing/using-agentic-sdlc.json` is the same blob (`5f1f84d80696`). `scripts/run_routing_eval.py` changed only in Claude-only code (commit `01d2932f5140`), not in the Codex classifier path.
+- **Native lifecycle matrix (measured at `1a9ac73b47f4`)**: `hooks/`, `skills/`, `agents/`, `workflows/`, `commands/` and `contracts/` are byte-identical at the 0.5.0 commit. The package differs in documentation, catalog `description` and version strings, manifest versions, `.gitignore`, the pinned ZCode download hashes, the projected ZCode packet README text in `scripts/prepare_marketplace_release.py` and a removed unused image. The matrix asks for a repeat on the release commit before publication; that repeat has not run.
+- **Pipeline procedure (measured at `26b0fe1983b3`)**: 21 files under `skills/`, `agents/`, `workflows/`, `commands/` and `contracts/` changed since that run. The recorded Codex procedure failures were not re-measured, so the 0.4.3 FAIL stays the latest result.
+
+## Identity definitions
+
+- **BR20 runtime payload identity**: the SHA-256 of the sha256sum-manifest form of the release archive members, one `<member sha256>  <path>` line per member sorted by UTF-8 path, excluding `docs/release-evidence-0.5.0.md` and `docs/release-readiness.md` (`scripts/build_release.py` `payload_identity` with `RUNTIME_PAYLOAD_EXCLUDE`). A later commit that changes only those two files keeps the same identity. Identities in the [0.4.3 ledger](release-evidence-0.4.3.md) excluded the 0.4.3 ledger instead, so they are not comparable with identities recorded here.
+- **Skills-only payload identity**: the same manifest form over every member of the BR24 skills-only archive, with no exclusion.
+- **Archive hash**: the SHA-256 of the archive file bytes.
+
+## Limits retained in the release decision
+
+- No live model behaviour of 0.5.0 is recorded. Claude routing and both pipeline procedures have no 0.5.0 run, and the Codex routing pass is a description-classifier result carried from identical inputs.
+- Real-profile Codex hook trust was not touched for 0.5.0; the trust rows describe the 0.4.3 measurement only.
+- The native lifecycle evidence ran no model turn. It proves neither hook delivery inside a live session nor skill behaviour.
+- Guard coverage is bounded, some checks are advisory or opt-in, and missing or unrecognized transcript evidence can fail open. See the [runtime adapter limits](runtime-adapter.md#limits-of-branch-review-result-and-strict-evidence).
+- This repository's history and PR text hold findings that keep it private (rows `history_private_path_finding` and `pr_text_actions_review`).
+
+## Release identity check
+
+- 2026-10-12T08:48:55Z: `git ls-remote --tags origin` exited 0 and listed 0 remote tags, so neither `v0.5.0` nor `agentic-sdlc--v0.5.0` exists, and `gh api repos/MrBekoX/agentic-sdlc/releases --jq length` exited 0 and printed 0 (no GitHub releases); no collision was found.
+- 2026-10-12T08:53:42Z re-check before the ledger commit: `git ls-remote --tags origin` exited 0 and listed 0 remote tags, and `gh api repos/MrBekoX/agentic-sdlc/releases --jq length` exited 0 and printed 0; no collision was found. The check is repeated before any tag, release or portal version is created.
+
+## Required release rows
+
+Row states are PASS, FAIL, BLOCKED, not-run or GAP. Cells of rows not measured for 0.5.0 read `not recorded (not-run)`; model/effort is `n/a` for static gate rows and for native rows that make no model call.
+
+| Row id | BR3 required | State | Identity (definition) | Git commit | CLI version | OS | Model/effort | Measurement type | Evidence |
+|---|---|---|---|---|---|---|---|---|---|
+| `local_gate` | yes | not-run | not recorded (not-run: measured on this commit after it exists) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run): the gate runs on the commit that adds this ledger, and the next ledger revision records it. |
+| `claude_routing_eval` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a (no run) | native live | not-run: no Claude routing run was made for 0.5.0 (maintainer decision 2026-10-12, no new live runs). History: the 0.4.3 batch left all 45 runs unscored because the Claude CLI was not authenticated (0.4.3 ledger row `claude_routing_eval`); the older 2026-09-13 batch reached 45/45 on runtime input 9978383c, which predates later skill-body changes, so it is not a 0.5.0 result. Since then the Claude path of `scripts/run_routing_eval.py` also changed (commit `01d2932f5140`). |
+| `codex_routing_eval` | yes | PASS (carried from byte-identical routing inputs; no 0.5.0 run) | measured source: `skills/` at commit 1d06ffc84d66 in the 0.4.3 batch; the 0.5.0 routing inputs are byte-identical (see Package deltas behind carried results) | 1d06ffc84d66e971957667011221370b736b60ec | codex-cli 0.154.0 | Ubuntu 24.04.4 LTS kernel=6.6.87.2-microsoft-standard-WSL2 | gpt-5.5/low | description classifier | Carried PASS: 45 of 45 runs scored and correct, 3 runs over each of 15 scenarios at threshold 1.0 (0.4.3 ledger row `codex_routing_eval`). The classifier prompt is built only from each skill's `name` and `description` and from the scenario set, and all of them are byte-identical at the 0.5.0 commit. Limit kept from 0.4.3: `codex exec --json` 0.154.0 exposes no model id or reasoning effort, so the model identity rests on the runner's child argv (`-m gpt-5.5`, `model_reasoning_effort="low"`), not on a transcript attestation. No newer Codex CLI or model was measured. |
+| `claude_pipeline_procedure` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a (no run) | native live | not-run: no 0.5.0 run. History: the 0.4.3 row is not-run because the file-tool probe never reached a model turn on an unauthenticated CLI; the 2026-09-13 flat and per-package Claude cases failed independent procedure review (0.4.3 ledger, the "Claude flat-layout pipeline" and "Claude per-package pipeline" results). |
+| `codex_pipeline_procedure` | yes | FAIL (latest result, measured at 26b0fe1; not re-measured on 0.5.0) | runtime payload identity 7cad7eba6d7e88166094c31f4d1dd6fc838d8b72495cd56f661e890f26197005 (definition: the 0.4.3 BR20 identity, which excluded the 0.4.3 ledger) | 26b0fe1983b379bb2dc70d2192d52f9572b0f52a | codex-cli 0.154.0 | Ubuntu 24.04.4 LTS kernel=6.6.87.2-microsoft-standard-WSL2 | gpt-5.5/low | native live | Carried FAIL: both approved cases, `agentic-sdlc-pipeline-feature-no-commit` and `agentic-sdlc-pipeline-per-package`, were scored and failed strict grading (replay `procedure_eval=failed`; 0.4.3 ledger row `codex_pipeline_procedure`). 21 behaviour files changed since that run, but no fresh run measured them, so this FAIL stays open. |
+| `secret_scan` | yes | BLOCKED | not recorded (BLOCKED: history findings unresolved; archive scans run on this commit after it exists) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED) | n/a | static gate | BLOCKED while the history findings stay unresolved in this repository (rows `history_private_path_finding` and `pr_text_actions_review`). The archive scans of the 0.5.0 archives run on the commit that adds this ledger, and the next ledger revision records them. |
+| `clean_package_native_validation` | yes | not-run | not recorded (not-run: measured on this commit after it exists) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a (no model call: manifest validation only) | native live | not recorded (not-run): `claude plugin validate --strict` over the extracted 0.5.0 archive runs on the commit that adds this ledger. |
+| `codex_discovery_16_8` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a (no model call) | native live | not-run on the 0.5.0 package: no app-server `plugin/read` or `hooks/list` capture was made. Related evidence: compatibility matrix rows E2, E6 and E11 installed a package built from 1a9ac73; E2 counted 16 skill folders in the installed copy, and E6 and E11 asked the app-server `skills/list` for 17 entries, without `hooks/list`. History: 0.4.3 PASS (skills=16, hooks=8) at 26b0fe1. |
+| `hook_trust_untrusted` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a (no model call) | native live | not-run: no real-profile trust step was made for 0.5.0; real user profiles are not changed in this preparation. History: 0.4.3 PASS on the maintainer's WSL profile at 26b0fe1 (0.4.3 ledger). |
+| `hook_trust_exact_definition` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a (no model call) | native live | not-run: no real-profile trust step was made for 0.5.0. History: 0.4.3 PASS at 26b0fe1. |
+| `hook_trust_retained_after_restart` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a (no model call) | native live | not-run: no real-profile trust step was made for 0.5.0. History: 0.4.3 PASS at 26b0fe1. |
+| `hook_trust_rereview_after_change` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a (no model call) | native live | not-run: no real-profile re-review was made for 0.5.0. History: 0.4.3 not-run (an isolated diagnostic copy is not a real-profile observation). |
+| `hook_effects_allowed_denied` | yes | BLOCKED | not recorded (BLOCKED: no native capture) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED: no native capture) | native live | BLOCKED: allowed and denied hook effects need a native session with a model turn, and no model run is part of the 0.5.0 preparation. History: BLOCKED in 0.4.3 for the same reason. |
+| `hook_native_resume_compact` | yes | BLOCKED | not recorded (BLOCKED: no native capture) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED: no native capture) | native live | BLOCKED: native resume and compaction behaviour needs a native session with a model turn, and no model run is part of the 0.5.0 preparation. History: BLOCKED in 0.4.3 for the same reason. |
+| `hook_trust_list_records` | yes | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a (no model call) | native live | not-run: `scripts/check_codex_hook_trust.py` was not run against a real profile for 0.5.0. History: 0.4.3 PASS (untrusted before, trusted after and after restart) at 26b0fe1. The check reports trust state from `hooks/list` only; it does not prove that a hook runs. |
+| `archive_verify` | yes | not-run | not recorded (not-run: measured on this commit after it exists) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run): the 0.5.0 release archive is built and verified from the commit that adds this ledger. |
+| `archive_reproducibility` | yes | not-run | not recorded (not-run: measured on this commit after it exists) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run): both 0.5.0 archives are rebuilt from the commit that adds this ledger and compared byte for byte. |
+| `pr_text_actions_review` | yes | BLOCKED | not recorded (BLOCKED: this repository stays private) | not recorded (repository-wide read-only audit, 2026-10-12) | n/a (read-only history and API review) | not recorded (BLOCKED) | n/a | static gate | BLOCKED: the 2026-10-12 read-only publication audit found personal-data and session-link classes in commit metadata, commit messages and PR text; values are not stored here. GitHub keeps PR refs, PR text and Actions logs, so rewriting this repository's history would not remove them. Maintainer decision 2026-10-12: this repository is not made public, and publication goes through a new public repository built from clean source. History: BLOCKED in 0.4.3 (maintainer decision open on the PR-text findings). |
+| `owner_skill_injection` | yes | BLOCKED | not recorded (BLOCKED: no native capture) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED: no native capture) | native live | BLOCKED: the assumed Codex carrier shapes still wait for a native capture, and none was made for 0.5.0. History: BLOCKED in 0.4.3 (fixture `tests/fixtures/transcripts/codex-owner-0.154.0-native-carriers.jsonl` only). |
+| `owner_resume` | yes | BLOCKED | not recorded (BLOCKED: no native capture) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED: no native capture) | native live | BLOCKED: the assumed resume carrier shapes still wait for a native capture, and none was made for 0.5.0. History: BLOCKED in 0.4.3. |
+| `owner_compaction` | yes | BLOCKED | not recorded (BLOCKED: no native capture) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED) | not recorded (BLOCKED: no native capture) | native live | BLOCKED: the assumed compaction carrier shapes still wait for a native capture, and none was made for 0.5.0. History: BLOCKED in 0.4.3. |
+| `current_version_declarations` | no | not-run | not recorded (not-run: measured on this commit after it exists) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run): `python3 scripts/bump_version.py --check` and `--release-check` run on the commit that adds this ledger. |
+| `history_private_path_finding` | no | BLOCKED | not recorded (BLOCKED: this repository stays private) | not recorded (repository-wide read-only audit, 2026-10-12) | n/a (read-only history review) | not recorded (BLOCKED) | n/a | static gate | BLOCKED: the F4 finding (`audit-docs/codex-audit-docs.md`, first commit c173b99a86d5) stays in this repository's history, and the 2026-10-12 publication audit found further personal-data classes in commit metadata. Maintainer decision 2026-10-12: no history rewrite here; publication goes through a new public repository built from clean source. History: BLOCKED in 0.4.3 (maintainer decision pending). |
+| `security_report_mechanism` | no | GAP | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | GAP: GitHub private vulnerability reporting is unavailable while the repository is private; it belongs to the new public repository. `SECURITY.md` and `LICENSE` ship in the package. |
+| `skills_only_archive` | no | not-run | not recorded (not-run: measured on this commit after it exists) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | not recorded (not-run): the 0.5.0 skills-only archive is built and verified from the commit that adds this ledger. |
+| `portal_normalized_manifest` | no | BLOCKED | not recorded (BLOCKED: no upload was performed) | not recorded (BLOCKED) | n/a (no upload) | n/a (no upload) | n/a | static gate | BLOCKED: no maintainer-approved portal upload exists, so no normalized portal manifest exists to record. The upload needs maintainer-only access; nothing was submitted. |
+| `skill_archives` | no | BLOCKED | not recorded (BLOCKED: no .skill archive was produced) | not recorded (BLOCKED) | n/a (no reviewed toolkit commit) | not recorded (BLOCKED) | n/a | static gate | BLOCKED: no skill-creator toolkit commit has been reviewed, so no `.skill` archive was produced (same state as 0.4.3). |
+| `submission_cases_group` | no | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not-run: no submission case ran for 0.5.0. The group keeps its own measurement type and is never merged into another pass rate. |
+| `coexistence_group` | no | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | native live | not-run: no coexistence scenario ran for 0.5.0. The historical 2026-09-13 observations stay historical. |
+| `native_lifecycle_matrix` | no | PASS (measured at 1a9ac73; not repeated on the 0.5.0 commit) | archive hash da1aaabbedbad216d7fef1f4d2a7a14c15004229ded10fc7168b5df122b1d26d (full archive built from 1a9ac73 for the local rows; the GitHub-hosted rows built and verified their own package from the same commit) | 1a9ac73b47f4f618e1f62c7d6331a47c097a2898 | Claude Code 2.1.282, 2.1.293 and 2.1.296; codex-cli 0.156.1 and 0.162.1; Kimi Code 2.1.1; Grok CLI 1.0.50; ZCode agent CLI 0.16.9 (per cell in the matrix) | Windows 11; Ubuntu 24.04 (WSL2 and GitHub-hosted); macOS (GitHub-hosted) | n/a (no model turn) | native live | 15 of 15 platform × OS cells passed native install, discovery, version-bumped refresh and uninstall in isolated profiles, leaving the host's real profiles unchanged (rows E1–E15 of the [compatibility matrix](publication/compatibility-matrix.md)). Package delta to 0.5.0: see Package deltas behind carried results. Not proven: hook trust and delivery in a live session, live skill behaviour, ZCode's desktop GUI flow. |
+| `path_verdicts` | no | not-run | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | not recorded (not-run) | n/a | static gate | See `### Path verdicts` |
+
+## Publication decision
+
+```text
+version=0.5.0
+scope=Claude Code, Codex
+local_gate=not-run
+claude_routing_eval=not-run
+codex_routing_eval=passed
+claude_pipeline_procedure=not-run
+codex_pipeline_procedure=failed
+secret_scan=blocked
+known_limitations_acknowledged=yes
+verdict=do-not-publish
+```
+
+| Key | Bound row |
+|---|---|
+| local_gate | `local_gate` |
+| claude_routing_eval | `claude_routing_eval` |
+| codex_routing_eval | `codex_routing_eval` |
+| claude_pipeline_procedure | `claude_pipeline_procedure` |
+| codex_pipeline_procedure | `codex_pipeline_procedure` |
+| secret_scan | `secret_scan` |
+| known_limitations_acknowledged | [docs/runtime-adapter.md#limits-of-branch-review-result-and-strict-evidence](runtime-adapter.md#limits-of-branch-review-result-and-strict-evidence) |
+
+The verdict stays do-not-publish for three independent reasons: the Codex pipeline procedure FAIL is still open, Claude live behaviour has no recorded result, and this repository is not to be published. No paid model run is implied by this ledger, and no publication was performed.
+
+### Path verdicts
+
+- Claude own marketplace: maintainer review pending -> no-go
+- Claude community marketplace submission: maintainer review pending -> no-go
+- Codex personal marketplace: maintainer review pending -> no-go
+- OpenAI public directory: maintainer review pending -> no-go
