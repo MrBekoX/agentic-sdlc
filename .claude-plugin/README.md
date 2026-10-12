@@ -112,7 +112,7 @@ The flow guards are the deterministic backstop for active implementation flows. 
 
 ## Distribution paths
 
-Four paths exist; each has its own go condition and state. The per-path verdicts are in [release readiness](../docs/release-readiness.md#distribution-paths-and-gono-go), and a state is a snapshot bound to the [release evidence ledger](../docs/release-evidence-0.4.3.md).
+Four paths exist; each has its own go condition and state. The per-path verdicts are in [release readiness](../docs/release-readiness.md#distribution-paths-and-gono-go), and a state is a snapshot bound to the [release evidence ledger](../docs/release-evidence-0.5.0.md) (the 0.4.3 verdicts stay in the [0.4.3 ledger](../docs/release-evidence-0.4.3.md)).
 
 | Path | Prerequisites | Steps | Go condition | State |
 |---|---|---|---|---|

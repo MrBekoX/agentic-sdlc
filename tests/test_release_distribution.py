@@ -623,11 +623,13 @@ class TestReleaseBuild(ScratchTestCase):
         self.assertIn("error=absolute_hook_path:hooks/grok.json", text)
 
 
-# Recorded when Task 47 went GREEN; asserted on both CI operating systems.
+# Recorded when Task 47 went GREEN; asserted on both CI operating systems. The golden fixture keeps the
+# 0.4.3 ledger name it was recorded with, so a version bump does not change these platform checks.
+GOLDEN_LEDGER = "docs/release-evidence-0.4.3.md"
 GOLDEN_COMMIT = "51e01c39dc9290011b206ec409745c6909da541b"
 GOLDEN_ARCHIVE_SHA256 = "ae1f6d17756a9f44a677d4e3aa37eee60ed3409eadc1320ac3bcbb50b29158f3"
 RELEASE_VERSION = (REPO / "VERSION").read_text(encoding="utf-8").strip()
-# QUAL-8: the excluded ledger name follows VERSION; at 0.4.3 the golden identities are unchanged.
+# QUAL-8: the excluded ledger name follows VERSION; only the golden digest test pins GOLDEN_LEDGER.
 LEDGER_DOCS = (f"docs/release-evidence-{RELEASE_VERSION}.md", "docs/release-readiness.md")
 
 
@@ -654,7 +656,7 @@ def printed(text: str, key: str) -> str:
 
 
 class TestDeterministicLayout(ScratchTestCase):
-    def layout_repo(self) -> ScratchRepo:
+    def layout_repo(self, ledger: str = LEDGER_DOCS[0]) -> ScratchRepo:
         repo = self.scratch()
         repo.write({
             "Z.txt": b"upper\n",
@@ -662,7 +664,7 @@ class TestDeterministicLayout(ScratchTestCase):
             "a-b.txt": b"dash\n",
             "a/b.txt": b"nested\n",
             "run.sh": b"#!/bin/sh\necho run\n",
-            LEDGER_DOCS[0]: b"# ledger\n",
+            ledger: b"# ledger\n",
             LEDGER_DOCS[1]: b"# readiness\n",
         })
         repo.git("add", "--", ".")
@@ -774,7 +776,7 @@ class TestDeterministicLayout(ScratchTestCase):
         self.assertEqual(modes["notes.txt"], 0o100644)
 
     def test_golden_archive_digest_is_platform_independent(self):
-        repo = self.layout_repo()
+        repo = self.layout_repo(ledger=GOLDEN_LEDGER)
         commit = repo.git("rev-parse", "HEAD")
         result, text, out = self.build(repo.root)
         self.assertEqual(result.exit_code, 0, text)

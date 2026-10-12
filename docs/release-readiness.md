@@ -40,7 +40,7 @@ The experimental ZCode, Grok CLI, and Kimi Code installs (local directory, and r
 
 **Go condition.** Anonymous users need a public repository: a private repository installs only through a git credential helper or SSH, and a token supplied only in an environment variable does not authenticate the install ([private repositories](https://code.claude.com/docs/en/plugin-marketplaces.md#private-repositories), observed 2026-09-14). `claude plugin validate .claude-plugin/marketplace.json --strict` and `claude plugin validate .claude-plugin/plugin.json --strict` pass as two separate checks. Since Claude Code 2.1.289, `claude plugin validate .` also checks the plugin beside a marketplace manifest ([plugins/publish](https://code.claude.com/docs/en/plugins/publish) and the 2.1.289 changelog, fetched 2026-10-07). Hook-config validity comes from the repository tests. A worktree strict `plugin.json` exit 1 caused by the untracked `CLAUDE.md` is not the clean-package result. The clean install starts from an empty profile: `claude plugin marketplace add MrBekoX/agentic-sdlc`, `claude plugin install agentic-sdlc@mrbekox`, a new session or `/reload-plugins`, then skill, command and hook discovery plus one real invocation, with the clone transport (SSH or HTTPS) recorded.
 
-State: BLOCKED. The repository is private, its unauthenticated URL returns 404 in `docs/publication/link-checks.json`, and visibility stays blocked by an unresolved Git history finding (ledger row `history_private_path_finding`).
+State: BLOCKED. The repository is private, its unauthenticated URL returns 404 in `docs/publication/link-checks.json`, and on 2026-10-12 the maintainer decided that this repository stays private: its Git history holds an unresolved finding (ledger row `history_private_path_finding`), so publication goes through a new public repository built from clean source.
 
 Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.5.0.md#path-verdicts)).
 
@@ -100,7 +100,7 @@ The local gate proves metadata consistency, Codex manifest shape, static skill w
 
 Do not claim that a skill "works", "triggers", or is "production-ready" in a runtime unless at least one current transcript or eval summary exists for that claim.
 
-The model baseline for this release batch is `gpt-5.5` / Low for Codex (a new baseline) and `claude-sonnet-5` / Low for Claude. Earlier `gpt-5.3-codex-spark` / Low results are historical and separate; they are not comparable to the new Codex baseline.
+The model baseline for the 0.4.3 release batch is `gpt-5.5` / Low for Codex (a new baseline) and `claude-sonnet-5` / Low for Claude. Earlier `gpt-5.3-codex-spark` / Low results are historical and separate; they are not comparable to the new Codex baseline.
 
 The live batch follows the BR11 settings: fifteen standalone routing scenarios with `--runs 3 --threshold 1.0` per runtime, where every case needs three correct observations, no hard error and no prohibited pipeline escalation; Claude `--max-budget-usd 1.50` per routing run; both procedure cases per runtime, at most $6 per Claude case; and no automatic retry. The first procedure case explicitly requests smoke depth, while the second requests the normal per-package layout.
 
@@ -166,7 +166,7 @@ Passing signals observed in the transcript:
 - final report included `Overall Status: PASS` for Implementation Control and the final todo list was complete.
 
 Limit of this evidence: this is a historical Codex `0.3.0` low-effort smoke/procedure run, not a
-publish-grade high-effort stability run and not live evidence for the current `0.4.3` worktree. It is
+publish-grade high-effort stability run and not live evidence for the current `0.5.0` worktree. It is
 valid only as evidence that the earlier adapter completed the full pipeline in a small fixture,
 including RED->GREEN, artifact validation, work-package resolution, and recovery from metadata errors.
 
@@ -192,7 +192,7 @@ Scan staged and unstaged diffs for tokens, private keys, connection strings, and
 - Hooks are local runtime guardrails. Some warn or fail open by design, so they complement but do not replace diff review, test output, and secret scanning.
 - `0.5.0` is publishable for Claude Code and Codex only when the local gate and current release evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
 - Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters.
-- Current bounded hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. They retain their own immutable source identities; current parser replay and later skill evaluations are separate evidence. `transcript_path` remains unstable. See [runtime boundaries](runtime-adapter.md#current-binary-and-historical-hook-evidence) and the [public release ledger](release-evidence-0.5.0.md).
+- Current bounded hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. They retain their own immutable source identities; current parser replay and later skill evaluations are separate evidence. `transcript_path` remains unstable. See [runtime boundaries](runtime-adapter.md#current-binary-and-historical-hook-evidence) and the [0.4.3 release ledger](release-evidence-0.4.3.md).
 
 ## Auxiliary .skill Archives
 

@@ -13,6 +13,7 @@ Tasks 83-85 write this format and the release envelope parses it when it fills l
 
 The helpers are pure and return named violations, so the synthetic cases prove each rule fires.
 """
+import hashlib
 import re
 import subprocess
 import unittest
@@ -432,6 +433,34 @@ def identity_check_violations(text):
     return violations
 
 
+ROUTING_DIGEST = re.compile(r"routing input digest ([0-9a-f]{64})")
+STALE_PASS_MARKERS = ("measured at", "not repeated", "not re-measured")
+
+
+def codex_routing_input_digest(root, routing_eval):
+    """SHA-256 of everything the Codex routing classifier reads besides its argv: the prompt that
+    `routing_eval` (scripts/run_routing_eval.py) builds from the skills' name/description lines with an
+    empty user prompt, a newline, and the scenario set read as text (CRLF checkouts give the same digest)."""
+    prompt = routing_eval.build_codex_prompt("", routing_eval.load_skills(root / "skills"))
+    scenarios = (root / "tests" / "skills" / "routing" / "using-agentic-sdlc.json").read_text(encoding="utf-8")
+    return hashlib.sha256((prompt + "\n" + scenarios).encode("utf-8")).hexdigest()
+
+
+def carried_state_violations(rows):
+    """A PASS taken from another commit must say it is carried from byte-identical inputs."""
+    violations = []
+    for row_id, row in rows.items():
+        if _row_state(row) != "PASS":
+            continue
+        state = row["state"]
+        carried = "carried" in state
+        if carried and "byte-identical" not in state:
+            violations.append("carried_pass_without_identity:" + row_id)
+        if not carried and any(marker in state for marker in STALE_PASS_MARKERS):
+            violations.append("stale_pass_not_carried:" + row_id)
+    return violations
+
+
 def packet_dependency_violations(packet, skill_texts, command_names, agent_names, packaged=None):
     """The OpenAI packet states the no-commands/agents rule as a guide requirement and names each GAP."""
     violations = []
@@ -676,6 +705,27 @@ class TestCurrentReleaseLedger(unittest.TestCase):
 
     def test_ledger_names_its_own_version(self):
         self.assertEqual(self.text.splitlines()[0], f"# Release evidence — {self.version}")
+
+    def test_carried_states_name_byte_identical_inputs(self):
+        self.assertEqual(carried_state_violations(required_rows(self.text)[0]), [])
+
+    def test_carried_codex_routing_pass_matches_current_inputs(self):
+        row = required_rows(self.text)[0]["codex_routing_eval"]
+        if _row_state(row) != "PASS" or "carried" not in row["state"]:
+            self.skipTest("codex_routing_eval is not a carried PASS in this ledger")
+        from scripts import run_routing_eval
+        recorded = ROUTING_DIGEST.search(row["identity"])
+        self.assertIsNotNone(recorded, "a carried routing PASS records its routing input digest")
+        self.assertEqual(recorded.group(1), codex_routing_input_digest(REPO, run_routing_eval))
+
+    def test_carried_state_rule_synthetic_cases(self):
+        def rows(state):
+            return {"x": {"state": state}}
+
+        self.assertEqual(carried_state_violations(rows("PASS (carried from byte-identical routing inputs)")), [])
+        self.assertEqual(carried_state_violations(rows("not-run (measured at 1a9ac73)")), [])
+        self.assertIn("carried_pass_without_identity:x", carried_state_violations(rows("PASS (carried from 1a9ac73)")))
+        self.assertIn("stale_pass_not_carried:x", carried_state_violations(rows("PASS (measured at 1a9ac73)")))
 
 
 class TestOpenAIPacketDependencies(unittest.TestCase):
