@@ -160,6 +160,8 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_strict_flow_evidence.py` | flow evidence | Offline strict flow-evidence derivation: what counts as a step having run, and the characterization pairs that separate a real signal from a jointly-empty comparison. |
 | `tests/test_br6_case_table.py` | guard regression | The shared shell-attribution case table: schema, row coverage, and parity between the Node and Python implementations that read it. |
 | `tests/test_grok_rhai_workflows.py` | runtime adapter | The experimental Grok adapter's Rhai workflow scripts: each shipped script parses, declares the metadata the runtime reads, and dispatches only agent types that exist. |
+| `tests/test_multi_lens_review_workflow.py` | workflow behaviour | Runs `workflows/multi-lens-review.js` under the runtime wrapper with stubbed agents: a missing finder or verifier answer is an error, an incomplete result or an unverified finding, never a clean or confirmed review. Skipped if `node` is absent. |
+| `tests/test_light_flow_audit.py` | skill contract | The `safe-refactor` audit path: `implementation-control` and `implementation-auditor` grade the Goal Lock for that one flow, and every other flow without a spec/plan keeps the block. |
 
 Source inventory tests must exclude generated `dist/`/`build/` archive and installed-cache copies while retaining controls for accidental source copies. External-toolkit negative fixtures must isolate the user's home: a legitimate already-installed fallback is runtime behavior, not a failed identity check. The source gate never installs a toolkit to make a fixture pass.
 
