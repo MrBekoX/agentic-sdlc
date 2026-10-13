@@ -56,7 +56,7 @@ Use live evals for those claims.
 
 ## Automation / CI policy
 
-`.github/workflows/ci.yml` runs on `pull_request`, and on `push` **only to `main`** (`workflow_dispatch` also allows a manual run), across `ubuntu-latest`, `windows-latest` and `macos-latest`. The macOS entry is preparation until a job result is recorded. A push to a feature branch therefore gets no CI until a pull request exists for it — open the PR early if you want the matrix to run. The source steps run:
+`.github/workflows/ci.yml` runs on `pull_request`, and on `push` **only to `main`** (`workflow_dispatch` also allows a manual run), across `ubuntu-latest`, `windows-latest` and `macos-15-intel`. The standard Intel macOS image preserves this OS coverage after hosted ARM capacity left `macos-latest` jobs unacquired. It does not establish ARM coverage. The macOS entry is preparation until a job result is recorded. A push to a feature branch therefore gets no CI until a pull request exists for it — open the PR early if you want the matrix to run. The source steps run:
 
 ```bash
 python3 scripts/bump_version.py --release-check
