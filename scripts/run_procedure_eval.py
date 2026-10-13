@@ -1041,6 +1041,9 @@ def has_unquoted_background(statement: str) -> bool:
     return False
 
 
+_BR6_DOUBLE_QUOTE_EDGE_RE = re.compile(r'["\\]')
+
+
 def br6_statement_joins(command: str) -> list[tuple[str, bool]]:
     """(statement, joined by `||`) pairs, mirroring splitBr6StatementJoins in hooks/codex-rollout.mjs (D23).
 
@@ -1076,6 +1079,13 @@ def br6_statement_joins(command: str) -> list[tuple[str, bool]]:
             quote = "" if end != -1 else quote
             index = stop
             continue
+        if quote == '"':
+            edge = _BR6_DOUBLE_QUOTE_EDGE_RE.search(text, index)
+            stop = length if edge is None else edge.start()
+            if stop > index:
+                current.append(text[index:stop])
+                index = stop
+                continue
         nxt = text[index + 1] if index + 1 < length else ""
         if ch == "\\":
             if nxt == "\n":
@@ -1157,9 +1167,11 @@ _GRAMMAR_ASSIGNMENT_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\+?=")
 _GRAMMAR_PLAIN_ARGUMENT_RE = re.compile(r"[A-Za-z0-9_-]+")
 _GRAMMAR_SET_OPTION_RE = re.compile(r"[-+][euo]+")
 _GRAMMAR_SET_WORDS = frozenset({"errexit", "nounset", "pipefail"})
+# Search ordinary quoted spans in C; every character needing a grammar decision still takes its existing branch.
+_GRAMMAR_DOUBLE_QUOTE_EDGE_RE = re.compile(r'["\\$`\x00-\x08\x0b-\x1f\x7f\[]')
 
 
-def br6_simple_commands(command: str) -> list[dict[str, Any]] | None:
+def br6_simple_commands(command: str, *, _collect: bool = True) -> list[dict[str, Any]] | None:
     """The statements and simple commands of `command` (DP39 (1)), or None when it lies outside the D23 safe grammar.
 
     One linear left-to-right pass: unquoted words, single quotes, double quotes without substitution, `$NAME`-style
@@ -1178,7 +1190,8 @@ def br6_simple_commands(command: str) -> list[dict[str, Any]] | None:
     comment-only statements are dropped and the `||` join carries over them. Each simple command is {"assignments": the
     raw leading NAME=/NAME+= words, "words": [{"value", "unknown", "redirect"}] for every other word, "op": the operator
     that ended it inside its statement ("", "&&", "|", "|&" or "&")}. hooks/codex-rollout.mjs br6SimpleCommands mirrors
-    this pass branch for branch.
+    this pass branch for branch. The private boolean-validation mode returns [] for valid input and preserves every
+    grammar check without decoding or retaining records that its caller never consumes.
     """
     text = str(command or "")
     length = len(text)
@@ -1199,6 +1212,10 @@ def br6_simple_commands(command: str) -> list[dict[str, Any]] | None:
     pending_or = False
 
     def record(raw: str, redirect: bool) -> None:
+        if not _collect:
+            if not current["words"]:
+                current["words"].append(None)  # retain only the operand-presence bit
+            return
         value, unknown = _br6_word_value(raw)
         current["words"].append({"value": value, "unknown": unknown, "redirect": redirect})
 
@@ -1218,7 +1235,10 @@ def br6_simple_commands(command: str) -> list[dict[str, Any]] | None:
         assignment = _GRAMMAR_ASSIGNMENT_RE.match(raw)
         if not command_seen:
             if assignment:
-                current["assignments"].append(raw)
+                if _collect:
+                    current["assignments"].append(raw)
+                elif not current["assignments"]:
+                    current["assignments"].append("")
                 return assignment.group(1) not in BR6_INTEGER_VARIABLES
             command_seen = True
             if not all(c in _GRAMMAR_COMMAND_WORD_CHARS or ord(c) >= 0x80 for c in raw):
@@ -1240,6 +1260,10 @@ def br6_simple_commands(command: str) -> list[dict[str, Any]] | None:
     def end_simple_command(op: str) -> None:
         nonlocal command_seen, safe_builtin, set_command, export_command, current
         command_seen = safe_builtin = set_command = export_command = False
+        if not _collect:
+            current["assignments"].clear()
+            current["words"].clear()
+            return
         current["op"] = op
         if current["assignments"] or current["words"]:
             commands.append(current)
@@ -1247,6 +1271,8 @@ def br6_simple_commands(command: str) -> list[dict[str, Any]] | None:
 
     def end_statement(via_or: bool) -> None:
         nonlocal commands, pending_or
+        if not _collect:
+            return
         if commands:
             statements.append({"via_or": pending_or, "commands": commands})
             pending_or = False
@@ -1348,6 +1374,10 @@ def br6_simple_commands(command: str) -> list[dict[str, Any]] | None:
             while True:
                 if scan >= length:
                     return None  # unterminated
+                edge = _GRAMMAR_DOUBLE_QUOTE_EDGE_RE.search(text, scan)
+                if edge is None:
+                    return None  # unterminated
+                scan = edge.start()
                 inner = text[scan]
                 if inner == '"':
                     break
@@ -1391,7 +1421,7 @@ def br6_simple_commands(command: str) -> list[dict[str, Any]] | None:
 def in_safe_br6_grammar(command: str) -> bool:
     """True only when every character and every simple command of `command` lies inside the D23 safe grammar with the
     DP39 operand rule (br6_simple_commands parses it)."""
-    return br6_simple_commands(command) is not None
+    return br6_simple_commands(command, _collect=False) is not None
 
 
 def has_unquoted_pipe(statement: str) -> bool:
