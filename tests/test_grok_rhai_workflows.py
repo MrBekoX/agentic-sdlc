@@ -145,6 +145,13 @@ class TestGrokRhaiCatalog(unittest.TestCase):
         self.assertIn("final_prompt += ctx_block;", final)
         self.assertIn("final_prompt += draft_md;", final)
 
+    def test_multi_lens_short_votes_are_counted_before_any_classification(self):
+        """Structural parity: dropped results cannot conceal a missing requested vote."""
+        tail = _read(GROK_WF / "multi-lens-review.rhai").split("let verdicts = parallel(vjobs);", 1)[1]
+        self.assertLess(tail.index("short_votes += 1"), tail.index("if total_votes == 0"),
+                        "short-vote coverage must include dropped, unverified and confirmed partitions")
+        self.assertEqual(tail.count("short_votes += 1"), 1, "do not double-count confirmed partial votes")
+
     def test_multi_lens_find_splices_each_lens_key_into_the_stem(self):
         """The Find loop must build each lens prompt via splice_marker, not str.replace.
 

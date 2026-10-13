@@ -25,7 +25,7 @@
 // resolves; it does not make a pre-execution string gate authoritative, which is impossible.
 
 import { runGit } from './git-exec.mjs';
-import { resolve as resolvePath } from 'node:path';
+import { resolve as resolvePath, parse as parsePath, sep } from 'node:path';
 import { skipCommandPrefix } from './shell-prefix.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
 
@@ -219,7 +219,22 @@ function gitCall(tokens) {
   const name = basename(t[0]).toLowerCase().replace(/\.exe$/, '');
   if (name !== 'git') return null;
   const inlineAliases = new Map();
+  const inlineConfig = [];
   const dirs = [];
+  // unwrap returns the actual command suffix. A wrapper operand or redirect filename
+  // named "git" must not truncate the environment prefix before the real command.
+  const gitIndex = tokens.length - t.length;
+  let readContextKnown = !tokens.slice(0, Math.max(0, gitIndex)).some((token) =>
+    /^(?:GIT_(?:DIR|WORK_TREE|NAMESPACE|CONFIG(?:_[A-Z0-9_]+)?|CEILING_DIRECTORIES)|HOME|XDG_CONFIG_HOME)=/.test(token));
+  const config = (kv) => {
+    const j = kv.indexOf('=');
+    const key = j < 0 ? kv : kv.slice(0, j);
+    const value = j < 0 ? 'true' : kv.slice(j + 1);
+    inlineConfig.push([key, value]);
+    if (/^alias\./i.test(key)) inlineAliases.set(key.slice(6).toLowerCase(), value);
+    if (/^core\.(?:bare|worktree)$/i.test(key)) readContextKnown = false;
+    if (/^(?:include|includeif\..+)\.path$/i.test(key)) readContextKnown = false;
+  };
   let i = 1;
   while (i < t.length) {
     const a = t[i];
@@ -227,19 +242,22 @@ function gitCall(tokens) {
     // `-c alias.ci=commit` and `-c=` / `--git-dir=...` inline forms.
     const eq = a.indexOf('=');
     if (a === '-c' && i + 1 < t.length) {
-      const kv = t[i + 1];
-      const j = kv.indexOf('=');
-      if (j > 0 && /^alias\./i.test(kv.slice(0, j))) inlineAliases.set(kv.slice(6, j).toLowerCase(), kv.slice(j + 1));
+      config(t[i + 1]);
       i += 2;
       continue;
     }
+    if (a.startsWith('-c') && a.length > 2) { config(a.slice(2)); i += 1; continue; }
     if (a === '-C' && i + 1 < t.length) { dirs.push(t[i + 1]); i += 2; continue; }
+    if (a.startsWith('-C') && a.length > 2) { dirs.push(a.slice(2)); i += 1; continue; }
+    if (/^--(?:git-dir|work-tree|namespace|exec-path|config-env)(?:=|$)/.test(a) || a === '--bare') {
+      readContextKnown = false;
+    }
     if (eq > 0) { i += 1; continue; }                 // --git-dir=/x : value is attached
     if (GIT_GLOBAL_VALUE_OPTS.has(a) && i + 1 < t.length) { i += 2; continue; }
     i += 1;
   }
   if (i >= t.length) return null;
-  return { subcommand: t[i], args: t.slice(i + 1), inlineAliases, dirs };
+  return { subcommand: t[i], args: t.slice(i + 1), inlineAliases, inlineConfig, dirs, readContextKnown };
 }
 
 function makeAliasLookup(cwd) {
@@ -273,7 +291,35 @@ export function commandCwd(input, env = process.env) {
 // the target is a/b (verified against real git). Taking dirs[0] pointed every git read at a
 // strict ancestor of the real target repository, which silently un-scoped the guard.
 export function resolveTargetCwd(baseCwd, dirs) {
-  return (dirs || []).reduce((acc, d) => resolvePath(acc, d), baseCwd || process.cwd());
+  // Normalize components once rather than resolving an ever-growing path for every -C.
+  // Absolute steps reset the path; Windows root/drive-relative steps retain native semantics.
+  let root;
+  let parts;
+  const assign = (value) => {
+    const absolute = resolvePath(value);
+    root = parsePath(absolute).root;
+    parts = absolute.slice(root.length).split(sep).filter(Boolean);
+  };
+  assign(baseCwd || process.cwd());
+  for (const dir of dirs || []) {
+    if (!dir) continue; // Git's -C '' leaves cwd unchanged
+    let rest = dir;
+    const stepRoot = parsePath(dir).root;
+    if (sep === '\\' && /^[A-Za-z]:$/.test(stepRoot)) {
+      if (root.slice(0, 2).toLowerCase() !== stepRoot.toLowerCase()) { assign(dir); continue; }
+      root = stepRoot + root.slice(2);
+      rest = dir.slice(stepRoot.length);
+    } else if (sep === '\\' && /^[\\/]$/.test(stepRoot)) {
+      parts = [];
+      rest = dir.slice(stepRoot.length);
+    } else if (stepRoot) { assign(dir); continue; }
+    for (const part of rest.split(sep === '\\' ? /[\\/]/ : /\//)) {
+      if (!part || part === '.') continue;
+      if (part === '..') parts.pop();
+      else parts.push(part);
+    }
+  }
+  return root + parts.join(sep);
 }
 
 /**
@@ -336,6 +382,7 @@ export function resolveGitCommands(command, opts = {}) {
     const texts = [];
     const payloadTexts = [];
     const dirs = [];
+    const invocations = [];
     // `dirs` stays the ordered result; `dirSeen` is the membership test. It used to be
     // `dirs.includes(d)`, which compares each new directory against every one already
     // collected - quadratic, and this path has no input cap, so a long enough command line
@@ -377,6 +424,17 @@ export function resolveGitCommands(command, opts = {}) {
         }
         continue;
       }
+      // Additive argv records preserve normal-alias caller operands and ordered -C context.
+      // Keep legacy text/directory views for existing commit readers. Payload paths still never
+      // become disk-read locations, and arbitrary inline config is never passed to a Git child.
+      const orderedDirs = [...(item.orderedDirs || []), ...call.dirs];
+      const inlineConfig = [...(item.inlineConfig || []), ...call.inlineConfig];
+      const effectiveArgs = [...call.args, ...(item.extraArgs || [])];
+      const contextKnown = item.readContextKnown !== false && call.readContextKnown;
+      const effectiveAliases = new Map();
+      for (const [key, value] of inlineConfig) {
+        if (/^alias\./i.test(key)) effectiveAliases.set(key.slice(6).toLowerCase(), value);
+      }
       if (viaPayload) {
         // Message text only, collected separately. A payload-derived call contributes no `-C`
         // directory and never reaches the `-F`/`--file` reader, so reaching into a payload does
@@ -392,6 +450,13 @@ export function resolveGitCommands(command, opts = {}) {
       const sub = String(call.subcommand || '').toLowerCase();
       if (!sub || sub.startsWith('-')) continue;
       subcommands.add(sub);
+      if (sub === 'commit' || sub === 'push') {
+        invocations.push({
+          subcommand: sub, args: effectiveArgs, inlineConfig,
+          cwd: viaPayload ? baseCwd : resolveTargetCwd(baseCwd, orderedDirs),
+          viaPayload, readContextKnown: contextKnown && !viaPayload,
+        });
+      }
       const key = depth + ':' + sub;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -399,19 +464,24 @@ export function resolveGitCommands(command, opts = {}) {
       // expanded. This mirrors git's own behaviour and keeps `git status` off the subprocess path.
       if (GIT_BUILTINS.has(sub)) continue;
       // Resolution order mirrors git: inline `-c alias.x=y` wins over stored config.
-      const inline = call.inlineAliases.get(sub);
-      const expansion = inline !== undefined ? inline : lookupFor(call)(sub);
+      const inline = effectiveAliases.get(sub);
+      const expansion = inline !== undefined ? inline
+        : lookupFor({ ...call, dirs: viaPayload ? call.dirs : orderedDirs })(sub);
       if (!expansion) continue;
       if (expansion.startsWith('!')) {
         // `!`-alias: the expansion is a shell command line, so re-analyze it as one.
-        for (const seg of splitStatements(expansion.slice(1))) {
-          queue.push({ text: seg, depth: depth + 1, viaPayload, payloadDepth });
+        const segments = splitStatements(expansion.slice(1));
+        for (let i = 0; i < segments.length; i += 1) {
+          queue.push({ text: segments[i], depth: depth + 1, viaPayload, payloadDepth,
+            orderedDirs, inlineConfig, readContextKnown: false,
+            extraArgs: i === segments.length - 1 ? effectiveArgs : [] });
         }
       } else {
-        queue.push({ text: 'git ' + expansion, depth: depth + 1, viaPayload, payloadDepth });
+        queue.push({ text: 'git ' + expansion, depth: depth + 1, viaPayload, payloadDepth,
+          orderedDirs, inlineConfig, extraArgs: effectiveArgs, readContextKnown: contextKnown });
       }
     }
-    return { subcommands, texts, payloadTexts, dirs };
+    return { subcommands, texts, payloadTexts, dirs, invocations };
   }
 
   const calls = splitStatements(command)
@@ -421,14 +491,16 @@ export function resolveGitCommands(command, opts = {}) {
   const texts = [];
   const payloadTexts = [];
   const dirs = [];
+  const invocations = [];
   const dirSeen = new Set();                             // same reason as in walk() above
   for (const c of calls) {
     for (const s of c.subcommands) subcommands.add(s);
     texts.push(...c.texts);
     payloadTexts.push(...c.payloadTexts);
+    invocations.push(...c.invocations);
     for (const d of c.dirs) if (!dirSeen.has(d)) { dirSeen.add(d); dirs.push(d); }
   }
-  return { subcommands, texts, payloadTexts, dirs, calls };
+  return { subcommands, texts, payloadTexts, dirs, calls, invocations };
 }
 
 /**

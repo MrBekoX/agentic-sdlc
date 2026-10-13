@@ -322,6 +322,10 @@ for f in to_verify {
         }
         vi += 1;
     }
+    // Completion covers every partition, including majority-refuted findings.
+    if total_votes < votes {
+        short_votes += 1;
+    }
     if total_votes == 0 {
         // A finding nobody could check is UNVERIFIED, never confirmed: zero votes is not a pass.
         unverified.push(#{
@@ -352,9 +356,6 @@ for f in to_verify {
         let kept = f;
         kept.votes = total_votes;
         kept.requestedVotes = votes;
-        if total_votes < votes {
-            short_votes += 1;
-        }
         confirmed.push(kept);
     }
     ji += 1;
