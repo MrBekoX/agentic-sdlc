@@ -506,6 +506,14 @@ class TestProtectedPushDestinations(unittest.TestCase):
         self.assertEqual(self.run_hook("git push --delete origin +main"), {})
         self.assert_denied("git push --delete origin main")
 
+    def test_pattern_captures_are_literal_refname_text(self):
+        self.git("branch", "topic/$&")
+        self.git("config", "remote.origin.push", "refs/heads/topic/*:refs/heads/*")
+        self.assertEqual(self.run_hook("git push origin 'topic/$&'"), {},
+                         "literal capture must not manufacture a protected destination pattern")
+        self.git("branch", "topic/main")
+        self.assert_denied("git push origin topic/main")
+
     def test_invalid_numeric_mirror_is_unresolved_and_bounded(self):
         module = (REPO / "hooks" / "push-targets.mjs").as_uri()
         script = "import {resolvePushTargets} from " + json.dumps(module) + ";\n"

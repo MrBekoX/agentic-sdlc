@@ -80,6 +80,12 @@ function patternCapture(pattern, value) {
     ? value.slice(prefix.length, value.length - suffix.length) : null;
 }
 
+function applyPattern(pattern, capture) {
+  // Git substitutes one wildcard with literal refname text, including '$&' and '$$'.
+  const star = pattern.indexOf('*');
+  return star < 0 ? pattern : pattern.slice(0, star) + capture + pattern.slice(star + 1);
+}
+
 // The existing branch policy is case-insensitive; preserve concrete spellings until
 // Git's case-sensitive destination exclusions have run. This domain is always 80 refs.
 const protectedRefs = ['main', 'master'].flatMap((name) =>
@@ -215,7 +221,7 @@ export function resolvePushTargets(invocation, state = {}) {
       if (!spend(request.src, source)) return unknownMapping(source);
       const capture = patternCapture(request.src, source);
       if (capture !== null) {
-        mapping = { destination: request.dst.replace('*', capture), force: request.force };
+        mapping = { destination: applyPattern(request.dst, capture), force: request.force };
         break;
       }
     }
@@ -229,7 +235,7 @@ export function resolvePushTargets(invocation, state = {}) {
       if (request.matching) reversed.add(source);
       else if (request.pattern) {
         const capture = patternCapture(request.dst ?? request.src, source);
-        if (capture !== null) reversed.add(request.src.replace('*', capture));
+        if (capture !== null) reversed.add(applyPattern(request.src, capture));
       } else if (request.src === source) reversed.add(request.src);
     }
     for (const ref of reversed) {
@@ -285,7 +291,7 @@ export function resolvePushTargets(invocation, state = {}) {
       // Preserve each candidate's case until the active negative filter inside add().
       for (const ref of protectedRefs) {
         const capture = patternCapture(dst, ref);
-        if (capture !== null && (refSet.has(src.replace('*', capture)) || options.prune)) {
+        if (capture !== null && (refSet.has(applyPattern(src, capture)) || options.prune)) {
           const selected = add(ref, forced);
           if (options.prune && selected) pruneDeletion = true;
         }
