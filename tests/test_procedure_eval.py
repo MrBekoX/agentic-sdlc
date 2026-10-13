@@ -1535,6 +1535,40 @@ class TestStrictRedGreen(unittest.TestCase):
             procedure_eval.br6_statement_joins(text)
         self.assertLess(time.time() - started, 5.0, "the safe grammar pass must stay linear")
 
+    def test_safe_grammar_boolean_validation_has_bounded_allocation(self):
+        import tracemalloc
+
+        command = "pytest a;" * 20000
+        tracemalloc.start()
+        try:
+            self.assertTrue(procedure_eval.in_safe_br6_grammar(command))
+            _current, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 2 * 1024 * 1024,
+                        "boolean validation must not retain per-command parse records")
+
+    def test_double_quote_spans_preserve_grammar_and_statement_boundaries(self):
+        cases = [
+            ('pytest "a;#||\t\nb"; true', True, [('pytest "a;#||\t\nb"', False), ('true', False)]),
+            ('pytest "a\\"b" || true', True, [('pytest "a\\"b"', False), ('true', True)]),
+            ('pytest "a\\\nb"; true', True, [('pytest "ab"', False), ('true', False)]),
+            ('pytest "$x"', True, [('pytest "$x"', False)]),
+            ('pytest "$(', False, [('pytest "$(', False)]),
+            ('pytest "\\$(x)"', True, [('pytest "\\$(x)"', False)]),
+            ('pytest "`x`"', False, [('pytest "`x`"', False)]),
+            ('pytest "a\x01b"', False, [('pytest "a\x01b"', False)]),
+            ('pytest "[x]"', True, [('pytest "[x]"', False)]),
+            ('echo "[x]"', False, [('echo "[x]"', False)]),
+            ('echo "\\[x]"', False, [('echo "\\[x]"', False)]),
+            ('pytest "', False, [('pytest "', False)]),
+        ]
+        for text, accepted, statements in cases:
+            with self.subTest(command=text):
+                self.assertIs(procedure_eval.in_safe_br6_grammar(text), accepted)
+                self.assertIs(procedure_eval.br6_simple_commands(text) is not None, accepted)
+                self.assertEqual(procedure_eval.br6_statement_joins(text), statements)
+
     # Shared literal lists (D21): hooks/codex-rollout.mjs hasUnquotedBackground is checked against the same forms.
     BACKGROUND_TRUE = ("pytest &", "pytest & wait", "pytest&", "cd a && pytest &", "pytest \\&& wait", "pytest \\>& wait",
                        "pytest \\|& wait", "pytest &\\> x")
