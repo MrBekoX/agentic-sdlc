@@ -2035,7 +2035,7 @@ class TestCiArchiveSteps(unittest.TestCase):
 
     def test_source_steps_and_triggers_unchanged(self):
         assert_triggers_are_a_known_state(self, self.text)
-        self.assertIn("os: [ubuntu-latest, windows-latest, macos-latest]", self.text)
+        self.assertIn("os: [ubuntu-latest, windows-latest, macos-15-intel]", self.text)
         source = [(name, run) for name, run, _block in self.steps if name in dict(SOURCE_STEPS)]
         self.assertEqual(source, SOURCE_STEPS)
 

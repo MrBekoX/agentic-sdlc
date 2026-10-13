@@ -37,6 +37,13 @@ async function stubAgent(prompt, opts) {
   }
   const index = Number(parts[2]);
   const mode = SCENARIO.verify;
+  if (mode.startsWith('two-refute-third-')) {
+    if (index < 2) return { refuted: true, reason: 'false positive' };
+    if (mode.endsWith('error')) throw new Error('controlled verifier failure');
+    if (mode.endsWith('malformed')) return { refuted: 'true', reason: 'not a boolean' };
+    if (mode.endsWith('keep')) return { refuted: false, reason: 'holds' };
+    return null;
+  }
   if (mode === 'null') return null;
   if ((mode === 'first-only' || mode === 'first-refute-only') && index > 0) return null;
   if (mode === 'first-refute-only') return { refuted: true, reason: 'false positive' };
@@ -139,6 +146,27 @@ class TestMultiLensReviewMissingAnswers(unittest.TestCase):
         # CONTROL: all three answered and refuted -> dropped, exactly as before.
         payload = run_review({"find": {"injection": "one", "*": "none"}, "verify": "refute"})
         self.assertEqual([d["title"] for d in payload["result"]["dropped"]], ["injection-issue"])
+
+    def test_majority_refuted_with_missing_verifier_is_incomplete(self):
+        for preset, lens in (("security", "injection"), ("quality", "correctness")):
+            for missing in ("null", "error", "malformed"):
+                with self.subTest(preset=preset, missing=missing):
+                    payload = run_review({"find": {lens: "one", "*": "none"},
+                                          "verify": "two-refute-third-" + missing},
+                                         {"preset": preset, "scope": "s", "verifyVotes": 3})
+                    self.assertTrue(payload["ok"], payload)
+                    result = payload["result"]
+                    self.assertEqual(len(result["dropped"]), 1, "majority drop policy must stay unchanged")
+                    self.assertEqual((result["dropped"][0]["refutedVotes"], result["dropped"][0]["totalVotes"]), (2, 2))
+                    self.assertIs(result["complete"], False, "a dropped finding still lacks the third requested verdict")
+
+    def test_majority_refuted_with_all_verifiers_is_complete_for_both_presets(self):
+        for preset, lens in (("security", "injection"), ("quality", "correctness")):
+            with self.subTest(preset=preset):
+                result = run_review({"find": {lens: "one", "*": "none"}, "verify": "two-refute-third-keep"},
+                                    {"preset": preset, "scope": "s", "verifyVotes": 3})["result"]
+                self.assertEqual(result["dropped"][0]["totalVotes"], 3)
+                self.assertIs(result["complete"], True)
 
     def test_control_confirmed_and_dropped_behaviour_is_unchanged(self):
         kept = run_review({"find": {"injection": "one", "*": "none"}, "verify": "keep"})["result"]

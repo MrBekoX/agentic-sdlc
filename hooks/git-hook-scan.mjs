@@ -71,8 +71,10 @@ function stagedFindings() {
 }
 
 function messageFindings(file) {
-  // Comment lines are git's own template and are stripped from the recorded message.
-  const body = readFileSync(file, 'utf8').split(/\r?\n/).filter((l) => !l.startsWith('#')).join('\n');
+  // Git can retain commentary with whitespace/verbatim cleanup, nonedited -m/-F defaults,
+  // or a custom comment marker. Scan the supplied bytes conservatively instead of guessing
+  // what cleanup will discard. Ordinary templates and same-line suppressions keep their rules.
+  const body = readFileSync(file, 'utf8');
   return scanLines(body, HIGH).map((f) => ({ what: f.label, where: 'commit message' }));
 }
 

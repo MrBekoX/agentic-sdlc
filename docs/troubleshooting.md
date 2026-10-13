@@ -107,13 +107,15 @@ See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md) for the install s
 
 ## Branch Guard Only Warns
 
-This is the default in Claude Code. To make protected branch commit/push attempts block:
+Warnings are the default. The guard checks the local `main`/`master` checkout and resolved protected push destinations, including aliases, refspecs and local push defaults. Mirror and prune ranges that can delete a protected remote ref also warn when that ref is absent locally. To block these attempts:
 
 ```bash
 AGENTIC_BRANCH_GUARD_BLOCK=true
 ```
 
-The branch guard fails open if git is unavailable or the workspace is not a git repo.
+Unknown local state remains nonblocking unless a protected destination is independently known, for example `HEAD:refs/heads/main`. This includes unavailable Git, nonrepositories, exhausted read budgets, command-supplied Git environment/include/path overrides and unsupported expansions. A tag source with an unqualified destination has an unknown remote namespace; use an explicit `refs/heads/` or `refs/tags/` destination. The guard does not connect to a remote to resolve uncertainty. See [push resolution boundaries](../hooks/README.md) for details.
+
+Very large configured mapping queries can also exhaust the documented matching-work budget. Such a query remains unresolved rather than gaining a guessed upstream or same-name destination; later independently known explicit protected destinations still warn or deny. This client-side backstop preserves fail-open handling for unknown queries.
 
 ## Completion Claim Guard Only Warns
 
