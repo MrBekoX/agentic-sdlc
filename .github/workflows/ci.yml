@@ -25,13 +25,10 @@ jobs:
         # Keep macOS coverage when hosted ARM capacity leaves jobs unacquired.
         os: [ubuntu-latest, windows-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
-    # The gate runs the suite twice per OS: once over the source tree, once inside the extracted
-    # archive. It used to be FOUR - check_all.py also ran an unrestricted `discover -s tests`, so
-    # each explicit `Unit tests` step was shadowed by an implicit one, and this comment
-    # undercounted by 2x. check_all.py now runs only the validator suites it names.
-    # The GitHub default timeout is 360 minutes; a hung job should not burn six hours of the
-    # account's minutes.
-    timeout-minutes: 60
+    # Three suite passes per OS: source, extracted archive, then source again for archive coverage.
+    # An observed Intel macOS source pass took about 27 minutes; allow three passes plus setup.
+    # Keep a finite budget instead of the GitHub default of 360 minutes.
+    timeout-minutes: 90
     steps:
       # Actions are pinned to a full commit SHA: a tag can be moved, a SHA cannot. Dependabot keeps
       # both the SHA and the trailing version comment current (.github/dependabot.yml).

@@ -65,7 +65,7 @@ python3 tests/skills/harness.py
 python3 -m unittest discover -s tests -v
 ```
 
-The archive steps (DP16) then run under the same triggers (pull requests, and pushes to `main`). They build the release archive with `python3 scripts/build_release.py --output`, verify it with `python3 scripts/build_release.py --verify`, extract it to a clean directory without creating a commit, and run all five local gate commands there, including `python3 scripts/bump_version.py --check`. A coverage comparison against the source run counts named skips, and the archive-run logs are named `archive-*`.
+The archive steps (DP16) then run under the same triggers (pull requests, and pushes to `main`). They build the release archive with `python3 scripts/build_release.py --output`, verify it with `python3 scripts/build_release.py --verify`, extract it to a clean directory without creating a commit, and run all five local gate commands there, including `python3 scripts/bump_version.py --check`. A coverage comparison against the source run counts named skips, and the archive-run logs are named `archive-*`. That comparison executes the full source suite again, so each OS job has three suite passes under a finite job limit of 90 minutes; the individual grammar performance assertion remains 5 seconds.
 
 Publishing, release creation, pushing generated commits, and marketplace/plugin publication must remain **manual and explicitly requested**. Do not automate those steps from an eval or a script.
 
