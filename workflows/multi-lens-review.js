@@ -189,5 +189,6 @@ return {
   incompleteLenses,
   // complete = every lens answered and every finding was judged by every skeptic asked.
   complete: incompleteLenses.length === 0 && unverified.length === 0
-    && confirmed.every((c) => c.votes === c.requestedVotes),
+    && confirmed.every((c) => c.votes === c.requestedVotes)
+    && dropped.every((d) => d.totalVotes === votes),
 }

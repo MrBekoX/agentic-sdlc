@@ -20,6 +20,18 @@ Each entry includes:
 
 ---
 
+## 2026-10-13 — Review completion covers every requested response
+
+- **Date:** 2026-10-13
+- **Task / context:** Closing B3 from the technical readiness review.
+- **Symptom:** Two refutations and a missing third verifier dropped the finding by majority and still reported complete.
+- **Root cause:** Completion checked confirmed and unverified partitions; the majority-dropped partition hid its missing requested vote.
+- **Correct fix:** Require full requested coverage for dropped results too; count short coverage before classification in the Rhai twin. JavaScript regression tests reproduced the failure and passed after repair; Rhai coverage is structural only.
+- **Preventive rule / automated check:** Keep response coverage independent of finding classification. Test null, failed and malformed responses in both kept and dropped outcomes.
+- **Related files & tests:** `workflows/multi-lens-review.js`, `.grok/workflows/multi-lens-review.rhai`, `tests/test_multi_lens_review_workflow.py`, `tests/test_grok_rhai_workflows.py`.
+
+---
+
 ## 2026-10-12 — A bounded scan needs a budget per class for every bounded resource
 
 - **Date:** 2026-10-12

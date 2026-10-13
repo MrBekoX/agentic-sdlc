@@ -3,28 +3,60 @@
 // to deny protected-branch commit/push without editing this file.
 // On error, fail-open (does not break the command).
 import { runGit } from './git-exec.mjs';
-import { resolve as resolvePath } from 'node:path';
 import { readStdin } from './secret-patterns.mjs';
-import { commandCwd, resolveGitCommands, targetCwdsFor } from './git-invocation.mjs';
+import { commandCwd, resolveGitCommands } from './git-invocation.mjs';
+import { PUSH_CONFIG_PATTERN, resolvePushTargets } from './push-targets.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
 import { emitHookResult } from './hook-output.mjs';
 
 const BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_BRANCH_GUARD_BLOCK || ''));
 const PROTECTED = /^(main|master)$/i;
+const stateCache = new Map();
+const branchCache = new Map();
+let stateDeadline;
 
-function git(args, cwd) {
+function queryGit(args, cwd, allowNoMatch = false) {
   try {
-    return runGit(args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch {
-    return '';
+    const timeout = Math.min(1000, stateDeadline - Date.now());
+    if (timeout <= 0) return { text: '', known: false };
+    return { text: runGit(args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      timeout, maxBuffer: 1024 * 1024 }).trim(), known: true };
+  } catch (error) {
+    return { text: '', known: allowNoMatch && error.status === 1 && !String(error.stdout || '') };
   }
 }
 
 function currentBranch(cwd) {
-  return git(['branch', '--show-current'], cwd) || git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  if (!branchCache.has(cwd)) {
+    branchCache.set(cwd, queryGit(['branch', '--show-current'], cwd).text
+      || queryGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd).text);
+  }
+  return branchCache.get(cwd);
+}
+
+function localPushState(invocation) {
+  // Shell payload -C/config paths must never widen the existing reader boundary.
+  if (!invocation.readContextKnown) return {};
+  const cwd = invocation.cwd;
+  if (stateCache.has(cwd)) return stateCache.get(cwd);
+  const config = [];
+  const configRead = queryGit(['config', '--null', '--get-regexp', PUSH_CONFIG_PATTERN], cwd, true);
+  for (const entry of configRead.text.split('\0').filter(Boolean)) {
+    const newline = entry.indexOf('\n');
+    config.push(newline >= 0 ? [entry.slice(0, newline), entry.slice(newline + 1)] : [entry, 'true']);
+  }
+  const refsRead = queryGit(['for-each-ref', '--format=%(refname)'], cwd);
+  const remotesRead = queryGit(['remote'], cwd);
+  const branch = currentBranch(cwd);
+  const state = { config, refs: refsRead.text.split('\n').filter(Boolean), refsKnown: refsRead.known,
+    remotes: remotesRead.text.split('\n').filter(Boolean), branch,
+    available: configRead.known && refsRead.known && remotesRead.known && !!branch };
+  stateCache.set(cwd, state);
+  return state;
 }
 
 const raw = await readStdin();
+stateDeadline = Date.now() + 4000;
 let input = {};
 try { input = JSON.parse(raw || '{}'); } catch { /* ignore */ }
 const cmd = String(input?.toolInput?.command || input?.tool_input?.command || '');
@@ -50,20 +82,27 @@ const info = resolveGitCommands(cmd, { cwd: baseCwd });
 // resolver when a second `-C` commit was found to go unscanned; this guard was left on the
 // singular one, so `git -C feature-repo commit && git -C main-checkout commit` reported only
 // the first repo's branch and let a direct commit to main through.
-const repoCwds = targetCwdsFor(info, ['commit', 'push'], baseCwd);
+const invocations = (info.invocations || []).filter((call) => call.subcommand === 'commit' || call.subcommand === 'push');
+const repoCwds = [...new Set(invocations.map((call) => call.cwd))];
 const isPush = info.subcommands.has('push');
 if (!info.subcommands.has('commit') && !isPush) process.exit(0);
 
 // Check EVERY repository the command touches, not just the first. One protected branch anywhere in
 // a compound command is enough to warn/deny.
 const protectedBranch = repoCwds.map(currentBranch).find((b) => b && PROTECTED.test(b));
-const branch = protectedBranch;
-const forcePush = isPush && /(--force\b|--force-with-lease\b|\s-f\b)/.test(cmd);
+const pushes = invocations.filter((call) => call.subcommand === 'push')
+  .map((call) => resolvePushTargets(call, localPushState(call)));
+const protectedPush = pushes.find((push) => push.targets.length);
+const branch = protectedBranch || protectedPush?.targets[0];
+const forcePush = isPush && pushes.some((push) => push.force);
 
 if (branch && PROTECTED.test(branch)) {
   const msg =
     `Protected branch '${branch}': commit/push directly to ${branch} is risky (contract 08 — git-safety). ` +
-    `Prefer a feature branch and a reviewed PR.` + (forcePush ? ' FORCE-PUSH detected — extra caution.' : '');
+    `Prefer a feature branch and a reviewed PR.`
+    + (protectedPush?.mirror ? ' Mirror push may delete protected remote refs even when they are absent locally.' : '')
+    + (protectedPush?.prune ? ' Prune push may delete protected remote refs even when they are absent locally.' : '')
+    + (forcePush ? ' FORCE-PUSH detected — extra caution.' : '');
   if (BLOCK) {
     emitHookResult({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: msg },
