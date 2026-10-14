@@ -13,9 +13,9 @@ import re
 
 
 MANIFESTS = tuple(f'.{runtime}-plugin/plugin.json'
-                  for runtime in ('claude', 'codex', 'kimi', 'zcode', 'grok'))
+                  for runtime in ('claude', 'codex', 'kimi', 'zcode', 'grok', 'cursor'))
 ROOT_REF = re.compile(r'\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT|KIMI_PLUGIN_ROOT|ZCODE_PLUGIN_ROOT|GROK_PLUGIN_ROOT)\}/([A-Za-z0-9_./-]+)')
-ENV_REF = re.compile(r"\.join\(process\.env\.(?:PLUGIN_ROOT|GROK_PLUGIN_ROOT),'hooks','([a-z0-9-]+\.mjs)'\)")
+ENV_REF = re.compile(r"\.join\(process\.env\.(?:PLUGIN_ROOT|GROK_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT),'hooks','([a-z0-9-]+\.mjs)'\)")
 RELATIVE_REF = re.compile(r'\./(hooks/[a-z0-9-]+\.mjs)')
 ABSOLUTE_PATH = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\|(?:^|[\s'\"])/[^\s'\"]+)")
 IMPORT_REF = re.compile(r"(?:from\s*|import\s*(?:\(\s*)?)[\"'](\.{1,2}/[^\"']+\.mjs)[\"']")

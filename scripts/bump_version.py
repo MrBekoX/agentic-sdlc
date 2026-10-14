@@ -39,6 +39,8 @@ MANIFESTS = (
     ("marketplace.json", "marketplace"),          # root, ZCode marketplace schema
     (".grok-plugin/plugin.json", "plugin"),
     (".grok-plugin/marketplace.json", "marketplace"),
+    (".cursor-plugin/plugin.json", "plugin"),
+    (".cursor-plugin/marketplace.json", "marketplace"),
 )
 MANIFEST_KEYS = tuple(path for path, _kind in MANIFESTS)
 # Directories that never hold a shipped manifest. tests/ is pruned because its fixtures write
