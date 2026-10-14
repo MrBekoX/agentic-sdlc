@@ -24,6 +24,8 @@ USER_FACING = (
     "scripts/check_codex_hook_trust.py",
     "scripts/strict_flow_evidence.py",
     "scripts/check_plugin_portability.py",
+    "scripts/check_cursor_plugin.py",
+    "scripts/install_cursor_plugin.py",
     "skills/skill-authoring/scripts/resolve_skill_creator.py",
 )
 

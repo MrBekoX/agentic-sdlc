@@ -342,7 +342,7 @@ PLUGIN_ROOT_RULE = (
     "`SKILL.md` (`<runtime-root>/skills/<name>/SKILL.md`) — never the user's working directory. "
     "Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}`; Claude Code and ZCode substitute "
     "`${CLAUDE_SKILL_DIR}/../..`; Kimi Code substitutes `${KIMI_SKILL_DIR}/../..`; a SessionStart line "
-    "`Plugin root (resolved by this hook…)` names it on Claude Code, Codex and ZCode; Codex and Grok "
+    "`Plugin root (resolved by this hook…)` names it on Claude Code, Codex, ZCode and Cursor; Codex and Grok "
     "CLI show this skill's absolute path in the skill listing. A `${…}` token still shown literally is "
     "unresolved: never pass it to a shell. Confirm `<runtime-root>/scripts/validate_artifacts.py` "
     "exists and write that absolute path, quoted for your shell, into commands; if it cannot be "

@@ -2,7 +2,7 @@
 
 ![agentic-sdlc](agentic-sdlc-image.png)
 
-> An AGENTIC-SDLC skill library with adapters for **Claude Code**, **Codex**, **Kimi Code**, **ZCode** and **Grok CLI**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
+> An AGENTIC-SDLC skill library with adapters for **Claude Code**, **Codex**, **Kimi Code**, **ZCode**, **Grok CLI** and **Cursor**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
 > `Version 0.5.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
 
@@ -10,7 +10,7 @@
 
 ## Scope
 
-All five platforms are in packaging and portability scope. Claude Code and Codex retain their full runtime guard adapters; the others expose the documented subsets below. Native/live evidence is separate from packaging support:
+Claude Code, Codex, Kimi Code, ZCode, Grok CLI and Cursor are in packaging and portability scope. Claude Code and Codex retain their full runtime guard adapters; the others expose the documented subsets below. Native/live evidence is separate from packaging support. The five vendor-CLI lifecycle passes below do not include Cursor:
 
 | Runtime | Read this first | Plugin entry point |
 |---|---|---|
@@ -19,6 +19,7 @@ All five platforms are in packaging and portability scope. Claude Code and Codex
 | Kimi Code | [`.kimi-plugin/README.md`](.kimi-plugin/README.md) | [`.kimi-plugin/plugin.json`](.kimi-plugin/plugin.json) + [custom marketplace](marketplace-kimi.json) |
 | ZCode | [`.zcode-plugin/README.md`](.zcode-plugin/README.md) | [`.zcode-plugin/plugin.json`](.zcode-plugin/plugin.json) + [marketplace](marketplace.json) |
 | Grok CLI | [`.grok-plugin/README.md`](.grok-plugin/README.md) | [`.grok-plugin/plugin.json`](.grok-plugin/plugin.json) + [marketplace](.grok-plugin/marketplace.json) |
+| Cursor | [`.cursor-plugin/README.md`](.cursor-plugin/README.md) | [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json) + [marketplace](.cursor-plugin/marketplace.json) |
 
 Installation/update/uninstall steps, verified root contracts and publishing limits for all five platforms are in [multi-platform distribution](docs/publication/multi-platform-distribution.md); the per-platform and per-OS verification results are in the [compatibility matrix](docs/publication/compatibility-matrix.md). Requirements on every platform: Node.js on the hook `PATH` (22 and 24 tested; a missing `node` silently disables the guards), Python 3 for helper workflows (3.12 tested; the helpers that skills run are kept import-compatible with Python 3.8 by a static check; maintainer and release tooling such as `build_release.py`, `bump_version.py`, the Codex trust check and the eval runners needs Python 3.12; `py -3` on Windows when `python3` is missing or is the Microsoft Store alias) and Git. Repository-URL installs use the public repository `MrBekoX/agentic-sdlc`; an extracted package directory installs from any local path without developer-specific setup, as long as the path contains no `#` (Codex and Grok read `#` specially). Kimi, ZCode and Grok are packaged adapters with limited runtime coverage; they do not inherit Claude/Codex transcript or Workflow behavior. The 0.4.3 release evaluation covered only Claude Code and Codex (its verdict was do-not-publish) and does not certify the other adapters' native lifecycle. Other harnesses remain deferred.
 
@@ -83,6 +84,18 @@ The install also enables the plugin; `grok plugin enable agentic-sdlc` is only n
 
 In the ZCode desktop client (builds for Windows x64/ARM64, macOS Apple Silicon/Intel DMG and Linux x64 AppImage): **Settings → Plugins → Add marketplace**, choose the package's root [`marketplace.json`](marketplace.json) **as a file source**, then **Install**. Newly installed plugins are enabled by default, so their hooks run at install: review the [hook wiring](#guardrails) first. Start a new session afterwards.
 
+### Cursor
+
+From the package directory:
+
+```bash
+python3 scripts/install_cursor_plugin.py install
+```
+
+On Windows, use `py -3` when `python3` is missing or is the Microsoft Store alias. The script resolves Cursor's documented local plugin directory from the current user's home (`~/.cursor/plugins/local/agentic-sdlc` on macOS and Linux, `%USERPROFILE%\.cursor\plugins\local\agentic-sdlc` on Windows). It copies this package there. A symlink from that folder to a checkout elsewhere is not loaded. Then run **Developer: Reload Window**, open **Customize**, and confirm `agentic-sdlc`. Node.js 22 or newer (`node` on `PATH`), Python 3.8+ and Git are required; a missing tool stops the install with `error=node_missing`, `error=python_missing` or `error=git_missing`.
+
+In a project chat, start with `/using-agentic-sdlc`. A full delivery request uses `/agentic-sdlc-pipeline`. The read-only command is `/git-safety-check`. Teams can import `https://github.com/MrBekoX/agentic-sdlc` from **Dashboard → Plugins & MCPs → Add Marketplace**; that import reads [`.cursor-plugin/marketplace.json`](.cursor-plugin/marketplace.json). Nothing has been submitted to the public Cursor Marketplace.
+
 ### Update and uninstall
 
 | Platform | Update | Uninstall |
@@ -92,6 +105,7 @@ In the ZCode desktop client (builds for Windows x64/ARM64, macOS Apple Silicon/I
 | Kimi Code | Reinstall the changed directory, or press Enter on an available update in `/plugins` | `/plugins remove agentic-sdlc` (the managed copy stays on disk) |
 | Grok CLI | Local install: `grok plugin uninstall agentic-sdlc`, then install the new folder; Git catalog: `grok plugin marketplace update <source-name>`, then `grok plugin update agentic-sdlc` | `grok plugin uninstall agentic-sdlc` (no prompt; `--keep-data` keeps data) |
 | ZCode | Refresh the marketplace → **Manage installed** → **Check for updates** (offered only when the version changes) → start a new session | **Settings → Plugins → Manage installed → Uninstall** (asks for confirmation) |
+| Cursor | From the package directory, `python3 scripts/install_cursor_plugin.py update`, then **Developer: Reload Window** | `python3 scripts/install_cursor_plugin.py uninstall` (removes files this installer wrote; other files in that folder stay) |
 
 Native install, discovery, update and uninstall of a package directory passed in all 15 platform × OS cells of the [compatibility matrix](docs/publication/compatibility-matrix.md), with no model turn. Not proven there: hook trust and delivery inside a live session, live skill and model behavior, ZCode's desktop GUI flow (the bundled agent CLI was used), Git-catalog update paths (Codex `marketplace upgrade`, Kimi Enter-update) and Kimi's TUI `/plugins install` (the `kimi web` API was used). Retained data and scope options are in [multi-platform distribution](docs/publication/multi-platform-distribution.md).
 
@@ -311,12 +325,12 @@ workflows/             Claude Code dynamic workflow scripts; workflows/zcode/ ho
 hooks/                 Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/      Durable behavior contracts
 commands/              Manual slash-command definitions
-scripts/               23 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check, native lifecycle check
+scripts/               25 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check, native lifecycle check, Cursor package check and install
 tests/                 Unit tests, harness, fixtures, golden refs, eval seeds
 docs/                  Component reference, boundaries, testing, release notes
 ```
 
-Skills live in root [`skills/`](skills/), not in `.claude/skills/` or `.codex/skills/`. All five adapters (Claude Code, Codex, Kimi Code, ZCode and Grok CLI) load this shared source tree, through an explicit manifest path or the runtime's default `skills/` layout.
+Skills live in root [`skills/`](skills/), not in `.claude/skills/` or `.codex/skills/`. Claude Code, Codex, Kimi Code, ZCode, Grok CLI and Cursor load this shared source tree, through an explicit manifest path or the runtime's default `skills/` layout.
 
 ## Skill Inventory
 
@@ -367,6 +381,7 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 | ZCode (experimental adapter) | [`hooks/hooks-zcode.json`](hooks/hooks-zcode.json), declared by `.zcode-plugin/plugin.json`: `PreToolUse` command guards on `Bash`, `PostToolUse` write scan on `Write\|Edit`, and the `SessionStart` bootstrap on `startup\|resume\|clear\|compact`, each a `process` executor (`node` on `PATH` required). Stop completion/flow guards and the flow-order guard stay unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
 | Grok CLI (experimental adapter) | [`hooks/hooks-grok.json`](hooks/hooks-grok.json), declared by `.grok-plugin/plugin.json`: `PreToolUse` command guards on `Bash\|run_terminal_command`; fixed Node code reads `process.env.GROK_PLUGIN_ROOT` as data. Write-scan, Stop, and SessionStart remain unwired; see [`docs/runtime-adapter.md`](docs/runtime-adapter.md). |
 | Kimi Code (experimental adapter) | Inline `hooks` in `.kimi-plugin/plugin.json`: three `PreToolUse` command guards (`scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs`) on `^Bash$`, run as `node "./hooks/<handler>.mjs"` with the plugin root as hook cwd; `sessionStart.skill` loads the `using-agentic-sdlc` router. Write-scan and Stop guards are not wired and warn-only guard output is not shown; see [`.kimi-plugin/README.md`](.kimi-plugin/README.md). |
+| Cursor | [`hooks/hooks-cursor.json`](hooks/hooks-cursor.json), declared by `.cursor-plugin/plugin.json`: `beforeShellExecution` command guards, `preToolUse` write scan and flow-order, `sessionStart`, and a `stop` worktree scan. Launch code reads `process.env.CURSOR_PLUGIN_ROOT`. Claude transcript Stop readers stay unwired. See [`.cursor-plugin/README.md`](.cursor-plugin/README.md). |
 
 Claude Code wires flow enforcement through `flow-order-guard.mjs` and `flow-step-guard.mjs`. Codex uses its own `flow-order-guard-codex.mjs` and `flow-step-guard-codex.mjs` adapters over the same [`hooks/flow-requirements.json`](hooks/flow-requirements.json); the Codex order gate is opt-in and its Stop gate can continue the turn but cannot undo effects.
 

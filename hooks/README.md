@@ -13,6 +13,7 @@ Two kinds of guard live here:
 | Codex | `hooks/hooks-codex.json` via `.codex-plugin/plugin.json`, after hook review/trust; portable root manifests are not hook-equivalent on CLI 0.154.0 | `PreToolUse`, `SessionStart`, `Stop` |
 | ZCode (Z.ai) (experimental adapter, not a 0.4.3 release target) | `hooks/hooks-zcode.json` via `.zcode-plugin/plugin.json`; `hooks/hooks.json` is never created | `PreToolUse` (`Bash`), `PostToolUse` (`Write\|Edit`), `SessionStart` (`startup\|resume\|clear\|compact`); Stop guards and `flow-order-guard` unwired |
 | Grok CLI (experimental adapter, not a 0.4.3 release target) | `hooks/hooks-grok.json` via `.grok-plugin/plugin.json`; `hooks/hooks.json` is never created | `PreToolUse` only (`Bash\|run_terminal_command`); write-scan / Stop / SessionStart unwired |
+| Cursor | `hooks/hooks-cursor.json` via `.cursor-plugin/plugin.json`; `hooks/hooks.json` is never created | `beforeShellExecution` command guards, `preToolUse` write scan and flow-order, `sessionStart` bootstrap, `stop` worktree scan. Claude transcript Stop readers stay unwired |
 
 > **Command-guard matcher is `Bash\|PowerShell`, with no `if` filter.** Both details are security-load-bearing.
 > On a Windows host without Git Bash, Claude Code does not register the Bash tool at all, so a `Bash`-only
@@ -161,6 +162,6 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 
 ## Adding Or Disabling Hooks
 
-- Add new scripts under the matching event in `hooks/hooks-claude.json` for Claude Code or `hooks/hooks-codex.json` for Codex when that runtime supports the event. The Grok adapter wire is `hooks/hooks-grok.json`; do not copy Claude/Codex parsers into it, and do not create `hooks/hooks.json`.
+- Add new scripts under the matching event in `hooks/hooks-claude.json` for Claude Code or `hooks/hooks-codex.json` for Codex when that runtime supports the event. The Grok adapter wire is `hooks/hooks-grok.json` and the Cursor adapter wire is `hooks/hooks-cursor.json`; do not copy Claude/Codex parsers into them, and do not create `hooks/hooks.json`.
 - Use runtime hook controls to browse or temporarily disable hooks.
 - Keep scripts deterministic. Checks that need judgment belong in skills/contracts.

@@ -20,6 +20,7 @@ These hooks open the transcript or rollout file named by the `transcript_path` f
 | `hooks/completion-claim-guard-codex.mjs` | Codex | `Stop` |
 | `hooks/flow-step-guard-codex.mjs` | Codex | `Stop` |
 | `hooks/flow-order-guard-codex.mjs` | Codex | `PreToolUse` for `Bash`, `apply_patch` |
+| `hooks/cursor-launch.mjs` | Cursor | Forwards `transcript_path` to `hooks/flow-order-guard.mjs` on `preToolUse`. The launcher does not open that file. |
 
 ### Work-package artifacts
 
@@ -80,7 +81,7 @@ The helpers below write transcripts, review packages and task briefs, redacted a
 
 ## Model providers
 
-The skills run inside Claude Code, Codex, Kimi Code, Grok CLI or ZCode. Content that the runtime sends to a model, including files the agent reads and tool output, is processed by the model provider the user configured in that runtime, under that provider's terms.
+The skills run inside Claude Code, Codex, Kimi Code, Grok CLI, ZCode or Cursor. Content that the runtime sends to a model, including files the agent reads and tool output, is processed by the model provider the user configured in that runtime, under that provider's terms.
 
 ## Directory Policy 3.A
 
