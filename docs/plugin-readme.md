@@ -1,6 +1,6 @@
 # AGENTIC-SDLC Plugin Reference
 
-> Version: `0.5.0`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md), [Codex](../.codex-plugin/README.md), [Kimi Code](../.kimi-plugin/README.md), [Grok CLI](../.grok-plugin/README.md) or [ZCode](../.zcode-plugin/README.md).
+> Version: `0.5.0`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md), [Codex](../.codex-plugin/README.md), [Kimi Code](../.kimi-plugin/README.md), [Grok CLI](../.grok-plugin/README.md), [ZCode](../.zcode-plugin/README.md) or [Cursor](../.cursor-plugin/README.md).
 
 AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**, with experimental adapters for **Kimi Code**, **Grok CLI** and **ZCode**. It routes each prompt to the smallest sufficient skill and reserves the full SDLC envelope for work that actually needs it.
 
@@ -13,9 +13,10 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**, wi
 | ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Marketplace install through the root ZCode-schema `marketplace.json` added as a file source; a directory or GitHub source (`MrBekoX/agentic-sdlc`) is read through `.claude-plugin/marketplace.json` first and shows the Claude entry, and the GitHub source (public since 2026-10-12) is not natively verified. A narrow verified-event hook wire. ZCode 3.14.0 added dynamic workflows, but Z.ai publishes no script API and `plugin.json` has no `workflows` key, so none ships here. See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
 | Grok CLI | Adapter / experimental (not a 0.4.3 release target) | Local install with `grok plugin install <package-directory> --trust`; the shipped catalog `.grok-plugin/marketplace.json` carries a remote `url` entry pointing at the public repository; a narrow verified-event hook wire (`hooks/hooks-grok.json`); project-catalog Rhai at `.grok/workflows/*.rhai` (not a plugin component). See [`../.grok-plugin/README.md`](../.grok-plugin/README.md). |
 | Kimi Code | Adapter / experimental, limited runtime coverage (not a 0.4.3 release target) | `/plugins install <package-directory>` in the TUI; `.kimi-plugin/plugin.json`, `marketplace-kimi.json`, startup router and three inline command guards; see [Kimi](../.kimi-plugin/README.md). |
+| Cursor | Adapter | Local copy into Cursor's user plugin directory via `scripts/install_cursor_plugin.py`, or a team marketplace import of `.cursor-plugin/marketplace.json`. Shared skills, agents, commands, one rule, and `hooks/hooks-cursor.json`. See [Cursor](../.cursor-plugin/README.md). |
 | OpenCode / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.3`. |
 
-All five platform adapters are included in [distribution preparation](publication/multi-platform-distribution.md); packaging/replay evidence does not replace native/live validation. Native install, discovery, update and uninstall passed for all five on Windows, Linux and macOS in isolated profiles with no model turn ([compatibility matrix](publication/compatibility-matrix.md), E1–E15); hook trust and delivery inside a live session, live skill behavior and ZCode's desktop GUI flow are not proven there.
+Claude Code, Codex, Kimi Code, ZCode and Grok CLI are included in [distribution preparation](publication/multi-platform-distribution.md); packaging/replay evidence does not replace native/live validation. Native install, discovery, update and uninstall passed for those five on Windows, Linux and macOS in isolated profiles with no model turn ([compatibility matrix](publication/compatibility-matrix.md), E1–E15); hook trust and delivery inside a live session, live skill behavior and ZCode's desktop GUI flow are not proven there. The Cursor adapter is packaged separately and its IDE lifecycle cells are `not-run`.
 
 ## Installation Model
 
@@ -34,6 +35,10 @@ All five platform adapters are included in [distribution preparation](publicatio
 | `.grok-plugin/plugin.json` | Grok CLI | Adapter plugin metadata and the Grok hook wire. |
 | `.grok-plugin/marketplace.json` | Grok CLI | Grok-schema catalog whose single entry is a remote `url` source (`https://github.com/MrBekoX/agentic-sdlc.git`), which is public since 2026-10-12; Grok skips an entry that points at the catalog's own root. A local install uses `grok plugin install <package-directory> --trust` instead. |
 | `hooks/hooks-grok.json` | Grok CLI | Verified-event wiring only: `PreToolUse` command guards on `Bash\|run_terminal_command`. |
+| `.cursor-plugin/plugin.json` | Cursor | Cursor plugin metadata and component paths. |
+| `.cursor-plugin/marketplace.json` | Cursor | Single-plugin marketplace (`name=mrbekox`, `source: "."`). Prepared for import; not submitted. |
+| `hooks/hooks-cursor.json` | Cursor | `beforeShellExecution`, `preToolUse`, `sessionStart` and `stop`, launched through `hooks/cursor-launch.mjs`. |
+| `rules/agentic-sdlc.mdc` | Cursor | Always-on pointer at the shared skills and contracts. |
 
 `.claude-plugin/marketplace.json` is Claude's marketplace schema; current Codex reads it as a legacy-compatible layout named `mrbekox`. The primary Codex install is `codex plugin marketplace add <package-directory>` (no `#` in the path; Codex reads `#` as a ref separator) followed by `codex plugin add agentic-sdlc@mrbekox`. That route installed, discovered, recopied and removed the package natively on codex-cli 0.162.1 on Windows (E2 in the [compatibility matrix](publication/compatibility-matrix.md)); the Linux and macOS runs (E6, E11) installed the same package through a personal catalog. Once the repository is public, `codex plugin marketplace add MrBekoX/agentic-sdlc` surfaces the same `mrbekox` marketplace. A personal catalog (`~/.agents/plugins/marketplace.json`, installed with `codex plugin add agentic-sdlc@personal`) is an optional alternative. Installing from both catalogs can list the plugin twice, once from `mrbekox` and once from `personal`.
 
@@ -149,7 +154,7 @@ The experimental adapters wire a subset of the same scripts. Kimi Code (inline h
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
-## Deterministic scripts (23)
+## Deterministic scripts (25)
 
 | Script | Purpose |
 |---|---|
@@ -163,6 +168,8 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | `validate_artifacts.py` | Spec/plan validation: structure, AC coverage, placeholders/secrets, task verification, deferral, and security hand-wave checks. |
 | `resolve_work_package.py` | Deterministically resolves the canonical spec/plan pair for implementation audits without timestamp fallback. |
 | `check_plugin_portability.py` | Checks declared hook paths and their transitive module/resource closure; shared by source harness and release build/verification. |
+| `check_cursor_plugin.py` | Static Cursor manifest, component frontmatter and hook-path check. It does not start Cursor. |
+| `install_cursor_plugin.py` | Copy, update or uninstall the package in Cursor's local plugin directory. Update and uninstall keep files the installer did not write. |
 | `prepare_marketplace_release.py` | Export validated committed source and deterministic Grok/ZCode catalog packets to a new local destination, with separate producer/source provenance and byte verification; no publication or original Git mutation. |
 | `detect_context.py` | Workspace/dependency/toolchain classification. |
 | `run_trigger_eval.py` | Claude Code trigger eval runner. |

@@ -32,6 +32,7 @@ Each skill names the capability it needs; when a runtime lacks it, use this fall
 | Kimi Code | None: `Agent` author → critic → revise with saved artifacts | `Agent` with a plugin agent role, else `coder` / `explore` / `plan` plus the role instructions | Ask directly in chat; stop at the decision point | Not wired (PreToolUse command guards only) | `sessionStart.skill` selects `using-agentic-sdlc` | `${KIMI_SKILL_DIR}` substituted; resolve the root as `${KIMI_SKILL_DIR}/../..` |
 | Grok CLI | Rhai `workflow` tool when `.grok/workflows/spec-plan-draft.rhai` is in the project catalog; otherwise `spawn_subagent` | `spawn_subagent` | Ask directly in chat; stop at the decision point | Not wired (PreToolUse command guards only) | None | Not substituted for a model-chosen skill: two levels above the listed `SKILL.md` |
 | ZCode | None deliverable by a plugin (saved workflows live in `.zcode/workflows/`); embedded adapter | `Agent` with the plugin's `agents/` roles | Ask directly in chat; stop at the decision point | Not wired (PreToolUse guards, PostToolUse write scan, SessionStart only) | SessionStart hook bootstrap | `${CLAUDE_SKILL_DIR}` / `${ZCODE_SKILL_DIR}` substituted; resolve the root as `${CLAUDE_SKILL_DIR}/../..` |
+| Cursor | None: embedded author → critic → revise adapter | Cursor subagents with `agents/` roles; otherwise an inline pass marked degraded | Ask directly in chat; stop at the decision point | `beforeShellExecution` command guards, `preToolUse` write scan and flow-order, `stop` worktree scan when `AGENTIC_WORKTREE_SCAN_BLOCK` is set. Claude transcript Stop readers are not wired | `sessionStart` prints the installed root and a Cursor invocation note | Not substituted in skill text: two levels above the loaded `SKILL.md`, or the sessionStart root line. Hooks read `CURSOR_PLUGIN_ROOT` |
 
 Warn-only hook output (branch-guard warn mode, scan-commit advisories) is not shown to the model on Kimi Code or ZCode; only blocking decisions surface there. Kimi Code resolves bare skill names only (`mind-spark`, not `agentic-sdlc:mind-spark`).
 
@@ -110,6 +111,29 @@ and project-cwd handling have deterministic replay coverage.
 and [hooks](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/hooks.html)
 were checked 2026-10-10. Full install/update guidance is in
 [multi-platform distribution](publication/multi-platform-distribution.md).
+
+## Cursor adapter
+
+Cursor is an adapter target. The supported release targets remain Claude Code and Codex. The manifest and component rules below were fetched on 2026-10-14 from [cursor.com/docs/plugins](https://cursor.com/docs/plugins) and [cursor.com/docs/reference/plugins](https://cursor.com/docs/reference/plugins). Hook events and payload fields were fetched the same day from [cursor.com/docs/hooks](https://cursor.com/docs/hooks). Plugin hook working directories and `CURSOR_PLUGIN_ROOT` / `CURSOR_PROJECT_DIR` were taken from Cursor staff's 2026-04-13 forum reply on plugin hook cwd, not from the hooks reference (that page documents project, user, team and enterprise hook cwd, and does not describe plugin-hook cwd).
+
+Cursor discovers a plugin from `.cursor-plugin/plugin.json`. This repository is one plugin at the root, so component paths point at the shared `skills/`, `agents/`, `commands/` and `rules/` directories. `hooks/hooks.json` is not created: ZCode and Grok auto-load that filename, and Claude Code loads it in addition to its declared wire. The Cursor manifest points at `hooks/hooks-cursor.json`.
+
+Each command is fixed `node -e` code. It reads `process.env.CURSOR_PLUGIN_ROOT`, joins `hooks/cursor-launch.mjs`, and imports that file URL. The installed path stays in the environment. `hooks/cursor-launch.mjs` then loads a sibling handler from its own file URL and translates Cursor's payload:
+
+| Cursor event | Shared handler | Cursor result |
+|---|---|---|
+| `beforeShellExecution` | `scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs` | `permission: deny` for a deny, `ask` for a warning, `allow` otherwise. Shell text is presented as `tool_input.command` with `tool_name: Bash`, which makes the shared guard apply both POSIX and PowerShell readings. A crash fails closed. |
+| `preToolUse` (`Write`, `Edit`, `StrReplace`, `ApplyPatch`, `Delete`) | `scan-write.mjs`, `flow-order-guard.mjs` | A write-scan finding becomes `permission: deny`, because `afterFileEdit` documents no model-visible output. Flow-order denies only when `AGENTIC_FLOW_GATE_BLOCK` is set; its default warning has no Cursor channel and is not turned into a deny. |
+| `sessionStart` | `session-start.mjs` | `additional_context`, plus a Cursor invocation note. The child cwd is the project (`CURSOR_PROJECT_DIR`, else the hook `cwd`). |
+| `stop` | `worktree-scan.mjs` | `followup_message` only when `AGENTIC_WORKTREE_SCAN_BLOCK` is set and the scan reports a finding. The default advisory is not forwarded: Cursor's documented stop output is `followup_message`, and using it for a warning would start another turn. |
+
+`completion-claim-guard.mjs` and `flow-step-guard.mjs` stay unwired. They read Claude transcript records. Cursor's `stop` input documents `status` and `loop_count`, plus the common `transcript_path`, and that file is not a Claude transcript.
+
+There is no Claude `Workflow` tool. Spec and plan use the embedded author → critic → revise adapter and the shared `agents/` roles. Skills are invoked as `/<skill-name>` or by reading the installed `SKILL.md`. The manual command id is `git-safety-check`.
+
+Install with `python3 scripts/install_cursor_plugin.py install` from the package directory. The destination is `Path.home() / ".cursor" / "plugins" / "local" / "agentic-sdlc"` unless `--dest` is set. Cursor's own documentation says a symlink in `~/.cursor/plugins/local` loads only when its target is inside that folder, so the installer copies. Update copies again and deletes only files listed in the previous install receipt. Uninstall deletes those receipt files and leaves every other file, including Cursor settings outside the destination. Node.js (`node` on `PATH`), Python 3.8+ and Git are checked first.
+
+A team marketplace import uses `.cursor-plugin/marketplace.json` (`source: "."`, marketplace name `mrbekox`). Public marketplace submission is prepared in [cursor-marketplace.md](publication/cursor-marketplace.md) and has not been sent. Native IDE install, Customize discovery and a live model turn were not run in the packaging environment: `cursor` and `cursor-agent` were not on `PATH`. Static manifest checks and relocated hook replays are not that IDE session.
 
 ## Codex flow evidence and limits
 

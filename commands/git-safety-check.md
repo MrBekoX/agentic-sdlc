@@ -1,4 +1,5 @@
 ---
+name: git-safety-check
 description: Read-only pre-commit git safety check (status, diff, log, secret scan). Never commits or pushes.
 allowed-tools: ["Bash(git status)", "Bash(git diff --no-ext-diff --no-textconv --stat)", "Bash(git diff --no-ext-diff --no-textconv)", "Bash(git log --oneline -n 10)", "Bash(git diff --cached --name-only)", "PowerShell(git status)", "PowerShell(git diff --no-ext-diff --no-textconv --stat)", "PowerShell(git diff --no-ext-diff --no-textconv)", "PowerShell(git log --oneline -n 10)", "PowerShell(git diff --cached --name-only)", "Read", "Grep"]
 ---

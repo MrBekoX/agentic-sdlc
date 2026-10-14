@@ -1,0 +1,25 @@
+{
+  "name": "agentic-sdlc",
+  "version": "0.5.0",
+  "description": "Gated SDLC skills for spec, plan, TDD, security review, implementation control, and evidence-backed delivery in Cursor.",
+  "author": {
+    "name": "Beko"
+  },
+  "homepage": "https://github.com/MrBekoX/agentic-sdlc",
+  "repository": "https://github.com/MrBekoX/agentic-sdlc",
+  "license": "MIT",
+  "keywords": [
+    "sdlc",
+    "skills",
+    "tdd",
+    "security",
+    "code-review",
+    "cursor"
+  ],
+  "logo": "assets/logo.png",
+  "skills": "./skills/",
+  "agents": "./agents/",
+  "commands": "./commands/",
+  "rules": "./rules/",
+  "hooks": "./hooks/hooks-cursor.json"
+}
