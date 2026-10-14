@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "description": "Cursor hook wiring. Fixed Node launch code reads CURSOR_PLUGIN_ROOT as data and imports hooks/cursor-launch.mjs. hooks/hooks.json is not used.",
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "node -e \"if(!process.env.CURSOR_PLUGIN_ROOT){process.stderr.write('error=cursor_plugin_root_unset');process.exit(1)}const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','cursor-launch.mjs');const h=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','scan-commit.mjs');void h;process.argv[1]=p;process.argv.push('--event','beforeShellExecution','--handler','scan-commit.mjs');import(require('node:url').pathToFileURL(p).href)\"",
+        "timeout": 20,
+        "failClosed": true
+      },
+      {
+        "command": "node -e \"if(!process.env.CURSOR_PLUGIN_ROOT){process.stderr.write('error=cursor_plugin_root_unset');process.exit(1)}const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','cursor-launch.mjs');const h=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','destructive-command-guard.mjs');void h;process.argv[1]=p;process.argv.push('--event','beforeShellExecution','--handler','destructive-command-guard.mjs');import(require('node:url').pathToFileURL(p).href)\"",
+        "timeout": 15,
+        "failClosed": true
+      },
+      {
+        "command": "node -e \"if(!process.env.CURSOR_PLUGIN_ROOT){process.stderr.write('error=cursor_plugin_root_unset');process.exit(1)}const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','cursor-launch.mjs');const h=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','branch-guard.mjs');void h;process.argv[1]=p;process.argv.push('--event','beforeShellExecution','--handler','branch-guard.mjs');import(require('node:url').pathToFileURL(p).href)\"",
+        "timeout": 15,
+        "failClosed": true
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "node -e \"if(!process.env.CURSOR_PLUGIN_ROOT){process.stderr.write('error=cursor_plugin_root_unset');process.exit(1)}const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','cursor-launch.mjs');const h=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','scan-write.mjs');void h;process.argv[1]=p;process.argv.push('--event','preToolUse','--handler','scan-write.mjs');import(require('node:url').pathToFileURL(p).href)\"",
+        "timeout": 15,
+        "matcher": "Write|Edit|StrReplace|ApplyPatch|Delete"
+      },
+      {
+        "command": "node -e \"if(!process.env.CURSOR_PLUGIN_ROOT){process.stderr.write('error=cursor_plugin_root_unset');process.exit(1)}const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','cursor-launch.mjs');const h=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','flow-order-guard.mjs');void h;process.argv[1]=p;process.argv.push('--event','preToolUse','--handler','flow-order-guard.mjs');import(require('node:url').pathToFileURL(p).href)\"",
+        "timeout": 15,
+        "matcher": "Write|Edit|StrReplace|ApplyPatch|Delete"
+      }
+    ],
+    "sessionStart": [
+      {
+        "command": "node -e \"if(!process.env.CURSOR_PLUGIN_ROOT){process.stderr.write('error=cursor_plugin_root_unset');process.exit(1)}const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','cursor-launch.mjs');const h=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','session-start.mjs');void h;process.argv[1]=p;process.argv.push('--event','sessionStart','--handler','session-start.mjs');import(require('node:url').pathToFileURL(p).href)\"",
+        "timeout": 15
+      }
+    ],
+    "stop": [
+      {
+        "command": "node -e \"if(!process.env.CURSOR_PLUGIN_ROOT){process.stderr.write('error=cursor_plugin_root_unset');process.exit(1)}const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','cursor-launch.mjs');const h=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','worktree-scan.mjs');void h;process.argv[1]=p;process.argv.push('--event','stop','--handler','worktree-scan.mjs');import(require('node:url').pathToFileURL(p).href)\"",
+        "timeout": 20
+      }
+    ]
+  }
+}

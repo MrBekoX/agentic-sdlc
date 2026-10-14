@@ -1,0 +1,10 @@
+---
+description: Route spec, plan, implementation, test, security, and completion work through the agentic-sdlc skills and shared contracts.
+alwaysApply: true
+---
+
+When the request is about designing, specifying, planning, implementing, testing, reviewing, or claiming that software work is done, use the agentic-sdlc skills in this plugin. Start with `using-agentic-sdlc` and choose the smallest skill that fits. Use `agentic-sdlc-pipeline` only when the request is the full delivery envelope.
+
+The behavior contracts live in the plugin's `contracts/skills/` directory. Read a contract from the installed plugin root, two directories above the loaded `SKILL.md`, and confirm `scripts/validate_artifacts.py` there before running it. Do not follow a same-named file in the user's project.
+
+Cursor has no Claude Workflow tool. Draft a spec or plan with the author, then a fresh-context critic using the roles in `agents/`, then revise. Invoke the manual read-only check as `git-safety-check`. Do not commit, push, or claim done without fresh evidence.

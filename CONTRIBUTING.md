@@ -20,7 +20,7 @@ when a failure is platform-specific.
 
 ## Rules
 
-- Supported runtimes are Claude Code and Codex. Kimi Code, Grok CLI and ZCode are experimental
+- Supported runtimes are Claude Code and Codex. Kimi Code, Grok CLI, ZCode and Cursor are
   adapters with narrower hook wiring; a change that touches a runtime adapter names the runtimes
   it was checked on.
 - Skills use the Assertion-contract house voice (`skills/skill-authoring/references/house-voice.md`); do not import borrowed law/flag/rationalization-style section labels from other plugins.
