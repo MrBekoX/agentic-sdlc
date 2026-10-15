@@ -971,6 +971,43 @@ class TestVersionDeclarations(unittest.TestCase):
             self.assertEqual(json.loads((root / ".kimi-plugin/plugin.json").read_bytes())["version"], "0.4.4")
             self.assertEqual(marketplace.read_bytes(), before)
 
+    def test_antigravity_bump_preserves_versionless_plugin_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_tree(root, manifests=self.ADAPTER_MANIFESTS)
+            antigravity = root / ".antigravity-plugin" / "plugin.json"
+            antigravity.parent.mkdir(parents=True, exist_ok=True)
+            antigravity.write_text(
+                '{"name": "agentic-sdlc", "description": "Agentic SDLC skill library."}\n',
+                encoding="utf-8",
+                newline="\n",
+            )
+            before = antigravity.read_bytes()
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = self.bump_version.bump("0.4.4", root=root)
+            self.assertEqual(code, 0)
+            self.assertEqual(antigravity.read_bytes(), before)
+            self.assertNotIn("version", json.loads(antigravity.read_text(encoding="utf-8")))
+            audit_out = io.StringIO()
+            with contextlib.redirect_stdout(audit_out):
+                audit_code = self.bump_version.audit(root=root)
+            self.assertEqual(audit_code, 0, audit_out.getvalue())
+            self.assertIn("audit_manifest=.antigravity-plugin/plugin.json:registered", audit_out.getvalue())
+
+    def test_antigravity_version_field_rejected_by_check(self):
+        code, out = self.run_check(
+            manifests={
+                ".antigravity-plugin/plugin.json": {
+                    "name": "agentic-sdlc",
+                    "description": "Agentic SDLC skill library.",
+                    "version": "0.4.3",
+                }
+            }
+        )
+        self.assertEqual(code, 1, out)
+        self.assertIn("version_unsupported=.antigravity-plugin/plugin.json:version:0.4.3", out)
+        self.assertIn("version_check=failed", out)
+
     def test_audit_discovers_named_marketplace_plugin_version(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
