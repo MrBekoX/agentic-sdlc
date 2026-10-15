@@ -181,8 +181,24 @@ def package_counts(package) -> tuple:
 def copy_package(source, dest) -> None:
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(str(source), str(dest), ignore=shutil.ignore_patterns(".git"),
-                    ignore_dangling_symlinks=True)
+    shutil.copytree(
+        str(source),
+        str(dest),
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".pytest_cache",
+            "__pycache__",
+            "audit-docs",
+            "artifacts",
+            "build",
+            "dist",
+            ".opencode",
+            ".claude",
+            ".worktrees",
+            ".tmp-superpowers-compare",
+        ),
+        ignore_dangling_symlinks=True,
+    )
 
 
 def _absolute_entry(entry: str) -> bool:

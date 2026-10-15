@@ -43,6 +43,14 @@ MANIFESTS = (
     (".cursor-plugin/marketplace.json", "marketplace"),
 )
 MANIFEST_KEYS = tuple(path for path, _kind in MANIFESTS)
+# Adapter manifests whose upstream schema forbids a plugin ``version`` property:
+# https://antigravity.google/schemas/v1/plugin.json sets ``additionalProperties: false`` and allows
+# only ``name`` and ``description``. Registered here so ``--check`` rejects an unsupported
+# ``version`` field, ``bump`` preserves the schema without injecting ``version``, and ``--audit``
+# covers the Antigravity manifest alongside the versioned manifests.
+VERSIONLESS_PLUGIN_MANIFESTS = (
+    ".antigravity-plugin/plugin.json",
+)
 # Directories that never hold a shipped manifest. tests/ is pruned because its fixtures write
 # synthetic plugin.json files that would otherwise read as unregistered manifests.
 AUDIT_SKIP_DIRS = frozenset({".git", "__pycache__", ".venv", "venv", "node_modules", "tests", "out", "mcps", ".claude"})
@@ -119,6 +127,12 @@ def declaration_failures(versions: dict[str, str], root: Path = REPO) -> list[st
     version = versions["VERSION"]
     failures = [f"version_mismatch={key}:version:{versions[key]}"
                 for key in MANIFEST_KEYS if key in versions and versions[key] != version]
+    for rel in VERSIONLESS_PLUGIN_MANIFESTS:
+        file = root / rel
+        if file.is_file():
+            data = read_json(file)
+            if "version" in data:
+                failures.append(f"version_unsupported={rel}:version:{data['version']}")
     for (path, declaration), values in version_declarations(root).items():
         if declaration == "version-badge":
             # Presence only: the badge value is also a version token, checked below.
@@ -236,6 +250,10 @@ def discovered_manifests(root: Path = REPO) -> list[str]:
         if name != "plugin.json" and not (name == "marketplace.json" or
                                          name.startswith("marketplace-") and name.endswith(".json")):
             continue
+        if rel in VERSIONLESS_PLUGIN_MANIFESTS:
+            if (root / rel).is_file():
+                found.append(rel)
+            continue
         # Named marketplace files may carry a schema version at the top level.
         # Only a plugins[] entry version is a plugin version to register/audit.
         kind = "plugin" if name == "plugin.json" else "marketplace"
@@ -247,7 +265,15 @@ def discovered_manifests(root: Path = REPO) -> list[str]:
             continue
         if declared:
             found.append(rel)
-    return found
+    for rel in VERSIONLESS_PLUGIN_MANIFESTS:
+        if rel not in found and (root / rel).is_file():
+            try:
+                data = read_json(root / rel)
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict) and data.get("name"):
+                found.append(rel)
+    return sorted(found)
 
 
 def audit(root: Path = REPO) -> int:
@@ -257,12 +283,12 @@ def audit(root: Path = REPO) -> int:
     leaves it behind silently and only that adapter's own test notices — which is how the ZCode
     and Grok manifests came to sit outside the one version source.
     """
-    registered = set(MANIFEST_KEYS)
+    registered = set(MANIFEST_KEYS) | set(VERSIONLESS_PLUGIN_MANIFESTS)
     discovered = discovered_manifests(root)
     unregistered = [rel for rel in discovered if rel not in registered]
     for rel in discovered:
         print(f"audit_manifest={rel}:{'registered' if rel in registered else 'unregistered'}")
-    for rel in MANIFEST_KEYS:
+    for rel in (*MANIFEST_KEYS, *VERSIONLESS_PLUGIN_MANIFESTS):
         if not (root / rel).is_file():
             # Not a failure: adapter manifests are optional members (see MANIFESTS).
             print(f"audit_absent={rel}")
