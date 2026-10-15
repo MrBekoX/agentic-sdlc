@@ -24,8 +24,13 @@ import install_cursor_plugin
 
 
 def _run(command, payload, env, cwd):
+    if os.name == "nt":
+        shell = os.environ.get("COMSPEC") or shutil.which("cmd.exe")
+        argv = f'"{shell}" /d /s /c "{command}"'
+    else:
+        argv = ["/bin/sh", "-c", command]
     return subprocess.run(
-        ["/bin/sh", "-c", command],
+        argv,
         input=json.dumps(payload),
         text=True,
         encoding="utf-8",
@@ -129,7 +134,7 @@ class CursorInstallAndHookTests(unittest.TestCase):
         self.assertEqual(missing.returncode, 1)
         self.assertIn("error=cursor_plugin_root_unset", missing.stderr)
         session = next(item["command"] for item in wire["hooks"]["sessionStart"])
-        started = _run(session, {}, env, Path("/tmp"))
+        started = _run(session, {}, env, Path(tempfile.gettempdir()))
         self.assertEqual(started.returncode, 0, started.stderr)
         context = json.loads(started.stdout)["additional_context"]
         self.assertIn(str(self.dest), context)
