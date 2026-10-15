@@ -4,6 +4,7 @@
 
 ## 0.5.0 - 2026-10-12
 
+- Add an experimental Google Antigravity adapter: `.antigravity-plugin/plugin.json` (validated against the strict two-key `https://antigravity.google/schemas/v1/plugin.json` schema via `VERSIONLESS_PLUGIN_MANIFESTS` in `scripts/bump_version.py`) and `.antigravity-plugin/README.md`, with subagent delegation guidance (`invoke_subagent`) and portable `<runtime-root>` resolution across all 16 shared skills; no `hooks.json` is wired and no legacy `.agent/workflows/*.md` dependency is introduced.
 - Add a Cursor adapter: `.cursor-plugin/plugin.json`, `.cursor-plugin/marketplace.json`, `rules/agentic-sdlc.mdc`, and `hooks/hooks-cursor.json`. Shared skills, agents, and commands stay in place. Cursor hook commands read `CURSOR_PLUGIN_ROOT` inside Node and translate payloads through `hooks/cursor-launch.mjs`. `hooks/hooks.json` is still not created.
 - Install, update, and uninstall that copy with `scripts/install_cursor_plugin.py`. The destination resolves at runtime to Cursor's local plugin directory, and files the installer did not write are kept.
 - Add the 0.5.0 release evidence ledger (`docs/release-evidence-0.5.0.md`); its verdict is do-not-publish. The 0.4.3 ledger is kept unchanged, and the ledger tests check both.

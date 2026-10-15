@@ -30,7 +30,7 @@ def workflow_port_sources(root):
     for directory, dirs, files in os.walk(root):
         relative = Path(directory).relative_to(root)
         dirs[:] = [name for name in dirs if name not in {".git", "node_modules", "__pycache__"}
-                   and not (relative == Path(".") and name in {"dist", "build", ".worktrees"})
+                   and not (relative == Path(".") and name in {"dist", "build", ".worktrees", "audit-docs"})
                    and not (relative == Path(".claude") and name == "worktrees")
                    and not (relative == Path("tests") and name == "artifacts")]
         found.extend((relative / name).as_posix() for name in files if name.endswith(".dwf.ts"))
