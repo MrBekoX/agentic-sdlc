@@ -24,6 +24,7 @@ RECEIPT = ".cursor-plugin/install-receipt.json"
 SKIP_DIRECTORIES = {
     ".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     ".venv", "venv", "node_modules", ".claude", ".codex", ".zcode", ".opencode",
+    ".worktrees", "artifacts", "eval-results", "reviews", "dist", "build",
     "tests", ".github",
 }
 SKIP_FILES = {".DS_Store", "install-receipt.json"}
