@@ -1042,6 +1042,8 @@ def has_unquoted_background(statement: str) -> bool:
 
 
 _BR6_DOUBLE_QUOTE_EDGE_RE = re.compile(r'["\\]')
+_BR6_STATEMENT_EDGE_RE = re.compile(r'[\\\'"#;\n|]')
+_BR6_NON_SEMI_SPECIAL_RE = re.compile(r'[\\\'"#\n|]')
 
 
 def br6_statement_joins(command: str) -> list[tuple[str, bool]]:
@@ -1052,6 +1054,8 @@ def br6_statement_joins(command: str) -> list[tuple[str, bool]]:
     non-empty statement as joined. Empty statements are dropped and the join carries over them.
     """
     text = str(command or "")
+    if not _BR6_NON_SEMI_SPECIAL_RE.search(text):
+        return [(s, False) for part in text.split(";") if (s := part.strip(_BR6_BLANKS))]
     length = len(text)
     statements: list[tuple[str, bool]] = []
     current: list[str] = []
@@ -1061,16 +1065,27 @@ def br6_statement_joins(command: str) -> list[tuple[str, bool]]:
     index = 0
 
     def flush(via_or: bool) -> None:
-        nonlocal current, pending_or
-        statement = "".join(current).strip(_BR6_BLANKS)
-        if statement:
-            statements.append((statement, pending_or))
-            pending_or = False
-        current = []
+        nonlocal pending_or
+        if current:
+            raw = current[0] if len(current) == 1 else "".join(current)
+            statement = raw.strip(_BR6_BLANKS)
+            if statement:
+                statements.append((statement, pending_or))
+                pending_or = False
+            current.clear()
         if via_or:
             pending_or = True
 
     while index < length:
+        if not quote:
+            edge = _BR6_STATEMENT_EDGE_RE.search(text, index)
+            stop = length if edge is None else edge.start()
+            if stop > index:
+                current.append(text[index:stop])
+                word_start = text[stop - 1] in _BR6_COMMENT_BOUNDARY
+                index = stop
+                if index >= length:
+                    break
         ch = text[index]
         if quote == "'":
             end = text.find("'", index)
@@ -1163,12 +1178,24 @@ _ASCII_ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 _GRAMMAR_WORD_CHARS = frozenset(_ASCII_ALNUM + "_-./:=+,@%^~!?*]")
 _GRAMMAR_PARAMETER_CHARS = frozenset(_ASCII_ALNUM + "_?#$!@*-")
 _GRAMMAR_COMMAND_WORD_CHARS = frozenset(_ASCII_ALNUM + "_-./:=+,@%^~!#")
+_GRAMMAR_COMMAND_WORD_RE = re.compile(r"[A-Za-z0-9_\-./:=+,@%^~!#\x80-\U0010ffff]+")
+_GRAMMAR_UNQUOTED_SPAN_RE = re.compile(r"(?:[A-Za-z0-9_\-./:=+,@%^~!?*\]]+|\$[A-Za-z0-9_?#$!@*-])+")
+_GRAMMAR_DIGITS_RE = re.compile(r"[0-9]+")
 _GRAMMAR_ASSIGNMENT_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\+?=")
 _GRAMMAR_PLAIN_ARGUMENT_RE = re.compile(r"[A-Za-z0-9_-]+")
 _GRAMMAR_SET_OPTION_RE = re.compile(r"[-+][euo]+")
 _GRAMMAR_SET_WORDS = frozenset({"errexit", "nounset", "pipefail"})
 # Search ordinary quoted spans in C; every character needing a grammar decision still takes its existing branch.
 _GRAMMAR_DOUBLE_QUOTE_EDGE_RE = re.compile(r'["\\$`\x00-\x08\x0b-\x1f\x7f\[]')
+_GRAMMAR_UNSAFE_CMD_WORDS = sorted(BR6_RESERVED_WORDS | (BR6_BASH_BUILTINS - BR6_SAFE_BUILTINS), key=len, reverse=True)
+_GRAMMAR_UNSAFE_CMD_IN_SEMI_RE = re.compile(
+    r"(?:^|;[ \t]*)(?:" + "|".join(re.escape(w) for w in _GRAMMAR_UNSAFE_CMD_WORDS) + r");"
+)
+_GRAMMAR_SEMI_RUN_RE = re.compile(r"(?:[A-Za-z0-9_\-./+@%^~!]+;[ \t]*){2,}")
+_GRAMMAR_ASSIGN_RUN_RE = re.compile(r"(?:[A-Za-z_][A-Za-z0-9_]*\+?=[A-Za-z0-9_\-./:=+,@%^~!?*\]]*[ \t]+){2,}")
+_GRAMMAR_INTEGER_ASSIGN_RE = re.compile(
+    r"(?:^|[ \t])(?:" + "|".join(sorted(BR6_INTEGER_VARIABLES)) + r")\+?="
+)
 
 
 def br6_simple_commands(command: str, *, _collect: bool = True) -> list[dict[str, Any]] | None:
@@ -1206,42 +1233,42 @@ def br6_simple_commands(command: str, *, _collect: bool = True) -> list[dict[str
     target_word = False       # the current word is a redirection target
     waiting = False           # an `&&`, `||`, `|` or `|&` still waits for a word (operand rule)
     pipe_waiting = False      # a `|` or `|&` still waits for a word (DP40 (a))
+    has_operand = False
     statements: list[dict[str, Any]] = []
     commands: list[dict[str, Any]] = []
     current: dict[str, Any] = {"assignments": [], "words": [], "op": ""}
     pending_or = False
 
     def record(raw: str, redirect: bool) -> None:
+        nonlocal has_operand
+        has_operand = True
         if not _collect:
-            if not current["words"]:
-                current["words"].append(None)  # retain only the operand-presence bit
             return
         value, unknown = _br6_word_value(raw)
         current["words"].append({"value": value, "unknown": unknown, "redirect": redirect})
 
     def finish_word(next_char: str) -> bool:
-        nonlocal in_word, command_seen, safe_builtin, set_command, export_command, target_word
+        nonlocal in_word, command_seen, safe_builtin, set_command, export_command, target_word, has_operand
         if not in_word:
             return True
         in_word = False
-        raw = "".join(word)
+        raw = word[0] if len(word) == 1 else "".join(word)
         if target_word:
             target_word = False
             record(raw, True)
             return True
-        if next_char in ("<", ">") and raw and all(c in "0123456789" for c in raw):
+        if next_char in ("<", ">") and _GRAMMAR_DIGITS_RE.fullmatch(raw):
             record(raw, True)
             return True  # the file descriptor of the redirection that follows
-        assignment = _GRAMMAR_ASSIGNMENT_RE.match(raw)
+        assignment = _GRAMMAR_ASSIGNMENT_RE.match(raw) if "=" in raw else None
         if not command_seen:
             if assignment:
+                has_operand = True
                 if _collect:
                     current["assignments"].append(raw)
-                elif not current["assignments"]:
-                    current["assignments"].append("")
                 return assignment.group(1) not in BR6_INTEGER_VARIABLES
             command_seen = True
-            if not all(c in _GRAMMAR_COMMAND_WORD_CHARS or ord(c) >= 0x80 for c in raw):
+            if not _GRAMMAR_COMMAND_WORD_RE.fullmatch(raw):
                 return False
             if raw in BR6_RESERVED_WORDS or (raw in BR6_BASH_BUILTINS and raw not in BR6_SAFE_BUILTINS):
                 return False
@@ -1258,11 +1285,9 @@ def br6_simple_commands(command: str, *, _collect: bool = True) -> list[dict[str
         return not set_command or bool(_GRAMMAR_SET_OPTION_RE.fullmatch(raw)) or raw in _GRAMMAR_SET_WORDS
 
     def end_simple_command(op: str) -> None:
-        nonlocal command_seen, safe_builtin, set_command, export_command, current
-        command_seen = safe_builtin = set_command = export_command = False
+        nonlocal command_seen, safe_builtin, set_command, export_command, current, has_operand
+        command_seen = safe_builtin = set_command = export_command = has_operand = False
         if not _collect:
-            current["assignments"].clear()
-            current["words"].clear()
             return
         current["op"] = op
         if current["assignments"] or current["words"]:
@@ -1282,6 +1307,24 @@ def br6_simple_commands(command: str, *, _collect: bool = True) -> list[dict[str
 
     index = 0
     while index < length:
+        if not _collect and not in_word and not command_seen and not redirect_pending:
+            semi_run = _GRAMMAR_SEMI_RUN_RE.match(text, index)
+            if semi_run is not None and not has_operand:
+                stop = semi_run.end()
+                if _GRAMMAR_UNSAFE_CMD_IN_SEMI_RE.search(text, index, stop) is None:
+                    waiting = pipe_waiting = False
+                    word_start = True
+                    index = stop
+                    continue
+            assign_run = _GRAMMAR_ASSIGN_RUN_RE.match(text, index)
+            if assign_run is not None:
+                stop = assign_run.end()
+                if _GRAMMAR_INTEGER_ASSIGN_RE.search(text, index, stop) is None:
+                    has_operand = True
+                    waiting = pipe_waiting = False
+                    word_start = True
+                    index = stop
+                    continue
         ch = text[index]
         nxt = text[index + 1] if index + 1 < length else ""
         if ch == "[" and safe_builtin:
@@ -1302,7 +1345,7 @@ def br6_simple_commands(command: str, *, _collect: bool = True) -> list[dict[str
             else:
                 op = ch
             index += len(op)
-            if op != "\n" and not (current["assignments"] or current["words"]):
+            if op != "\n" and not has_operand:
                 return None  # an operator after an empty simple command (operand rule)
             if op == "\n" and pipe_waiting:
                 return None  # bash joins the next line into the pipeline (DP40 (a))
@@ -1347,9 +1390,16 @@ def br6_simple_commands(command: str, *, _collect: bool = True) -> list[dict[str
             in_word = True
             waiting = False
             pipe_waiting = False
-            word = []
+            word.clear()
             target_word = redirect_pending
             redirect_pending = False
+        span = _GRAMMAR_UNQUOTED_SPAN_RE.match(text, index)
+        if span is not None:
+            stop = span.end()
+            word.append(text[index:stop])
+            index = stop
+            word_start = False
+            continue
         if ch == "$":
             if nxt not in _GRAMMAR_PARAMETER_CHARS or not nxt:
                 return None
