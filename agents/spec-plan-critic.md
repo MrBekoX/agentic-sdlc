@@ -1,6 +1,6 @@
 ---
 name: spec-plan-critic
-description: Adversarially audits a spec/plan draft for completeness — missing layers/criteria/edge-cases, contradictions, placeholders, ambiguity. Called after the author in the spec-plan-draft workflow. Technology-agnostic.
+description: Adversarially audits a spec/plan draft for completeness — missing layers/criteria/edge-cases, contradictions, placeholders, ambiguity. Called after the author in the spec-plan-draft workflow and the runtime author/critic adapters. Technology-agnostic.
 model: inherit
 tools: Glob, Grep, Read, WebFetch, WebSearch
 ---
