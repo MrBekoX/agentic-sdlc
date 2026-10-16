@@ -1,3 +1,4 @@
+import gc
 import hashlib
 import io
 import json
@@ -4586,8 +4587,10 @@ class TestC17SpecStatusMembershipLinear(unittest.TestCase):
     """C17.5: _spec_statuses tests spec-path membership against a set, so the stop_at_gate status read stays linear in
     the number of distinct spec writes (lesson 2026-07-01: assert the growth RATIO across doublings, never a time)."""
 
-    SIZES = [1000 * 2 ** step for step in range(5)]  # 4 doublings of distinct spec writes
-    MAX_GROWTH = 40  # linear is about 16x over 4 doublings; the list membership test grew about 100x on this shape
+    SIZES = [2000 * 2 ** step for step in range(5)]  # 4 doublings of distinct spec writes
+    # Linear is about 16x over 4 doublings (15-17x measured with the collector off); the list membership test grew
+    # 64-119x on this shape, and the gap widens with size, so the ladder starts at 2000.
+    MAX_GROWTH = 40
     CASE = {"id": "status-probe", "prompt": "probe", "strict": {"stop_at_gate": "spec-review"}}
 
     @staticmethod
@@ -4604,9 +4607,17 @@ class TestC17SpecStatusMembershipLinear(unittest.TestCase):
                 trace = procedure_eval.trace_events(self.spec_writes(count), strict=True)
                 best = None
                 for _ in range(3):  # best of three, so one slow run does not skew the ratio
-                    started = time.perf_counter()
-                    errors = procedure_eval.evaluate_case(self.CASE, trace, REPO, strict=True)
-                    took = time.perf_counter() - started
+                    # The cyclic collector's full passes scan the whole live heap, which grows with the trace, so
+                    # they add superlinear noise unrelated to the read (43x on a Windows CI runner). Time with the
+                    # collector off, as timeit does, and collect between runs.
+                    gc.collect()
+                    gc.disable()
+                    try:
+                        started = time.perf_counter()
+                        errors = procedure_eval.evaluate_case(self.CASE, trace, REPO, strict=True)
+                        took = time.perf_counter() - started
+                    finally:
+                        gc.enable()
                     best = took if best is None else min(best, took)
                 self.assertEqual(errors, ["strict_missing_gate_stop"])
                 timings.append(best)
