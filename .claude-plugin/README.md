@@ -64,7 +64,7 @@ Do not hard-code machine-specific absolute paths into skills, hooks, evals, or g
 
 `agentic-sdlc-pipeline` is the full-envelope escalation path. In Claude Code it must leave real transcript evidence:
 
-1. `Skill` invocation for `agentic-sdlc:dispatch-strategy`, once, at Step 1.
+1. `Skill` invocation for `agentic-sdlc:dispatch-strategy`, once, at kickoff, before Step 1.
 2. `Bash`/`PowerShell` invocation of `detect_context.py`.
 3. `Workflow` invocation of `agentic-sdlc:spec-plan-draft` with `mode:"spec"`.
 4. `validate_artifacts.py --mode spec` after saving the spec.
@@ -83,7 +83,7 @@ Focused skills are independently invocable. Inside a pipeline run the pipeline i
 
 | Pipeline stage | Claude Code mechanism |
 |---|---|
-| Mechanism decision | `Skill` `agentic-sdlc:dispatch-strategy`, once, at Step 1. |
+| Mechanism decision | `Skill` `agentic-sdlc:dispatch-strategy`, once, at kickoff, before Step 1. |
 | Spec and plan phases | Named workflow `agentic-sdlc:spec-plan-draft`. |
 | Implementation core (Steps 8–13) | `Read` of `skills/<skill>/references/core.md` for `feature-build`, `root-cause-fix`, `safe-refactor`, or `test-authoring`; the standalone skill reads the same file. |
 | Security gates (Steps 11 and 14) | `Agent` `security-reviewer`. |
@@ -159,7 +159,7 @@ Claude live trigger and procedure evidence uses `scripts/run_trigger_eval.py`, `
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
-Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 

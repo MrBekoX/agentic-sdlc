@@ -42,7 +42,7 @@ const bootstrap = [
   '</PROCESS_OWNER_POLICY>',
   'Routing authority for AGENTIC-SDLC-owned work is agentic-sdlc:using-agentic-sdlc; consult it when no focused skill below clearly fits or scope changes. Route by semantic intent, not exact keywords or prompt language.',
   'Use the smallest sufficient skill. agentic-sdlc-pipeline is only for full-envelope end-to-end SDLC (or high-risk: auth, payment, migration, API contract, permissions, user data, tokens, RLS).',
-  'Inside an active agentic-sdlc-pipeline run the pipeline owns every step: dispatch-strategy runs once at Step 1; its tests, security reviews and final audit use the work-type core file, security-reviewer and implementation-auditor - do not invoke or read the focused skills below for those steps.',
+  'Inside an active agentic-sdlc-pipeline run the pipeline owns every step: dispatch-strategy runs once at kickoff, before Step 1; its tests, security reviews and final audit use the work-type core file, security-reviewer and implementation-auditor - do not invoke or read the focused skills below for those steps.',
   'Intent -> skill (AGENTIC-SDLC-owned phases; invoke via the Skill tool; "I will use X" without the tool call is not activation):',
   '  idea / option-exploration / uncertain  -> agentic-sdlc:mind-spark',
   '  spec / WHAT / acceptance criteria only  -> agentic-sdlc:spec-authoring',

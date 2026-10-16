@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from contextlib import redirect_stdout
@@ -2376,11 +2377,18 @@ class TestEvidencePacket(unittest.TestCase):
                 full_tool_use("b1", "Bash", {"command": "dir C:\\Users\\" + user + "\\repo"}),
                 full_tool_use("b2", "Bash", {"command": "dir C:\\Users\\" + spaced + "\\repo"}),
                 full_tool_use("b3", "Bash", {"command": "ls /home/" + spaced + "/x c:/users/" + folded + "/x"}),
+                # A denied command carries a home path into a packet error id (since C17.1 unsafe_artifact_path does not).
+                {"type": "result", "subtype": "success", "is_error": False, "result": "done", "permission_denials": [
+                    {"tool_name": "Bash", "tool_input": {"command": "ls /home/" + user + "/work"}}]},
             ])
             self.assertTrue(b"C:\\\\Users\\\\" + user.encode() in transcript.read_bytes(), "precondition: escaped path")
             evidence = Path(td) / "ev"
             proc = strict_replay(evidence, self.copy_fixture_root(td), transcript=transcript)
-            self.assertIn("unsafe_artifact_path:/home/" + user + "/work/docs/agentic-sdlc/specs/x.md", proc.stdout)
+            # C17.1: a spec path no root can relativize keeps unsafe_artifact_path, but its id never carries the
+            # absolute path or the home segment (the last two segments only).
+            self.assertIn("unsafe_artifact_path:specs/x.md", proc.stdout)
+            self.assertFalse(("unsafe_artifact_path:/home/" in proc.stdout), "an absolute path reached the error id")
+            self.assertIn("permission_denied:Bash:ls /home/" + user + "/work", proc.stdout)
             packet_bytes = (evidence / f"{PACKET_CASE}.json").read_bytes()
             copy_bytes = (evidence / f"{PACKET_CASE}.transcript.jsonl").read_bytes()
         for label, data in (("packet", packet_bytes), ("transcript copy", copy_bytes)):
@@ -2388,7 +2396,8 @@ class TestEvidencePacket(unittest.TestCase):
                 for part in (user, "Evan", "Doe", folded):
                     self.assertFalse(part.encode() in data, f"home user segment {part!r} persisted in the {label}")
                 self.assertTrue(b"***MASKED:home***" in data, f"{label} lacks the masked home segment")
-        self.assertTrue(b"unsafe_artifact_path:/home/***MASKED:home***/work/" in packet_bytes)
+        self.assertTrue(b"permission_denied:Bash:ls /home/***MASKED:home***/work" in packet_bytes)
+        self.assertTrue(b"unsafe_artifact_path:specs/x.md" in packet_bytes)
         raw = "C:\\Users\\" + spaced + "\\repo /home/" + spaced + "\tx/y c:/users/" + folded + "/z"
         self.assertEqual(procedure_eval.mask_home_paths(raw),
                          "C:\\Users\\***MASKED:home***\\repo /home/***MASKED:home***/y c:/users/***MASKED:home***/z")
@@ -2905,8 +2914,8 @@ class TestStrictClaudeFixtures(StrictFixtureAssertions):
     @unittest.skipUnless(shutil.which("node"), "node unavailable: the redaction check needs hooks/redact-sensitive.mjs")
     def test_strict_fixtures_are_committed_clean_lf(self):
         # 4 pre-C7 fixtures (missing-core renamed missing-failing-test) + 14 C7/C15 full-run + 6 gate-stop fixtures
-        # + the 9 C16 review probes (7 full-run, 2 gate-stop).
-        self.assert_committed_clean_lf("procedure-strict-claude-*.jsonl", 33)
+        # + the 9 C16 review probes (7 full-run, 2 gate-stop) + the C17.1 absolute-paths shallow negative.
+        self.assert_committed_clean_lf("procedure-strict-claude-*.jsonl", 34)
 
 
 class TestStrictCodexFixtures(StrictFixtureAssertions):
@@ -3366,8 +3375,8 @@ FLAT_TDD_PATH = "docs/agentic-sdlc/evidence/greeting-suffix.tdd.md"
 CORE_READ_PATH = "/opt/agentic-sdlc/skills/feature-build/references/core.md"
 SHALLOW_STUBS = ["shallow_artifact:docs/agentic-sdlc/plans/greeting-suffix.md",
                  "shallow_artifact:docs/agentic-sdlc/specs/greeting-suffix.md"]
-ABSOLUTE_UNSAFE = ["unsafe_artifact_path:/work/greeting-suffix/docs/agentic-sdlc/plans/greeting-suffix.md",
-                   "unsafe_artifact_path:/work/greeting-suffix/docs/agentic-sdlc/specs/greeting-suffix.md"]
+# C17.1: a spec/plan path no root can relativize keeps unsafe_artifact_path, its id carrying only the last two segments.
+NO_ROOT_UNSAFE = ["unsafe_artifact_path:plans/greeting-suffix.md", "unsafe_artifact_path:specs/greeting-suffix.md"]
 UNATTRIBUTED_RED = ["strict_missing_red_before_green", "strict_red_not_before_source_edit",
                     "strict_step_missing:red-run", "strict_test_run_unattributable"]
 NO_ATTRIBUTABLE_RUN = ["strict_missing_green", "strict_red_not_before_source_edit", "strict_step_missing:green-run",
@@ -3383,6 +3392,8 @@ STRICT_POSITIVE_RUNS = (  # (fixture, eval set, case ids): each must pass strict
     ("procedure-strict-codex-complete-pass.jsonl", PIPELINE_EVAL, PIPELINE_CASES),
     ("agentic-sdlc-pipeline-procedure-per-package-pass.jsonl", PIPELINE_EVAL, (PER_PACKAGE_CASE_ID,)),
     ("procedure-strict-claude-gate-stop-pass.jsonl", GATE_STOP_EVAL, (GATE_STOP_CASE,)),
+    # C17.1: absolute spec/plan paths under the init cwd are relativized and depth-checked (both are deep).
+    ("procedure-strict-claude-absolute-paths-pass.jsonl", PIPELINE_EVAL, PIPELINE_CASES),
 )
 DEFAULT_POSITIVE_RUNS = (  # (fixture, case ids): each must pass default-mode replay
     ("agentic-sdlc-pipeline-procedure-pass.jsonl", PIPELINE_CASES),
@@ -3966,8 +3977,6 @@ class TestC7StrictKeys(C7FixtureReplay):
             self.assert_fixture_errors(fixture, [], eval_set=eval_set, case_ids=case_ids)
         # The default-mode pass fixture keeps the shallow "spec"/"plan" stubs, which is its only strict failure.
         self.assert_fixture_errors("agentic-sdlc-pipeline-procedure-pass.jsonl", SHALLOW_STUBS)
-        # C15.13: absolute spec/plan paths are the deferred L3c-F1 normalization; acceptance excludes them (C15.7).
-        self.assert_fixture_errors("procedure-strict-claude-absolute-paths-pass.jsonl", ABSOLUTE_UNSAFE)
 
     def test_positive_fixtures_pass_strict_cli_replay(self):
         for fixture, eval_set, case_ids in STRICT_POSITIVE_RUNS:
@@ -4006,7 +4015,13 @@ class TestC7AcceptanceLines(StrictFixtureAssertions):
                                BOTH_CRITICAL)
 
     def test_unsafe_artifact_path_is_excluded(self):
-        self.assert_acceptance("procedure-strict-claude-absolute-paths-pass.jsonl", "failed", "pass", ABSOLUTE_UNSAFE)
+        # C17.1: only a spec/plan path no root can relativize keeps unsafe_artifact_path, so the absolute-paths
+        # positive replays without its init cwd here (its absolute paths then stay absolute).
+        events = fixture_events("procedure-strict-claude-absolute-paths-pass.jsonl")
+        self.assertEqual(events[0].pop("cwd", None), "/work/greeting-suffix")
+        with tempfile.TemporaryDirectory() as td:
+            transcript = write_jsonl(Path(td) / "absolute-paths-no-cwd.jsonl", events)
+            self.assert_acceptance(transcript, "failed", "pass", NO_ROOT_UNSAFE)
 
     def test_a_counted_error_fails_acceptance(self):
         self.assert_acceptance("procedure-strict-claude-missing-tdd-evidence.jsonl", "failed", "fail", [])
@@ -4167,8 +4182,6 @@ class TestC7PathHelperParity(unittest.TestCase):
 # here are the Phase 2 review probes, committed as they were built (compact JSON, LF); every expected value is the
 # contract outcome.
 FAILED_EDIT_TEXT = "<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>"
-DRIVE_CASE_UNSAFE = ["unsafe_artifact_path:c:/tmp/pytest-0/test_run0/docs/agentic-sdlc/plans/greeting-suffix.md",
-                     "unsafe_artifact_path:c:/tmp/pytest-0/test_run0/docs/agentic-sdlc/specs/greeting-suffix.md"]
 # Times regex_present on the grader's haystack shape: a JSON-dumped command naming a focused skill, then a backslash run
 # and no SKILL.md. Each size is the best of three runs, so one slow run does not skew the ratio.
 PATTERN_TIMING_CHILD = r"""
@@ -4332,11 +4345,10 @@ class TestC16PathNormalization(C7FixtureReplay):
 
     def test_drive_letter_case_mismatch_with_the_init_cwd(self):
         # init cwd C:/tmp/pytest-0/test_run0, tool paths c:/tmp/pytest-0/test_run0/... (a pytest tmp_path shape whose
-        # test_ segment makes every unrelativized write a test path). Only the deferred L3c-F1 depth paths remain, and
-        # only where the OS reads `c:/...` as absolute (Windows); on POSIX that string is relative, so the depth check
-        # has nothing to flag. The C16 path-normalization outcome is the same on both.
-        expected = DRIVE_CASE_UNSAFE if os.path.isabs("c:/tmp") else []
-        self.assert_fixture_errors("procedure-strict-claude-drive-case-cwd.jsonl", expected)
+        # test_ segment makes every unrelativized write a test path). C17.1: the depth check relativizes the spec and
+        # plan paths against the same roots, so they are depth-checked (both deep) and no unsafe_artifact_path is left,
+        # whether or not the OS reads `c:/...` as absolute.
+        self.assert_fixture_errors("procedure-strict-claude-drive-case-cwd.jsonl", [])
 
     def test_codex_rollout_cwd_is_a_root(self):
         events = fixture_events("procedure-strict-codex-complete-pass.jsonl")
@@ -4416,3 +4428,187 @@ class TestC16ForbiddenSkillScanKeys(C7FixtureReplay):
                                                                  "prompt": "skills/feature-build/SKILL.md"},
                                            "toolu_s18", "ok")
             self.assert_errors(self.replay_events(derived), [])
+
+
+# Contract C17 items 1-5 (the grader fix round after the final review of e29c571). The inputs reuse the final review's
+# probes: abs-shallow.jsonl (committed as procedure-strict-claude-absolute-paths-shallow.jsonl), the G3/G4 traversal
+# writes, the G11 Grep shape and a Codex `*** Move to:` rename.
+DEPTH_CASE = {"id": "depth-probe", "prompt": "probe", "check_artifact_depth": True}
+SPEC_STUB = "---\nwork_id: greeting-suffix\nstatus: reviewed\n---\nspec\n"
+
+
+class TestC17ArtifactDepthPaths(C7FixtureReplay):
+    """C17.1: evaluate_artifact_depth normalizes each spec/plan path with the strict roots first. A path that becomes
+    relative is depth-checked under the fixture root; only a path no root can relativize keeps unsafe_artifact_path,
+    and its id comes from _error_path (no absolute path, no user name)."""
+
+    def depth_errors(self, events, cwd=REPO, contained_root=None):
+        trace = procedure_eval.trace_events(events, strict=True)
+        return procedure_eval.evaluate_case(DEPTH_CASE, trace, cwd, contained_root=contained_root)
+
+    @staticmethod
+    def write(path, content):
+        return [full_tool_use("toolu_w1", "Write", {"file_path": path, "content": content}),
+                claude_result("toolu_w1", False, "File created successfully")]
+
+    def test_absolute_paths_under_the_init_cwd_are_depth_checked(self):
+        self.assert_fixture_errors("procedure-strict-claude-absolute-paths-pass.jsonl", [])
+        # The same run with stub spec and plan bodies (review probe abs-shallow.jsonl): both are shallow now.
+        self.assert_fixture_errors("procedure-strict-claude-absolute-paths-shallow.jsonl", SHALLOW_STUBS)
+
+    def test_an_absolute_path_under_the_fixture_root_reads_the_file_on_disk(self):
+        # The live-run shape: the Write names the absolute path inside the copied fixture, so the bytes on disk win.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "fixture"
+            spec = root / "docs" / "agentic-sdlc" / "specs" / "deep-spec.md"
+            spec.parent.mkdir(parents=True)
+            spec.write_bytes(DEEP_SPEC.encode("utf-8"))
+            events = self.write(str(spec), SPEC_STUB)
+            self.assertEqual(self.depth_errors(events, cwd=root, contained_root=root), [])
+            spec.write_bytes(SPEC_STUB.encode("utf-8"))
+            self.assertEqual(self.depth_errors(events, cwd=root, contained_root=root),
+                             ["shallow_artifact:docs/agentic-sdlc/specs/deep-spec.md"])
+
+    def test_an_unrelativizable_path_id_carries_no_absolute_path_or_user_name(self):
+        bs = chr(92)
+        for path in ("/home/alice/proj/docs/agentic-sdlc/specs/x.md",
+                     bs.join(("C:", "Users", "alice", "proj", "docs", "agentic-sdlc", "specs", "x.md")),
+                     "//server/share/alice/docs/agentic-sdlc/specs/x.md",
+                     "../alice/docs/agentic-sdlc/specs/x.md"):
+            with self.subTest(path=path):
+                errors = self.depth_errors(self.write(path, DEEP_SPEC))
+                self.assertEqual(errors, ["unsafe_artifact_path:specs/x.md"])
+                self.assertFalse(any("alice" in error for error in errors), "a user name reached the error id")
+        with self.subTest(variant="the absolute-paths positive without its init cwd"):
+            events = fixture_events("procedure-strict-claude-absolute-paths-pass.jsonl")
+            self.assertEqual(events[0].pop("cwd", None), "/work/greeting-suffix")
+            self.assert_errors(self.replay_events(events), NO_ROOT_UNSAFE)
+
+
+class TestC17GateStopTraversal(C7FixtureReplay):
+    """C17.2: `.` and `..` segments collapse, posix-style, before every stop_at_gate classification:
+    `docs/agentic-sdlc/../../greeting.py` counts as `greeting.py`."""
+
+    @staticmethod
+    def write(tool_id, path, parent=None):
+        result = claude_result(tool_id, False, "File created successfully")
+        if parent is not None:
+            result["parent_tool_use_id"] = parent
+        return [full_tool_use(tool_id, "Write", {"file_path": path, "content": "x = 1\n"}, parent_tool_use_id=parent),
+                result]
+
+    def gate_with(self, extra):
+        gate = fixture_events("procedure-strict-claude-gate-stop-pass.jsonl")
+        at = index_after(gate, "toolu_g05", "tool_result")  # after the spec write and its validation
+        return self.replay_events(gate[:at] + extra + gate[at:], **GATE_STOP_ONLY)
+
+    def test_a_traversal_out_of_docs_is_the_collapsed_path(self):
+        bs = chr(92)
+        for path, shown in (("docs/agentic-sdlc/../../greeting.py", "greeting.py"),  # probe G3
+                            ("./src/../greeting.py", "greeting.py"),  # probe G4
+                            ("docs/agentic-sdlc/specs/../../../tools/run.py", "tools/run.py"),
+                            (bs.join(("docs", "agentic-sdlc", "..", "..", "greeting.py")), "greeting.py")):
+            with self.subTest(path=path):
+                self.assert_errors(self.gate_with(self.write("toolu_t1", path)),
+                                   [f"strict_edit_after_spec_gate:{shown}"])
+        with self.subTest(variant="a sub-agent traversal write"):
+            dispatch = [full_tool_use("toolu_t2", "Agent", {"subagent_type": "general-purpose", "prompt": "Sketch."})]
+            done = [claude_result("toolu_t2", False, "Sketched.")]
+            nested = self.write("toolu_t3", "docs/agentic-sdlc/notes/../../../src/app.py", parent="toolu_t2")
+            self.assert_errors(self.gate_with(dispatch + nested + done), ["strict_edit_after_spec_gate:src/app.py"])
+
+    def test_a_traversal_into_docs_is_inside_the_artifact_base(self):
+        self.assert_errors(self.gate_with(self.write("toolu_t4", "src/../docs/agentic-sdlc/notes/n.md")), [])
+
+    def test_a_path_that_escapes_every_root_shows_its_last_two_segments(self):
+        # Collapsing leaves the leading `..` of a path above the fixture root; like an absolute path no root makes
+        # relative (C16.5), its id carries the last two segments only.
+        self.assert_errors(self.gate_with(self.write("toolu_t5", "../../other/repo/app.py")),
+                           ["strict_edit_after_spec_gate:repo/app.py"])
+
+    def test_a_traversal_plan_write_after_the_spec(self):
+        plan = self.write("toolu_t6", "docs/agentic-sdlc/specs/../plans/greeting-suffix.md")
+        self.assert_errors(self.gate_with(plan), ["strict_plan_after_spec_gate"])
+
+    def test_a_traversal_out_of_specs_is_not_the_spec_write(self):
+        gate = fixture_events("procedure-strict-claude-gate-stop-pass.jsonl")
+        moved = replaced(gate, "docs/agentic-sdlc/specs/greeting-suffix.md",
+                         "docs/agentic-sdlc/specs/../notes/greeting-suffix.md", call_ids={"toolu_g04"})
+        self.assertNotEqual(moved, gate)
+        self.assert_errors(self.replay_events(moved, **GATE_STOP_ONLY), ["strict_step_missing:spec-written"])
+
+
+class TestC17ForbiddenSkillGlobKey(C7FixtureReplay):
+    """C17.3: forbid_skills_anywhere also scans Grep's `glob` key (inside a sub-agent, so only the strict id fires)."""
+
+    def test_a_grep_glob_naming_a_focused_skill_md(self):
+        events = fixture_events("procedure-strict-claude-complete-pass.jsonl")
+        at = index_after(events, "toolu_s18", "tool_use")
+        for glob, name in (("**/feature-build/SKILL.md", "feature-build"),
+                           (chr(92).join(("skills", "root-cause-fix", "SKILL.md")), "root-cause-fix")):
+            with self.subTest(glob=glob):
+                derived = list(events)
+                derived[at:at] = subagent_call("toolu_n11", "Grep", {"pattern": "Steps", "glob": glob}, "toolu_s18",
+                                               "ok")
+                self.assert_errors(self.replay_events(derived), [f"strict_forbidden_skill:{name}"])
+
+
+class TestC17CodexMoveTo(C7FixtureReplay):
+    """C17.4: a Codex `*** Move to:` rename records a write at the destination path, plus the source path; the
+    rename's hunk `+` lines count for the status read on either path."""
+
+    def gate_with_patch(self, patch, listed_path):
+        events = fixture_events("procedure-strict-codex-gate-stop-spec-approved.jsonl")
+        base = [event for event in events if (event.get("payload") or {}).get("call_id") != "call_g04"]
+        self.assertEqual(len(events) - len(base), 2)  # without its approving patch the run is a clean gate stop
+        at = rollout_text_index(base, GATE_STOP_FINAL_TEXT)
+        moved = [patch_call("call_m1", patch), patch_success("call_m1", "M", listed_path)]
+        return self.replay_events(base[:at] + moved + base[at:], **GATE_STOP_ONLY)
+
+    def test_a_rename_out_of_docs_writes_the_destination(self):
+        patch = ("*** Begin Patch\n*** Update File: docs/agentic-sdlc/notes/sketch.md\n*** Move to: src/sketch.py\n"
+                 "@@\n-notes\n+x = 1\n*** End Patch\n")
+        self.assert_errors(self.gate_with_patch(patch, "src/sketch.py"), ["strict_edit_after_spec_gate:src/sketch.py"])
+
+    def test_a_rename_into_docs_still_writes_the_source(self):
+        patch = ("*** Begin Patch\n*** Update File: greeting.py\n*** Move to: docs/agentic-sdlc/notes/greeting.py\n"
+                 "@@\n-x = 1\n+x = 2\n*** End Patch\n")
+        self.assert_errors(self.gate_with_patch(patch, "docs/agentic-sdlc/notes/greeting.py"),
+                           ["strict_edit_after_spec_gate:greeting.py"])
+
+    def test_a_rename_onto_the_spec_reads_its_status_lines(self):
+        patch = ("*** Begin Patch\n*** Update File: docs/agentic-sdlc/notes/draft.md\n"
+                 f"*** Move to: {FLAT_SPEC_PATH}\n@@\n-status: reviewed\n+status: approved\n*** End Patch\n")
+        self.assert_errors(self.gate_with_patch(patch, FLAT_SPEC_PATH), ["strict_spec_status_without_approval"])
+
+
+class TestC17SpecStatusMembershipLinear(unittest.TestCase):
+    """C17.5: _spec_statuses tests spec-path membership against a set, so the stop_at_gate status read stays linear in
+    the number of distinct spec writes (lesson 2026-07-01: assert the growth RATIO across doublings, never a time)."""
+
+    SIZES = [1000 * 2 ** step for step in range(5)]  # 4 doublings of distinct spec writes
+    MAX_GROWTH = 40  # linear is about 16x over 4 doublings; the list membership test grew about 100x on this shape
+    CASE = {"id": "status-probe", "prompt": "probe", "strict": {"stop_at_gate": "spec-review"}}
+
+    @staticmethod
+    def spec_writes(count):
+        return [full_tool_use(f"toolu_w{k}", "Write", {"file_path": f"docs/agentic-sdlc/specs/s{k:06d}.md",
+                                                       "content": "---\nwork_id: s\nstatus: reviewed\n---\n"})
+                for k in range(count)]
+
+    def test_the_status_read_grows_linearly_with_distinct_spec_writes(self):
+        timings = []
+        # The per-spec disk lookup is linear and only adds file-system noise, so it is patched out here.
+        with mock.patch.object(procedure_eval, "resolve_under", side_effect=ValueError("no disk in this probe")):
+            for count in self.SIZES:
+                trace = procedure_eval.trace_events(self.spec_writes(count), strict=True)
+                best = None
+                for _ in range(3):  # best of three, so one slow run does not skew the ratio
+                    started = time.perf_counter()
+                    errors = procedure_eval.evaluate_case(self.CASE, trace, REPO, strict=True)
+                    took = time.perf_counter() - started
+                    best = took if best is None else min(best, took)
+                self.assertEqual(errors, ["strict_missing_gate_stop"])
+                timings.append(best)
+        growth = timings[-1] / max(timings[0], 1e-9)
+        self.assertLess(growth, self.MAX_GROWTH, f"the spec status read grew {growth:.0f}x over 4 doublings: {timings}")

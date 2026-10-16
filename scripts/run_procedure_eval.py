@@ -475,7 +475,8 @@ def _exec_command_text(arguments: Any) -> str | None:
     return None
 
 
-_PATCH_UPDATE_BODY_MARKERS = ("*** Move to: ", "*** End of File")
+_PATCH_UPDATE_BODY_MARKERS = ("*** End of File",)
+PATCH_MOVE_TO = "*** Move to: "
 
 
 class PatchUpdateContent(str):
@@ -491,7 +492,8 @@ def _patch_writes(patch: str) -> list[tuple[str, str, str | None]]:
 
     Add File: content rebuilt from its `+` lines, added None. Update File: PATCH_UPDATE_EMPTY, so the on-disk file or
     an earlier write wins in evaluate_artifact_depth, and added = the `+` lines of its hunks, which the stop_at_gate
-    status read treats like a Claude Edit new_string (C15.9).
+    status read treats like a Claude Edit new_string (C15.9). An Update File with `*** Move to:` (a rename) also writes
+    its destination, right after the source and as an Update record sharing the same added text (C17.4).
     """
     targets: list[tuple[str, list[str], bool]] = []
     current: list[str] | None = None
@@ -503,6 +505,8 @@ def _patch_writes(patch: str) -> list[tuple[str, str, str | None]]:
         elif line.startswith("*** Update File: "):
             current, updating = [], True
             targets.append((line[len("*** Update File: "):].strip(), current, True))
+        elif updating and current is not None and line.startswith(PATCH_MOVE_TO):
+            targets.append((line[len(PATCH_MOVE_TO):].strip(), current, True))
         elif line.startswith("*** "):
             if not (updating and line.startswith(_PATCH_UPDATE_BODY_MARKERS)):
                 current = None
@@ -955,19 +959,31 @@ def _load_validator():
     return mod
 
 
-def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
+def _relative_artifact_path(cwd: Path, norm: str, label: str) -> Path:
+    """The on-disk path of a normalized artifact path under cwd. A path no root made relative is unsafe on every OS
+    (C17.1): it raises ValueError before resolve_under, whose absolute test differs between Windows and POSIX."""
+    if _ANCHORED_PATH_RE.match(norm):
+        raise ValueError(f"{label} is not relative to any root")
+    return resolve_under(cwd, norm, label)
+
+
+def evaluate_artifact_depth(trace: Trace, cwd: Path, roots: list[str] | None = None) -> list[str]:
     """For each canonical spec/plan artifact written, validate its CONTENT in strict mode.
 
     Content is taken from the transcript write (transcript mode) or the on-disk file
     (live mode). A literal stub like "spec" fails validation -> shallow_artifact error.
+    Each path is first normalized with the strict roots (C17.1; by default the cwd and the trace's init/rollout cwds),
+    so an absolute path under a root is depth-checked under cwd. Only a path no root can relativize, or one that
+    escapes cwd, yields unsafe_artifact_path, and its id never carries an absolute path (_error_path).
     """
+    roots = _path_roots(trace, cwd, None) if roots is None else roots
     validator = _load_validator()
     errors: list[str] = []
     # The latest content wins if the same path is written more than once. Only a Codex Update File record, whose patch
     # does not carry the file, never replaces earlier content (C15.9); an empty Claude Write still counts (C16.6).
     latest: dict[str, str] = {}
     for path, content in trace.artifact_writes:
-        norm = path.replace("\\", "/")
+        norm = normalize_tool_path(path, roots)
         # Additive: keep the flat plural-substring gate, also admit per-package
         # (singular /spec/, /plan/ segment) writes. Flat detection is unchanged.
         if (
@@ -978,9 +994,9 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
             latest[norm] = content
     for norm, content in sorted(latest.items()):
         try:
-            disk = resolve_under(cwd, norm, "artifact write path")
+            disk = _relative_artifact_path(cwd, norm, "artifact write path")
         except ValueError:
-            errors.append(f"unsafe_artifact_path:{norm}")
+            errors.append(f"unsafe_artifact_path:{_error_path(norm)}")
             continue
         text = disk.read_text(encoding="utf-8") if disk.exists() else content
         # Per-package mode comes from the singular-segment classifier; flat falls back
@@ -1010,9 +1026,9 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
                     spec_path = next((p for p in latest if "/specs/" in p), None)
                 if spec_path:
                     try:
-                        sp = resolve_under(cwd, spec_path, "paired spec path")
+                        sp = _relative_artifact_path(cwd, spec_path, "paired spec path")
                     except ValueError:
-                        errors.append(f"unsafe_artifact_path:{spec_path}")
+                        errors.append(f"unsafe_artifact_path:{_error_path(spec_path)}")
                         continue
                     spec_text = sp.read_text(encoding="utf-8") if sp.exists() else latest[spec_path]
                     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as sf:
@@ -1027,7 +1043,7 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
             # accumulated in the system temp dir across runs. Unlink it in the same finally.
             if spec_arg is not None:
                 Path(spec_arg).unlink(missing_ok=True)
-    return errors
+    return list(dict.fromkeys(errors))  # two unrelativized paths can share an _error_path id
 
 
 # --- BR6 strict attribution (matches the strict column of tests/fixtures/transcripts/br6-attribution-cases.json).
@@ -2170,8 +2186,8 @@ def _codex_gate_text_index(trace: Trace, marker: str) -> int | None:
 
 
 def _is_artifact_path(path: str, role: str) -> bool:
-    """A flat docs/agentic-sdlc/<role>s/ path or a per-package <role> path."""
-    norm = str(path).replace("\\", "/")
+    """A flat docs/agentic-sdlc/<role>s/ path or a per-package <role> path, read after `.`/`..` collapse (C17.2)."""
+    norm = _collapse_dot_segments(str(path).replace("\\", "/"))
     layout = per_package_layout(norm)
     return f"docs/agentic-sdlc/{role}s/" in norm or (layout is not None and layout[0] == role)
 
@@ -2317,25 +2333,45 @@ def is_source_path(path: str, req: dict[str, Any]) -> bool:
     return _path_extension(norm) in (req.get("sourceGlobs") or [])
 
 
+_PATH_ANCHOR_RE = re.compile(r"(?:[A-Za-z]:)?/+")
+
+
+def _collapse_dot_segments(norm: str) -> str:
+    """`.` and `..` segments collapsed posix-style on a `/`-separated path (C17.2), in one pass: an empty or `.`
+    segment drops and `..` removes the segment before it. A `..` above an anchor (`/`, `//`, `X:/`, kept as written)
+    drops; a relative path keeps the leading `..` segments that climb above its start."""
+    match = _PATH_ANCHOR_RE.match(norm)
+    anchor = match.group(0) if match else ""
+    kept: list[str] = []
+    for segment in norm[len(anchor):].split("/"):
+        if segment in ("", "."):
+            continue
+        if segment != "..":
+            kept.append(segment)
+        elif kept and kept[-1] != "..":
+            kept.pop()
+        elif not anchor:
+            kept.append("..")
+    return anchor + "/".join(kept)
+
+
 def _path_roots(trace: Trace, cwd: Path, contained_root: Path | None) -> list[str]:
     """Normalized roots that make an absolute tool path relative, longest first: the fixture root (or eval cwd), the
-    Claude init cwd and the Codex rollout cwds (C16.5)."""
+    Claude init cwd and the Codex rollout cwds (C16.5), collapsed like the tool paths (C17.2)."""
     candidates = (cwd, contained_root, trace.init_cwd, *trace.rollout_cwds)
-    roots = {str(root).replace("\\", "/").rstrip("/") for root in candidates if root}
+    roots = {_collapse_dot_segments(str(root).replace("\\", "/")).rstrip("/") for root in candidates if root}
     return sorted((root for root in roots if root), key=len, reverse=True)
 
 
 def normalize_tool_path(path: Any, roots: list[str]) -> str:
-    """`\\` becomes `/`; a path under one of `roots` (a drive letter or root prefix compared case-insensitively)
-    becomes relative to it; a leading `./` is dropped (C16.5); anything else is kept (never guessed)."""
-    norm = str(path).replace("\\", "/")
+    """`\\` becomes `/` and `.`/`..` segments collapse (C17.2, so a leading `./` drops too, C16.5); a path under one of
+    `roots` (a drive letter or root prefix compared case-insensitively) then becomes relative to it; anything else is
+    kept (never guessed)."""
+    norm = _collapse_dot_segments(str(path).replace("\\", "/"))
     for root in roots:
         prefix = root + "/"
         if norm[:len(prefix)].lower() == prefix.lower():
-            norm = norm[len(prefix):]
-            break
-    while norm.startswith("./"):
-        norm = norm[2:]
+            return norm[len(prefix):]
     return norm
 
 
@@ -2344,11 +2380,12 @@ _DRIVE_SEGMENT_RE = re.compile(r"[A-Za-z]:")
 
 
 def _error_path(norm: str) -> str:
-    """The path an error id carries: never an absolute one (C16.5). A path no root made relative shows its last two
-    segments (after the root or drive)."""
-    if not _ANCHORED_PATH_RE.match(norm):
+    """The path an error id carries: never an absolute one (C16.5). A path no root made relative (an absolute path, or
+    a collapsed relative path that still climbs above every root with a leading `../`) shows its last two segments
+    (after the root or drive)."""
+    if not _ANCHORED_PATH_RE.match(norm) and not norm.startswith("../"):
         return norm
-    segments = [segment for segment in norm.split("/") if segment]
+    segments = [segment for segment in norm.split("/") if segment and segment != ".."]
     if segments and _DRIVE_SEGMENT_RE.fullmatch(segments[0]):
         segments = segments[1:]
     return "/".join(segments[-2:])
@@ -2450,8 +2487,8 @@ def skill_count_errors(trace: Trace, counts: dict[str, list[int]]) -> list[str]:
     return errors
 
 
-# The input keys forbid_skills_anywhere scans on every tool for a focused SKILL.md path (C16.7).
-FORBIDDEN_SKILL_SCAN_KEYS = ("path", "pattern", "file_path", "command", "notebook_path")
+# The input keys forbid_skills_anywhere scans on every tool for a focused SKILL.md path (C16.7; Grep's `glob`, C17.3).
+FORBIDDEN_SKILL_SCAN_KEYS = ("path", "pattern", "glob", "file_path", "command", "notebook_path")
 
 
 def forbidden_skill_errors(trace: Trace, names: list[str]) -> list[str]:
@@ -2530,12 +2567,13 @@ def _spec_statuses(trace: Trace, cwd: Path, writes: list[tuple[int, str]], roots
     specs = list(dict.fromkeys(path for _index, path in writes if _is_artifact_path(path, "spec")))
     if not specs:
         return []
+    spec_set = frozenset(specs)  # membership tests stay O(1) per record (C17.5)
     validator = _load_validator()
     failed = _failed_call_ids(trace)
     latest: dict[str, str] = {}
     for _index, record in _top_level_writes(trace):
         content = record.get("content")
-        if isinstance(content, str) and content and normalize_tool_path(record.get("path", ""), roots) in specs:
+        if isinstance(content, str) and content and normalize_tool_path(record.get("path", ""), roots) in spec_set:
             latest[normalize_tool_path(record["path"], roots)] = content
     statuses: list[str] = []
     for spec in specs:
@@ -2553,13 +2591,13 @@ def _spec_statuses(trace: Trace, cwd: Path, writes: list[tuple[int, str]], roots
         payload = record.get("input") if isinstance(record.get("input"), dict) else {}
         if (record["kind"] == "tool_call" and not record.get("parent_tool_use_id")
                 and record.get("name") in ("Edit", "MultiEdit") and record.get("id") not in failed
-                and normalize_tool_path(payload.get("file_path", ""), roots) in specs):
+                and normalize_tool_path(payload.get("file_path", ""), roots) in spec_set):
             edits = payload.get("edits") if record.get("name") == "MultiEdit" else [payload]
             for edit in edits if isinstance(edits, list) else []:
                 if isinstance(edit, dict) and isinstance(edit.get("new_string"), str):
                     statuses += _fragment_statuses(edit["new_string"])
         elif (record["kind"] == "write" and isinstance(record.get("added"), str)
-              and normalize_tool_path(record.get("path", ""), roots) in specs):
+              and normalize_tool_path(record.get("path", ""), roots) in spec_set):
             statuses += _fragment_statuses(record["added"])
     return statuses
 
@@ -2610,7 +2648,8 @@ def zero_delegation_errors(trace: Trace, strict_config: dict[str, Any], runs: li
 
 
 def acceptance_excluded(error: str) -> bool:
-    """C15.7: acceptance does not count the auditor verdict (its own column) or the deferred L3c-F1 path errors."""
+    """C15.7: acceptance does not count the auditor verdict (its own column) or unsafe_artifact_path, which since C17.1
+    names only a spec/plan path no root can relativize."""
     return error.startswith("strict_critical_audit:") or "unsafe_artifact_path" in error
 
 
@@ -2619,6 +2658,7 @@ def evaluate_case(
 ) -> list[str]:
     errors = []
     haystack = trace.haystack()
+    roots = _path_roots(trace, cwd, contained_root)  # the depth check relativizes with the strict roots (C17.1)
     if case.get("fail_on_runtime_errors", True):
         errors += [f"runtime_error:{error}" for error in trace.runtime_errors]
     if case.get("fail_on_permission_denials", True):
@@ -2651,7 +2691,7 @@ def evaluate_case(
         if regex_present(pattern, haystack):
             errors.append(f"forbidden_pattern:{pattern}")
     if case.get("check_artifact_depth", False):
-        errors += evaluate_artifact_depth(trace, cwd)
+        errors += evaluate_artifact_depth(trace, cwd, roots)
     if strict:
         strict_config = case.get("strict") if isinstance(case.get("strict"), dict) else {}
         runs: list[AttributableRun] = []
@@ -2666,7 +2706,7 @@ def evaluate_case(
             errors += step_order_errors(trace, strict_config, runs)
         # strict.check_artifact_depth runs the depth check whatever the case-level flag says (never twice).
         if strict_config.get("check_artifact_depth") and not case.get("check_artifact_depth", False):
-            errors += evaluate_artifact_depth(trace, cwd)
+            errors += evaluate_artifact_depth(trace, cwd, roots)
         errors += zero_delegation_errors(trace, strict_config, runs, cwd, contained_root)
         if auditor_verdict_unobservable(trace):
             errors.append("strict_auditor_verdict_unobservable")

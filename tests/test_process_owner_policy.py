@@ -24,11 +24,17 @@ PINNED_SUPERPOWERS_SKILLS = {"brainstorming", "writing-plans", "dispatching-para
                              "verification-before-completion"}
 # Pipeline v2.1 C16 item 12 (maintainer-approved): both bootstraps state, right before the Intent
 # table, that an active pipeline run owns its steps, and mark the dispatch-strategy row as once per run.
+# C17 item 7: Step 1 is "Update main"; the dispatch call happens at kickoff, before Step 1.
 PIPELINE_OWNS_STEPS_LINE = (
     "Inside an active agentic-sdlc-pipeline run the pipeline owns every step: dispatch-strategy runs once at "
-    "Step 1; its tests, security reviews and final audit use the work-type core file, security-reviewer and "
-    "implementation-auditor - do not invoke or read the focused skills below for those steps."
+    "kickoff, before Step 1; its tests, security reviews and final audit use the work-type core file, "
+    "security-reviewer and implementation-auditor - do not invoke or read the focused skills below for those "
+    "steps."
 )
+# C17 item 7: the Codex bootstrap's Finalize evidence sentence names the Finalize evidence, not all evidence
+# (flat packages still get the TDD evidence file).
+FLAT_NO_FINALIZE_EVIDENCE = "(flat packages get no Finalize evidence)"
+FLAT_NO_EVIDENCE_OLD = "(flat packages get no evidence)"
 DISPATCH_STRATEGY_ROW = (
     "  parallelism / delegation decision       -> agentic-sdlc:dispatch-strategy "
     "(before choosing a mechanism) (once per pipeline run)"
@@ -102,6 +108,12 @@ class TestDeliveredProcessOwnership(unittest.TestCase):
                 rows = [line for line in lines if "-> agentic-sdlc:dispatch-strategy" in line]
                 self.assertEqual(rows, [DISPATCH_STRATEGY_ROW])
                 self.assertTrue(rows[0].endswith(" (once per pipeline run)"), rows[0])
+                self.assertTrue(context.isascii(), runtime)  # hook stdout stays ASCII
+
+    def test_codex_bootstrap_flat_packages_get_no_finalize_evidence(self):  # pipeline v2.1 C17 item 7
+        context = self.contexts["codex"]
+        self.assertEqual(context.count(FLAT_NO_FINALIZE_EVIDENCE), 1)
+        self.assertNotIn(FLAT_NO_EVIDENCE_OLD, context)
 
 
 class TestDirectSkillOwnership(unittest.TestCase):

@@ -4,8 +4,8 @@
 gate security and the final audit through `security-audit` / `implementation-control`. In v2.1
 the pipeline invokes none of the six focused skills. It reads a shared work-type core file
 (`skills/<skill>/references/core.md`), dispatches `security-reviewer` and `implementation-auditor`
-directly, calls `dispatch-strategy` once at Step 1, and records an approval receipt before any
-source or test edit.
+directly, calls `dispatch-strategy` once at kickoff, before Step 1, and records an approval receipt
+before any source or test edit.
 
 What this suite pins, as literals taken from the contracts (never from the file under test):
 - C1: the four core files exist, carry the depth blocks byte-identical to their SKILL.md (parity),
@@ -18,6 +18,11 @@ What this suite pins, as literals taken from the contracts (never from the file 
 - C16 items 13-21: the fix-round text (amended approval receipt, TDD file write rule, core
   mapping in SKILL.md, the `Envelope reports:` auditor section, markers-once, feedback-triage and
   completion-claim-gate scope, and the minor wording fixes).
+- C17 items 8-16: "at kickoff, before Step 1" for the dispatch call, kickoff item 2 as selection
+  only with the core read and mapping in the Work-type core gate paragraph, the playbook
+  pre-approval clause, markers once per gate occurrence, the SKILL.md TDD write clause, "no
+  Finalize evidence" in the docs, the closed Skill-call list in docs/skill-boundaries.md, the
+  docs/testing.md strict-key rows and the CHANGELOG 0.6.0 known limitations.
 Every comparison asserts PRESENCE first, so deleting the thing a check protects fails it instead
 of passing it vacuously.
 
@@ -452,7 +457,7 @@ DISPATCH_CALLER_RULE = (
     "you (the user did not ask for a mechanism decision), the decision is never the final answer. "
     "State the map in at most 5 lines, then continue with the caller's next step in the same turn; "
     "end the turn only when the caller's flow says so. Within one `agentic-sdlc-pipeline` run you "
-    "are called once, at Step 1, and the pipeline reuses that map."
+    "are called once, at kickoff, before Step 1, and the pipeline reuses that map."  # C17.8
 )
 DISPATCH_FENCED_LAST_ITEM = "- **Never touch the skill's internal mechanism.**"
 DISPATCH_AUDITOR_ROUTE = (
@@ -460,9 +465,9 @@ DISPATCH_AUDITOR_ROUTE = (
     "`agentic-sdlc-pipeline`, via `implementation-control` elsewhere"
 )
 DISPATCH_AUDITOR_ROUTE_OLD = "route them through `implementation-auditor` (via `implementation-control`)"
-PIPELINE_DISPATCH_ONCE = (
-    "Within one pipeline run, call `dispatch-strategy` once at Step 1 and reuse that mechanism map "
-    "for every later heavy, independent, or parallel step."
+PIPELINE_DISPATCH_ONCE = (  # C17.8: Step 1 is "Update main"; the dispatch call comes before it
+    "Within one pipeline run, call `dispatch-strategy` once at kickoff, before Step 1, and reuse that "
+    "mechanism map for every later heavy, independent, or parallel step."
 )
 PIPELINE_DISPATCH_PER_STEP_OLD = {
     PIPELINE: "for every heavy/independent/parallel step — it picks the mechanism",
@@ -609,11 +614,13 @@ SECURITY_EVERY_WORK_TYPE = (
 ENVELOPE_REPORT_PARTS = ("Analysis Summary", "Goal Lock", "Quality Gates", "Diff Review",
                          "Loop Iteration", '"none"')
 
-# C16.18.
+# C16.18, as amended by C17.11: once per gate occurrence, so Steps 11 and 14 each emit theirs.
 MARKERS_ONCE = (
-    "Emit each marker once, in the message where its gate happens; never repeat markers in progress "
-    "notes, summaries or the final report."
+    "Emit each marker once per gate occurrence, in the message where that gate happens (Steps 11 "
+    "and 14 are two occurrences); never repeat markers in progress notes, summaries or the final "
+    "report."
 )
+MARKERS_ONCE_OLD = "Emit each marker once, in the message where its gate happens"
 
 # C16.19: feedback-triage inside a run, in the pipeline and in feedback-triage itself.
 PIPELINE_FEEDBACK_TRIAGE = (
@@ -637,7 +644,7 @@ CLAIM_GATE_AUDITOR_OLD = "`implementation-control` audits the *whole flow*"
 REVIEWER_NO_FINDINGS_ROW = "`None | — | — | — | No finding`"
 REVIEWER_CALL_SHAPE = (
     "`subagent_type` `security-reviewer` or `agentic-sdlc:security-reviewer`: one call for all four "
-    "lenses, or one call per lens when the Step 1 map fans out"
+    "lenses, or one call per lens when the kickoff map fans out"  # C17.8: not "the Step 1 map"
 )
 FM1_CONTINUE = "continue with Step 1 and the branch checkpoint in the same turn"
 FM1_RESUME = ("Resuming after a Review gate continues the same run: no second dispatch and no "
@@ -663,6 +670,74 @@ ZCODE_CONTROL_ROW_NEEDS = ("agentic-sdlc-pipeline", "resolve_work_package.py",
                            "ZCode Adapter Gate: implementation-auditor",
                            "ZCode Adapter Gate: completion-claim-gate")
 ZCODE_CONTROL_ROW_OLD = "final-report gate marker"
+
+# --- C17 (fix round after the final review of e29c571; text owner T2) ---
+# C17.8: "Step 1" is "Update main". Text that means the dispatch call or its map says "at kickoff,
+# before Step 1" (or "the kickoff map"). `\b` after the 1 keeps "at Step 16" out of the ban.
+KICKOFF_DISPATCH = "at kickoff, before Step 1"
+STEP_1_DISPATCH_OLD = re.compile(r"\bat Step 1\b|Step 1 (?:map|mechanism map|`dispatch-strategy` map)")
+STEP_1_DISPATCH_FILES = (
+    PIPELINE,
+    PLAYBOOK,
+    DISPATCH,
+    "README.md",
+    "docs/plugin-readme.md",
+    ".claude-plugin/README.md",
+    ".codex-plugin/README.md",
+    "docs/skill-boundaries.md",
+    "CHANGELOG.md",
+)
+# C17.9: kickoff item 2 only selects; the read and the mapping live in the core gate paragraph.
+KICKOFF_SELECTION = "note the selected core; you read it at Step 8, after the Plan Review gate."
+CORE_READ_INSTRUCTION = "Read `<runtime-root>/skills/<skill>/references/core.md`"
+CORE_GATE_PARAGRAPH = "**Work-type core gate (Steps 8–13):**"
+# C17.10: playbook Spec Review gate.
+RESOLVE_WITH_USER = ("Resolve the decision points WITH the user (AskUserQuestion) unless the request "
+                     "pre-approves the gates (see Approval receipt)")
+RESOLVE_WITH_USER_OLD = "Resolve the decision points WITH the user (AskUserQuestion);"
+# C17.12: the SKILL.md TDD paragraph.
+TDD_PARAGRAPH = "From Step 8 the main loop writes the **TDD evidence file**"
+TDD_SKILL_WRITE_CLAUSE = "write each block with the file-edit tool, never a shell redirect"
+# C17.13: the shared Finalize evidence sentence in the docs. "per-package" stays a marker
+# (tests/test_artifact_path_prose.py), so only the parenthesis changes.
+FLAT_NO_FINALIZE_EVIDENCE = "(flat packages get no Finalize evidence)"
+FLAT_NO_EVIDENCE_DOC_FILES = (
+    ".claude-plugin/README.md",
+    ".codex-plugin/README.md",
+    "README.md",
+    "docs/claude-code-runtime.md",
+    "docs/plugin-readme.md",
+    "docs/release-readiness.md",
+    "docs/runtime-adapter.md",
+    "docs/skill-boundaries.md",
+    "docs/testing.md",
+    "docs/troubleshooting.md",
+    "hooks/README.md",
+)
+# C17.14: the closed Skill-call list in docs/skill-boundaries.md.
+BOUNDARIES = "docs/skill-boundaries.md"
+BOUNDARIES_CLOSED_LIST = "The pipeline's own `Skill` calls are"
+# C17.15: docs/testing.md strict-key rows (C16.2-C16.4) and the depth relativization (C17.1).
+TESTING_DOC = "docs/testing.md"
+TESTING_ROW_NEEDS = {
+    "| `skill_call_counts` |": ("whose only result is an error",),
+    "| `reviewers_after_last_source_edit` |": ("dispatch call",),
+    "| `evidence_file_before_control` |": ("dispatch call",),
+    "| `stop_at_gate` |": ("anywhere in the run", "sub-agent"),
+}
+TESTING_STRICT_SECTION = "### Strict evidence keys"
+TESTING_STRICT_NEEDS = ("failed write", "relativiz", "unsafe_artifact_path")
+# C17.16: CHANGELOG 0.6.0 known limitations.
+CHANGELOG = "CHANGELOG.md"
+CHANGELOG_NO_LIVE_RUN = (
+    "No live pipeline run has measured 0.6.0 yet; the zero-delegation behaviour is enforced by text, "
+    "hooks (Claude Code) and the offline grader."
+)
+CHANGELOG_TDD_PATHS = (
+    "per-package `docs/agentic-sdlc/<slug>/evidence/<work_id>.tdd.md`",
+    "flat `docs/agentic-sdlc/evidence/<work_id>.tdd.md`",
+)
+CHANGELOG_TDD_OLD = "(`<work_id>.tdd.md` next to the work package's evidence)"
 
 
 def block(text, heading):
@@ -1293,14 +1368,33 @@ class TestC16TddFile(ContractCase):
 
 
 class TestC16CoreMapping(ContractCase):
-    def test_mapping_sits_next_to_the_core_paths(self):
+    # C17.9 moved the C16.16 sentences from kickoff item 2 into the Work-type core gate paragraph:
+    # kickoff only selects the core, and the core is read at Step 8, after the Plan Review gate.
+    def core_gate_paragraph(self):
+        lines = [ln for ln in self.read(PIPELINE).split("\n") if ln.startswith(CORE_GATE_PARAGRAPH)]
+        self.assertEqual(len(lines), 1, f"{PIPELINE} needs one `{CORE_GATE_PARAGRAPH}` paragraph")
+        return lines[0]
+
+    def test_kickoff_item_2_only_selects_the_core(self):
         kickoff = self.section(self.read(PIPELINE), "## At kickoff (always)", PIPELINE)
-        last_path = f"<runtime-root>/{core_md('test-authoring')}"
-        self.assertIn(last_path, kickoff)
+        item = next((ln for ln in kickoff.split("\n") if ln.startswith("2. ")), None)
+        self.assertIsNotNone(item, "kickoff item 2 is gone")
+        missing = [f"<runtime-root>/{core_md(skill)}" for skill in WORK_TYPE_SKILLS
+                   if f"<runtime-root>/{core_md(skill)}" not in item]
+        self.assertEqual(missing, [], "kickoff item 2 must still name the four core files")
+        self.assertIn(KICKOFF_SELECTION, item)
+        for moved in (CORE_READ_INSTRUCTION, PIPELINE_MAPPING, CORE_LAST_STEP):
+            with self.subTest(moved=moved[:50]):
+                self.assertNotIn(moved, kickoff)
+
+    def test_mapping_sits_in_the_core_gate_paragraph(self):
+        paragraph = self.core_gate_paragraph()
         for sentence in (PIPELINE_MAPPING, CORE_LAST_STEP):
             with self.subTest(sentence=sentence[:50]):
-                self.assertIn(sentence, kickoff)
-                self.assertLess(kickoff.index(last_path), kickoff.index(sentence))
+                self.assertIn(sentence, paragraph)
+        self.assertLess(paragraph.index(PIPELINE_MAPPING), paragraph.index(CORE_LAST_STEP))
+        self.assertEqual(self.read(PIPELINE).count(PIPELINE_MAPPING), 1,
+                         "the mapping sentence lives in one place in SKILL.md")
 
     def test_security_steps_run_for_every_work_type(self):
         self.assertIn(SECURITY_EVERY_WORK_TYPE, self.read(PIPELINE))
@@ -1327,8 +1421,10 @@ class TestC16AuditorEnvelope(ContractCase):
 
 
 class TestC16Markers(ContractCase):
-    def test_markers_are_emitted_once(self):
-        self.assertIn(MARKERS_ONCE, self.read(PIPELINE))
+    def test_markers_are_emitted_once_per_gate_occurrence(self):
+        text = self.read(PIPELINE)
+        self.assertIn(MARKERS_ONCE, text)
+        self.assertNotIn(MARKERS_ONCE_OLD, text)
 
 
 class TestC16FeedbackTriage(ContractCase):
@@ -1416,6 +1512,94 @@ class TestC16MinorFixes(ContractCase):
         missing = [part for part in ZCODE_CONTROL_ROW_NEEDS if part not in rows[0]]
         self.assertEqual(missing, [])
         self.assertNotIn(ZCODE_CONTROL_ROW_OLD, rows[0])
+
+
+# ============================================================ C17 (text, owner T2)
+
+
+class TestC17KickoffDispatch(ContractCase):
+    def test_dispatch_call_is_placed_at_kickoff_before_step_1(self):
+        for rel in STEP_1_DISPATCH_FILES:
+            with self.subTest(file=rel):
+                text = self.read(rel)
+                self.assertIn(KICKOFF_DISPATCH, text)
+                self.assertEqual(pattern_hits(text, (STEP_1_DISPATCH_OLD,)), [],
+                                 f"{rel} still places the dispatch call or its map at Step 1")
+
+    def test_step_1_stays_update_main(self):
+        rows = [ln for ln in self.read(PIPELINE).split("\n") if ln.startswith("| 1 |")]
+        self.assertEqual(len(rows), 1, rows)
+        self.assertIn("Update main", rows[0])
+
+
+class TestC17PlaybookPreApproval(ContractCase):
+    def test_spec_review_gate_names_the_pre_approval_exception(self):
+        section = playbook_section(self.read(PLAYBOOK), "### 4. Spec phase")
+        self.assertIsNotNone(section, f"{PLAYBOOK} has no `### 4. Spec phase` section")
+        self.assertIn(RESOLVE_WITH_USER, section)
+        self.assertNotIn(RESOLVE_WITH_USER_OLD, section)
+
+
+class TestC17SkillTddClause(ContractCase):
+    def test_skill_md_tdd_paragraph_names_the_write_tool(self):
+        lines = [ln for ln in self.read(PIPELINE).split("\n") if ln.startswith(TDD_PARAGRAPH)]
+        self.assertEqual(len(lines), 1, f"{PIPELINE} needs one TDD evidence paragraph")
+        self.assertIn(TDD_SKILL_WRITE_CLAUSE, lines[0])
+
+
+class TestC17FlatWording(ContractCase):
+    def test_docs_say_flat_packages_get_no_finalize_evidence(self):
+        for rel in FLAT_NO_EVIDENCE_DOC_FILES:
+            with self.subTest(file=rel):
+                text = self.read(rel)
+                self.assertIn(FLAT_NO_FINALIZE_EVIDENCE, text)
+                for old in FLAT_NO_EVIDENCE_OLD:
+                    self.assertNotIn(old, text)
+
+
+class TestC17SkillBoundaries(ContractCase):
+    def test_closed_skill_call_list_names_git_safety_check(self):
+        lines = [ln for ln in self.read(BOUNDARIES).split("\n") if BOUNDARIES_CLOSED_LIST in ln]
+        self.assertEqual(len(lines), 1, f"{BOUNDARIES} needs one closed Skill-call list")
+        self.assertIn(GIT_SAFETY_CHECK_CALL, lines[0])
+        self.assertIn(KICKOFF_DISPATCH, lines[0])
+
+
+class TestC17TestingDoc(ContractCase):
+    def test_strict_key_rows_match_the_fix_round_grader(self):
+        section = playbook_section(self.read(TESTING_DOC), TESTING_STRICT_SECTION)
+        self.assertIsNotNone(section, f"{TESTING_DOC} has no `{TESTING_STRICT_SECTION}` section")
+        lines = section.split("\n")
+        for start, needs in TESTING_ROW_NEEDS.items():
+            with self.subTest(row=start):
+                rows = [ln for ln in lines if ln.startswith(start)]
+                self.assertEqual(len(rows), 1, rows)
+                missing = [need for need in needs if need not in rows[0]]
+                self.assertEqual(missing, [])
+        missing = [need for need in TESTING_STRICT_NEEDS if need not in section]
+        self.assertEqual(missing, [], f"{TESTING_DOC} strict section misses C16.4 / C17.1 wording")
+
+
+class TestC17Changelog(ContractCase):
+    def release_section(self):
+        text = self.read(CHANGELOG)
+        start = text.find("\n## 0.6.0 - ")
+        self.assertNotEqual(start, -1, f"{CHANGELOG} has no 0.6.0 section")
+        end = text.find("\n## ", start + 1)
+        return text[start:end if end != -1 else len(text)]
+
+    def test_known_limitations_name_the_missing_live_run(self):
+        section = self.release_section()
+        line = next((ln for ln in section.split("\n") if ln.startswith("- Known limitations:")), None)
+        self.assertIsNotNone(line, "the 0.6.0 Known limitations bullet is gone")
+        self.assertIn(CHANGELOG_NO_LIVE_RUN, line)
+
+    def test_tdd_evidence_paths_are_exact(self):
+        section = self.release_section()
+        for path in CHANGELOG_TDD_PATHS:
+            with self.subTest(path=path):
+                self.assertIn(path, section)
+        self.assertNotIn(CHANGELOG_TDD_OLD, section)
 
 
 if __name__ == "__main__":

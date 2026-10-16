@@ -826,18 +826,20 @@ class TestReviewResultStep(unittest.TestCase):
         return _reminder_ids(self.run_guard(events, **kw))
 
     # ---- RED ----
-    def test_errored_control_dispatch_lists_review_result_once(self):  # AC37
+    # C17 item 6: a dispatch whose every tool_result has is_error true no longer satisfies its toolUse
+    # step, so an errored control dispatch lists `control` as well; review-result is still listed once.
+    def test_errored_control_dispatch_lists_control_and_review_result_once(self):  # AC37 + C17 item 6
         events = _review_transcript(FB, [(CONTROL_AGENT, "error"), (SECURITY_AGENT, "ok")])
-        self.assertEqual(self.ids(events), ["review-result"])
+        self.assertEqual(self.ids(events), ["control", "review-result"])
 
     def test_missing_result_lists_review_result(self):  # AC37
         events = _review_transcript(FB, [(CONTROL_AGENT, "missing"), (SECURITY_AGENT, "ok")])
         self.assertEqual(self.ids(events), ["review-result"])
 
-    def test_security_cleared_control_errored_listed_once(self):  # AC37
+    def test_security_cleared_control_errored_listed_once(self):  # AC37 + C17 item 6
         events = _review_transcript(FB, [(SECURITY_SKILL, "ok"), (SECURITY_AGENT, "ok"),
                                          (CONTROL_SKILL, "error"), (CONTROL_AGENT, "error")])
-        self.assertEqual(self.ids(events), ["review-result"])
+        self.assertEqual(self.ids(events), ["control", "review-result"])
 
     # ---- guards: pass before and after the review-result step ----
     def test_mixed_member_results_clear_step(self):  # AC37: any member's non-error result clears its step
@@ -866,19 +868,28 @@ class TestReviewResultStep(unittest.TestCase):
         events = _review_transcript(FB, [(CONTROL_AGENT, "error")], source_edit=False)
         self.assertEqual(self.run_guard(events), {})
 
-    def test_block_flag_errored_control_no_block_decision(self):  # AC38
+    def test_block_flag_review_result_never_blocks(self):  # AC38 + C17 item 6
+        # A control dispatch with no result yet still satisfies `control` (no result counts), so only the
+        # warn-level review-result step is open: the block flag adds no block decision.
+        pending = self.run_guard(_review_transcript(FB, [(CONTROL_AGENT, "missing"), (SECURITY_AGENT, "ok")]), block=True)
+        self.assertNotEqual(pending.get("decision"), "block")
+        self.assertEqual(_reminder_ids(pending), ["review-result"])
+        # C17 item 6: an errored control dispatch fails the block-level `control` step. The block reason
+        # names `control` only; review-result never joins a block decision.
         errored = self.run_guard(_review_transcript(FB, [(CONTROL_AGENT, "error"), (SECURITY_AGENT, "ok")]), block=True)
-        self.assertNotEqual(errored.get("decision"), "block")
-        self.assertEqual(_reminder_ids(errored), ["review-result"])
+        self.assertEqual(errored.get("decision"), "block")
+        self.assertEqual(_block_ids(errored), ["control"])
         cleared = _review_transcript(FB, [(CONTROL_AGENT, "ok"), (SECURITY_AGENT, "ok")])
         self.assertEqual(self.run_guard(cleared, block=True), {})
 
-    def test_existing_control_security_outcomes_unchanged(self):  # AC37
+    def test_control_security_outcomes_for_errored_and_missing_dispatches(self):  # AC37 + C17 item 6
         def step_ids(dispatches):
             return [i for i in self.ids(_review_transcript(FB, dispatches)) if i in ("security", "control")]
 
-        self.assertEqual(step_ids([(CONTROL_AGENT, "error"), (SECURITY_AGENT, "missing")]), [])
-        self.assertEqual(step_ids([(SECURITY_AGENT, "error")]), ["control"])
+        # C17 item 6: an errored dispatch (every tool_result is_error) no longer satisfies its step; a
+        # dispatch with no result still does.
+        self.assertEqual(step_ids([(CONTROL_AGENT, "error"), (SECURITY_AGENT, "missing")]), ["control"])
+        self.assertEqual(step_ids([(SECURITY_AGENT, "error")]), ["security", "control"])
         self.assertEqual(step_ids([(CONTROL_SKILL, "missing")]), ["security"])
 
     def test_pipeline_missing_control_block_pinned(self):  # AC40, C6 pipeline block pin
@@ -1329,7 +1340,8 @@ def _pipe_events(*, dispatch=DS, security="agentic-sdlc:security-reviewer",
 class TestExactNameEvidence(unittest.TestCase):
     """C6: an `exactName` toolUse item is satisfied only when `input.skill` (Skill) or
     `input.subagent_type` (Agent) equals X or agentic-sdlc:X - never by a substring of the
-    serialized input. The receiptHasError rule is unchanged."""
+    serialized input. The receiptHasError rule applies to it (C17 item 6 extends that rule; see
+    TestRealErrorShape)."""
 
     run_guard = TestFlowStepGuard.run_guard
 
@@ -1784,6 +1796,133 @@ class TestDispatchTerminalStop(unittest.TestCase):
         side["isSidechain"] = True
         lagging = [PROMPT] + self._call(PIPE, "t1") + self._call(DS, "t2") + [side]
         self.assertEqual(self.run_guard(lagging, block=True), {})
+
+
+# ---- C17 item 6: the real Claude Code error shape --------------------------------------------
+# Shape observed in local Claude Code session files (2026-10-16; keys and types only, no content copied):
+# an errored call's result is a type "user" record whose `toolUseResult` is a STRING and whose single
+# tool_result block carries `is_error: true` and string content. A successful Skill result has an object
+# toolUseResult ({commandName, success}) or none; a successful Agent result has an object toolUseResult
+# and list content; neither success block carries an is_error key. The text below is synthetic.
+ERROR_TEXT = "Error: synthetic tool failure"
+
+
+def errored_result(tool_id, *, string_result=True, is_error=True):
+    """A failed call's result record. The defaults are the real shape; string_result=False or
+    is_error=None isolates one of the two C17 rules."""
+    item = {"type": "tool_result", "tool_use_id": tool_id, "content": ERROR_TEXT}
+    if is_error is not None:
+        item["is_error"] = is_error
+    rec = {"type": "user", "message": {"content": [item]}}
+    if string_result:
+        rec["toolUseResult"] = ERROR_TEXT
+    return rec
+
+
+def skill_success(tool_id, name, *, with_tool_use_result=True):
+    """A successful Skill result in the real shape: string content, no is_error key, and an object
+    toolUseResult or none."""
+    rec = {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": tool_id, "content": "Launching skill: " + name}]}}
+    if with_tool_use_result:
+        rec["toolUseResult"] = {"commandName": name, "success": True}
+    return rec
+
+
+def agent_success(tool_id):
+    """A successful synchronous Agent result in the real shape: list content, no is_error key, object
+    toolUseResult."""
+    return {"type": "user", "toolUseResult": {"status": "completed", "isAsync": False},
+            "message": {"content": [{"type": "tool_result", "tool_use_id": tool_id,
+                                     "content": [{"type": "text", "text": "No finding."}]}]}}
+
+
+ERROR_SHAPES = {
+    "real shape: string toolUseResult + is_error": {},
+    "string toolUseResult alone": {"is_error": None},
+    "every tool_result is_error alone": {"string_result": False},
+}
+SECURITY_CALL = {"subagent_type": "agentic-sdlc:security-reviewer", "prompt": "do the audit"}
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestRealErrorShape(unittest.TestCase):
+    """C17 item 6: a Skill or Agent call counts as errored when its toolUseResult is a string or when
+    every correlated tool_result has is_error true, beside the object toolUseResult.error rule. A
+    successful call and a call with no result still count."""
+
+    run_step = TestFlowStepGuard.run_guard
+    run_order = TestFlowOrderGuard.run_guard
+
+    @staticmethod
+    def _pipe_call(result):
+        return [tool_with_id("Skill", {"skill": PIPE}, "t_pipe")] + ([result] if result else [])
+
+    @staticmethod
+    def _rest_of_run(*, security=True):
+        """Every other pipeline Stop step, each call with a correlated non-error result."""
+        calls = [workflow("agentic-sdlc:spec-plan-draft"), bash("py -3 -m unittest tests.test_app"),
+                 edit("src/app.py"), bash("py -3 -m unittest tests.test_app")]
+        if security:
+            calls.append(agent("agentic-sdlc:security-reviewer"))
+        return with_results(calls + [agent("agentic-sdlc:implementation-auditor")])
+
+    def test_errored_pipeline_skill_call_does_not_activate_the_flow(self):  # (a)
+        for name, shape in ERROR_SHAPES.items():
+            with self.subTest(shape=name):
+                events = self._pipe_call(errored_result("t_pipe", **shape))
+                self.assertEqual(self.run_order("src/app.py", events, block=True), {})
+                self.assertEqual(self.run_step(events + [edit("src/app.py"), ev_text("Edited.")], block=True), {})
+                # O4: no pipeline activation inside the turn, so a turn ending on dispatch stays silent.
+                o4 = [PROMPT] + events + [tool_with_id("Skill", {"skill": DS}, "t_ds"), skill_success("t_ds", DS),
+                                          ev_text(NO_QUESTION)]
+                self.assertEqual(self.run_step(o4, block=True, last_assistant_message=NO_QUESTION), {})
+
+    def test_errored_only_dispatch_call_does_not_satisfy_dispatch(self):  # (b)
+        for name, shape in ERROR_SHAPES.items():
+            with self.subTest(shape=name):
+                events = (self._pipe_call(skill_success("t_pipe", PIPE))
+                          + [tool_with_id("Skill", {"skill": DS}, "t_ds"), errored_result("t_ds", **shape)]
+                          + self._rest_of_run() + [ev_text("Done.")])
+                out = self.run_step(events, block=True)
+                self.assertEqual(out.get("decision"), "block", out)
+                self.assertEqual(_block_ids(out), ["dispatch"])
+
+    def test_errored_security_reviewer_does_not_satisfy_security(self):  # (c)
+        for name, shape in ERROR_SHAPES.items():
+            with self.subTest(shape=name):
+                events = (self._pipe_call(skill_success("t_pipe", PIPE))
+                          + [tool_with_id("Skill", {"skill": DS}, "t_ds"), skill_success("t_ds", DS)]
+                          + self._rest_of_run(security=False)
+                          + [tool_with_id("Agent", SECURITY_CALL, "t_sec"), errored_result("t_sec", **shape),
+                             ev_text("Done.")])
+                out = self.run_step(events, block=True)
+                self.assertEqual(out.get("decision"), "block", out)
+                self.assertEqual(_block_ids(out), ["security"])
+
+    def test_successful_calls_still_count(self):  # (d)
+        for with_tur in (True, False):
+            with self.subTest(skill_tool_use_result="object" if with_tur else "none"):
+                pipe = self._pipe_call(skill_success("t_pipe", PIPE, with_tool_use_result=with_tur))
+                order = self.run_order("src/app.py", pipe, block=True)
+                self.assertEqual(order["hookSpecificOutput"]["permissionDecision"], "deny")
+                events = (pipe + [tool_with_id("Skill", {"skill": DS}, "t_ds"),
+                                  skill_success("t_ds", DS, with_tool_use_result=with_tur)]
+                          + self._rest_of_run(security=False)
+                          + [tool_with_id("Agent", SECURITY_CALL, "t_sec"), agent_success("t_sec"),
+                             ev_text("Done.")])
+                self.assertEqual(self.run_step(events, block=True), {})
+
+    def test_calls_without_a_result_still_count(self):  # (e)
+        pipe = self._pipe_call(None)
+        order = self.run_order("src/app.py", pipe, block=True)
+        self.assertEqual(order["hookSpecificOutput"]["permissionDecision"], "deny")
+        events = (pipe + [tool_with_id("Skill", {"skill": DS}, "t_ds")] + self._rest_of_run(security=False)
+                  + [tool_with_id("Agent", SECURITY_CALL, "t_sec"), ev_text("Done.")])
+        out = self.run_step(events, block=True)
+        # Every block step counts; only the warn-level review-result step notes the missing reviewer result.
+        self.assertNotEqual(out.get("decision"), "block", out)
+        self.assertEqual(_reminder_ids(out), ["review-result"])
 
 
 @unittest.skipIf(NODE is None, "node not available")
