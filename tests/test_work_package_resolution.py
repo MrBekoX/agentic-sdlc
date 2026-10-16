@@ -231,6 +231,16 @@ status: reviewed
         self.assertFalse(result.ok)
         self.assertIn("work_id_mismatch", result.errors)
 
+    def test_approved_status_resolves(self):
+        # `approved` is the approval receipt (see validate_artifacts FRONTMATTER_STATUSES);
+        # the resolver accepts the same status set as the validator.
+        self.assertIn("approved", self.resolver.STATUSES)
+        spec, plan = write_artifacts(self.root, status="approved")
+        result = self.resolver.resolve(self.root, plan_path=plan)
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(result.status, "approved")
+        self.assertEqual(result.plan, plan.resolve())
+
     def test_invalid_status_fails(self):
         _spec, plan = write_artifacts(self.root, status="almost_done")
         result = self.resolver.resolve(self.root, plan_path=plan)

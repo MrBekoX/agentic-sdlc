@@ -71,7 +71,9 @@ reasoning (see "Evaluate-only" below).
    below.)
 6. **IMPLEMENT** — One item at a time, testing each before the next. Batching edits hides
    which suggestion broke what. For behavior changes this is ordinary TDD territory — defer to
-   `test-authoring` / `root-cause-fix`. If a test contradicts what you said in RESPOND, say so and adjust.
+   `test-authoring` / `root-cause-fix`. Inside an `agentic-sdlc-pipeline` run, follow the
+   pipeline's selected work-type core instead of deferring to a focused skill. If a test
+   contradicts what you said in RESPOND, say so and adjust.
 
 ## Evaluate-only — when the ask is "is this right?"
 

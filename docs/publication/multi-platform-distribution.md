@@ -81,7 +81,7 @@ commit's full `sha`. If the public repository ends up at a different URL than
   and the `.zcode-plugin/` README pair), `CHANGELOG.md`, `docs/plugin-readme.md`,
   `docs/runtime-adapter.md`, `docs/troubleshooting.md`, `docs/zcode-runtime-adapter.md`,
   `docs/release-readiness.md`,
-  `docs/release-evidence-0.4.3.md`, `docs/release-evidence-0.5.0.md` and the notes under `docs/publication/`;
+  `docs/release-evidence-0.4.3.md`, `docs/release-evidence-0.5.0.md`, `docs/release-evidence-0.6.0.md` and the notes under `docs/publication/`;
 - the tests that pin it: `tests/test_grok_packaging.py`, `tests/test_kimi_packaging.py`,
   `tests/test_packaging_metadata.py` and `tests/test_zcode_packaging.py`.
 

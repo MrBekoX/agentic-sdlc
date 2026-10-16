@@ -14,6 +14,8 @@ This scope is fenced:
 - **Never wholesale-delegate a multi-step skill.** The skill always coordinates from the main loop; only its *parts* receive a mechanism — a multi-step skill run inside one sub-agent would nest its own delegations and degrade its fresh-context gates.
 - **Never touch the skill's internal mechanism.** Its steps, their order, whether a step runs, the mandated integrity gates (a `spec-plan-critic` for a drafted spec/plan, an `implementation-auditor` for self-graded code/findings), and the content/correctness verdicts belong to the skill and its contracts — not to this decision.
 
+**Called by a skill or the pipeline:** when another skill or `agentic-sdlc-pipeline` invoked you (the user did not ask for a mechanism decision), the decision is never the final answer. State the map in at most 5 lines, then continue with the caller's next step in the same turn; end the turn only when the caller's flow says so. Within one `agentic-sdlc-pipeline` run you are called once, at Step 1, and the pipeline reuses that map.
+
 In one line: dispatch sets the **working strategy**; the skill owns **what the work is and how it is sequenced**.
 
 ## Depth contract (proportional — scale rigor to the change)
@@ -66,7 +68,7 @@ Use the portable capability matrix in `<runtime-root>/docs/runtime-adapter.md`.
 ## Per-slice fan-out — parallel specialists, you coordinate
 The common in-skill shape: the work splits into 2+ **independent read-only slices** (layers, lenses, file-groups, hypotheses). Dispatch **one specialist per slice in a single message** — parallel `Agent` calls, or a `Workflow` when the slices are a fixed ≈3+ and you want them deterministic/repeatable — so they run concurrently. You (main loop) stay the **coordinator**: the fresh-context specialists return unbiased findings; merging, dedup, conflict resolution, and the final call are yours.
 - **Reads fan out; writes stay serial.** Review/analysis/audit slices parallelize; file edits stay in one loop or worktree-isolated — never two agents on one file.
-- **Independent verdict, not self-attestation.** When accepting the merged findings would mean judging your own code, route them through `implementation-auditor` (via `implementation-control`). You coordinate; the auditor arbitrates.
+- **Independent verdict, not self-attestation.** When accepting the merged findings would mean judging your own code, route them through `implementation-auditor` — dispatched directly inside `agentic-sdlc-pipeline`, via `implementation-control` elsewhere. You coordinate; the auditor arbitrates.
 - **No coordinator agent.** The main loop already receives every specialist's result — a separate coordinator sub-agent would see less than you and cannot apply fixes. Don't add one.
 - **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → run the slices serially and flag `Delegation Degraded: parallel specialists unavailable`, marked non-independent.
 

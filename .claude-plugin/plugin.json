@@ -2,7 +2,7 @@
   "name": "agentic-sdlc",
   "displayName": "Agentic SDLC",
   "description": "Claude Code skill library for gated spec, plan, TDD, security, and review workflows",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": {
     "name": "Beko",
     "url": "https://github.com/MrBekoX"

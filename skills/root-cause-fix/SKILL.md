@@ -1,6 +1,6 @@
 ---
 name: root-cause-fix
-description: This skill should be used first in any language to fix a bug, error, broken behavior, failing test, production issue, regression, or incident at its root-cause (reproduce, find and fix). Not for new features, pure refactors, or review feedback.
+description: This skill should be used first in any language to fix a bug, error, broken behavior, failing test, production issue, regression, or incident at its root-cause (reproduce, find and fix). Not for new features, pure refactors, or review feedback. Not for steps inside an active agentic-sdlc-pipeline run.
 ---
 
 # Skill: root-cause-fix
@@ -69,28 +69,21 @@ Break into small single-purpose tasks; each maps to acceptance criteria, each is
 ### 5. Goal lock
 Use the runtime goal tool when available with a measurable end-state (e.g. *"the failing test in X passes, full suite green, no other behavior changed"*). Otherwise write the Goal Lock template inline and treat it as the scope lock.
 
-### 6. TDD / Regression test (RED) — contract 05
-Write a failing test that reproduces the bug. **Confirm it actually fails** (show output) before writing any fix.
+Read [references/core.md](references/core.md) before step 6 and run the steps marked "core step" exactly as its `## Core steps` section writes them. Resolve the link from this installed skill's directory. In Claude Code, use `Read`; in Codex, use the available file-reading tool for the exact installed reference path. Reload it after resume, compaction, or a supplied summary.
 
-### 7. Implementation (GREEN)
-Minimal code to pass the test. Only files in plan scope. No unrelated refactor, no scope-creep, don't break the architecture, justify any new abstraction.
+### 6. TDD / Regression test (RED) — core step 1.
 
-### 8. Test Run
-Run the targeted test, then the full suite where feasible. **Show real output.**
-**Loop A — test fail:** analyze → fix → retest. Use the runtime loop tool when available; otherwise record each fail -> fix -> retest cycle with the Loop Iteration template and command evidence. Don't proceed while red.
+### 7. Implementation (GREEN) — core step 2.
 
-### 9. Security Analysis (#1) — contract 06
-Review the diff: input validation, auth/authorization (incl. IDOR), secret leakage, injection, race conditions, data-loss risk, permission issues, dependency risk. Mask any secret (`***MASKED***`).
-**Loop B — finding:** fix → re-run security analysis → re-run tests.
+### 8. Test Run — core step 3.
 
-### 10. Refactor — contract 07
-Only necessary cleanup; behavior unchanged; improve readability, reduce duplication/complexity.
+### 9. Security Analysis (#1) — core step 4.
 
-### 11. Retest
-Re-run the full suite after refactor; **show output**. (Loop A applies again if red.)
+### 10. Refactor — core step 5.
 
-### 12. Final Review
-Review `git diff`: summarize changed files, remaining risks, anything left open. Confirm only intended files changed and no secrets are present.
+### 11. Retest — core step 6.
+
+### 12. Final Review — core step 7.
 
 ### 13. Implementation Control (mandatory) — run `implementation-control`
 Trigger the **`implementation-control`** skill to audit that steps 1–12 were truly done.
@@ -113,18 +106,6 @@ Report: what was fixed · which files changed · which tests ran (with result) �
 ## Constraints
 ## Risk Areas
 ## Next Step
-```
-
-## Loop Iteration template
-```md
-# Loop Iteration
-## Trigger
-## Failed Check
-## Root Cause
-## Fix Plan
-## Applied Fix
-## Verification
-## Continue or Exit Loop
 ```
 
 ## Limits

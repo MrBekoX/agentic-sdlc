@@ -28,7 +28,7 @@ The [official packaging guide](https://developers.openai.com/plugins/build/plugi
 
 ## Distribution paths
 
-Four paths exist; each has its own go condition and state. Per-path verdicts are bound to the [release evidence ledger](../docs/release-evidence-0.5.0.md) (the 0.4.3 verdicts stay in the [0.4.3 ledger](../docs/release-evidence-0.4.3.md)); new preparation results are recorded separately. `codex plugin --help` on 0.160.1 still lists no validate command, so use native discovery, the local gate and archive verification without inventing that subcommand.
+Four paths exist; each has its own go condition and state. Per-path verdicts are bound to the [release evidence ledger](../docs/release-evidence-0.6.0.md) (earlier verdicts stay in the [0.5.0 ledger](../docs/release-evidence-0.5.0.md) and the [0.4.3 ledger](../docs/release-evidence-0.4.3.md)); new preparation results are recorded separately. `codex plugin --help` on 0.160.1 still lists no validate command, so use native discovery, the local gate and archive verification without inventing that subcommand.
 
 Public directory distribution uses a separate `--skills-only` projection: the manifest has no hooks; reusable specialist and git-review instructions live in skill references; only required stdlib helpers ship. Public installation provides procedural guidance. Manual local distribution retains hooks and requires native review/trust. See the [public packet](../docs/publication/openai-skills-only.md).
 
@@ -124,36 +124,38 @@ Codex uses activated skill instructions and available Codex tools. It does not e
 
 Codex has no Claude Code Workflow runtime. Therefore `agentic-sdlc-pipeline` does not call the `spec-plan-draft` JavaScript workflow. It uses the embedded author/critic adapter:
 
-Emit `Runtime: Codex` once. At each gate below, emit `Codex Adapter Gate: <gate>` so `codex exec --json` transcripts have deterministic evidence. When Codex has no native `Skill` transcript event, record `Delegation Degraded: native Skill transcript events unavailable`; the adapter still runs the step by loading or activating the relevant `SKILL.md` instructions.
+Emit `Runtime: Codex` once. At each gate below, emit `Codex Adapter Gate: <gate>` so `codex exec --json` transcripts have deterministic evidence. When Codex has no native `Skill` transcript event, record `Delegation Degraded: native Skill transcript events unavailable`; the adapter still runs the step: it activates or reads the `dispatch-strategy` and `completion-claim-gate` instructions, reads the work-type core file, and runs the reviewer roles as fresh-context subagents. The pipeline activates no focused skill and reads no focused skill's `SKILL.md`.
 
-1. Activate `dispatch-strategy` before heavy, independent, or parallel decisions.
+1. Activate `dispatch-strategy` once, at Step 1, and reuse its mechanism map for every later heavy, independent, or parallel step; record `Codex Adapter Gate: dispatch-strategy activated`.
 2. Run `<runtime-root>/scripts/detect_context.py`, with `<runtime-root>` resolved as described under [Runtime Root](#runtime-root).
 3. Draft the spec inside `agentic-sdlc-pipeline` using the spec contract and `spec-plan-author` role instructions.
 4. Run a fresh-context critic pass with `spec-plan-critic` instructions when Codex subagents are available; otherwise record a degraded inline critic pass.
 5. Save `docs/agentic-sdlc/specs/<work_id>.md` and run `validate_artifacts.py --mode spec`.
 6. Draft and critic-review the plan inside `agentic-sdlc-pipeline`.
 7. Save `docs/agentic-sdlc/plans/<work_id>.md` and run `validate_artifacts.py --mode plan --strict`.
-8. Activate the selected core workflow skill before implementation edits.
-9. Activate `security-audit`, `implementation-control`, and `completion-claim-gate` at their gates.
+8. Read the selected work-type core file, `<runtime-root>/skills/<skill>/references/core.md`, before the first test edit; record `Codex Adapter Gate: work-type core <feature|bugfix|refactor|test-only>`. Run its core steps as Steps 8–13 with bare test commands and write the TDD evidence file.
+9. For Steps 11 and 14, run a fresh-context subagent with `<runtime-root>/agents/security-reviewer.md` instructions (`Codex Adapter Gate: security-reviewer`). At implementation control, run `resolve_work_package.py`, then a fresh-context subagent with `<runtime-root>/agents/implementation-auditor.md` instructions (`Codex Adapter Gate: implementation-auditor`). Print each findings table and the auditor verdict as assistant text. Before the final report, activate `completion-claim-gate` (`Codex Adapter Gate: completion-claim-gate`).
 
 During Codex pipeline and eval runs, do not run recursive cleanup deletes for generated caches such as `__pycache__`. Leave or report them instead; cleanup is not a pipeline gate and may create permission-denial noise in procedure transcripts.
 
 `spec-authoring` and `plan-authoring` remain standalone prompt-level skills. They are not internal pipeline substeps.
 
-## How Independent Skills Feed The Pipeline
+## How Focused Skills Relate To The Pipeline
 
-Focused skills are independently routable in Codex and also serve as pipeline building blocks:
+Focused skills are independently routable in Codex. Inside a pipeline run none of them is activated; the pipeline uses these instead:
 
-| Pipeline need | Skill |
+| Pipeline need | Codex mechanism |
 |---|---|
-| New feature or endpoint | `feature-build` |
-| Bug or regression | `root-cause-fix` |
-| Behavior-preserving refactor | `safe-refactor` |
-| Test-only work | `test-authoring` |
-| Execution mechanism choice | `dispatch-strategy` |
-| Security gates | `security-audit` |
-| Pre-final audit | `implementation-control` |
+| New feature or endpoint | Work-type core file of `feature-build` |
+| Bug or regression | Work-type core file of `root-cause-fix` |
+| Behavior-preserving refactor | Work-type core file of `safe-refactor` |
+| Test-only work | Work-type core file of `test-authoring` |
+| Execution mechanism choice | `dispatch-strategy`, activated once at Step 1 |
+| Security gates | `security-reviewer` role in a fresh-context subagent |
+| Pre-final audit | `resolve_work_package.py`, then the `implementation-auditor` role in a fresh-context subagent |
 | Final evidence claim | `completion-claim-gate` |
+
+Codex emits no `Skill` or `Agent` transcript events, so the hooks do not observe these steps. The offline strict grader (`scripts/run_procedure_eval.py --strict-evidence`) checks them from the gate markers, the printed reviewer output and the recorded commands; see [strict evidence limits](../docs/runtime-adapter.md#limits-of-branch-review-result-and-strict-evidence) for what it cannot attribute on real Codex transcripts.
 
 ## Hooks In Codex
 

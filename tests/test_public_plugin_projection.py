@@ -75,6 +75,18 @@ class TestPublicPluginProjection(unittest.TestCase):
         self.assertIn("role instructions", guide)
         self.assertIn("spec-plan-critic.md", guide)
 
+    def test_work_type_core_references_ship(self):
+        # Pipeline v2.1 (contract C1): the focused skills and agentic-sdlc-pipeline Steps 8-13 read
+        # skills/<skill>/references/core.md, so the public package must carry all four. This suite
+        # reads the committed HEAD tree, not the working tree, so it stays red until the core files
+        # are committed on the feature branch (plan O3).
+        members = self.projected()
+        for skill in ("feature-build", "root-cause-fix", "safe-refactor", "test-authoring"):
+            path = f"skills/{skill}/references/core.md"
+            with self.subTest(skill=skill):
+                self.assertTrue(path in members, path)
+                self.assertIn(f"# {skill} — work-type core", self.text(members, path))
+
     def test_public_git_review_is_packaged_without_printing_secrets(self):
         members = self.projected()
         path = f"{REFERENCE_ROOT}/git-safety-check.md"

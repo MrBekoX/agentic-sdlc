@@ -35,7 +35,7 @@ Skills are intentionally stored in root `skills/`. Do not duplicate them into `.
 
 In Claude Code, `agentic-sdlc-pipeline` must use the named Workflow `agentic-sdlc:spec-plan-draft` for its internal Spec and Plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for steps 4-5. Dynamic workflows are available on paid plans, with Anthropic API access, and on Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry; on Pro, turn them on from `/config` ([workflows](https://code.claude.com/docs/en/workflows), fetched 2026-10-07). This is not a live test on 2.1.293.
 
-The full-mode transcript must show native calls for the pipeline gates: `Skill`, `Workflow`, and, when used, `Agent`/`Task`. Manual prose does not replace a tool call when the runtime supports that tool.
+The full-mode transcript must show native calls for the pipeline gates: `Skill` (`dispatch-strategy`, `completion-claim-gate`), `Workflow` (`spec-plan-draft`), and `Agent`/`Task` (`security-reviewer`, `implementation-auditor`, and `context-analyst` when used). Manual prose does not replace a tool call when the runtime supports that tool.
 
 ## Hooks
 
@@ -48,7 +48,7 @@ Claude Code wires the full hook set through `hooks/hooks-claude.json`:
 
 `flow-order-guard.mjs` and `flow-step-guard.mjs` both read `hooks/flow-requirements.json` through `flow-evidence.mjs`. They re-derive evidence from validated artifacts, real tool calls, and command transcripts; prose claims do not satisfy a step. They warn by default and block/deny only when `AGENTIC_FLOW_GATE_BLOCK=true`.
 
-The Stop guard also lists two warn-level steps for the house flows. `branch` flags a source edit while the Stop-time working directory is on `main` or `master`. `review-result` flags a reviewer that was dispatched (the control reviewers `implementation-control` / `implementation-auditor`, and where a flow has a security step, `security-audit` / `security-reviewer`) when the only result is a launch receipt (`toolUseResult.status` `async_launched` or `remote_launched`) or no completed result exists. A runtime task-notification with `completed`, or an in-flight Stop `background_tasks` subagent naming that reviewer, clears it ([hooks](https://code.claude.com/docs/en/hooks), fetched 2026-10-07). Neither step ever blocks or denies, even with `AGENTIC_FLOW_GATE_BLOCK=true`; `branch-guard.mjs` remains the commit and push guard.
+The Stop guard also lists two warn-level steps for the house flows. `branch` flags a source edit while the Stop-time working directory is on `main` or `master`. `review-result` flags a reviewer that was dispatched (the control reviewers `implementation-control` / `implementation-auditor`, and where a flow has a security step, `security-audit` / `security-reviewer`; for `agentic-sdlc-pipeline` only the `Agent` dispatches of `implementation-auditor` and `security-reviewer`, matched by exact name) when the only result is a launch receipt (`toolUseResult.status` `async_launched` or `remote_launched`) or no completed result exists. A runtime task-notification with `completed`, or an in-flight Stop `background_tasks` subagent naming that reviewer, clears it ([hooks](https://code.claude.com/docs/en/hooks), fetched 2026-10-07). Neither step ever blocks or denies, even with `AGENTIC_FLOW_GATE_BLOCK=true`; `branch-guard.mjs` remains the commit and push guard.
 
 All paths resolve through `${CLAUDE_PLUGIN_ROOT}`. `node` must be on `PATH`.
 

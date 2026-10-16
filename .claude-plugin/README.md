@@ -64,30 +64,33 @@ Do not hard-code machine-specific absolute paths into skills, hooks, evals, or g
 
 `agentic-sdlc-pipeline` is the full-envelope escalation path. In Claude Code it must leave real transcript evidence:
 
-1. `Skill` invocation for `agentic-sdlc:dispatch-strategy`.
+1. `Skill` invocation for `agentic-sdlc:dispatch-strategy`, once, at Step 1.
 2. `Bash`/`PowerShell` invocation of `detect_context.py`.
 3. `Workflow` invocation of `agentic-sdlc:spec-plan-draft` with `mode:"spec"`.
 4. `validate_artifacts.py --mode spec` after saving the spec.
 5. `Workflow` invocation of `agentic-sdlc:spec-plan-draft` with `mode:"plan"`.
 6. `validate_artifacts.py --mode plan --strict` after saving the plan.
-7. `Skill` invocation for the selected core workflow: `feature-build`, `root-cause-fix`, `safe-refactor`, or `test-authoring`.
-8. `Skill` invocation for `security-audit` at required security gates.
-9. `Skill` invocation for `implementation-control` before final reporting.
+7. `Read` of the selected work-type core file before the first test edit, then bare RED/GREEN test runs, each appended to the TDD evidence file.
+8. `Agent` dispatch of `security-reviewer` for Steps 11 and 14, with its returned findings table.
+9. `Bash`/`PowerShell` invocation of `resolve_work_package.py`, then `Agent` dispatch of `implementation-auditor` before final reporting.
 10. `Skill` invocation for `completion-claim-gate` immediately before any done/fixed/passing/ready claim.
 
 Manual prose does not replace those tool calls when the runtime supports them.
 
-## How Independent Skills Feed The Pipeline
+## How Focused Skills Relate To The Pipeline
 
-Focused skills are independently invocable. The pipeline reuses them instead of duplicating their internal logic:
+Focused skills are independently invocable. Inside a pipeline run the pipeline invokes none of them; it shares their work-type rules through the core files instead of duplicating them:
 
 | Pipeline stage | Claude Code mechanism |
 |---|---|
+| Mechanism decision | `Skill` `agentic-sdlc:dispatch-strategy`, once, at Step 1. |
 | Spec and plan phases | Named workflow `agentic-sdlc:spec-plan-draft`. |
-| Implementation core | Delegates to `feature-build`, `root-cause-fix`, `safe-refactor`, or `test-authoring`. |
-| Security gates | Delegates to `security-audit`. |
-| Pre-final audit | Delegates to `implementation-control`. |
-| Final evidence claim | Delegates to `completion-claim-gate`. |
+| Implementation core (Steps 8–13) | `Read` of `skills/<skill>/references/core.md` for `feature-build`, `root-cause-fix`, `safe-refactor`, or `test-authoring`; the standalone skill reads the same file. |
+| Security gates (Steps 11 and 14) | `Agent` `security-reviewer`. |
+| Pre-final audit | `resolve_work_package.py`, then `Agent` `implementation-auditor`. |
+| Final evidence claim | `Skill` `agentic-sdlc:completion-claim-gate`. |
+
+The flow hooks match the pipeline's dispatch, security and control steps by exact skill or agent name. Hook flow activation is by the `Skill` tool; a run started only by the `/agentic-sdlc-pipeline` slash command is covered by the offline procedure eval.
 
 `spec-authoring` and `plan-authoring` remain standalone prompt-level skills. They are not internal pipeline substeps.
 
@@ -112,7 +115,7 @@ The flow guards are the deterministic backstop for active implementation flows. 
 
 ## Distribution paths
 
-Four paths exist; each has its own go condition and state. The per-path verdicts are in [release readiness](../docs/release-readiness.md#distribution-paths-and-gono-go), and a state is a snapshot bound to the [release evidence ledger](../docs/release-evidence-0.5.0.md) (the 0.4.3 verdicts stay in the [0.4.3 ledger](../docs/release-evidence-0.4.3.md)).
+Four paths exist; each has its own go condition and state. The per-path verdicts are in [release readiness](../docs/release-readiness.md#distribution-paths-and-gono-go), and a state is a snapshot bound to the [release evidence ledger](../docs/release-evidence-0.6.0.md) (earlier verdicts stay in the [0.5.0 ledger](../docs/release-evidence-0.5.0.md) and the [0.4.3 ledger](../docs/release-evidence-0.4.3.md)).
 
 | Path | Prerequisites | Steps | Go condition | State |
 |---|---|---|---|---|

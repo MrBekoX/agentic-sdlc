@@ -1,6 +1,6 @@
 # Release Readiness
 
-This file is the publish gate for `agentic-sdlc` version `0.5.0`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex. The current release decision and sanitized observations are in [release evidence](release-evidence-0.5.0.md); preparation or a metadata-only pass cannot replace its required results. The 0.4.3 decision stays unchanged in the [0.4.3 ledger](release-evidence-0.4.3.md).
+This file is the publish gate for `agentic-sdlc` version `0.6.0`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex. The current release decision and sanitized observations are in [release evidence](release-evidence-0.6.0.md); preparation or a metadata-only pass cannot replace its required results. The 0.4.3 and 0.5.0 decisions stay unchanged in the [0.4.3 ledger](release-evidence-0.4.3.md) and the [0.5.0 ledger](release-evidence-0.5.0.md).
 
 The 2026-10-06 preparation fixes public hook removal and packaged instruction/helper closure; native Codex 0.160.1 discovery from that date is recorded in [current readiness](publication/codex-0.160.1-readiness.md). The historical ledger below is preserved. New local preparation does not erase historical failed/not-run live evaluations or claim portal acceptance. No upload, publication, commit, push, PR or merge is part of this preparation.
 
@@ -28,7 +28,7 @@ Kimi, ZCode and Grok are now included in the installation/portability candidate 
 
 ## Distribution paths and go/no-go
 
-The four distribution paths below each get their own go/no-go decision; the same labels are used in [`README.md`](../README.md) and both runtime READMEs. Each verdict stays no-go, pending maintainer review, until a recorded maintainer review of that path is linked in the ledger's [path verdicts](release-evidence-0.5.0.md#path-verdicts). The old 45/45 routing results, synthetic replay and marketplace-only validation never close a path.
+The four distribution paths below each get their own go/no-go decision; the same labels are used in [`README.md`](../README.md) and both runtime READMEs. Each verdict stays no-go, pending maintainer review, until a recorded maintainer review of that path is linked in the ledger's [path verdicts](release-evidence-0.6.0.md#path-verdicts). The old 45/45 routing results, synthetic replay and marketplace-only validation never close a path.
 
 The experimental ZCode, Grok CLI, and Kimi Code installs (local directory, and repository or catalog sources from the public repository) are not among these four paths and carry no 0.4.3 verdict; their notes live in `docs/publication/zcode-marketplace.md`, `docs/publication/grok-marketplace.md`, and `docs/publication/kimi-marketplace.md`.
 
@@ -42,7 +42,7 @@ The experimental ZCode, Grok CLI, and Kimi Code installs (local directory, and r
 
 State: GAP. The repository is public since 2026-10-12, published with a rewritten history ([history map](publication/history-map.md)); its unauthenticated URL returns 200 in `docs/publication/link-checks.json`. From the public repository, `claude plugin marketplace add MrBekoX/agentic-sdlc` and `claude plugin install agentic-sdlc@mrbekox` installed 0.5.0 with 16 skills in an isolated profile (Claude Code 2.1.282, Linux, 2026-10-12, no model call); the go condition's new-session discovery, real invocation and recorded clone transport are not recorded.
 
-Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.5.0.md#path-verdicts)).
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.6.0.md#path-verdicts)).
 
 ### Claude community marketplace submission
 
@@ -54,7 +54,7 @@ Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.
 
 State: BLOCKED. The path needs a public repository, the clean-package validation result and maintainer form access.
 
-Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.5.0.md#path-verdicts)).
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.6.0.md#path-verdicts)).
 
 ### Codex personal marketplace
 
@@ -64,9 +64,9 @@ Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.
 
 **Go condition.** Install through `codex plugin add agentic-sdlc@<marketplace-name>` from a catalog Codex recognizes (the package's own `mrbekox` catalog or a personal catalog); native discovery showing 16 skills and `hooks/list` showing 8 hooks; and hook trust granted through the native `/hooks` trust protocol as a required step.
 
-State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.5.0 package; the ledger carries the 26b0fe1 results.
+State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.6.0 package; the ledger carries the 26b0fe1 results.
 
-Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.5.0.md#path-verdicts)).
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.6.0.md#path-verdicts)).
 
 ### OpenAI public directory
 
@@ -78,7 +78,7 @@ Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.
 
 State: BLOCKED. The path needs the verified identity, `api.apps.write` and a verified skills-only archive.
 
-Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.5.0.md#path-verdicts)).
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.6.0.md#path-verdicts)).
 
 ## Required Local Gate
 
@@ -166,7 +166,7 @@ Passing signals observed in the transcript:
 - final report included `Overall Status: PASS` for Implementation Control and the final todo list was complete.
 
 Limit of this evidence: this is a historical Codex `0.3.0` low-effort smoke/procedure run, not a
-publish-grade high-effort stability run and not live evidence for the current `0.5.0` worktree. It is
+publish-grade high-effort stability run and not live evidence for the current `0.6.0` worktree. It is
 valid only as evidence that the earlier adapter completed the full pipeline in a small fixture,
 including RED->GREEN, artifact validation, work-package resolution, and recovery from metadata errors.
 
@@ -190,7 +190,7 @@ Scan staged and unstaged diffs for tokens, private keys, connection strings, and
 - Codex wires native blocking `PreToolUse` guards, `SessionStart`, and two `Stop` continuation backstops. Coverage is bounded: branch/flow hardening is env-gated, unrecognized write forms fail open, and Stop can request another turn but cannot undo prior effects.
 - `agentic-sdlc-pipeline` owns internal spec/plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for pipeline steps 4-5; Codex uses the embedded author/critic adapter.
 - Hooks are local runtime guardrails. Some warn or fail open by design, so they complement but do not replace diff review, test output, and secret scanning.
-- `0.5.0` is publishable for Claude Code and Codex only when the local gate and current release evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
+- `0.6.0` is publishable for Claude Code and Codex only when the local gate and current release evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
 - Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters.
 - Current bounded hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. They retain their own immutable source identities; current parser replay and later skill evaluations are separate evidence. `transcript_path` remains unstable. See [runtime boundaries](runtime-adapter.md#current-binary-and-historical-hook-evidence) and the [0.4.3 release ledger](release-evidence-0.4.3.md).
 
@@ -212,7 +212,7 @@ These skills depend on companion plugin resources, so they are not offered as un
 
 The skill-creator toolkit is BLOCKED until reviewed. `skills/skill-authoring/scripts/resolve_skill_creator.py` reports `skill_creator_status=missing_capabilities` for the WSL toolkit and `explicit-unverified` for the Windows cache. No archive is produced from an unreviewed toolkit, and a reviewed toolkit commit is recorded only as a full 40-hex commit together with its ledger row.
 
-The per-archive identity record is the `skill_archives` row in [release evidence](release-evidence-0.5.0.md) (AC127).
+The per-archive identity record is the `skill_archives` row in [release evidence](release-evidence-0.6.0.md) (AC127).
 
 ## Artifact Layouts And Per-Package Evidence
 
@@ -224,10 +224,10 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 
 ## Release Verdict Template
 
-Use this shape in a release note or final publish report. Its keys, allowed values and row bindings are governed by the decision block in the [release ledger](release-evidence-0.5.0.md#publication-decision) (AC116):
+Use this shape in a release note or final publish report. Its keys, allowed values and row bindings are governed by the decision block in the [release ledger](release-evidence-0.6.0.md#publication-decision) (AC116):
 
 ```text
-version=0.5.0
+version=0.6.0
 scope=Claude Code, Codex
 local_gate=<passed|failed|blocked|not-run>
 claude_routing_eval=<passed|failed|blocked|not-run>

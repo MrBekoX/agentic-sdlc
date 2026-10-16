@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-10-16
+
+- Breaking: `agentic-sdlc-pipeline` no longer invokes or reads `feature-build`, `root-cause-fix`, `safe-refactor`, `test-authoring`, `security-audit` or `implementation-control`. Steps 8–13 read the selected work type's `skills/<skill>/references/core.md`; the security review dispatches `Agent(security-reviewer)`; the final audit runs `scripts/resolve_work_package.py` and dispatches `Agent(implementation-auditor)`. `dispatch-strategy` runs once per pipeline run, at Step 1. The four work-type skills read the same core file from their standalone entry, and the six focused skills' descriptions now exclude steps inside an active pipeline run.
+- Hook flow `agentic-sdlc-pipeline` in `hooks/flow-requirements.json`: the focused-skill core step is removed, a `red-first` step (no `stop` key) gates the first production edit, and the security and control steps accept only an `Agent` call with the exact role name (`exactName`). `hooks/flow-step-guard.mjs` adds a Stop warning when a pipeline turn ends on the `dispatch-strategy` decision (blocks only under `AGENTIC_FLOW_GATE_BLOCK=true`); its byte lock is released and replaced by behavioural pins.
+- Add the `approved` artifact status to `scripts/validate_artifacts.py` and `scripts/resolve_work_package.py` (`draft` → `reviewed` → `approved` → `in_progress` → `ready_for_audit` → `complete`); the pipeline writes `approved` only under its Approval receipt rule.
+- The pipeline writes a TDD evidence file (`<work_id>.tdd.md` next to the work package's evidence) with every test run from Step 8 until the auditor is dispatched, and the auditor's dispatch prompt gains an `Envelope reports:` section.
+- Procedure eval: new strict case keys `red_before_source_edit`, `stop_at_gate`, `skill_call_counts`, `forbid_skills_anywhere`, `reviewers_after_last_source_edit` and `evidence_file_before_control`; the `core-read` order id for the work-type core file; the gate-stop eval set `tests/skills/procedure/agentic-sdlc-pipeline-gate-stop.json`; and per-case `acceptance` lines that leave out the auditor verdict and the deferred artifact-path errors.
+- Both SessionStart bootstraps print one line stating that the pipeline owns every step inside an active run, and mark `dispatch-strategy` as once per pipeline run.
+- Known limitations: Codex test runs wrapped in `/bin/bash -lc` or `powershell -Command` are not attributed, so strict RED/GREEN cannot pass on real Codex transcripts; the validator's plan AC-coverage check fails open for `AC-1`-style or id-less criteria (tracked as a separate issue); hooks do not detect a slash-command-only pipeline activation, which the offline procedure eval covers. The changed skill descriptions have no new trigger run.
+- Add the 0.6.0 release evidence ledger (`docs/release-evidence-0.6.0.md`); its verdict is do-not-publish. The 0.4.3 and 0.5.0 ledgers are kept unchanged.
+
 ## 0.5.0 - 2026-10-12
 
 - Add an experimental Google Antigravity adapter: `.antigravity-plugin/plugin.json` (validated against the strict two-key `https://antigravity.google/schemas/v1/plugin.json` schema via `VERSIONLESS_PLUGIN_MANIFESTS` in `scripts/bump_version.py`) and `.antigravity-plugin/README.md`, with subagent delegation guidance (`invoke_subagent`) and portable `<runtime-root>` resolution across all 16 shared skills; no `hooks.json` is wired and no legacy `.agent/workflows/*.md` dependency is introduced.

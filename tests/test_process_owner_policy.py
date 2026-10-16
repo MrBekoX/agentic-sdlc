@@ -22,6 +22,17 @@ COEXISTENCE_SCENARIOS = REPO / "tests" / "skills" / "evals" / "coexistence" / "s
 PINNED_SUPERPOWERS_REF = "b36e0829c6d0140e93cfef2ca599b1b07d4a7797"
 PINNED_SUPERPOWERS_SKILLS = {"brainstorming", "writing-plans", "dispatching-parallel-agents",
                              "verification-before-completion"}
+# Pipeline v2.1 C16 item 12 (maintainer-approved): both bootstraps state, right before the Intent
+# table, that an active pipeline run owns its steps, and mark the dispatch-strategy row as once per run.
+PIPELINE_OWNS_STEPS_LINE = (
+    "Inside an active agentic-sdlc-pipeline run the pipeline owns every step: dispatch-strategy runs once at "
+    "Step 1; its tests, security reviews and final audit use the work-type core file, security-reviewer and "
+    "implementation-auditor - do not invoke or read the focused skills below for those steps."
+)
+DISPATCH_STRATEGY_ROW = (
+    "  parallelism / delegation decision       -> agentic-sdlc:dispatch-strategy "
+    "(before choosing a mechanism) (once per pipeline run)"
+)
 
 
 @unittest.skipIf(NODE is None, "node not available")
@@ -80,6 +91,17 @@ class TestDeliveredProcessOwnership(unittest.TestCase):
                     self.assertTrue(target.startswith(prefix), (runtime, target))
                     skill = target.removeprefix(prefix)
                     self.assertTrue((REPO / "skills" / skill / "SKILL.md").is_file(), target)
+
+    def test_pipeline_owns_its_steps_line_precedes_the_intent_table(self):  # pipeline v2.1 C16 item 12
+        for runtime, context in self.contexts.items():
+            with self.subTest(runtime=runtime):
+                lines = context.split("\n")
+                header = next(i for i, line in enumerate(lines) if line.startswith("Intent -> skill"))
+                self.assertEqual(lines[header - 1], PIPELINE_OWNS_STEPS_LINE)
+                self.assertEqual(lines.count(PIPELINE_OWNS_STEPS_LINE), 1)
+                rows = [line for line in lines if "-> agentic-sdlc:dispatch-strategy" in line]
+                self.assertEqual(rows, [DISPATCH_STRATEGY_ROW])
+                self.assertTrue(rows[0].endswith(" (once per pipeline run)"), rows[0])
 
 
 class TestDirectSkillOwnership(unittest.TestCase):

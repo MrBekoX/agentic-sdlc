@@ -166,6 +166,7 @@ The local unittest layer is organized into coverage **matrices** so each concern
 | `tests/test_grok_rhai_workflows.py` | runtime adapter | Structural checks of the experimental Grok Rhai scripts' metadata, referenced agent types and completion accounting. Short verification coverage is counted before confirmed/dropped classification. These checks do not execute the scripts in a native Rhai runtime. |
 | `tests/test_multi_lens_review_workflow.py` | workflow behaviour | Runs `workflows/multi-lens-review.js` under the runtime wrapper with stubbed agents: missing finder/verifier answers remain incomplete or unverified. Majority-dropped findings retain their classification but missing requested votes keep complete=false in both presets; all requested valid votes restore completeness. Skipped if `node` is absent. |
 | `tests/test_light_flow_audit.py` | skill contract | The `safe-refactor` audit path: `implementation-control` and `implementation-auditor` grade the Goal Lock for that one flow, and every other flow without a spec/plan keeps the block. |
+| `tests/test_pipeline_zero_delegation.py` | skill contract | Pipeline v2.1 zero-skill delegation: the four work-type `references/core.md` files copy their skill's depth blocks byte-identical, keep the moved core steps and sections, and hold none of the envelope; both entry points load them; the pipeline names no focused skill as a call target, dispatches `security-reviewer` and `implementation-auditor` directly, calls `dispatch-strategy` once and records an approval receipt; a literal sweep bans stale delegation wording from the pipeline, its read set and the docs. Static text checks: a drift gate, not proof that a model follows the text. |
 
 Source inventory tests must exclude generated `dist/`/`build/` archive and installed-cache copies while retaining controls for accidental source copies. External-toolkit negative fixtures must isolate the user's home: a legitimate already-installed fallback is runtime behavior, not a failed identity check. The source gate never installs a toolkit to make a fixture pass.
 
@@ -210,7 +211,7 @@ The deterministic layer is driven by checked-in references and fixtures under `t
 | `tests/skills/evals/<skill>.json` | Live trigger eval fixtures shared by the Claude and Codex runners. | `{ "queries": [{ "query": "...", "should_trigger": true\|false }] }` |
 | `tests/skills/routing/using-agentic-sdlc.json` | Router eval scenarios for smallest-sufficient-skill selection. | `{ "scenarios": [{ "prompt", "expected", "escalation" }] }` |
 | `tests/skills/behavior/<case>.json` | Behavior eval seeds. Each case gives a prompt and required/forbidden regex patterns. | `{ "cases": [{ "id", "prompt", "required_patterns": [...], "forbidden_patterns": [...] }] }` |
-| `tests/skills/procedure/<case>.json` | Procedure eval seeds, including `agentic-sdlc-pipeline.json` and `skill-depth.json` (see format below). | `{ "cases": [{ "id", "prompt", "fixture_dir?", "check_artifact_depth?", "required_skills": [...], "required_workflows": [...], "required_runtime_adapters": [...], "required_commands": [...], "required_artifacts": [...], "forbidden_commands": [...], "required_patterns": [...], "forbidden_patterns": [...] }] }` |
+| `tests/skills/procedure/<case>.json` | Procedure eval seeds, including `agentic-sdlc-pipeline.json`, the strict-only `agentic-sdlc-pipeline-gate-stop.json` and `skill-depth.json` (see format below). | `{ "cases": [{ "id", "prompt", "fixture_dir?", "check_artifact_depth?", "required_skills": [...], "required_workflows": [...], "required_runtime_adapters": [...], "required_commands": [...], "required_artifacts": [...], "forbidden_commands": [...], "required_patterns": [...], "forbidden_patterns": [...], "strict?": {...} }] }` |
 | `tests/fixtures/transcripts/*.jsonl` | Sample Claude Code stream-json transcripts for deterministic procedure-eval testing. | One JSON object per line — typically `assistant`, `stream_event`, and `result` events. |
 
 ---
@@ -409,7 +410,7 @@ For each case, the evaluator parses the transcript into a trace and checks:
 
 | Check | Mechanism |
 |---|---|
-| Required skills | A `Skill` tool invocation whose payload contains the expected skill name, a mapped specialist `Agent`/`Task`, or a `required_runtime_adapters[].satisfies` entry with all adapter patterns present. |
+| Required skills | A `Skill` tool invocation whose payload contains the expected skill name, a mapped specialist `Agent`/`Task`, or a `required_runtime_adapters[].satisfies` entry with all adapter patterns present. This payload match is a substring match, so a `Skill` call whose arguments mention the name also satisfies it; the strict `skill_call_counts` and `forbid_skills_anywhere` keys below use exact names. |
 | Required workflows | A `Workflow` tool invocation whose payload contains the expected workflow name, or a `required_runtime_adapters[].satisfies` entry with all adapter patterns present. |
 | Runtime adapter evidence | Regex patterns in `required_runtime_adapters[].required_patterns` proving the runtime-equivalent path, such as `Workflow unavailable`, `Codex Adapter Gate`, `spec-plan-author`, `spec-plan-critic`, `docs/agentic-sdlc/specs/`, `docs/agentic-sdlc/plans/`, and activated delegate-skill instructions. |
 | Required commands | A regex match against the `command` field of any tool invocation recorded in the trace. |
@@ -455,6 +456,25 @@ For each case, the evaluator parses the transcript into a trace and checks:
 
 `fixture_dir` is optional for dry-run/transcript analysis and required for `--live`. Live mode copies
 every fixture into a fresh temporary git repo; it never falls back to the real plugin checkout.
+
+### Strict evidence keys
+
+A case's optional `strict` object is graded only with `--strict-evidence`; without the flag every `strict` key is inert. `validate_strict_config` rejects an unknown key or a wrong value type as `case <id> invalid strict.<key>`. Besides `require_red_green`, `check_artifact_depth`, `reviewers` and `required_order`, it accepts six keys that check the pipeline's zero-skill delegation:
+
+| Key | Value | Fails when | Error id |
+|---|---|---|---|
+| `red_before_source_edit` | bool | No attributable test run with a non-zero exit falls strictly between the first top-level test-file write and the first production-source write. With no production-source write at all, the check reports `strict_source_edit_unobserved` instead, and only when `require_red_green` is true. | `strict_red_not_before_source_edit` |
+| `skill_call_counts` | `{name: [min, max]}` | The number of main-loop `Skill` calls with exactly that name (on Codex, of distinct assistant messages carrying `Codex Adapter Gate: <name>`) is outside the bounds. A counted name gets no agent-delegation credit. | `strict_skill_call_count:<name>=<n>` |
+| `forbid_skills_anywhere` | list of names | A timeline tool call, sub-agent calls included, is a `Skill` call with a listed name, or a read or command path names a listed skill's `SKILL.md` in either separator style. | `strict_forbidden_skill:<name>` |
+| `reviewers_after_last_source_edit` | bool | The last clearing result of the `security` or `control` reviewer comes before the last top-level production-source write. A missing result is reported by `strict_reviewer_result_missing` instead. | `strict_reviewer_before_last_edit:<step>` |
+| `evidence_file_before_control` | bool | No top-level write to a `.tdd.md` path under `docs/agentic-sdlc/` comes before the first clearing `control` result. | `strict_missing_tdd_evidence` |
+| `stop_at_gate` | `"spec-review"` | After the first spec write there is a write outside `docs/agentic-sdlc/`, a plan write, or a spec status of `approved` or later; or the final assistant text does not name the spec review. | `strict_edit_after_spec_gate:<path>`, `strict_plan_after_spec_gate`, `strict_spec_status_without_approval`, `strict_missing_gate_stop` |
+
+`required_order` also accepts the step id `core-read`: on Claude, a top-level `Read` of a `skills/<skill>/references/core.md` file of `feature-build`, `root-cause-fix`, `safe-refactor` or `test-authoring`, in either separator style; on Codex, a command that names such a file or the `Codex Adapter Gate: work-type core <type>` marker. The pipeline cases order it after `plan-written` and before `red-run`. `core-skill` stays a valid id, but no pipeline case uses it.
+
+`tests/skills/procedure/agentic-sdlc-pipeline-gate-stop.json` holds the strict-only gate-stop case: no pre-approval in the prompt, `stop_at_gate: "spec-review"`, exactly one `dispatch-strategy` call, no focused skill, and the order `dispatch-strategy` → `spec-written`. It is a separate file because a strict replay grades every case of an eval set unless `--case-id` narrows it, and a pre-approved full-run transcript fails every `stop_at_gate` rule.
+
+With `--strict-evidence`, the runner prints `case_<id>_acceptance=pass|fail` and `case_<id>_acceptance_excluded=<comma list>` next to the unchanged `case_<id>=passed|failed` line. Acceptance counts every error except those starting with `strict_critical_audit:` (the auditor verdict, which is reported in its own column) and those containing `unsafe_artifact_path`; the excluded list names the errors it set aside. On real Codex transcripts the red/green keys cannot pass, because test runs wrapped in `/bin/bash -lc` or `powershell -Command` are not attributed (see [strict evidence limits](runtime-adapter.md#limits-of-branch-review-result-and-strict-evidence)).
 
 ---
 

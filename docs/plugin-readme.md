@@ -1,6 +1,6 @@
 # AGENTIC-SDLC Plugin Reference
 
-> Version: `0.5.0`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md), [Codex](../.codex-plugin/README.md), [Kimi Code](../.kimi-plugin/README.md), [Grok CLI](../.grok-plugin/README.md), [ZCode](../.zcode-plugin/README.md) or [Cursor](../.cursor-plugin/README.md).
+> Version: `0.6.0`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md), [Codex](../.codex-plugin/README.md), [Kimi Code](../.kimi-plugin/README.md), [Grok CLI](../.grok-plugin/README.md), [ZCode](../.zcode-plugin/README.md) or [Cursor](../.cursor-plugin/README.md).
 
 AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**, with experimental adapters for **Kimi Code**, **Grok CLI** and **ZCode**. It routes each prompt to the smallest sufficient skill and reserves the full SDLC envelope for work that actually needs it.
 
@@ -80,16 +80,16 @@ The session-local router. It chooses the smallest sufficient skill and escalates
 
 The full-envelope orchestrator. It owns git lifecycle, analysis, spec/plan gates, validation, scope lock, quality gates, security passes, final audit, and evidence-before-claim discipline.
 
-The pipeline does not duplicate the implementation core. It delegates to focused skills after it has approved spec/plan artifacts:
+The pipeline runs Steps 8–13 itself and never invokes a focused skill or reads its `SKILL.md`. Once the spec and plan are approved, it reads the work-type core file of the matching focused skill and runs that file's core steps:
 
-| Work type | Delegated core skill |
+| Work type | Core file read for Steps 8–13 |
 |---|---|
-| Feature or endpoint | `feature-build` |
-| Bug or broken behavior | `root-cause-fix` |
-| Behavior-preserving refactor | `safe-refactor` |
-| Test-only work | `test-authoring` |
+| Feature or endpoint | `skills/feature-build/references/core.md` |
+| Bug or broken behavior | `skills/root-cause-fix/references/core.md` |
+| Behavior-preserving refactor | `skills/safe-refactor/references/core.md` |
+| Test-only work | `skills/test-authoring/references/core.md` |
 
-Gate skills feed the pipeline at control points: `dispatch-strategy`, `security-audit`, `implementation-control`, and `completion-claim-gate`.
+The standalone skill reads the same core file, so the work-type rules exist once. The pipeline calls `dispatch-strategy` once, at Step 1, and `completion-claim-gate` before any done or ready claim. Its security passes (Steps 11 and 14) dispatch the `security-reviewer` agent, and its implementation-control gate runs `resolve_work_package.py` and dispatches the `implementation-auditor` agent. The `security-audit` and `implementation-control` skills remain standalone entry points.
 
 `spec-authoring` and `plan-authoring` are standalone prompt-level skills. They are not internal pipeline substeps.
 

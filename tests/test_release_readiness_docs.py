@@ -205,6 +205,7 @@ class TestReleaseReadinessDocs(unittest.TestCase):
             | {
                 "!docs/data-handling.md",
                 "!docs/release-evidence-0.5.0.md",
+                "!docs/release-evidence-0.6.0.md",
                 "!docs/publication/",
                 "!docs/publication/*.md",
                 "!docs/publication/link-checks.json",

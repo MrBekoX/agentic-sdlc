@@ -20,6 +20,17 @@ Each entry includes:
 
 ---
 
+## 2026-10-16 — An alternation of overlapping branches under `+` is exponential; one character class is not
+
+- **Task / context:** Pipeline v2.1 contract C7 added a procedure-eval `forbidden_patterns` entry to catch focused `SKILL.md` reads in any separator style, written as `(?:<six skills>)(?:[\\/]|\\\\)+SKILL\.md` so that `/`, `\` and the JSON-doubled `\\` would all match.
+- **Symptom:** An Opus code review timed `regex_present` over a `json.dumps` haystack holding `skills\feature-build` plus a run of N backslashes and a non-matching tail: 33 backslashes 0.41 s, 41 backslashes 21.1 s, 49 backslashes did not finish in 300 s. The pattern runs on the whole transcript haystack (including Codex command output) in default and strict mode with no timeout, so an untrusted run could hang the grader.
+- **Root cause:** `\\\\` (two backslashes) and `[\\/]` (one) both match backslashes, so the engine can split a run of k backslashes into one- and two-character pieces in Fibonacci-many ways, and it tries every split before the failing `SKILL\.md` anchor rejects the input. Overlapping branches inside a repeated group are the trap; the ReDoS lesson of 2026-07-01 (greedy whitespace before `$`) did not name this shape, and the pattern was written into a contract and copied into three files before any timing check ran.
+- **Correct fix:** `[\\/]+SKILL\.md`. One character class already covers the doubled form, matches exactly the same strings, and stays linear (16 ms at 100k backslashes).
+- **Preventive rule / automated check:** Never repeat a group whose branches can match the same characters (`(?:a|aa)+`, `(?:[\\/]|\\\\)+`, `(?:\s|\s\s)*`); collapse it to one character class or make the branches disjoint. Any regex that scans agent-influenced text gets a timing test that grows the dangerous run over 4 doublings and asserts a RATIO, written before the pattern is copied anywhere.
+- **Related files & tests:** `tests/skills/procedure/agentic-sdlc-pipeline.json`, `tests/skills/procedure/agentic-sdlc-pipeline-gate-stop.json`, `tests/test_pipeline_zero_delegation.py` (`FOCUSED_SKILL_PATH`); `tests/test_procedure_eval.py::TestC16ForbiddenPatternLinear`.
+
+---
+
 ## 2026-10-13 — Review completion covers every requested response
 
 - **Date:** 2026-10-13
