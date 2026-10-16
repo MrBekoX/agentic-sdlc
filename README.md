@@ -4,7 +4,7 @@
 
 > An AGENTIC-SDLC skill library with adapters for **Claude Code**, **Codex**, **Kimi Code**, **ZCode**, **Grok CLI** and **Cursor**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
-> `Version 0.5.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
+> `Version 0.6.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
 
 ---
 
@@ -117,7 +117,7 @@ Native install, discovery, update and uninstall of a package directory passed in
 
 ## Distribution paths
 
-`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.5.0.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. A BLOCKED or GAP state concerns publication or a release gate; it does not mean the [Install](#install) steps above fail. Kimi, ZCode and Grok adapters are included in this distribution candidate; the historical four-path 0.4.3 verdict does not establish their native lifecycle or public-directory acceptance.
+`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.6.0.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. A BLOCKED or GAP state concerns publication or a release gate; it does not mean the [Install](#install) steps above fail. Kimi, ZCode and Grok adapters are included in this distribution candidate; the historical four-path 0.4.3 verdict does not establish their native lifecycle or public-directory acceptance.
 
 ### Claude own marketplace
 
@@ -203,11 +203,11 @@ The same skills run through the embedded author/critic adapter where Claude-only
 
 **Go condition.** Install through `codex plugin add agentic-sdlc@<marketplace-name>` from a catalog Codex recognizes (the package's own `mrbekox` catalog or a personal catalog); native discovery showing 16 skills (the app-server `skills/list` reports 17 entries, the `git-safety-check` command included) and `hooks/list` showing 8 hooks; and hook trust granted through the native `/hooks` trust protocol as a required step.
 
-State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the [compatibility matrix](docs/publication/compatibility-matrix.md); `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.5.0 package; the ledger carries the 26b0fe1 results.
+State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the [compatibility matrix](docs/publication/compatibility-matrix.md); `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.6.0 package; the ledger carries the 26b0fe1 results.
 
 ### ZCode marketplace installs (experimental, not a release-gated path)
 
-> **Experimental adapter.** ZCode was not a supported 0.4.3 release target; the next release includes it as an experimental adapter. These install paths carry no go/no-go verdict and no official submission exists. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
+> **Experimental adapter.** ZCode was not a supported 0.4.3 release target; 0.5.0 and 0.6.0 include it as an experimental adapter. These install paths carry no go/no-go verdict and no official submission exists. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
 
 **Prerequisites.** The ZCode desktop client (builds for Windows x64/ARM64, macOS Apple Silicon/Intel DMG and Linux x64 AppImage) and `node` on `PATH`; a file-source or directory marketplace add also needs a package directory (see [Get the package](#get-the-package)).
 
@@ -296,21 +296,22 @@ using-agentic-sdlc
   |
   `-- full SDLC or high risk ---> agentic-sdlc-pipeline
                                    owns outer envelope
-                                   delegates implementation core
+                                   reads the work-type core file
+                                   dispatches reviewer agents
 ```
 
 `using-agentic-sdlc` routes ordinary work to the smallest sufficient independent skill. Those skills are first-class entry points: users can invoke them directly, and they remain useful without the full pipeline.
 
-`agentic-sdlc-pipeline` is the escalation path for end-to-end or high-risk work. It owns the outer envelope: git lifecycle, analysis, spec/plan phases, validation, scope lock, quality gates, security passes, final audit, and evidence-before-claim discipline. It then feeds the approved `docs/agentic-sdlc/specs/<work_id>.md` and `docs/agentic-sdlc/plans/<work_id>.md` into the matching core skill:
+`agentic-sdlc-pipeline` is the escalation path for end-to-end or high-risk work. It owns the outer envelope: git lifecycle, analysis, spec/plan phases, validation, scope lock, quality gates, security passes, final audit, and evidence-before-claim discipline. It never invokes a focused skill. Once `docs/agentic-sdlc/specs/<work_id>.md` and `docs/agentic-sdlc/plans/<work_id>.md` are approved, it reads the work-type core file of the matching focused skill and runs that file's core steps as Steps 8–13:
 
-| Pipeline core need | Delegated skill |
+| Pipeline work type | Core file (shared with the standalone skill) |
 |---|---|
-| New feature, endpoint, or capability | `feature-build` |
-| Bug, regression, or broken behavior | `root-cause-fix` |
-| Behavior-preserving restructure | `safe-refactor` |
-| Test-only coverage or repair | `test-authoring` |
+| New feature, endpoint, or capability | `skills/feature-build/references/core.md` |
+| Bug, regression, or broken behavior | `skills/root-cause-fix/references/core.md` |
+| Behavior-preserving restructure | `skills/safe-refactor/references/core.md` |
+| Test-only coverage or repair | `skills/test-authoring/references/core.md` |
 
-Gate and review skills also feed the pipeline at control points: `dispatch-strategy`, `security-audit`, `implementation-control`, and `completion-claim-gate`.
+The pipeline calls `dispatch-strategy` once, at kickoff, before Step 1, and `completion-claim-gate` before any done or ready claim. Its security passes dispatch the `security-reviewer` agent, and its implementation-control gate runs `resolve_work_package.py` and dispatches the `implementation-auditor` agent. The `security-audit` and `implementation-control` skills remain standalone entry points.
 
 Important boundary: `spec-authoring` and `plan-authoring` are standalone prompt-level skills. The pipeline does not call them for its internal spec/plan phases. Claude Code uses the `spec-plan-draft` workflow; Codex uses the embedded author/critic adapter documented in the runtime-specific README.
 
@@ -391,7 +392,7 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 | Cursor | [`hooks/hooks-cursor.json`](hooks/hooks-cursor.json), declared by `.cursor-plugin/plugin.json`: `beforeShellExecution` command guards, `preToolUse` write scan and flow-order, `sessionStart`, and a `stop` worktree scan. Launch code reads `process.env.CURSOR_PLUGIN_ROOT`. Claude transcript Stop readers stay unwired. See [`.cursor-plugin/README.md`](.cursor-plugin/README.md). |
 | Google Antigravity (experimental adapter) | Not wired by default: Antigravity's `hooks.json` supports only `PreToolUse` and `PostToolUse` with `toolCall` payloads and top-level `decision` outputs (`allow`\|`deny`), without `SessionStart`, `Stop`, or `CLAUDE_PLUGIN_ROOT` / `PLUGIN_ROOT` injection. Use repo-level git hooks (`python3 <runtime-root>/scripts/install_git_hooks.py`), explicit validator scripts, and `/git-safety-check`; see [`.antigravity-plugin/README.md`](.antigravity-plugin/README.md). |
 
-Claude Code wires flow enforcement through `flow-order-guard.mjs` and `flow-step-guard.mjs`. Codex uses its own `flow-order-guard-codex.mjs` and `flow-step-guard-codex.mjs` adapters over the same [`hooks/flow-requirements.json`](hooks/flow-requirements.json); the Codex order gate is opt-in and its Stop gate can continue the turn but cannot undo effects.
+Claude Code wires flow enforcement through `flow-order-guard.mjs` and `flow-step-guard.mjs`. Codex uses its own `flow-order-guard-codex.mjs` and `flow-step-guard-codex.mjs` adapters over the same [`hooks/flow-requirements.json`](hooks/flow-requirements.json); the Codex order gate is opt-in and its Stop gate can continue the turn but cannot undo effects. For `agentic-sdlc-pipeline` on Claude Code, the flow hooks match the `Skill` call to `dispatch-strategy` and the `Agent` dispatches of `security-reviewer` and `implementation-auditor` by exact name, `flow-order-guard.mjs` checks for a test command before the first production edit (`red-first`), and `flow-step-guard.mjs` warns when a pipeline turn ends on the `dispatch-strategy` decision. Hook flow activation is by the `Skill` tool: a pipeline run started only by the `/agentic-sdlc-pipeline` slash command activates no hook flow and is covered by the offline procedure eval.
 
 Guarding happens at two layers, because one of them provably cannot be complete.
 
@@ -437,7 +438,9 @@ This proves metadata consistency, static skill wiring, fixture health, hook/work
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
-Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+
+From Step 8 the pipeline's main loop also writes a TDD evidence file, `docs/agentic-sdlc/<slug>/evidence/<work_id>.tdd.md` per-package or `docs/agentic-sdlc/evidence/<work_id>.tdd.md` flat, with every test run until `implementation-auditor` is dispatched; it is git-ignored, has no validator and never gates resolution.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
 
@@ -454,7 +457,7 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 
 ## Versioning
 
-Current version: `0.5.0`.
+Current version: `0.6.0`.
 
 ```bash
 python3 scripts/bump_version.py --check

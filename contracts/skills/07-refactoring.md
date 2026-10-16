@@ -4,7 +4,7 @@
 Improve structure without changing behavior — safely and reversibly.
 
 ## When applied
-When code needs restructuring for readability/maintainability, or during step 9 of the default workflow.
+When code needs restructuring for readability/maintainability, or during the refactor step of a flow (the work-type core's refactor step; Step 12 of `agentic-sdlc-pipeline`).
 
 ## Required
 - **Behavior must not change.** Secure current behavior with tests **first**; if coverage is missing, add characterization tests before refactoring.

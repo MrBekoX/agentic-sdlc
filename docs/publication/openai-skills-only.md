@@ -4,7 +4,7 @@ This packet prepares an `agentic-sdlc` upload to the OpenAI public plugin direct
 
 ## Archive definition
 
-- The skills-only archive is a deterministic public projection of committed source (BR24), separate from the unchanged manual Claude/Codex distribution. It contains `.codex-plugin/plugin.json`, source `skills/`, `contracts/skills/`, `assets/`, `LICENSE`, and three stdlib Python helpers: `scripts/detect_context.py`, `scripts/validate_artifacts.py`, `scripts/resolve_work_package.py`.
+- The skills-only archive is a deterministic public projection of committed source (BR24), separate from the unchanged manual Claude/Codex distribution. It contains `.codex-plugin/plugin.json`, source `skills/` (with each skill's `references/`, including the four work-type `references/core.md` files that `agentic-sdlc-pipeline` Steps 8–13 read), `contracts/skills/`, `assets/`, `LICENSE`, and three stdlib Python helpers: `scripts/detect_context.py`, `scripts/validate_artifacts.py`, `scripts/resolve_work_package.py`.
 - It is built with `python3 scripts/build_release.py --output <zip> --skills-only` and checked with `python3 scripts/build_release.py --verify <zip>`, which reports `archive_kind=skills-only`. It is a separate archive from the general release ZIP.
 - The governing manifest is `.codex-plugin/plugin.json` (DP11).
 - It has no lifecycle hook files, `.claude-plugin/`, `commands/`, `agents/`, `workflows/`, root `docs/` or `tests/` member and no MCP configuration. The public manifest has no `hooks` field. General release and manual install hooks remain unchanged.

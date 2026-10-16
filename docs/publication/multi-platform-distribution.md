@@ -15,7 +15,8 @@ Microsoft Store alias). Python 3.12 is the tested version; the helpers skills ru
 kept import-compatible with 3.8 by a static check, not by a runtime test. Maintainer and
 release tooling (`build_release.py`, `bump_version.py`, the Codex hook trust check, the
 eval runners) needs Python 3.12. Keep the full plugin directory: isolated SKILL.md copies
-omit shared contracts, scripts and reviewers. Skills locate the installed plugin with
+omit shared contracts, scripts, reviewers and skill references such as the four work-type
+`references/core.md` files that the focused skills and `agentic-sdlc-pipeline` read. Skills locate the installed plugin with
 the **Plugin root** rule (two levels above the loaded `SKILL.md`); per-runtime
 fallbacks are in [runtime-adapter.md](../runtime-adapter.md#capability-fallbacks-on-all-five-runtimes).
 
@@ -81,7 +82,7 @@ commit's full `sha`. If the public repository ends up at a different URL than
   and the `.zcode-plugin/` README pair), `CHANGELOG.md`, `docs/plugin-readme.md`,
   `docs/runtime-adapter.md`, `docs/troubleshooting.md`, `docs/zcode-runtime-adapter.md`,
   `docs/release-readiness.md`,
-  `docs/release-evidence-0.4.3.md`, `docs/release-evidence-0.5.0.md` and the notes under `docs/publication/`;
+  `docs/release-evidence-0.4.3.md`, `docs/release-evidence-0.5.0.md`, `docs/release-evidence-0.6.0.md` and the notes under `docs/publication/`;
 - the tests that pin it: `tests/test_grok_packaging.py`, `tests/test_kimi_packaging.py`,
   `tests/test_packaging_metadata.py` and `tests/test_zcode_packaging.py`.
 

@@ -64,30 +64,33 @@ Do not hard-code machine-specific absolute paths into skills, hooks, evals, or g
 
 `agentic-sdlc-pipeline` is the full-envelope escalation path. In Claude Code it must leave real transcript evidence:
 
-1. `Skill` invocation for `agentic-sdlc:dispatch-strategy`.
+1. `Skill` invocation for `agentic-sdlc:dispatch-strategy`, once, at kickoff, before Step 1.
 2. `Bash`/`PowerShell` invocation of `detect_context.py`.
 3. `Workflow` invocation of `agentic-sdlc:spec-plan-draft` with `mode:"spec"`.
 4. `validate_artifacts.py --mode spec` after saving the spec.
 5. `Workflow` invocation of `agentic-sdlc:spec-plan-draft` with `mode:"plan"`.
 6. `validate_artifacts.py --mode plan --strict` after saving the plan.
-7. `Skill` invocation for the selected core workflow: `feature-build`, `root-cause-fix`, `safe-refactor`, or `test-authoring`.
-8. `Skill` invocation for `security-audit` at required security gates.
-9. `Skill` invocation for `implementation-control` before final reporting.
+7. `Read` of the selected work-type core file before the first test edit, then bare RED/GREEN test runs, each appended to the TDD evidence file.
+8. `Agent` dispatch of `security-reviewer` for Steps 11 and 14, with its returned findings table.
+9. `Bash`/`PowerShell` invocation of `resolve_work_package.py`, then `Agent` dispatch of `implementation-auditor` before final reporting.
 10. `Skill` invocation for `completion-claim-gate` immediately before any done/fixed/passing/ready claim.
 
 Manual prose does not replace those tool calls when the runtime supports them.
 
-## How Independent Skills Feed The Pipeline
+## How Focused Skills Relate To The Pipeline
 
-Focused skills are independently invocable. The pipeline reuses them instead of duplicating their internal logic:
+Focused skills are independently invocable. Inside a pipeline run the pipeline invokes none of them; it shares their work-type rules through the core files instead of duplicating them:
 
 | Pipeline stage | Claude Code mechanism |
 |---|---|
+| Mechanism decision | `Skill` `agentic-sdlc:dispatch-strategy`, once, at kickoff, before Step 1. |
 | Spec and plan phases | Named workflow `agentic-sdlc:spec-plan-draft`. |
-| Implementation core | Delegates to `feature-build`, `root-cause-fix`, `safe-refactor`, or `test-authoring`. |
-| Security gates | Delegates to `security-audit`. |
-| Pre-final audit | Delegates to `implementation-control`. |
-| Final evidence claim | Delegates to `completion-claim-gate`. |
+| Implementation core (Steps 8–13) | `Read` of `skills/<skill>/references/core.md` for `feature-build`, `root-cause-fix`, `safe-refactor`, or `test-authoring`; the standalone skill reads the same file. |
+| Security gates (Steps 11 and 14) | `Agent` `security-reviewer`. |
+| Pre-final audit | `resolve_work_package.py`, then `Agent` `implementation-auditor`. |
+| Final evidence claim | `Skill` `agentic-sdlc:completion-claim-gate`. |
+
+The flow hooks match the pipeline's dispatch, security and control steps by exact skill or agent name. Hook flow activation is by the `Skill` tool: a pipeline run started only by the `/agentic-sdlc-pipeline` slash command activates no hook flow and is covered by the offline procedure eval.
 
 `spec-authoring` and `plan-authoring` remain standalone prompt-level skills. They are not internal pipeline substeps.
 
@@ -108,17 +111,17 @@ Claude Code wires the full hook surface in `hooks/hooks-claude.json`:
 labels/locations, and is advisory by default. `AGENTIC_WORKTREE_SCAN_BLOCK=true` asks Claude Code to
 continue the turn, but cannot undo a secret that already reached disk.
 
-The flow guards are the deterministic backstop for active implementation flows. `flow-order-guard.mjs` checks before source edits that required pre-edit evidence exists in the current turn; `flow-step-guard.mjs` checks at Stop that required flow steps have observable evidence. Both use `hooks/flow-requirements.json` and `flow-evidence.mjs`, warn by default, and block/deny only when `AGENTIC_FLOW_GATE_BLOCK=true`.
+The flow guards are the deterministic backstop for active implementation flows. `flow-order-guard.mjs` checks before source edits that required pre-edit evidence exists earlier in the session transcript; `flow-step-guard.mjs` checks at Stop that required flow steps have observable evidence. Both use `hooks/flow-requirements.json` and `flow-evidence.mjs`, warn by default, and block/deny only when `AGENTIC_FLOW_GATE_BLOCK=true`. For `agentic-sdlc-pipeline`, `flow-order-guard.mjs` also looks for a test command before the first production edit (`red-first`), and `flow-step-guard.mjs` flags a pipeline turn that ends on the `dispatch-strategy` decision.
 
 ## Distribution paths
 
-Four paths exist; each has its own go condition and state. The per-path verdicts are in [release readiness](../docs/release-readiness.md#distribution-paths-and-gono-go), and a state is a snapshot bound to the [release evidence ledger](../docs/release-evidence-0.5.0.md) (the 0.4.3 verdicts stay in the [0.4.3 ledger](../docs/release-evidence-0.4.3.md)).
+Four paths exist; each has its own go condition and state. The per-path verdicts are in [release readiness](../docs/release-readiness.md#distribution-paths-and-gono-go), and a state is a snapshot bound to the [release evidence ledger](../docs/release-evidence-0.6.0.md) (earlier verdicts stay in the [0.5.0 ledger](../docs/release-evidence-0.5.0.md) and the [0.4.3 ledger](../docs/release-evidence-0.4.3.md)).
 
 | Path | Prerequisites | Steps | Go condition | State |
 |---|---|---|---|---|
 | Claude own marketplace | Claude Code with plugin marketplace support; `node` on `PATH`; a package directory, or the public repository `MrBekoX/agentic-sdlc`. | `claude plugin marketplace add <package-directory>` (see [Install](#install)) or `claude plugin marketplace add MrBekoX/agentic-sdlc`; then `claude plugin install agentic-sdlc@mrbekox`. | Go condition: anonymous users need a public repository (a private one installs only through a git credential helper or SSH; a token only in an environment variable does not authenticate, [private repositories](https://code.claude.com/docs/en/plugin-marketplaces.md#private-repositories), observed 2026-09-14); both strict validations below pass; a clean install from an empty profile runs marketplace add, install, a new session or `/reload-plugins`, then skill, command and hook discovery plus one real invocation, with the clone transport (SSH or HTTPS) recorded. | State: GAP. The repository is public since 2026-10-12 (unauthenticated URL 200 in `docs/publication/link-checks.json`). From the public repository, `claude plugin marketplace add MrBekoX/agentic-sdlc` and `claude plugin install agentic-sdlc@mrbekox` installed 0.5.0 with 16 skills in an isolated profile (Claude Code 2.1.282, Linux, 2026-10-12, no model call); the go condition's new-session discovery, real invocation and recorded clone transport are not recorded. |
 | Claude community marketplace submission | A public repository; a recorded clean-package `claude plugin validate ./plugin --strict` result; a paid claude.ai plan (Pro and Max submit from their own account; Team and Enterprise need an Owner, and Enterprise can grant the Directory permission; [plugins/publish](https://code.claude.com/docs/en/plugins/publish), fetched 2026-10-07). | Submit at [claude.ai/directory/manage](https://claude.ai/directory/manage); packet [`docs/publication/claude-community.md`](../docs/publication/claude-community.md). | Go condition: public repository and a passing `claude plugin validate` on the submitted root; acceptance is not guaranteed. Observed 2026-09-14: [code.claude.com/docs/en/plugins](https://code.claude.com/docs/en/plugins.md) says approved plugins "are pinned to a specific commit SHA" with CI bumping the pin as commits are pushed, and [claude.com/docs/plugins/submit](https://claude.com/docs/plugins/submit) says updates pushed to the repository "are picked up automatically", so every default-branch push after approval counts as publication. The pages name `claude-community` and `claude-plugins-official` as targets; neither is promised. | State: BLOCKED. Needs a public repository, the clean-package validation and maintainer form access. |
-| Codex personal marketplace | Codex CLI with plugin marketplace support (native lifecycle passed on codex-cli 0.162.1 on Windows and macOS and 0.156.1 on Linux, [compatibility matrix](../docs/publication/compatibility-matrix.md)); `node` on `PATH`; a package directory. | See [`../.codex-plugin/README.md`](../.codex-plugin/README.md): `codex plugin marketplace add <package-directory>`, then `codex plugin add agentic-sdlc@mrbekox` (the personal catalog is an optional alternative), trust the hooks in `/hooks`, then run the hook trust check. | Go condition: a discoverable catalog (the added package directory, or the optional personal catalog `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`); native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; hook trust granted through the native `/hooks` protocol. | State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the compatibility matrix; `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.5.0 package; the ledger carries the 26b0fe1 results. |
+| Codex personal marketplace | Codex CLI with plugin marketplace support (native lifecycle passed on codex-cli 0.162.1 on Windows and macOS and 0.156.1 on Linux, [compatibility matrix](../docs/publication/compatibility-matrix.md)); `node` on `PATH`; a package directory. | See [`../.codex-plugin/README.md`](../.codex-plugin/README.md): `codex plugin marketplace add <package-directory>`, then `codex plugin add agentic-sdlc@mrbekox` (the personal catalog is an optional alternative), trust the hooks in `/hooks`, then run the hook trust check. | Go condition: a discoverable catalog (the added package directory, or the optional personal catalog `~/.agents/plugins/marketplace.json` with top-level `"name": "personal"`); native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; hook trust granted through the native `/hooks` protocol. | State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the compatibility matrix; `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.6.0 package; the ledger carries the 26b0fe1 results. |
 | OpenAI public directory | Maintainer-verified identity and Apps Management Write (`api.apps.write`). | Build the skills-only archive with `python3 scripts/build_release.py --output <zip> --skills-only`, verify it, then upload; see [`../.codex-plugin/README.md`](../.codex-plugin/README.md). | Go condition: a verified skills-only archive; submission, acceptance and publication are three separate stages, and the listing changes after publication only through a newly reviewed version. | State: BLOCKED. Needs verified identity, `api.apps.write` and a verified skills-only archive. |
 
 ### Native manifest validation
@@ -156,7 +159,9 @@ Claude live trigger and procedure evidence uses `scripts/run_trigger_eval.py`, `
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
-Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+
+From Step 8 the pipeline's main loop also writes a TDD evidence file, `docs/agentic-sdlc/<slug>/evidence/<work_id>.tdd.md` per-package or `docs/agentic-sdlc/evidence/<work_id>.tdd.md` flat, with every test run until `implementation-auditor` is dispatched; it is git-ignored, has no validator and never gates resolution.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 

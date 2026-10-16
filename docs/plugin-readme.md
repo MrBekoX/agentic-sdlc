@@ -1,6 +1,6 @@
 # AGENTIC-SDLC Plugin Reference
 
-> Version: `0.5.0`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md), [Codex](../.codex-plugin/README.md), [Kimi Code](../.kimi-plugin/README.md), [Grok CLI](../.grok-plugin/README.md), [ZCode](../.zcode-plugin/README.md) or [Cursor](../.cursor-plugin/README.md).
+> Version: `0.6.0`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md), [Codex](../.codex-plugin/README.md), [Kimi Code](../.kimi-plugin/README.md), [Grok CLI](../.grok-plugin/README.md), [ZCode](../.zcode-plugin/README.md) or [Cursor](../.cursor-plugin/README.md).
 
 AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**, with experimental adapters for **Kimi Code**, **Grok CLI** and **ZCode**. It routes each prompt to the smallest sufficient skill and reserves the full SDLC envelope for work that actually needs it.
 
@@ -15,7 +15,7 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**, wi
 | Kimi Code | Adapter / experimental, limited runtime coverage (not a 0.4.3 release target) | `/plugins install <package-directory>` in the TUI; `.kimi-plugin/plugin.json`, `marketplace-kimi.json`, startup router and three inline command guards; see [Kimi](../.kimi-plugin/README.md). |
 | Cursor | Adapter | Local copy into Cursor's user plugin directory via `scripts/install_cursor_plugin.py`, or a team marketplace import of `.cursor-plugin/marketplace.json`. Shared skills, agents, commands, one rule, and `hooks/hooks-cursor.json`. See [Cursor](../.cursor-plugin/README.md). |
 | Google Antigravity | Adapter / experimental (not a supported release target) | Local staging into `<workspace>/.agents/plugins/agentic-sdlc/` or `~/.gemini/config/plugins/agentic-sdlc/` with `.antigravity-plugin/plugin.json` copied as `<plugin-dir>/plugin.json`. Shared skills, portable `<runtime-root>` resolution, `invoke_subagent` delegation, no `hooks.json` wire. See [Google Antigravity](../.antigravity-plugin/README.md). |
-| OpenCode / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets for `0.4.3`. |
+| OpenCode / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets. |
 
 Claude Code, Codex, Kimi Code, ZCode and Grok CLI are included in [distribution preparation](publication/multi-platform-distribution.md); packaging/replay evidence does not replace native/live validation. Native install, discovery, update and uninstall passed for those five on Windows, Linux and macOS in isolated profiles with no model turn ([compatibility matrix](publication/compatibility-matrix.md), E1–E15); hook trust and delivery inside a live session, live skill behavior and ZCode's desktop GUI flow are not proven there. The Cursor adapter is packaged separately and its IDE lifecycle cells are `not-run`.
 
@@ -80,16 +80,16 @@ The session-local router. It chooses the smallest sufficient skill and escalates
 
 The full-envelope orchestrator. It owns git lifecycle, analysis, spec/plan gates, validation, scope lock, quality gates, security passes, final audit, and evidence-before-claim discipline.
 
-The pipeline does not duplicate the implementation core. It delegates to focused skills after it has approved spec/plan artifacts:
+The pipeline runs Steps 8–13 itself and never invokes a focused skill or reads its `SKILL.md`. Once the spec and plan are approved, it reads the work-type core file of the matching focused skill and runs that file's core steps:
 
-| Work type | Delegated core skill |
+| Work type | Core file read for Steps 8–13 |
 |---|---|
-| Feature or endpoint | `feature-build` |
-| Bug or broken behavior | `root-cause-fix` |
-| Behavior-preserving refactor | `safe-refactor` |
-| Test-only work | `test-authoring` |
+| Feature or endpoint | `skills/feature-build/references/core.md` |
+| Bug or broken behavior | `skills/root-cause-fix/references/core.md` |
+| Behavior-preserving refactor | `skills/safe-refactor/references/core.md` |
+| Test-only work | `skills/test-authoring/references/core.md` |
 
-Gate skills feed the pipeline at control points: `dispatch-strategy`, `security-audit`, `implementation-control`, and `completion-claim-gate`.
+The standalone skill reads the same core file, so the implementation steps exist once; the depth blocks are copied byte-identical into each focused `SKILL.md`, and a parity test pins the copies. The pipeline calls `dispatch-strategy` once, at kickoff, before Step 1, and `completion-claim-gate` before any done or ready claim. Its security passes (Steps 11 and 14) dispatch the `security-reviewer` agent, and its implementation-control gate runs `resolve_work_package.py` and dispatches the `implementation-auditor` agent. The `security-audit` and `implementation-control` skills remain standalone entry points.
 
 `spec-authoring` and `plan-authoring` are standalone prompt-level skills. They are not internal pipeline substeps.
 
@@ -134,17 +134,17 @@ The scripts are shared, but runtime wiring differs.
 
 | Script | Claude Code wiring | Codex wiring | Behavior |
 |---|---|---|---|
-| `session-start.mjs` | `SessionStart` | Not wired | Injects git status and Claude Code Skill-tool bootstrap reminder. |
-| `session-start-codex.mjs` | Not wired | `SessionStart` | Injects git status and Codex-specific AGENTIC-SDLC bootstrap reminder. |
+| `session-start.mjs` | `SessionStart` | Not wired | Injects git status and Claude Code Skill-tool bootstrap reminder, including the line that the pipeline owns every step inside an active `agentic-sdlc-pipeline` run. |
+| `session-start-codex.mjs` | Not wired | `SessionStart` | Injects git status and Codex-specific AGENTIC-SDLC bootstrap reminder, including the same pipeline-ownership line. |
 | `scan-write.mjs` | `PostToolUse` | Not wired | Warns on secret-shaped new content. |
 | `scan-commit.mjs` | `PreToolUse` for shell commands; self-gates to commits | `PreToolUse` for `Bash`; self-gates to commits | Blocks high-confidence secrets in added diff lines. |
 | `branch-guard.mjs` | `PreToolUse` for shell commands; self-gates to commit/push | `PreToolUse` for `Bash`; self-gates to commit/push | Warns on protected branches; can block with `AGENTIC_BRANCH_GUARD_BLOCK=true`. |
 | `destructive-command-guard.mjs` | `PreToolUse` for shell commands | `PreToolUse` for `Bash` | Blocks the documented deterministic destructive-command subset, after walking off every shell `cmd_prefix` that can precede a command name and reaching into `-c`/`eval` payloads and command substitutions. The walk is depth- and budget-bounded and widens to a coarse linear scan past the bound. The prefix set is closed by the shell grammar; the wrapper list is an open-ended deny-list. |
 | `scan-write-codex.mjs` | Not wired | `PreToolUse` for `Bash\|apply_patch` | Blocks high-confidence secrets in recognized literal writes. |
 | `flow-order-guard-codex.mjs` | Not wired | `PreToolUse` for `Bash\|apply_patch` | With `AGENTIC_FLOW_ORDER_BLOCK=true`, requires this-session spec/plan or test-run ordering evidence. |
-| `flow-order-guard.mjs` | `PreToolUse` for `Write`/`Edit`/`MultiEdit` | Not wired | Checks current-turn pre-edit evidence for active implementation flows before source edits; can deny with `AGENTIC_FLOW_GATE_BLOCK=true`. |
+| `flow-order-guard.mjs` | `PreToolUse` for `Write`/`Edit`/`MultiEdit` | Not wired | Checks this-session pre-edit evidence for active implementation flows before source edits (for `agentic-sdlc-pipeline`, including a test command before the first production edit, `red-first`); can deny with `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `completion-claim-guard.mjs` | `Stop` | Not wired | Warns, or blocks with `AGENTIC_COMPLETION_GATE_BLOCK=true`, when final completion claims skip `completion-claim-gate`. |
-| `flow-step-guard.mjs` | `Stop` | Not wired | Re-derives active-flow step evidence from validated artifacts, tool calls, and commands; can block missing required steps with `AGENTIC_FLOW_GATE_BLOCK=true`. Its warn-level `branch` and `review-result` steps never block. |
+| `flow-step-guard.mjs` | `Stop` | Not wired | Re-derives active-flow step evidence from validated artifacts, tool calls, and commands; can block missing required steps with `AGENTIC_FLOW_GATE_BLOCK=true`. Its warn-level `branch` and `review-result` steps never block. It also warns when an `agentic-sdlc-pipeline` turn ends on the `dispatch-strategy` decision, and blocks that only with `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `completion-claim-guard-codex.mjs` | Not wired | `Stop` | Warns, or continues the turn with `AGENTIC_COMPLETION_GATE_BLOCK=true`, when completion evidence is absent. In a Superpowers-owned or Ambiguous phase the message is owner-neutral (fresh verification evidence); otherwise it is the unchanged house message. |
 | `flow-step-guard-codex.mjs` | Not wired | `Stop` | Re-derives Codex-observable evidence; can continue the turn with `AGENTIC_FLOW_GATE_BLOCK=true`. |
 | `flow-evidence.mjs` | Shared library | Shared library | Evidence engine used by the flow guards. |
@@ -152,7 +152,7 @@ The scripts are shared, but runtime wiring differs.
 
 The experimental adapters wire a subset of the same scripts. Kimi Code (inline hooks in `.kimi-plugin/plugin.json`) and Grok CLI (`hooks/hooks-grok.json`) run `scan-commit.mjs`, `destructive-command-guard.mjs` and `branch-guard.mjs` as `PreToolUse` command guards; ZCode (`hooks/hooks-zcode.json`) runs the same three plus `scan-write.mjs` on `PostToolUse` and `session-start.mjs` on `SessionStart`. None of them wires a Stop or flow guard; see [`runtime-adapter.md`](./runtime-adapter.md).
 
-`hooks/flow-requirements.json` is the shared source for which steps each active flow must evidence. It covers `root-cause-fix`, `feature-build`, `safe-refactor`, and `agentic-sdlc-pipeline`; the offline gate validates that every referenced skill, workflow, agent, and validator exists.
+`hooks/flow-requirements.json` is the shared source for which steps each active flow must evidence. It covers `root-cause-fix`, `feature-build`, `safe-refactor`, and `agentic-sdlc-pipeline`; the offline gate validates that every referenced skill, workflow, agent, and validator exists. The `agentic-sdlc-pipeline` flow matches its `dispatch-strategy`, `security-reviewer` and `implementation-auditor` evidence by exact name (`exactName`). Hook flow activation is by the `Skill` tool: a pipeline run started only by the `/agentic-sdlc-pipeline` slash command activates no hook flow and is covered by the offline procedure eval.
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
@@ -203,7 +203,7 @@ The local gate proves static wiring and fixture health. It does not prove live m
 |---|---|
 | Claude skill trigger | `run_trigger_eval.py` stream-json transcript with real `Skill`/`Read` activation. |
 | Codex route selection | `run_codex_trigger_eval.py` route-classifier output. |
-| Pipeline procedure | `run_procedure_eval.py` transcript/tool/artifact evidence. |
+| Pipeline procedure | `run_procedure_eval.py` transcript/tool/artifact evidence; `--strict-evidence` adds the zero-delegation keys and per-case acceptance lines. |
 
 See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readiness.md).
 
@@ -216,13 +216,16 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 - `validate_artifacts.py` is structural; it cannot prove that a spec is semantically about the requested task.
 - Live routing is model-dependent and must be evidenced per runtime, model, and run.
 - Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters. Local CLI install does not require a public directory listing.
-- Bounded native hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. Their source identities and the separate parser replay are recorded in [runtime evidence](runtime-adapter.md#current-binary-and-historical-hook-evidence); `transcript_path` remains unstable. The [release ledger](release-evidence-0.4.3.md) distinguishes this proof from the standalone routing and pipeline publication gates.
+- Bounded native hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. Their source identities and the separate parser replay are recorded in [runtime evidence](runtime-adapter.md#current-binary-and-historical-hook-evidence); `transcript_path` remains unstable. The [0.4.3 release ledger](release-evidence-0.4.3.md) distinguishes this proof from the standalone routing and pipeline publication gates.
+- No live pipeline run has measured 0.6.0 yet; the zero-delegation rule is stated in the skill text, checked by the Claude Code flow hooks (warn by default) and graded offline by the strict procedure eval. Codex test runs wrapped in `/bin/bash -lc` or `powershell -Command` are not attributed, so strict RED/GREEN cannot pass on real Codex transcripts. See the [current release ledger](release-evidence-0.6.0.md).
 
 ## Artifact Layouts And Per-Package Evidence
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
-Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+
+From Step 8 the pipeline's main loop also writes a TDD evidence file, `docs/agentic-sdlc/<slug>/evidence/<work_id>.tdd.md` per-package or `docs/agentic-sdlc/evidence/<work_id>.tdd.md` flat, with every test run until `implementation-auditor` is dispatched; it is git-ignored, has no validator and never gates resolution.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 

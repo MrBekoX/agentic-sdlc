@@ -48,3 +48,18 @@ Lengths come from the parsed frontmatter values, with quotes stripped. Support f
 | `spec-authoring` | yes | 14 / 64 | 279 / 1024 | `name`, `description` | none | Triggers on a request for only a spec, acceptance criteria or a WHAT document. |
 | `test-authoring` | yes | 14 / 64 | 358 / 1024 | `name`, `description` | none | Triggers on test-only work: writing, repairing or designing tests without changing production behavior. |
 | `using-agentic-sdlc` | yes | 18 / 64 | 375 / 1024 | `name`, `description` | none | Triggers on explicit routing questions about which AGENTIC-SDLC skill owns the work, and escalates only full SDLC work to the pipeline. |
+
+## Changes since this record (0.6.0)
+
+The table above records the 2026-09-15 tree, and its values still held at `4262a19`. Version 0.6.0 changed six descriptions and added four support files; names and frontmatter keys are unchanged. Each of the six descriptions now ends with "Not for steps inside an active agentic-sdlc-pipeline run.", and `implementation-control` also rewords its auditor clause. The description-meaning reviews above were not redone, and no trigger eval has run on the new descriptions.
+
+| Skill | Description length / 1024 (0.6.0) | Support files (0.6.0) |
+|---|---|---|
+| `feature-build` | 316 / 1024 | `references/core.md` |
+| `implementation-control` | 722 / 1024 | none |
+| `root-cause-fix` | 302 / 1024 | `references/core.md` |
+| `safe-refactor` | 492 / 1024 | `references/core.md` |
+| `security-audit` | 357 / 1024 | none |
+| `test-authoring` | 416 / 1024 | `references/core.md` |
+
+Each `references/core.md` holds that work type's depth blocks and implementation steps; the standalone skill and `agentic-sdlc-pipeline` Steps 8–13 read the same file.

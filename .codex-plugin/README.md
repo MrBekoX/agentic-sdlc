@@ -28,7 +28,7 @@ The [official packaging guide](https://developers.openai.com/plugins/build/plugi
 
 ## Distribution paths
 
-Four paths exist; each has its own go condition and state. Per-path verdicts are bound to the [release evidence ledger](../docs/release-evidence-0.5.0.md) (the 0.4.3 verdicts stay in the [0.4.3 ledger](../docs/release-evidence-0.4.3.md)); new preparation results are recorded separately. `codex plugin --help` on 0.160.1 still lists no validate command, so use native discovery, the local gate and archive verification without inventing that subcommand.
+Four paths exist; each has its own go condition and state. Per-path verdicts are bound to the [release evidence ledger](../docs/release-evidence-0.6.0.md) (earlier verdicts stay in the [0.5.0 ledger](../docs/release-evidence-0.5.0.md) and the [0.4.3 ledger](../docs/release-evidence-0.4.3.md)); new preparation results are recorded separately. `codex plugin --help` on 0.160.1 still lists no validate command, so use native discovery, the local gate and archive verification without inventing that subcommand.
 
 Public directory distribution uses a separate `--skills-only` projection: the manifest has no hooks; reusable specialist and git-review instructions live in skill references; only required stdlib helpers ship. Public installation provides procedural guidance. Manual local distribution retains hooks and requires native review/trust. See the [public packet](../docs/publication/openai-skills-only.md).
 
@@ -36,7 +36,7 @@ Public directory distribution uses a separate `--skills-only` projection: the ma
 |---|---|---|---|---|
 | Claude own marketplace | Claude Code; see [`../.claude-plugin/README.md`](../.claude-plugin/README.md). | `claude plugin marketplace add <package-directory>` (or the public `MrBekoX/agentic-sdlc`), then `claude plugin install agentic-sdlc@mrbekox`. | Go condition: a public repository, both strict Claude manifest validations passing, and a recorded clean install. | State: GAP. The repository is public since 2026-10-12; a clean install from it is recorded only up to install and skill count (see [`../.claude-plugin/README.md`](../.claude-plugin/README.md)). |
 | Claude community marketplace submission | A public repository, a clean-package validation result and maintainer form access. | Submit through the Anthropic form; packet [`docs/publication/claude-community.md`](../docs/publication/claude-community.md). | Go condition: public repository and a passing `claude plugin validate` on the submitted root; acceptance is not guaranteed. | State: BLOCKED. Needs a public repository, validation and form access. |
-| Codex personal marketplace | Codex with marketplace support; Node on the hook `PATH`; a package directory or another discoverable marketplace source. | `codex plugin marketplace add <package-directory>`, then `codex plugin add agentic-sdlc@mrbekox` (see [Install](#install)); open `/hooks` and trust each hook; run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@<marketplace-name> --cwd <target-project>` from the installed plugin root or any package copy (a standalone script; needs Python 3.12) and expect `codex_hook_trust=trusted` ([Codex hook trust](../docs/troubleshooting.md#codex-hook-trust)). | Go condition: discoverable catalog; native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; native `/hooks` trust review completed. The `@personal` catalog below is an optional alternative. | State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the [compatibility matrix](../docs/publication/compatibility-matrix.md); `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.5.0 package; the ledger carries the 26b0fe1 results. |
+| Codex personal marketplace | Codex with marketplace support; Node on the hook `PATH`; a package directory or another discoverable marketplace source. | `codex plugin marketplace add <package-directory>`, then `codex plugin add agentic-sdlc@mrbekox` (see [Install](#install)); open `/hooks` and trust each hook; run `python3 scripts/check_codex_hook_trust.py --plugin agentic-sdlc@<marketplace-name> --cwd <target-project>` from the installed plugin root or any package copy (a standalone script; needs Python 3.12) and expect `codex_hook_trust=trusted` ([Codex hook trust](../docs/troubleshooting.md#codex-hook-trust)). | Go condition: discoverable catalog; native `plugin/read` shows 16 skills and `hooks/list` shows 8 hooks; native `/hooks` trust review completed. The `@personal` catalog below is an optional alternative. | State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the [compatibility matrix](../docs/publication/compatibility-matrix.md); `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.6.0 package; the ledger carries the 26b0fe1 results. |
 | OpenAI public directory | Maintainer-verified identity and Apps Management Write (`api.apps.write`). | Build the deterministic skills-only projection (Codex manifest, skills and merged references, three required stdlib helpers, contracts, assets and `LICENSE`; lifecycle hooks are excluded) with `python3 scripts/build_release.py --output <zip> --skills-only`, verify it with `--verify`, then upload; packet [`docs/publication/openai-skills-only.md`](../docs/publication/openai-skills-only.md). | Go condition: a verified skills-only archive (`archive_kind=skills-only`); submission, acceptance and publication are three separate stages; after publication the listing changes only through a newly reviewed version ([app review](https://developers.openai.com/plugins/deploy/app-review)). | State: BLOCKED. Needs verified identity, `api.apps.write` and a verified skills-only archive. |
 
 ## Install
@@ -124,36 +124,38 @@ Codex uses activated skill instructions and available Codex tools. It does not e
 
 Codex has no Claude Code Workflow runtime. Therefore `agentic-sdlc-pipeline` does not call the `spec-plan-draft` JavaScript workflow. It uses the embedded author/critic adapter:
 
-Emit `Runtime: Codex` once. At each gate below, emit `Codex Adapter Gate: <gate>` so `codex exec --json` transcripts have deterministic evidence. When Codex has no native `Skill` transcript event, record `Delegation Degraded: native Skill transcript events unavailable`; the adapter still runs the step by loading or activating the relevant `SKILL.md` instructions.
+Emit `Runtime: Codex` once. At each gate below, emit `Codex Adapter Gate: <gate>` so `codex exec --json` transcripts have deterministic evidence. When Codex has no native `Skill` transcript event, record `Delegation Degraded: native Skill transcript events unavailable`; the adapter still runs the step: it activates or reads the `dispatch-strategy` and `completion-claim-gate` instructions, reads the work-type core file, and runs the reviewer roles as fresh-context subagents. The pipeline activates no focused skill and reads no focused skill's `SKILL.md`.
 
-1. Activate `dispatch-strategy` before heavy, independent, or parallel decisions.
+1. Activate `dispatch-strategy` once, at kickoff, before Step 1, and reuse its mechanism map for every later heavy, independent, or parallel step; record `Codex Adapter Gate: dispatch-strategy activated`.
 2. Run `<runtime-root>/scripts/detect_context.py`, with `<runtime-root>` resolved as described under [Runtime Root](#runtime-root).
 3. Draft the spec inside `agentic-sdlc-pipeline` using the spec contract and `spec-plan-author` role instructions.
 4. Run a fresh-context critic pass with `spec-plan-critic` instructions when Codex subagents are available; otherwise record a degraded inline critic pass.
 5. Save `docs/agentic-sdlc/specs/<work_id>.md` and run `validate_artifacts.py --mode spec`.
 6. Draft and critic-review the plan inside `agentic-sdlc-pipeline`.
 7. Save `docs/agentic-sdlc/plans/<work_id>.md` and run `validate_artifacts.py --mode plan --strict`.
-8. Activate the selected core workflow skill before implementation edits.
-9. Activate `security-audit`, `implementation-control`, and `completion-claim-gate` at their gates.
+8. Read the selected work-type core file, `<runtime-root>/skills/<skill>/references/core.md`, before the first test edit; record `Codex Adapter Gate: work-type core <feature|bugfix|refactor|test-only>`. Run its core steps as Steps 8–13 with bare test commands and write the TDD evidence file.
+9. For Steps 11 and 14, run a fresh-context subagent with `<runtime-root>/agents/security-reviewer.md` instructions (`Codex Adapter Gate: security-reviewer`). At implementation control, run `resolve_work_package.py`, then a fresh-context subagent with `<runtime-root>/agents/implementation-auditor.md` instructions (`Codex Adapter Gate: implementation-auditor`). Print each findings table and the auditor verdict as assistant text. Before the final report, activate `completion-claim-gate` (`Codex Adapter Gate: completion-claim-gate`).
 
 During Codex pipeline and eval runs, do not run recursive cleanup deletes for generated caches such as `__pycache__`. Leave or report them instead; cleanup is not a pipeline gate and may create permission-denial noise in procedure transcripts.
 
 `spec-authoring` and `plan-authoring` remain standalone prompt-level skills. They are not internal pipeline substeps.
 
-## How Independent Skills Feed The Pipeline
+## How Focused Skills Relate To The Pipeline
 
-Focused skills are independently routable in Codex and also serve as pipeline building blocks:
+Focused skills are independently routable in Codex. Inside a pipeline run none of them is activated; the pipeline uses these instead:
 
-| Pipeline need | Skill |
+| Pipeline need | Codex mechanism |
 |---|---|
-| New feature or endpoint | `feature-build` |
-| Bug or regression | `root-cause-fix` |
-| Behavior-preserving refactor | `safe-refactor` |
-| Test-only work | `test-authoring` |
-| Execution mechanism choice | `dispatch-strategy` |
-| Security gates | `security-audit` |
-| Pre-final audit | `implementation-control` |
+| New feature or endpoint | Work-type core file of `feature-build` |
+| Bug or regression | Work-type core file of `root-cause-fix` |
+| Behavior-preserving refactor | Work-type core file of `safe-refactor` |
+| Test-only work | Work-type core file of `test-authoring` |
+| Execution mechanism choice | `dispatch-strategy`, activated once at kickoff, before Step 1 |
+| Security gates | `security-reviewer` role in a fresh-context subagent |
+| Pre-final audit | `resolve_work_package.py`, then the `implementation-auditor` role in a fresh-context subagent |
 | Final evidence claim | `completion-claim-gate` |
+
+Codex emits no `Skill` or `Agent` transcript events, so the hooks do not observe these steps. The offline strict grader (`scripts/run_procedure_eval.py --strict-evidence`) checks them from the gate markers, the printed reviewer output and the recorded commands; see [strict evidence limits](../docs/runtime-adapter.md#limits-of-branch-review-result-and-strict-evidence) for what it cannot attribute on real Codex transcripts.
 
 ## Hooks In Codex
 
@@ -176,7 +178,9 @@ Use Codex eval output as evidence for Codex routing only. Use procedure transcri
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
-Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+
+From Step 8 the pipeline's main loop also writes a TDD evidence file, `docs/agentic-sdlc/<slug>/evidence/<work_id>.tdd.md` per-package or `docs/agentic-sdlc/evidence/<work_id>.tdd.md` flat, with every test run until `implementation-auditor` is dispatched; it is git-ignored, has no validator and never gates resolution.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 

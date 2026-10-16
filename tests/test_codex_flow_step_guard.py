@@ -27,13 +27,12 @@ FLOW_EVID = REPO / "hooks" / "flow-evidence.mjs"
 HOOK = REPO / "hooks" / "flow-step-guard-codex.mjs"
 CODEX_CFG = REPO / "hooks" / "hooks-codex.json"
 
-# LF-normalized sha256 of the two files this suite locks. The longer rationale sits beside
+# LF-normalized sha256 of the file this suite locks. The longer rationale sits beside
 # LOCK_DIGESTS in tests/test_codex_flow_order_guard.py: a lock that re-reads its expected value
 # from the moving HEAD cannot fail on a committed change.
 LOCK_DIGESTS = {
-    # Rebased for Claude Code 2.1.293: last_assistant_message + background_tasks on Stop.
-    "hooks/flow-step-guard.mjs":
-        "e5f66136c69096748375ea1fb357b1f6282d478f9857ddca974a29853595e165",
+    # hooks/flow-step-guard.mjs is no longer locked here.
+    # Released 2026-10 (pipeline v2.1 D7): the block reason named implementation-control, which the pipeline no longer invokes; behavior is pinned by tests/test_flow_guards.py PINNED_STEP_BLOCK_MAIN and the pipeline block pin.
     # Rebased for Claude Code 2.1.293: prefer last_assistant_message; block only when caught up.
     "hooks/completion-claim-guard.mjs":
         "ad454dd5f68c2ba08583c283b444318c24892d9c3305161b913dea3bcf317c9b",
@@ -788,6 +787,27 @@ class TestFlowEvidenceDerivation(_Tmp):
         roll = _write_rollout([_mark_write(s), _src_patch()])
         self.assertIn("spec", _derive(roll, cwd)["missingBlockSteps"])
 
+    # ---- C6 / D7: the pipeline's red-first step stays out of the Codex Stop requirement set ----
+    def test_pipeline_red_first_does_not_join_codex_block_set(self):  # C6
+        req = json.loads((REPO / "hooks" / "flow-requirements.json").read_text(encoding="utf-8"))
+        steps = {s["id"]: s for s in req["flows"]["agentic-sdlc-pipeline"]["steps"]}
+        # Presence first: without the step this test would pass vacuously.
+        self.assertIn("red-first", list(steps), "C6 adds a red-first step to the agentic-sdlc-pipeline flow")
+        self.assertNotIn("stop", steps["red-first"])
+        cwd = self._cwd()
+        s = _artifact(cwd, "spec", "W", valid=False)
+        p = _artifact(cwd, "plan", "W", valid=False)
+        roll = _write_rollout([_mark_write(s), _mark_write(p), _src_patch()])  # no test run at all
+        # The real config: the Codex Stop set stays {spec, plan, tests}; red-first never appears.
+        self.assertEqual(_derive(roll, cwd)["missingBlockSteps"], ["spec", "plan", "tests"])
+        # Control: the same rollout under a copy of the config whose red-first carries stop:block
+        # DOES fold red-first in - so the missing `stop` key is what keeps it out.
+        mutated = json.loads(json.dumps(req))
+        for step in mutated["flows"]["agentic-sdlc-pipeline"]["steps"]:
+            if step["id"] == "red-first":
+                step["stop"] = "block"
+        self.assertEqual(_derive_with(roll, mutated, cwd)["missingBlockSteps"], ["spec", "plan", "tests", "red-first"])
+
 
 # ---- AC4..AC9, AC13..AC17, AC23, AC25, AC27..AC29: behavioral Stop hook -----
 class TestFlowStepGuardBehavior(_Tmp):
@@ -956,7 +976,8 @@ class TestStopWiring(unittest.TestCase):
 # the working tree IS HEAD, so the shape this replaces compared each file to itself.
 class TestRegressionSurfaceUntouched(unittest.TestCase):
     BYTE_LOCKED = [
-        "hooks/flow-step-guard.mjs",
+        # hooks/flow-step-guard.mjs RELEASED (no longer locked).
+        # Released 2026-10 (pipeline v2.1 D7): the block reason named implementation-control, which the pipeline no longer invokes; behavior is pinned by tests/test_flow_guards.py PINNED_STEP_BLOCK_MAIN and the pipeline block pin.
         # hooks/flow-evidence.mjs is NOT locked here — the AP2 "regression surface untouched"
         # guarantee is intentionally SUPERSEDED for it by work-package-artifact-resolution
         # (per-package recognition + Claude Stop co-located pairing); its new behavior is covered by
@@ -980,13 +1001,31 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         self.assertTrue(any("publication-readiness 0.4.3 (BR17)" in line for line in comments),
                         "the lock release needs its rationale comment beside the list")
 
-    def test_remaining_locks_still_listed(self):  # AC48
+    def test_remaining_locks_still_listed(self):  # AC48, C6 (flow-step-guard.mjs released by pipeline v2.1 D7)
         import test_codex_flow_order_guard as order_suite
-        self.assertLessEqual({"hooks/flow-step-guard.mjs", "hooks/completion-claim-guard.mjs"},
-                             set(self.BYTE_LOCKED))
-        self.assertLessEqual({"hooks/flow-order-guard.mjs", "hooks/flow-step-guard.mjs",
-                              "hooks/completion-claim-guard.mjs", "hooks/flow-step-guard-codex.mjs"},
+        import test_codex_write_guard as write_suite
+        self.assertLessEqual({"hooks/completion-claim-guard.mjs"}, set(self.BYTE_LOCKED))
+        self.assertLessEqual({"hooks/completion-claim-guard.mjs"}, set(LOCK_DIGESTS))
+        self.assertLessEqual({"hooks/flow-order-guard.mjs", "hooks/completion-claim-guard.mjs",
+                              "hooks/flow-step-guard-codex.mjs"},
                              set(order_suite.TestRegressionSurfaceUntouched.BYTE_LOCKED))
+        self.assertLessEqual({"hooks/flow-order-guard.mjs", "hooks/completion-claim-guard.mjs",
+                              "hooks/flow-step-guard-codex.mjs"}, set(order_suite.LOCK_DIGESTS))
+        # C6: these stay locked, in the suites that carry them.
+        self.assertLessEqual({"hooks/scan-write.mjs", "hooks/hooks-claude.json"}, set(write_suite.LOCK_DIGESTS))
+        # The released file is out of every list and every digest map in both flow suites.
+        for name, locked in (("step BYTE_LOCKED", self.BYTE_LOCKED), ("step LOCK_DIGESTS", LOCK_DIGESTS),
+                             ("order BYTE_LOCKED", order_suite.TestRegressionSurfaceUntouched.BYTE_LOCKED),
+                             ("order LOCK_DIGESTS", order_suite.LOCK_DIGESTS)):
+            with self.subTest(lock=name):
+                self.assertNotIn("hooks/flow-step-guard.mjs", locked)
+
+    def test_released_flow_step_guard_rationale_present(self):  # C6 / D7
+        import test_codex_flow_order_guard as order_suite
+        comments = [line.strip() for line in Path(__file__).read_text(encoding="utf-8").splitlines()
+                    if line.strip().startswith("#")]
+        self.assertGreaterEqual(sum(line == "# " + order_suite.FLOW_STEP_GUARD_RELEASE for line in comments), 2,
+                                "the release needs its C6 rationale beside both LOCK_DIGESTS and BYTE_LOCKED")
 
     def test_locked_files_byte_identical(self):  # AC18
         for rel, want in sorted(LOCK_DIGESTS.items()):

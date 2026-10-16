@@ -3,7 +3,8 @@
 // Principle: evidence is RE-DERIVED from observable facts, never trusted from the agent's prose.
 //   - artifact : the file exists AND validate_artifacts.py re-validates it (Stop, thorough) or
 //                merely exists (PreToolUse, cheap). If the validator cannot run, fail-open.
-//   - toolUse  : a real tool_use event of the named tool whose input contains the marker.
+//   - toolUse  : a real tool_use event of the named tool whose input contains the marker (`contains`),
+//                or whose skill / subagent_type IS the named component (`exactName`).
 //   - command  : a real Bash or PowerShell command in the transcript matching the named regex.
 //   - branch   : the Stop-time working-directory branch is not main/master (warn-level step).
 //   - reviewResult : a dispatched reviewer returned a correlated non-error tool_result (warn-level).
@@ -124,6 +125,33 @@ function userRecordText(e) {
   return out;
 }
 
+// C14 turn boundary: a GENUINE user prompt is a `type:"user"` record whose content is a string or text
+// blocks, never a tool_result. System-generated user records are not prompts: the isMeta record Claude
+// Code writes after every Skill tool_use (it carries the skill body), a background-task notification
+// (origin.kind task-notification, or string content that starts with <task-notification>), and the
+// isCompactSummary record a compaction writes (C16 item 9).
+function isGenuinePrompt(e) {
+  if (e.isMeta === true || e.isCompactSummary === true || e.origin?.kind === 'task-notification') return false;
+  const content = e.message?.content;
+  if (typeof content === 'string') return !content.startsWith('<task-notification>');
+  return Array.isArray(content)
+    && content.some((c) => c?.type === 'text')
+    && !content.some((c) => c?.type === 'tool_result');
+}
+
+// C14 top-level: no parent_tool_use_id and not a sidechain record (a sub-agent's own calls).
+function isTopLevel(e) {
+  return !e.isSidechain && e.parent_tool_use_id == null;
+}
+
+// The text of one assistant record: string content, or its text blocks joined by newlines - the same
+// reading completion-claim-guard uses for its transcript fallback.
+function assistantRecordText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.filter((c) => c?.type === 'text').map((c) => c.text || '').join('\n');
+}
+
 // BR8/BR9: index-based header walk. Stops at <summary>/<result>; never scans a padded body.
 export function parseTaskNotificationHeader(text) {
   if (typeof text !== 'string' || !text) return null;
@@ -165,10 +193,21 @@ export function parseTaskNotificationHeader(text) {
   return null;
 }
 
+// C16 item 11: a tool entry keeps only the exact-name fields of its input (string input.skill /
+// input.subagent_type, the only fields toolMatches reads). The rest of the parsed input object - a Write
+// body, a long prompt - is dropped; `inputStr` still carries the full serialized input for `contains`.
+function exactNameFields(input) {
+  const kept = {};
+  if (typeof input?.skill === 'string') kept.skill = input.skill;
+  if (typeof input?.subagent_type === 'string') kept.subagent_type = input.subagent_type;
+  return kept;
+}
+
 export function parseTranscript(transcriptPath) {
   const empty = {
     tools: [], commands: [], edits: [], lastText: '', raw: '',
-    results: new Map(), receipts: new Map(), completions: new Map(),
+    results: new Map(), receipts: new Map(), stringResults: new Set(), completions: new Map(),
+    turnTools: [], lastRecordText: '', resultPos: new Map(), lastTopTextPos: -1,
   };
   if (!transcriptPath) return empty;
   let raw = '';
@@ -178,12 +217,21 @@ export function parseTranscript(transcriptPath) {
   const edits = [];
   const results = new Map(); // tool_use id -> { nonError } from native user tool_result records
   const receipts = new Map(); // tool_use id -> { status, error } for a single-result user record
+  const stringResults = new Set(); // tool_use ids whose single-result user record has a string toolUseResult
   const completions = new Map(); // tool_use id -> Set of BR8 notification statuses
   let lastText = '';
+  let turnTools = []; // top-level tool_uses since the last top-level genuine user prompt (C14 turn)
+  let lastRecordText = ''; // text of the last assistant record that has any (completion-claim-guard reading)
+  // C16 item 10 (O4 caught-up guard): record positions, so Stop can tell whether a top-level assistant
+  // text record landed after a call's result.
+  const resultPos = new Map(); // tool_use id -> position of the latest record carrying its tool_result
+  let lastTopTextPos = -1; // position of the last top-level assistant record that has text
+  let pos = -1;
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let e;
     try { e = JSON.parse(line); } catch { continue; }
+    pos += 1;
     if (e?.type === 'user') {
       const origin = e.origin;
       if (origin && origin.kind === 'task-notification' && origin.subkind == null) {
@@ -206,23 +254,37 @@ export function parseTranscript(transcriptPath) {
         if (RECEIPT_STATUSES.has(status) || (error != null && error !== '')) {
           receipts.set(id, { status, error });
         }
+      } else if (resultItems.length === 1 && typeof tus === 'string') {
+        stringResults.add(resultItems[0].tool_use_id); // C17 item 6: the real Claude Code error shape
       }
       for (const r of resultItems) {
+        resultPos.set(r.tool_use_id, pos);
         if (RECEIPT_STATUSES.has(receipts.get(r.tool_use_id)?.status)) continue;
         // is_error absent counts as non-error; any non-error result for an id marks it non-error.
         const nonError = r.is_error !== true || Boolean(results.get(r.tool_use_id)?.nonError);
         results.set(r.tool_use_id, { nonError });
       }
+      // A new user turn starts here. C16 item 9: only a TOP-LEVEL genuine prompt opens one; a sidechain
+      // or parent_tool_use_id user record is a sub-agent's prompt.
+      if (isTopLevel(e) && isGenuinePrompt(e)) turnTools = [];
     }
     if (e?.type !== 'assistant') continue;
     const content = e?.message?.content;
+    const recordText = assistantRecordText(content);
+    if (recordText) lastRecordText = recordText;
+    const topLevel = isTopLevel(e);
+    if (recordText && topLevel) lastTopTextPos = pos;
     if (typeof content === 'string') { if (content) lastText = content; continue; }
     if (!Array.isArray(content)) continue;
     for (const c of content) {
       if (c?.type === 'text' && c.text) lastText = c.text;
       else if (c?.type === 'tool_use') {
         const inputStr = JSON.stringify(c.input || {});
-        tools.push({ name: c.name || '', inputStr, id: typeof c.id === 'string' ? c.id : null });
+        const tool = {
+          name: c.name || '', inputStr, input: exactNameFields(c.input), id: typeof c.id === 'string' ? c.id : null,
+        };
+        tools.push(tool);
+        if (topLevel) turnTools.push(tool);
         if ((c.name === 'Bash' || c.name === 'PowerShell') && c.input?.command) {
           commands.push(String(c.input.command));
         }
@@ -232,16 +294,49 @@ export function parseTranscript(transcriptPath) {
       }
     }
   }
-  return { tools, commands, edits, lastText, raw, results, receipts, completions };
+  return {
+    tools, commands, edits, lastText, raw, results, receipts, stringResults, completions, turnTools,
+    lastRecordText, resultPos, lastTopTextPos,
+  };
 }
 
+// Did the call with this tool_use id fail? Three shapes count (C6, amended by C17 item 6):
+//   - an object toolUseResult with a non-empty `error` (the launch-receipt shape);
+//   - a string toolUseResult: the shape real Claude Code session files record for a failed call (a
+//     successful Skill, Agent or Workflow result has an object toolUseResult, or none);
+//   - every correlated tool_result has is_error true (one non-error result clears it).
+// A call with no id, or with no recorded result, is not errored: it still counts.
 function receiptHasError(trace, id) {
   const rec = trace.receipts?.get(id);
-  return rec != null && rec.error != null && rec.error !== '';
+  if (rec != null && rec.error != null && rec.error !== '') return true;
+  if (trace.stringResults?.has(id)) return true;
+  const res = trace.results?.get(id);
+  return res != null && !res.nonError;
 }
 
 function notificationCompleted(trace, id) {
   return Boolean(trace.completions?.get(id)?.has('completed'));
+}
+
+// C6 exact names. An `exactName` item is satisfied only by a tool_use that CALLS that component: its
+// input.skill (Skill) or input.subagent_type (Agent) equals X or agentic-sdlc:X. The name appearing
+// elsewhere in the input (args, a prompt), a lookalike (X-extra) or a foreign prefix (other:X) does not
+// count. Exact names are defined for Skill and Agent only. A `contains` item keeps the substring match
+// over the serialized input.
+const EXACT_NAME_FIELD = { Skill: 'skill', Agent: 'subagent_type' };
+
+function isExactName(value, name) {
+  return typeof value === 'string' && (value === name || value === `agentic-sdlc:${name}`);
+}
+
+// Does tool_use `t` match an evidence item or reviewer member { tool, exactName | contains }?
+function toolMatches(t, m) {
+  if (t.name !== m.tool) return false;
+  if (typeof m.exactName === 'string') {
+    const field = EXACT_NAME_FIELD[m.tool];
+    return Boolean(field) && isExactName(t.input?.[field], m.exactName);
+  }
+  return t.inputStr.includes(m.contains);
 }
 
 function inFlightReviewer(ctx, members) {
@@ -250,26 +345,62 @@ function inFlightReviewer(ctx, members) {
   return tasks.some((task) => {
     if (task?.type !== 'subagent') return false;
     const agentType = String(task.agent_type || '');
-    return (members || []).some((m) => agentType.includes(m.contains));
+    return (members || []).some((m) => (typeof m.exactName === 'string'
+      ? isExactName(agentType, m.exactName)
+      : agentType.includes(m.contains)));
   });
 }
 
-function toolUsePresent(trace, tool, contains) {
-  return trace.tools.some((t) => {
-    if (t.name !== tool || !t.inputStr.includes(contains)) return false;
+function toolUsePresent(trace, item, tools = trace.tools) {
+  return tools.some((t) => {
+    if (!toolMatches(t, item)) return false;
     if (t.id && receiptHasError(trace, t.id)) return false;
     return true;
   });
 }
 
-// Flows whose activeWhen.skill marker appears in a real Skill tool_use.
+// Flows whose activeWhen.skill marker IS the skill of a real Skill tool_use (exact name, C6): a
+// dispatch-strategy call whose args mention feature-build activates nothing. An errored call
+// (receiptHasError) still activates nothing; a call with no id or no result still counts.
 export function activeFlowNames(trace, req) {
   const out = [];
   for (const [name, flow] of Object.entries(req.flows || {})) {
     const marker = flow?.activeWhen?.skill;
-    if (marker && toolUsePresent(trace, 'Skill', marker)) out.push(name);
+    if (marker && toolUsePresent(trace, { tool: 'Skill', exactName: marker })) out.push(name);
   }
   return out;
+}
+
+// O4 dispatch-terminal check (pipeline v2.1 C6/C14), read by flow-step-guard on Stop: is the LAST
+// top-level tool_use of the current turn a Skill call to `name` (exact name)? The turn starts after the
+// last genuine user prompt, so a call from an earlier turn never counts.
+export function turnEndsOnSkill(trace, name) {
+  const tools = trace.turnTools || [];
+  const last = tools[tools.length - 1];
+  return Boolean(last) && toolMatches(last, { tool: 'Skill', exactName: name });
+}
+
+// C16 item 8: does the current turn itself contain a top-level, non-error Skill call to `name` (exact
+// name, the activeFlowNames rule)? A flow activated in an earlier turn does not count.
+export function turnInvokesSkill(trace, name) {
+  return toolUsePresent(trace, { tool: 'Skill', exactName: name }, trace.turnTools || []);
+}
+
+// C16 item 10: has a top-level assistant text record landed after the result of the turn's last
+// top-level tool_use? Without that, a transcript read at Stop may not have caught up: its last text can
+// predate the call. A call with no id or no recorded result has nothing to be after -> false.
+export function turnTextAfterLastResult(trace) {
+  const tools = trace.turnTools || [];
+  const last = tools[tools.length - 1];
+  if (!last?.id) return false;
+  const at = trace.resultPos?.get(last.id);
+  return at != null && trace.lastTopTextPos > at;
+}
+
+// The final assistant text: last_assistant_message when it is a string, otherwise the transcript's last
+// assistant text - completion-claim-guard's precedence and fallback.
+export function finalAssistantText(trace, lastAssistantMessage) {
+  return typeof lastAssistantMessage === 'string' ? lastAssistantMessage : (trace.lastRecordText || '');
 }
 
 // Per-package slug safety (BR2/BR11), shared by every per-package recognizer below. The rule is
@@ -429,7 +560,7 @@ function evidenceSatisfied(item, trace, ctx) {
     case 'artifact':
       return artifactSatisfied(item, trace, ctx);
     case 'toolUse':
-      return toolUsePresent(trace, item.tool, item.contains);
+      return toolUsePresent(trace, item);
     case 'command': {
       const pat = ctx.req[item.matches] || item.matches;
       let re;
@@ -445,7 +576,7 @@ function evidenceSatisfied(item, trace, ctx) {
       // member has a completed result. Launch receipts stay pending; a BR8 completed notification
       // or an in-flight background_tasks subagent naming the reviewer is not missing.
       return Object.values(item.reviewers || {}).every((members) => {
-        const dispatched = trace.tools.filter((t) => (members || []).some((m) => t.name === m.tool && t.inputStr.includes(m.contains)));
+        const dispatched = trace.tools.filter((t) => (members || []).some((m) => toolMatches(t, m)));
         if (!dispatched.length) return true;
         if (dispatched.some((t) => t.id && notificationCompleted(trace, t.id))) return true;
         if (dispatched.some((t) => t.id && trace.results?.get(t.id)?.nonError)) return true;

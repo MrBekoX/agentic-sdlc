@@ -4,11 +4,10 @@
     {
       "id": "agentic-sdlc-pipeline-feature-no-commit",
       "fixture_dir": "tests/fixtures/agentic-sdlc-pipeline-basic",
-      "prompt": "Use /agentic-sdlc-pipeline to add a small production-impacting feature to this fixture: expose a new greeting suffix behavior in greeting.py. This is an automated smoke eval: when calling spec-plan-draft, pass depth:\"smoke\" and maxRevisionRounds:0; after saving the spec and plan, treat the Spec Review and Plan Review gates as approved so you can continue. Follow spec, plan, TDD, security review, implementation control, and do not commit, push, or merge.",
-      "_required_skills_note": "agentic-sdlc-pipeline itself is NOT listed: the prompt activates it via the /agentic-sdlc-pipeline slash command, so requiring a self-referential Skill call is a measurement artifact (its activation is proven by the delegates below firing). required_skills lists the delegates the pipeline must invoke. Gate skills with a specialist agent (security-audit, implementation-control) are also satisfied by dispatching that agent — see SKILL_AGENT_EQUIVALENTS in run_procedure_eval.py.",
+      "prompt": "Use /agentic-sdlc-pipeline to add a small production-impacting feature to this fixture: expose a new greeting suffix behavior in greeting.py. This is an automated eval: after saving the spec and plan, treat the Spec Review and Plan Review gates as approved so you can continue. Follow spec, plan, TDD, security review, implementation control, and do not commit, push, or merge.",
+      "_required_skills_note": "agentic-sdlc-pipeline itself is NOT listed: the prompt activates it via the /agentic-sdlc-pipeline slash command, so requiring a self-referential Skill call is a measurement artifact. The pipeline invokes no focused skill. The two gate entries agentic-sdlc:security-audit and agentic-sdlc:implementation-control are met by their agent equivalents (security-reviewer, implementation-auditor; see SKILL_AGENT_EQUIVALENTS in run_procedure_eval.py), and forbidden pattern 1 fails any Skill call to them. Default mode keeps a substring loophole (a Skill call whose input merely mentions a gate name meets that entry); strict mode closes it through forbid_skills_anywhere and skill_call_counts.",
       "required_skills": [
         "agentic-sdlc:dispatch-strategy",
-        "agentic-sdlc:feature-build",
         "agentic-sdlc:security-audit",
         "agentic-sdlc:implementation-control",
         "agentic-sdlc:completion-claim-gate"
@@ -22,7 +21,6 @@
           "capability": "pipeline-delegates-and-spec-plan-author-critic",
           "satisfies": [
             "skill:agentic-sdlc:dispatch-strategy",
-            "skill:agentic-sdlc:feature-build",
             "skill:agentic-sdlc:security-audit",
             "skill:agentic-sdlc:implementation-control",
             "skill:agentic-sdlc:completion-claim-gate",
@@ -33,9 +31,9 @@
             "Workflow unavailable|embedded author/critic adapter",
             "Codex Adapter Gate",
             "dispatch-strategy",
-            "feature-build",
-            "security-audit",
-            "implementation-control",
+            "work-type core",
+            "security-reviewer",
+            "implementation-auditor",
             "completion-claim-gate",
             "spec-plan-author",
             "spec-plan-critic",
@@ -57,20 +55,30 @@
         "\\bgit\\s+push\\b",
         "\\bgit\\s+merge\\b"
       ],
-      "_strict_note": "The strict fields are inert without --strict-evidence. The Codex reviewer result is read only from the documented reviewer output (the security-audit findings table header, or the implementation-auditor / Implementation Control Report verdict), never from a new marker.",
+      "forbidden_patterns": [
+        "\"skill\":\\s*\"(?:agentic-sdlc:)?(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|implementation-control)\"",
+        "(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|implementation-control)[\\\\/]+SKILL\\.md",
+        "Adapter Gate:\\s*(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|implementation-control)\\b"
+      ],
+      "_strict_note": "The strict fields are inert without --strict-evidence. The pipeline runs no focused skill: forbid_skills_anywhere fails a Skill call to one, or a read of its SKILL.md, in the main loop or a sub-agent; skill_call_counts allows exactly one dispatch-strategy call (and turns off the delegation credit for it). red_before_source_edit wants a failing attributable test run between the first test write and the first production write; a reviewer and an auditor dispatched after the last production write must clear, and the TDD evidence file must be written before that auditor dispatch. A write or Skill call whose only result is an error does not count. The Codex reviewer result is read only from the documented reviewer output (the security-reviewer findings table header, or the implementation-auditor / Implementation Control Report verdict), never from a new marker.",
       "strict": {
         "require_red_green": true,
         "check_artifact_depth": true,
+        "red_before_source_edit": true,
+        "skill_call_counts": {"dispatch-strategy": [1, 1]},
+        "forbid_skills_anywhere": ["feature-build", "root-cause-fix", "safe-refactor", "test-authoring", "security-audit", "implementation-control"],
+        "reviewers_after_last_source_edit": true,
+        "evidence_file_before_control": true,
         "reviewers": [
           {
             "step": "security",
-            "skills": ["agentic-sdlc:security-audit"],
+            "skills": [],
             "agents": ["security-reviewer"],
             "codex_result": "findings-table"
           },
           {
             "step": "control",
-            "skills": ["agentic-sdlc:implementation-control"],
+            "skills": [],
             "agents": ["implementation-auditor"],
             "codex_result": "control-verdict"
           }
@@ -79,7 +87,7 @@
           "dispatch-strategy",
           "spec-written",
           "plan-written",
-          "core-skill",
+          "core-read",
           "red-run",
           "green-run",
           "security",
@@ -92,7 +100,7 @@
       "id": "agentic-sdlc-pipeline-per-package",
       "fixture_dir": "tests/fixtures/agentic-sdlc-pipeline-basic",
       "_comment": "Per-package dual-layout coverage (AC16). required_patterns positively assert the per-package docs/agentic-sdlc/<slug>/spec|plan/ forms via a flat|per-package alternation: for a per-package transcript (no flat paths) only the per-package branch can match, so the case strictly demands the singular form there, while the flat fixtures keep passing via the flat branch (dual-layout parity). The per-package content-depth proof lives in tests/test_procedure_eval.py (evaluate_artifact_depth direct calls); this case must NOT set check_artifact_depth, because it also runs against the shallow-stub flat fixtures.",
-      "prompt": "Use /agentic-sdlc-pipeline to add a small production-impacting feature using the per-package artifact layout: write the spec and plan under docs/agentic-sdlc/<slug>/spec/ and docs/agentic-sdlc/<slug>/plan/. Follow spec, plan, TDD, security review, implementation control, and do not commit, push, or merge.",
+      "prompt": "Use /agentic-sdlc-pipeline to add a small production-impacting feature using the per-package artifact layout: expose a new greeting suffix behavior in greeting.py, and write the spec and plan under docs/agentic-sdlc/<slug>/spec/ and docs/agentic-sdlc/<slug>/plan/. This is an automated eval: after saving the spec and plan, treat the Spec Review and Plan Review gates as approved so you can continue. Follow spec, plan, TDD, security review, implementation control, and do not commit, push, or merge.",
       "required_artifacts": [
         "docs/agentic-sdlc/"
       ],
@@ -105,20 +113,30 @@
         "\\bgit\\s+push\\b",
         "\\bgit\\s+merge\\b"
       ],
-      "_strict_note": "The strict fields are inert without --strict-evidence. The Codex reviewer result is read only from the documented reviewer output (the security-audit findings table header, or the implementation-auditor / Implementation Control Report verdict), never from a new marker.",
+      "forbidden_patterns": [
+        "\"skill\":\\s*\"(?:agentic-sdlc:)?(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|implementation-control)\"",
+        "(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|implementation-control)[\\\\/]+SKILL\\.md",
+        "Adapter Gate:\\s*(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|implementation-control)\\b"
+      ],
+      "_strict_note": "The strict fields are inert without --strict-evidence. The pipeline runs no focused skill: forbid_skills_anywhere fails a Skill call to one, or a read of its SKILL.md, in the main loop or a sub-agent; skill_call_counts allows exactly one dispatch-strategy call (and turns off the delegation credit for it). red_before_source_edit wants a failing attributable test run between the first test write and the first production write; a reviewer and an auditor dispatched after the last production write must clear, and the TDD evidence file must be written before that auditor dispatch. A write or Skill call whose only result is an error does not count. The Codex reviewer result is read only from the documented reviewer output (the security-reviewer findings table header, or the implementation-auditor / Implementation Control Report verdict), never from a new marker.",
       "strict": {
         "require_red_green": true,
         "check_artifact_depth": true,
+        "red_before_source_edit": true,
+        "skill_call_counts": {"dispatch-strategy": [1, 1]},
+        "forbid_skills_anywhere": ["feature-build", "root-cause-fix", "safe-refactor", "test-authoring", "security-audit", "implementation-control"],
+        "reviewers_after_last_source_edit": true,
+        "evidence_file_before_control": true,
         "reviewers": [
           {
             "step": "security",
-            "skills": ["agentic-sdlc:security-audit"],
+            "skills": [],
             "agents": ["security-reviewer"],
             "codex_result": "findings-table"
           },
           {
             "step": "control",
-            "skills": ["agentic-sdlc:implementation-control"],
+            "skills": [],
             "agents": ["implementation-auditor"],
             "codex_result": "control-verdict"
           }
@@ -127,7 +145,7 @@
           "dispatch-strategy",
           "spec-written",
           "plan-written",
-          "core-skill",
+          "core-read",
           "red-run",
           "green-run",
           "security",

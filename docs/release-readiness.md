@@ -1,6 +1,6 @@
 # Release Readiness
 
-This file is the publish gate for `agentic-sdlc` version `0.5.0`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex. The current release decision and sanitized observations are in [release evidence](release-evidence-0.5.0.md); preparation or a metadata-only pass cannot replace its required results. The 0.4.3 decision stays unchanged in the [0.4.3 ledger](release-evidence-0.4.3.md).
+This file is the publish gate for `agentic-sdlc` version `0.6.0`. It keeps the release decision evidence-based for the supported runtimes: Claude Code and Codex. The current release decision and sanitized observations are in [release evidence](release-evidence-0.6.0.md); preparation or a metadata-only pass cannot replace its required results. The 0.4.3 and 0.5.0 decisions stay unchanged in the [0.4.3 ledger](release-evidence-0.4.3.md) and the [0.5.0 ledger](release-evidence-0.5.0.md).
 
 The 2026-10-06 preparation fixes public hook removal and packaged instruction/helper closure; native Codex 0.160.1 discovery from that date is recorded in [current readiness](publication/codex-0.160.1-readiness.md). The historical ledger below is preserved. New local preparation does not erase historical failed/not-run live evaluations or claim portal acceptance. No upload, publication, commit, push, PR or merge is part of this preparation.
 
@@ -28,7 +28,7 @@ Kimi, ZCode and Grok are now included in the installation/portability candidate 
 
 ## Distribution paths and go/no-go
 
-The four distribution paths below each get their own go/no-go decision; the same labels are used in [`README.md`](../README.md) and both runtime READMEs. Each verdict stays no-go, pending maintainer review, until a recorded maintainer review of that path is linked in the ledger's [path verdicts](release-evidence-0.5.0.md#path-verdicts). The old 45/45 routing results, synthetic replay and marketplace-only validation never close a path.
+The four distribution paths below each get their own go/no-go decision; the same labels are used in [`README.md`](../README.md) and both runtime READMEs. Each verdict stays no-go, pending maintainer review, until a recorded maintainer review of that path is linked in the ledger's [path verdicts](release-evidence-0.6.0.md#path-verdicts). The old 45/45 routing results, synthetic replay and marketplace-only validation never close a path.
 
 The experimental ZCode, Grok CLI, and Kimi Code installs (local directory, and repository or catalog sources from the public repository) are not among these four paths and carry no 0.4.3 verdict; their notes live in `docs/publication/zcode-marketplace.md`, `docs/publication/grok-marketplace.md`, and `docs/publication/kimi-marketplace.md`.
 
@@ -42,7 +42,7 @@ The experimental ZCode, Grok CLI, and Kimi Code installs (local directory, and r
 
 State: GAP. The repository is public since 2026-10-12, published with a rewritten history ([history map](publication/history-map.md)); its unauthenticated URL returns 200 in `docs/publication/link-checks.json`. From the public repository, `claude plugin marketplace add MrBekoX/agentic-sdlc` and `claude plugin install agentic-sdlc@mrbekox` installed 0.5.0 with 16 skills in an isolated profile (Claude Code 2.1.282, Linux, 2026-10-12, no model call); the go condition's new-session discovery, real invocation and recorded clone transport are not recorded.
 
-Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.5.0.md#path-verdicts)).
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.6.0.md#path-verdicts)).
 
 ### Claude community marketplace submission
 
@@ -54,7 +54,7 @@ Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.
 
 State: BLOCKED. The path needs a public repository, the clean-package validation result and maintainer form access.
 
-Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.5.0.md#path-verdicts)).
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.6.0.md#path-verdicts)).
 
 ### Codex personal marketplace
 
@@ -64,9 +64,9 @@ Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.
 
 **Go condition.** Install through `codex plugin add agentic-sdlc@<marketplace-name>` from a catalog Codex recognizes (the package's own `mrbekox` catalog or a personal catalog); native discovery showing 16 skills and `hooks/list` showing 8 hooks; and hook trust granted through the native `/hooks` trust protocol as a required step.
 
-State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.5.0 package; the ledger carries the 26b0fe1 results.
+State: GAP. Final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.6.0 package; the ledger carries the 26b0fe1 results.
 
-Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.5.0.md#path-verdicts)).
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.6.0.md#path-verdicts)).
 
 ### OpenAI public directory
 
@@ -78,7 +78,7 @@ Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.
 
 State: BLOCKED. The path needs the verified identity, `api.apps.write` and a verified skills-only archive.
 
-Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.5.0.md#path-verdicts)).
+Verdict: maintainer review pending -> no-go ([path verdicts](release-evidence-0.6.0.md#path-verdicts)).
 
 ## Required Local Gate
 
@@ -102,7 +102,7 @@ Do not claim that a skill "works", "triggers", or is "production-ready" in a run
 
 The model baseline for the 0.4.3 release batch is `gpt-5.5` / Low for Codex (a new baseline) and `claude-sonnet-5` / Low for Claude. Earlier `gpt-5.3-codex-spark` / Low results are historical and separate; they are not comparable to the new Codex baseline.
 
-The live batch follows the BR11 settings: fifteen standalone routing scenarios with `--runs 3 --threshold 1.0` per runtime, where every case needs three correct observations, no hard error and no prohibited pipeline escalation; Claude `--max-budget-usd 1.50` per routing run; both procedure cases per runtime, at most $6 per Claude case; and no automatic retry. The first procedure case explicitly requests smoke depth, while the second requests the normal per-package layout.
+The live batch follows the BR11 settings: fifteen standalone routing scenarios with `--runs 3 --threshold 1.0` per runtime, where every case needs three correct observations, no hard error and no prohibited pipeline escalation; Claude `--max-budget-usd 1.50` per routing run; both procedure cases per runtime, at most $6 per Claude case; and no automatic retry. In the 0.4.3 batch the first procedure case requested smoke depth; since 0.6.0 both procedure cases run at normal depth and pre-approve the Spec Review and Plan Review gates, and the second requests the per-package layout.
 
 | Claim | Command shape | Passing signal |
 |---|---|---|
@@ -110,6 +110,8 @@ The live batch follows the BR11 settings: fifteen standalone routing scenarios w
 | `using-agentic-sdlc` routes standalone prompts in Codex | `python3 scripts/run_routing_eval.py --eval-set tests/skills/routing/using-agentic-sdlc.json --runtime codex --model gpt-5.5 --reasoning-effort low --runs 3 --threshold 1.0 ...` | `routing_eval=passed`, 15/15 scenarios and 45/45 observations; this is a description classifier, not native skill activation. |
 | `agentic-sdlc-pipeline` procedure in Claude Code and Codex | A native installed-package `claude -p` or `codex exec` run whose command equals its approved entry, graded by `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --case-id <id> --transcript <capture> --fixture-root <fixture> --strict-evidence --evidence-dir <dir>` | Strict `procedure_eval=passed` for both procedure cases (2/2) on that runtime. Output of the eval's `--live` harness mode (which requires `--allow-fixture-commit`) is not scored as a procedure row. |
 | `agentic-sdlc-pipeline` Codex adapter transcript replay | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-codex-adapter-pass.jsonl` | `procedure_eval=passed`; labeled deterministic replay, and it never sets `codex_pipeline_procedure`. |
+
+The pipeline row's passing signal stays the strict `procedure_eval=passed`. Since 0.6.0 the grader also prints per-case `case_<id>_acceptance=pass|fail` lines that set aside the auditor verdict and unresolvable artifact paths (see [strict evidence keys](testing.md#strict-evidence-keys)), and the strict-only gate-stop case in `tests/skills/procedure/agentic-sdlc-pipeline-gate-stop.json` checks that a run without pre-approval stops at the Spec Review gate.
 
 Procedure runs never use these BR12 forbidden flags. Codex: `--ephemeral`, `--dangerously-bypass-hook-trust`, `--dangerously-bypass-approvals-and-sandbox`, `--ignore-user-config` and `--ignore-rules`. Claude: `--no-session-persistence` and `--dangerously-skip-permissions`. Routing runs keep the runners' documented shapes, and neither routing type counts as trust, persistence or hook evidence.
 
@@ -166,7 +168,7 @@ Passing signals observed in the transcript:
 - final report included `Overall Status: PASS` for Implementation Control and the final todo list was complete.
 
 Limit of this evidence: this is a historical Codex `0.3.0` low-effort smoke/procedure run, not a
-publish-grade high-effort stability run and not live evidence for the current `0.5.0` worktree. It is
+publish-grade high-effort stability run and not live evidence for the current `0.6.0` worktree. It is
 valid only as evidence that the earlier adapter completed the full pipeline in a small fixture,
 including RED->GREEN, artifact validation, work-package resolution, and recovery from metadata errors.
 
@@ -189,8 +191,11 @@ Scan staged and unstaged diffs for tokens, private keys, connection strings, and
 - Claude Code has native `Skill`, `Workflow`, and `Agent` transcript events. Codex uses activated skill instructions and equivalent transcript/procedure evidence; it does not emit the same Claude-native workflow events.
 - Codex wires native blocking `PreToolUse` guards, `SessionStart`, and two `Stop` continuation backstops. Coverage is bounded: branch/flow hardening is env-gated, unrecognized write forms fail open, and Stop can request another turn but cannot undo prior effects.
 - `agentic-sdlc-pipeline` owns internal spec/plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for pipeline steps 4-5; Codex uses the embedded author/critic adapter.
+- Since 0.6.0 the pipeline text forbids invoking a focused skill: Steps 8–13 read the work-type core file, and the security and implementation-control gates dispatch `security-reviewer` and `implementation-auditor`. No live pipeline run has measured 0.6.0 yet; the zero-delegation rule is stated in the skill text, checked by the Claude Code flow hooks (warn by default) and graded offline by the strict procedure eval.
+- Hook flow activation is by the `Skill` tool: a pipeline run started only by the `/agentic-sdlc-pipeline` slash command activates no hook flow and is covered by the offline procedure eval.
+- Codex test runs wrapped in `/bin/bash -lc` or `powershell -Command` are not attributed, so strict RED/GREEN cannot pass on real Codex transcripts. The validator's plan AC-coverage check fails open for `AC-1`-style or id-less criteria; it is left for a separate change and is not fixed in 0.6.0.
 - Hooks are local runtime guardrails. Some warn or fail open by design, so they complement but do not replace diff review, test output, and secret scanning.
-- `0.5.0` is publishable for Claude Code and Codex only when the local gate and current release evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
+- `0.6.0` is publishable for Claude Code and Codex only when the local gate and current release evidence are attached. Other runtimes should be described as experimental adapter targets, not supported release targets.
 - Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters.
 - Current bounded hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. They retain their own immutable source identities; current parser replay and later skill evaluations are separate evidence. `transcript_path` remains unstable. See [runtime boundaries](runtime-adapter.md#current-binary-and-historical-hook-evidence) and the [0.4.3 release ledger](release-evidence-0.4.3.md).
 
@@ -212,22 +217,24 @@ These skills depend on companion plugin resources, so they are not offered as un
 
 The skill-creator toolkit is BLOCKED until reviewed. `skills/skill-authoring/scripts/resolve_skill_creator.py` reports `skill_creator_status=missing_capabilities` for the WSL toolkit and `explicit-unverified` for the Windows cache. No archive is produced from an unreviewed toolkit, and a reviewed toolkit commit is recorded only as a full 40-hex commit together with its ledger row.
 
-The per-archive identity record is the `skill_archives` row in [release evidence](release-evidence-0.5.0.md) (AC127).
+The per-archive identity record is the `skill_archives` row in [release evidence](release-evidence-0.6.0.md) (AC127).
 
 ## Artifact Layouts And Per-Package Evidence
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`). This is distinct from the legacy `docs/agentic-sdlc/evidence/` directory (no slug segment) referenced above, which is outside the per-package evidence gate.
 
-Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+
+From Step 8 the pipeline's main loop also writes a TDD evidence file, `docs/agentic-sdlc/<slug>/evidence/<work_id>.tdd.md` per-package or `docs/agentic-sdlc/evidence/<work_id>.tdd.md` flat, with every test run until `implementation-auditor` is dispatched; it is git-ignored, has no validator and never gates resolution. Both paths are written in the project the pipeline works on; the `docs/agentic-sdlc/evidence/` note referenced above is this repository's own historical record.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 
 ## Release Verdict Template
 
-Use this shape in a release note or final publish report. Its keys, allowed values and row bindings are governed by the decision block in the [release ledger](release-evidence-0.5.0.md#publication-decision) (AC116):
+Use this shape in a release note or final publish report. Its keys, allowed values and row bindings are governed by the decision block in the [release ledger](release-evidence-0.6.0.md#publication-decision) (AC116):
 
 ```text
-version=0.5.0
+version=0.6.0
 scope=Claude Code, Codex
 local_gate=<passed|failed|blocked|not-run>
 claude_routing_eval=<passed|failed|blocked|not-run>

@@ -9,7 +9,7 @@
     {
       "name": "agentic-sdlc",
       "description": "Gated SDLC skills for spec, plan, TDD, security review, and evidence-backed delivery on Grok CLI.",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "source": {
         "source": "url",
         "url": "https://github.com/MrBekoX/agentic-sdlc.git"

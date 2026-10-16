@@ -57,7 +57,15 @@ class TestSkillCrossReferences(unittest.TestCase):
         for phrase in (
             "Manual Read/Glob/ls exploration does not replace detect_context.py.",
             "Manual review text does not replace validate_artifacts.py.",
-            "Manual TDD/edit/test work does not replace the selected core work-flow Skill call.",
+            # Pipeline v2.1 (contracts C13/C14): the pipeline no longer hands Steps 8-13 to a core
+            # work-flow Skill, and C12 bans that wording, so the third gate is the prohibition
+            # sentence that names what Steps 8-13 and the review gates run instead.
+            "**Two branches.** Focused skills are standalone entry points. Inside an "
+            "`agentic-sdlc-pipeline` run, do not invoke `feature-build`, `root-cause-fix`, "
+            "`safe-refactor`, `test-authoring`, `security-audit`, or `implementation-control`: "
+            "Steps 8–13 read the selected work-type core file, the security steps dispatch "
+            "`security-reviewer`, and the implementation-control gate runs "
+            "`resolve_work_package.py` and dispatches `implementation-auditor`.",
         ):
             self.assertIn(phrase, text)
 

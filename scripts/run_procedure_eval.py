@@ -103,7 +103,10 @@ class Trace:
     text: str = ""
     # Additive strict-grading fields. haystack() excludes them, so its payload keys stay unchanged.
     timeline: list[dict[str, Any]] = field(default_factory=list)
+    # The rollout final_assistant_text, else the last Claude `result` string, else the last codex-exec agent_message.
     final_assistant_text: str = ""
+    init_cwd: str = ""  # the Claude system/init `cwd`, used to make absolute tool paths relative
+    rollout_cwds: list[str] = field(default_factory=list)  # Codex session_meta / turn_context `cwd` values (C16.5)
     runtime: str = "unknown"  # claude | codex-exec | codex-rollout | unknown
     meta: dict[str, str] = field(default_factory=dict)
     strict_errors: list[str] = field(default_factory=list)
@@ -344,9 +347,14 @@ def _text_of(content: Any) -> str:
     return ""
 
 
-def _assistant_text(trace: Trace, text: str) -> None:
+def _assistant_text(trace: Trace, text: str, carrier: str | None = None) -> None:
+    """Append assistant text; `carrier` names the rollout record that held it (response_item, event_msg or
+    task_complete), so a copy of one message on a second carrier is counted once (C15.5)."""
     trace.text += "\n" + text
-    trace.timeline.append({"kind": "assistant_text", "text": text})
+    entry = {"kind": "assistant_text", "text": text}
+    if carrier:
+        entry["carrier"] = carrier
+    trace.timeline.append(entry)
 
 
 LAUNCH_STATUSES = frozenset({"async_launched", "remote_launched"})
@@ -467,23 +475,45 @@ def _exec_command_text(arguments: Any) -> str | None:
     return None
 
 
-def _patch_writes(patch: str) -> list[tuple[str, str]]:
-    """Add File targets with content rebuilt from `+` lines; Update File targets with empty content."""
-    targets: list[tuple[str, list[str] | None]] = []
+_PATCH_UPDATE_BODY_MARKERS = ("*** End of File",)
+PATCH_MOVE_TO = "*** Move to: "
+
+
+class PatchUpdateContent(str):
+    """The empty content of a Codex `*** Update File:` record, whose patch does not carry the whole file. Only this
+    record is ignored for depth (C16.6); every other empty record, a Claude Write included, still counts."""
+
+
+PATCH_UPDATE_EMPTY = PatchUpdateContent("")
+
+
+def _patch_writes(patch: str) -> list[tuple[str, str, str | None]]:
+    """(path, content, added) per patch target, in patch order.
+
+    Add File: content rebuilt from its `+` lines, added None. Update File: PATCH_UPDATE_EMPTY, so the on-disk file or
+    an earlier write wins in evaluate_artifact_depth, and added = the `+` lines of its hunks, which the stop_at_gate
+    status read treats like a Claude Edit new_string (C15.9). An Update File with `*** Move to:` (a rename) also writes
+    its destination, right after the source and as an Update record sharing the same added text (C17.4).
+    """
+    targets: list[tuple[str, list[str], bool]] = []
     current: list[str] | None = None
+    updating = False
     for line in patch.split("\n"):
         if line.startswith("*** Add File: "):
-            current = []
-            targets.append((line[len("*** Add File: "):].strip(), current))
+            current, updating = [], False
+            targets.append((line[len("*** Add File: "):].strip(), current, False))
         elif line.startswith("*** Update File: "):
-            current = None
-            targets.append((line[len("*** Update File: "):].strip(), None))
+            current, updating = [], True
+            targets.append((line[len("*** Update File: "):].strip(), current, True))
+        elif updating and current is not None and line.startswith(PATCH_MOVE_TO):
+            targets.append((line[len(PATCH_MOVE_TO):].strip(), current, True))
         elif line.startswith("*** "):
-            current = None
+            if not (updating and line.startswith(_PATCH_UPDATE_BODY_MARKERS)):
+                current = None
         elif current is not None and line.startswith("+"):
             current.append(line[1:])
-    # An empty Update content lets the on-disk file win in evaluate_artifact_depth.
-    return [(path, "\n".join(lines) + "\n" if lines else "") for path, lines in targets]
+    joined = [(path, "\n".join(lines) + "\n" if lines else "", update) for path, lines, update in targets]
+    return [(path, PATCH_UPDATE_EMPTY, text) if update else (path, text, None) for path, text, update in joined]
 
 
 def _rollout_exit_codes(events: list[dict[str, Any]], trace: Trace) -> dict[int, int | None]:
@@ -509,6 +539,9 @@ def _record_rollout(trace: Trace, rtype: str, payload: dict[str, Any], exit_code
     """Strict-only Codex rollout carriers (D10: absent protocol keys leave meta unset, never raise)."""
     ptype = payload.get("type")
     call_id = payload.get("call_id") if isinstance(payload.get("call_id"), str) and payload.get("call_id") else None
+    cwd = payload.get("cwd")
+    if rtype in ("session_meta", "turn_context") and isinstance(cwd, str) and cwd and cwd not in trace.rollout_cwds:
+        trace.rollout_cwds.append(cwd)  # a relativization root for tool paths (C16.5)
     if rtype == "session_meta":
         if isinstance(payload.get("cli_version"), str):
             trace.meta["cli_version"] = payload["cli_version"]
@@ -537,10 +570,13 @@ def _record_rollout(trace: Trace, rtype: str, payload: dict[str, Any], exit_code
         # A patch counts as a write only after its correlated output confirms success (a blocked or
         # failed attempt is not a write).
         if patch is not None and exit_code == 0 and body is not None and body.startswith(APPLY_PATCH_SUCCESS):
-            for path, content in _patch_writes(patch):
+            for path, content, added in _patch_writes(patch):
                 trace.writes.append(path)
                 trace.artifact_writes.append((path, content))
-                trace.timeline.append({"kind": "write", "path": path})
+                entry = {"kind": "write", "path": path, "content": content}
+                if added is not None:
+                    entry["added"] = added
+                trace.timeline.append(entry)
     elif rtype == "response_item" and ptype == "message":
         parts = payload.get("content") if isinstance(payload.get("content"), list) else []
         text = "\n".join(
@@ -549,20 +585,33 @@ def _record_rollout(trace: Trace, rtype: str, payload: dict[str, Any], exit_code
             and isinstance(part.get("text"), str)
         )
         if text and payload.get("role") == "assistant":
-            _assistant_text(trace, text)
+            _assistant_text(trace, text, "response_item")
         elif text and payload.get("role") == "user":
             trace.timeline.append({"kind": "user_text", "text": text})
     elif rtype == "event_msg" and ptype == "agent_message" and isinstance(payload.get("message"), str):
-        _assistant_text(trace, payload["message"])
+        _assistant_text(trace, payload["message"], "event_msg")
     elif rtype == "event_msg" and ptype == "user_message" and isinstance(payload.get("message"), str):
         trace.timeline.append({"kind": "user_text", "text": payload["message"]})
     elif rtype == "event_msg" and ptype in ("task_complete", "turn_complete"):
         last = payload.get("last_agent_message")
         if isinstance(last, str):
             trace.final_assistant_text = last
-            _assistant_text(trace, last)
+            _assistant_text(trace, last, "task_complete")
         if payload.get("error"):
             trace.runtime_errors.append("turn_error")
+
+
+# Claude tools whose target path becomes a timeline `write` (top-level calls only; record_once drops sub-agent writes).
+WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+
+def _write_target(name: Any, input_obj: Any) -> str | None:
+    """The path a Claude write tool targets: `file_path`, or `notebook_path` for NotebookEdit (C15.6); else None."""
+    if name not in WRITE_TOOLS or not isinstance(input_obj, dict):
+        return None
+    if name == "NotebookEdit" and isinstance(input_obj.get("notebook_path"), str):
+        return input_obj["notebook_path"]
+    return input_obj["file_path"] if isinstance(input_obj.get("file_path"), str) else None
 
 
 def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace:
@@ -590,9 +639,14 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
             "name": name,
             "input": input_obj if isinstance(input_obj, dict) else {},
         }]
-        file_path = input_obj.get("file_path") if isinstance(input_obj, dict) else None
-        if name in ("Write", "Edit", "MultiEdit", "NotebookEdit") and isinstance(file_path, str):
-            entries.append({"kind": "write", "path": file_path})
+        file_path = _write_target(name, input_obj)
+        if file_path is not None:
+            # The call id lets a write whose result is an error drop out (C16.4); a Write's content feeds the
+            # stop_at_gate status read.
+            entry = {"kind": "write", "path": file_path, "call_id": entries[0]["id"]}
+            if isinstance(input_obj.get("content"), str):
+                entry["content"] = input_obj["content"]
+            entries.append(entry)
         return record, entries
 
     def replace_streamed(old: dict[str, Any], record: Trace, entries: list[dict[str, Any]]) -> None:
@@ -634,6 +688,8 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
     rollout_exits = _rollout_exit_codes(events, trace) if strict else {}
     pending_patches: dict[str, str] = {}
     completed_exec_ids: set[str] = set()
+    last_result: str | None = None  # the last Claude `result` string
+    last_exec_message: str | None = None  # the last completed codex-exec agent_message
 
     for position, event in enumerate(events):
         etype = event.get("type")
@@ -656,6 +712,8 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
                 for source, key in (("model", "model"), ("claude_code_version", "cli_version")):
                     if isinstance(event.get(source), str):
                         trace.meta[key] = event[source]
+                if isinstance(event.get("cwd"), str) and not trace.init_cwd:
+                    trace.init_cwd = event["cwd"]
             elif event.get("subtype") == "task_notification":
                 set_runtime("claude")
                 tool_use_id = event.get("tool_use_id")
@@ -700,6 +758,7 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
             result = event.get("result")
             if isinstance(result, str):
                 trace.text += "\n" + result
+                last_result = result
             subtype = event.get("subtype")
             if event.get("is_error") or (isinstance(subtype, str) and subtype.startswith("error")):
                 trace.runtime_errors.append(str(subtype or "result_error"))
@@ -717,6 +776,9 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
         elif etype in {"item.started", "item.completed", "item.updated"}:
             set_runtime("codex-exec")
             item = event.get("item")
+            if (etype == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message"
+                    and isinstance(item.get("text"), str)):
+                last_exec_message = item["text"]
             if isinstance(item, dict):
                 if strict:
                     _record_strict_exec_item(trace, etype, item, completed_exec_ids)
@@ -728,6 +790,10 @@ def trace_events(events: list[dict[str, Any]], *, strict: bool = False) -> Trace
         elif strict and (payload := _rollout_payload(event)) is not None:
             set_runtime("codex-rollout")
             _record_rollout(trace, event.get("type"), payload, rollout_exits.get(position), pending_patches)
+    # C7 final assistant text: the rollout final_assistant_text (set above), else the last Claude `result` string,
+    # else the last codex-exec agent_message.
+    if not trace.final_assistant_text:
+        trace.final_assistant_text = next((text for text in (last_result, last_exec_message) if text is not None), "")
     # D21: native transcripts never interleave families, so under strict a mixed transcript has no single runtime
     # whose carrier rules apply. With strict off, first-event-wins stays exactly as before.
     if strict and len(runtime_families) > 1:
@@ -843,11 +909,12 @@ def tool_invoked(trace: Trace, tool_name: str, expected: str) -> bool:
     return False
 
 
-def required_skill_satisfied(trace: Trace, expected: str) -> bool:
+def required_skill_satisfied(trace: Trace, expected: str, uncredited: frozenset[str] = frozenset()) -> bool:
     """A required gate is met by a `Skill` call OR a dispatch to its specialist agent.
 
     The pipeline lets review/audit gates run as fresh-context sub-agents (e.g. security-audit
-    via the security-reviewer agent); credit that as satisfying the gate.
+    via the security-reviewer agent); credit that as satisfying the gate. A short name in
+    `uncredited` (a strict `skill_call_counts` name, C7) gets no DELEGATION_SATISFIES credit.
     """
     if tool_invoked(trace, "Skill", expected):
         return True
@@ -855,7 +922,7 @@ def required_skill_satisfied(trace: Trace, expected: str) -> bool:
     for agent in SKILL_AGENT_EQUIVALENTS.get(short, []):
         if tool_invoked(trace, "Agent", agent) or tool_invoked(trace, "Task", agent):
             return True
-    if short in DELEGATION_SATISFIES and ("Agent" in trace.tools or "Task" in trace.tools):
+    if short in DELEGATION_SATISFIES and short not in uncredited and ("Agent" in trace.tools or "Task" in trace.tools):
         return True
     return False
 
@@ -892,31 +959,44 @@ def _load_validator():
     return mod
 
 
-def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
+def _relative_artifact_path(cwd: Path, norm: str, label: str) -> Path:
+    """The on-disk path of a normalized artifact path under cwd. A path no root made relative is unsafe on every OS
+    (C17.1): it raises ValueError before resolve_under, whose absolute test differs between Windows and POSIX."""
+    if _ANCHORED_PATH_RE.match(norm):
+        raise ValueError(f"{label} is not relative to any root")
+    return resolve_under(cwd, norm, label)
+
+
+def evaluate_artifact_depth(trace: Trace, cwd: Path, roots: list[str] | None = None) -> list[str]:
     """For each canonical spec/plan artifact written, validate its CONTENT in strict mode.
 
     Content is taken from the transcript write (transcript mode) or the on-disk file
     (live mode). A literal stub like "spec" fails validation -> shallow_artifact error.
+    Each path is first normalized with the strict roots (C17.1; by default the cwd and the trace's init/rollout cwds),
+    so an absolute path under a root is depth-checked under cwd. Only a path no root can relativize, or one that
+    escapes cwd, yields unsafe_artifact_path, and its id never carries an absolute path (_error_path).
     """
+    roots = _path_roots(trace, cwd, None) if roots is None else roots
     validator = _load_validator()
     errors: list[str] = []
-    # latest content wins if the same path is written more than once
+    # The latest content wins if the same path is written more than once. Only a Codex Update File record, whose patch
+    # does not carry the file, never replaces earlier content (C15.9); an empty Claude Write still counts (C16.6).
     latest: dict[str, str] = {}
     for path, content in trace.artifact_writes:
-        norm = path.replace("\\", "/")
+        norm = normalize_tool_path(path, roots)
         # Additive: keep the flat plural-substring gate, also admit per-package
         # (singular /spec/, /plan/ segment) writes. Flat detection is unchanged.
         if (
             "docs/agentic-sdlc/specs/" in norm
             or "docs/agentic-sdlc/plans/" in norm
             or per_package_layout(norm) is not None
-        ):
+        ) and (not isinstance(content, PatchUpdateContent) or norm not in latest):
             latest[norm] = content
     for norm, content in sorted(latest.items()):
         try:
-            disk = resolve_under(cwd, norm, "artifact write path")
+            disk = _relative_artifact_path(cwd, norm, "artifact write path")
         except ValueError:
-            errors.append(f"unsafe_artifact_path:{norm}")
+            errors.append(f"unsafe_artifact_path:{_error_path(norm)}")
             continue
         text = disk.read_text(encoding="utf-8") if disk.exists() else content
         # Per-package mode comes from the singular-segment classifier; flat falls back
@@ -946,9 +1026,9 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
                     spec_path = next((p for p in latest if "/specs/" in p), None)
                 if spec_path:
                     try:
-                        sp = resolve_under(cwd, spec_path, "paired spec path")
+                        sp = _relative_artifact_path(cwd, spec_path, "paired spec path")
                     except ValueError:
-                        errors.append(f"unsafe_artifact_path:{spec_path}")
+                        errors.append(f"unsafe_artifact_path:{_error_path(spec_path)}")
                         continue
                     spec_text = sp.read_text(encoding="utf-8") if sp.exists() else latest[spec_path]
                     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as sf:
@@ -963,7 +1043,7 @@ def evaluate_artifact_depth(trace: Trace, cwd: Path) -> list[str]:
             # accumulated in the system temp dir across runs. Unlink it in the same finally.
             if spec_arg is not None:
                 Path(spec_arg).unlink(missing_ok=True)
-    return errors
+    return list(dict.fromkeys(errors))  # two unrelativized paths can share an _error_path id
 
 
 # --- BR6 strict attribution (matches the strict column of tests/fixtures/transcripts/br6-attribution-cases.json).
@@ -1902,17 +1982,29 @@ def auditor_verdict_unobservable(trace: Trace) -> bool:
 
 
 # --- Strict reviewer results and step order (AC70). The case `strict` object is inert without --strict-evidence.
+# `core-skill` stays defined but no pipeline case uses it after contract C7; `core-read` is the work-type core read.
 STRICT_ORDER_IDS = frozenset({
-    "dispatch-strategy", "spec-written", "plan-written", "core-skill", "red-run", "green-run",
+    "dispatch-strategy", "spec-written", "plan-written", "core-skill", "core-read", "red-run", "green-run",
     "security", "control", "completion-claim-gate",
 })
 CODEX_RESULT_KINDS = frozenset({"findings-table", "control-verdict"})
-FINDINGS_TABLE_HEADER = "Severity | Category | File:Line | Risk | Recommendation"  # skills/security-audit/SKILL.md
+FINDINGS_TABLE_HEADER = "Severity | Category | File:Line | Risk | Recommendation"  # agents/security-reviewer.md
 CORE_WORKFLOW_SKILLS = ("feature-build", "root-cause-fix", "safe-refactor", "test-authoring")
+STRICT_BOOL_KEYS = frozenset({
+    "require_red_green", "check_artifact_depth", "red_before_source_edit", "reviewers_after_last_source_edit",
+    "evidence_file_before_control",
+})
+STOP_AT_GATE_VALUES = frozenset({"spec-review"})
 
 
 def _string_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _count_bounds(value: Any) -> bool:
+    """A `[min, max]` pair of non-negative ints with min <= max (a bool is not a count)."""
+    return (isinstance(value, list) and len(value) == 2 and all(type(bound) is int for bound in value)
+            and 0 <= value[0] <= value[1])
 
 
 def validate_strict_config(case_id: str, strict: Any) -> None:
@@ -1920,8 +2012,15 @@ def validate_strict_config(case_id: str, strict: Any) -> None:
     if not isinstance(strict, dict):
         raise ValueError(f"case {case_id} invalid strict")
     for key, value in strict.items():
-        if key in ("require_red_green", "check_artifact_depth"):
+        if key in STRICT_BOOL_KEYS:
             valid = isinstance(value, bool)
+        elif key == "stop_at_gate":
+            valid = isinstance(value, str) and value in STOP_AT_GATE_VALUES
+        elif key == "skill_call_counts":
+            valid = isinstance(value, dict) and all(
+                isinstance(name, str) and name and _count_bounds(bounds) for name, bounds in value.items())
+        elif key == "forbid_skills_anywhere":
+            valid = _string_list(value) and all(value)
         elif key == "reviewers":
             valid = isinstance(value, list) and all(
                 isinstance(entry, dict)
@@ -1971,29 +2070,54 @@ def _names_reviewer_member(record: dict[str, Any], reviewer: dict[str, Any]) -> 
     return False
 
 
-def _codex_reviewer_output_index(trace: Trace, kind: Any) -> int | None:
-    """First assistant_text holding the documented reviewer output (Codex has no reviewer result event, AC39)."""
+def _codex_reviewer_output_indices(trace: Trace, kind: Any) -> list[int]:
+    """Every assistant_text holding the documented reviewer output (Codex has no reviewer result event, AC39)."""
+    indices: list[int] = []
     for index, record in enumerate(trace.timeline):
         if record["kind"] != "assistant_text":
             continue
         text = record.get("text") or ""
-        if kind == "findings-table" and FINDINGS_TABLE_HEADER in text:
-            return index
-        if kind == "control-verdict" and auditor_verdict_occurrences(text):
-            return index
-    return None
+        if (kind == "findings-table" and FINDINGS_TABLE_HEADER in text) or (
+                kind == "control-verdict" and auditor_verdict_occurrences(text)):
+            indices.append(index)
+    return indices
+
+
+def _codex_reviewer_output_index(trace: Trace, kind: Any) -> int | None:
+    """First assistant_text holding the documented reviewer output (Codex has no reviewer result event, AC39)."""
+    indices = _codex_reviewer_output_indices(trace, kind)
+    return indices[0] if indices else None
 
 
 def reviewer_step(trace: Trace, reviewer: dict[str, Any]) -> tuple[int | None, str]:
     """(timeline index of the first clearing result, 'cleared' | 'missing' | 'errored')."""
+    indices, state = reviewer_clearing_indices(trace, reviewer)
+    return (indices[0] if indices else None), state
+
+
+def reviewer_clearing_indices(trace: Trace, reviewer: dict[str, Any]) -> tuple[list[int], str]:
+    """(timeline indices of every clearing result in order, 'cleared' | 'missing' | 'errored')."""
+    pairs, state = _reviewer_clearing(trace, reviewer)
+    return [result_at for result_at, _call_at in pairs], state
+
+
+def reviewer_clearing_call_indices(trace: Trace, reviewer: dict[str, Any]) -> list[int]:
+    """Timeline indices of the dispatch calls whose result clears, in order (C16.2). On Codex no reviewer call is
+    observable, so the documented reviewer-output message stands for the call."""
+    return sorted(call_at for _result_at, call_at in _reviewer_clearing(trace, reviewer)[0])
+
+
+def _reviewer_clearing(trace: Trace, reviewer: dict[str, Any]) -> tuple[list[tuple[int, int]], str]:
+    """((clearing result index, its dispatch call index) in result order, 'cleared' | 'missing' | 'errored')."""
     if _is_codex_trace(trace):
-        index = _codex_reviewer_output_index(trace, reviewer.get("codex_result"))
-        return (index, "cleared") if index is not None else (None, "missing")  # errored is not observable on Codex
-    members = {
-        record["id"] for record in trace.timeline
-        if record["kind"] == "tool_call" and record.get("id") and not record.get("parent_tool_use_id")
-        and _names_reviewer_member(record, reviewer)
-    }
+        indices = _codex_reviewer_output_indices(trace, reviewer.get("codex_result"))
+        # errored is not observable on Codex
+        return ([(index, index) for index in indices], "cleared") if indices else ([], "missing")
+    members: dict[str, int] = {}  # member call id -> timeline index of its dispatch call
+    for index, record in enumerate(trace.timeline):
+        if (record["kind"] == "tool_call" and record.get("id") and not record.get("parent_tool_use_id")
+                and _names_reviewer_member(record, reviewer)):
+            members.setdefault(record["id"], index)
     results: dict[str, list[tuple[int, dict[str, Any]]]] = {}
     notifications: list[tuple[int, dict[str, Any]]] = []
     for index, record in enumerate(trace.timeline):
@@ -2002,7 +2126,7 @@ def reviewer_step(trace: Trace, reviewer: dict[str, Any]) -> tuple[int | None, s
         elif record["kind"] == "task_notification" and record.get("id"):
             notifications.append((index, record))
     clearing = [
-        entries[0][0] for entries in results.values()
+        (entries[0][0], members[call_id]) for call_id, entries in results.items()
         if len(entries) == 1 and not entries[0][1].get("is_error") and not _is_launch_receipt(entries[0][1])
     ]
     completed_ids: set[str] = set()
@@ -2012,19 +2136,19 @@ def reviewer_step(trace: Trace, reviewer: dict[str, Any]) -> tuple[int | None, s
         if nid not in members:
             continue
         if note.get("status") == "completed":
-            clearing.append(index)
+            clearing.append((index, members[nid]))
             completed_ids.add(nid)
         elif note.get("status") in ("failed", "stopped"):
             failed_ids.add(nid)
     if clearing:
-        return min(clearing), "cleared"
+        return sorted(clearing), "cleared"
     if failed_ids - completed_ids:
-        return None, "errored"
+        return [], "errored"
     correlated = [record for entries in results.values() for _index, record in entries
                   if not _is_launch_receipt(record)]
     if correlated and all(record.get("is_error") for record in correlated):
-        return None, "errored"
-    return None, "missing"
+        return [], "errored"
+    return [], "missing"
 
 
 def reviewer_result_errors(trace: Trace, reviewers: list[dict[str, Any]]) -> list[str]:
@@ -2036,10 +2160,11 @@ def reviewer_result_errors(trace: Trace, reviewers: list[dict[str, Any]]) -> lis
     return errors
 
 
-def _gate_member_index(trace: Trace, expected: str) -> int | None:
-    """First tool_call satisfying required_skill_satisfied's members for one gate skill."""
+def _gate_member_index(trace: Trace, expected: str, uncredited: frozenset[str] = frozenset()) -> int | None:
+    """First tool_call satisfying required_skill_satisfied's members for one gate skill (same `uncredited` rule)."""
     short = expected.rsplit(":", 1)[-1]
     agents = SKILL_AGENT_EQUIVALENTS.get(short, [])
+    delegation = short in DELEGATION_SATISFIES and short not in uncredited
     for index, record in enumerate(trace.timeline):
         if record["kind"] != "tool_call" or record.get("parent_tool_use_id"):
             continue
@@ -2047,7 +2172,7 @@ def _gate_member_index(trace: Trace, expected: str) -> int | None:
         name = str(record.get("name", "")).lower()
         if name == "skill" and any(alias in payload for alias in expected_aliases(expected)):
             return index
-        if name in ("agent", "task") and (any(agent in payload for agent in agents) or short in DELEGATION_SATISFIES):
+        if name in ("agent", "task") and (any(agent in payload for agent in agents) or delegation):
             return index
     return None
 
@@ -2060,14 +2185,61 @@ def _codex_gate_text_index(trace: Trace, marker: str) -> int | None:
     )
 
 
+def _is_artifact_path(path: str, role: str) -> bool:
+    """A flat docs/agentic-sdlc/<role>s/ path or a per-package <role> path, read after `.`/`..` collapse (C17.2)."""
+    norm = _collapse_dot_segments(str(path).replace("\\", "/"))
+    layout = per_package_layout(norm)
+    return f"docs/agentic-sdlc/{role}s/" in norm or (layout is not None and layout[0] == role)
+
+
+def _failed_call_ids(trace: Trace) -> set[str]:
+    """Call ids whose every correlated tool_result is an error (C16.4): such a Claude write is not a write, and such a
+    Skill call is not counted (the hook's receiptHasError rule). A call with no result still counts."""
+    failed: dict[str, bool] = {}
+    for record in trace.timeline:
+        if record["kind"] == "tool_result" and record.get("id"):
+            failed[record["id"]] = failed.get(record["id"], True) and record.get("is_error") is True
+    return {call_id for call_id, all_errors in failed.items() if all_errors}
+
+
+def _top_level_writes(trace: Trace) -> list[tuple[int, dict[str, Any]]]:
+    """(timeline index, record) of every top-level write whose correlated result is not an error (C16.4)."""
+    failed = _failed_call_ids(trace)
+    return [(index, record) for index, record in enumerate(trace.timeline)
+            if record["kind"] == "write" and record.get("call_id") not in failed]
+
+
 def _artifact_write_index(trace: Trace, role: str) -> int | None:
     """First write to a flat docs/agentic-sdlc/<role>s/ path or a per-package <role> path."""
+    for index, record in _top_level_writes(trace):
+        if _is_artifact_path(str(record.get("path", "")), role):
+            return index
+    return None
+
+
+# C15.10 `core-read`: the work-type core file, in either separator style.
+CORE_READ_PATH_RE = re.compile(
+    r"skills[\\/]+(?:feature-build|root-cause-fix|safe-refactor|test-authoring)[\\/]+references[\\/]+core\.md")
+CODEX_CORE_MARKER_RE = re.compile(r"Codex Adapter Gate: work-type core (?:feature|bugfix|refactor|test-only)\b")
+
+
+def _core_read_index(trace: Trace) -> int | None:
+    """First work-type core read: Claude, a top-level `Read` of a core file; Codex, a command naming a core file or
+    the `Codex Adapter Gate: work-type core <type>` marker."""
+    codex = _is_codex_trace(trace)
     for index, record in enumerate(trace.timeline):
-        if record["kind"] != "write":
+        if record["kind"] == "assistant_text":
+            if codex and CODEX_CORE_MARKER_RE.search(record.get("text") or ""):
+                return index
             continue
-        norm = str(record.get("path", "")).replace("\\", "/")
-        layout = per_package_layout(norm)
-        if f"docs/agentic-sdlc/{role}s/" in norm or (layout is not None and layout[0] == role):
+        if record["kind"] != "tool_call" or record.get("parent_tool_use_id"):
+            continue
+        payload = record.get("input") if isinstance(record.get("input"), dict) else {}
+        if codex:
+            target = payload.get("command")
+        else:
+            target = payload.get("file_path") if str(record.get("name", "")).lower() == "read" else None
+        if isinstance(target, str) and CORE_READ_PATH_RE.search(target):
             return index
     return None
 
@@ -2075,6 +2247,7 @@ def _artifact_write_index(trace: Trace, role: str) -> int | None:
 def step_order_errors(trace: Trace, strict_config: dict[str, Any], runs: list[AttributableRun]) -> list[str]:
     order = strict_config.get("required_order", [])
     reviewers = {entry["step"]: entry for entry in strict_config.get("reviewers", [])}
+    uncredited = _counted_skills(strict_config)
     codex = _is_codex_trace(trace)
     green = next((run for run in runs if run.exit == 0), None)
     red = next((run for run in runs if run.exit != 0 and (green is None or run.index < green.index)), None)
@@ -2082,11 +2255,13 @@ def step_order_errors(trace: Trace, strict_config: dict[str, Any], runs: list[At
     def position(step: str) -> int | None:
         candidates: list[int | None] = []
         if step in ("dispatch-strategy", "completion-claim-gate"):
-            candidates.append(_gate_member_index(trace, f"agentic-sdlc:{step}"))
+            candidates.append(_gate_member_index(trace, f"agentic-sdlc:{step}", uncredited))
             if codex:
                 candidates.append(_codex_gate_text_index(trace, f"Codex Adapter Gate: {step}"))
         elif step in ("spec-written", "plan-written"):
             candidates.append(_artifact_write_index(trace, step.split("-", 1)[0]))
+        elif step == "core-read":
+            candidates.append(_core_read_index(trace))
         elif step == "core-skill":
             candidates.append(next(
                 (index for index, record in enumerate(trace.timeline)
@@ -2116,17 +2291,383 @@ def step_order_errors(trace: Trace, strict_config: dict[str, Any], runs: list[At
     return errors
 
 
+# --- Zero-delegation strict keys (pipeline v2.1 contract C7 with the C15 rulings). Like every strict key they are inert
+# without --strict-evidence. Paths are classified after normalization: `\` becomes `/`, and a path that lies under the
+# fixture root (or eval cwd) or the Claude init cwd becomes relative to it; any other path is kept as it is.
+# TEST_PATH_RE and is_source_path mirror isSourceFile in hooks/flow-evidence.mjs (a parity test pins them).
+TEST_PATH_RE = re.compile(r"(^|/)tests?/|(^|/)test_|_test\.|\.test\.|\.spec\.")
+LATE_SPEC_STATUSES = frozenset({"approved", "in_progress", "ready_for_audit", "complete"})
+GATE_STOP_TEXT_RE = re.compile(r"spec review", re.IGNORECASE)
+ARTIFACT_BASE = "docs/agentic-sdlc/"
+TDD_EVIDENCE_SUFFIX = ".tdd.md"
+HOUSE_PREFIX = "agentic-sdlc:"
+# Rollout carriers that repeat a response_item message; a copy equal to the preceding one is the same message (C15.5).
+ROLLOUT_COPY_CARRIERS = frozenset({"event_msg", "task_complete"})
+
+
+def load_flow_requirements() -> dict[str, Any]:
+    return json.loads(FLOW_REQUIREMENTS.read_text(encoding="utf-8"))
+
+
+def _path_extension(norm: str) -> str:
+    """The text after the last `.`, lowercased (the whole path when there is none), as isSourceFile reads it."""
+    return norm.rsplit(".", 1)[-1].lower()
+
+
+def is_test_path(path: str, req: dict[str, Any] | None = None) -> bool:
+    """A test file: a flow-requirements sourceGlobs extension and a TEST_PATH_RE match on the (relative) path."""
+    req = load_flow_requirements() if req is None else req
+    norm = str(path or "").replace("\\", "/")
+    return _path_extension(norm) in (req.get("sourceGlobs") or []) and TEST_PATH_RE.search(norm) is not None
+
+
+def is_source_path(path: str, req: dict[str, Any]) -> bool:
+    """A production source file: a sourceGlobs extension, no artifact root in the path and no test-path match."""
+    norm = str(path or "").replace("\\", "/")
+    if not norm:
+        return False
+    if any(isinstance(root, str) and root in norm for root in (req.get("artifactRoots") or {}).values()):
+        return False
+    if TEST_PATH_RE.search(norm):
+        return False
+    return _path_extension(norm) in (req.get("sourceGlobs") or [])
+
+
+_PATH_ANCHOR_RE = re.compile(r"(?:[A-Za-z]:)?/+")
+
+
+def _collapse_dot_segments(norm: str) -> str:
+    """`.` and `..` segments collapsed posix-style on a `/`-separated path (C17.2), in one pass: an empty or `.`
+    segment drops and `..` removes the segment before it. A `..` above an anchor (`/`, `//`, `X:/`, kept as written)
+    drops; a relative path keeps the leading `..` segments that climb above its start."""
+    match = _PATH_ANCHOR_RE.match(norm)
+    anchor = match.group(0) if match else ""
+    kept: list[str] = []
+    for segment in norm[len(anchor):].split("/"):
+        if segment in ("", "."):
+            continue
+        if segment != "..":
+            kept.append(segment)
+        elif kept and kept[-1] != "..":
+            kept.pop()
+        elif not anchor:
+            kept.append("..")
+    return anchor + "/".join(kept)
+
+
+def _path_roots(trace: Trace, cwd: Path, contained_root: Path | None) -> list[str]:
+    """Normalized roots that make an absolute tool path relative, longest first: the fixture root (or eval cwd), the
+    Claude init cwd and the Codex rollout cwds (C16.5), collapsed like the tool paths (C17.2)."""
+    candidates = (cwd, contained_root, trace.init_cwd, *trace.rollout_cwds)
+    roots = {_collapse_dot_segments(str(root).replace("\\", "/")).rstrip("/") for root in candidates if root}
+    return sorted((root for root in roots if root), key=len, reverse=True)
+
+
+def normalize_tool_path(path: Any, roots: list[str]) -> str:
+    """`\\` becomes `/` and `.`/`..` segments collapse (C17.2, so a leading `./` drops too, C16.5); a path under one of
+    `roots` (a drive letter or root prefix compared case-insensitively) then becomes relative to it; anything else is
+    kept (never guessed)."""
+    norm = _collapse_dot_segments(str(path).replace("\\", "/"))
+    for root in roots:
+        prefix = root + "/"
+        if norm[:len(prefix)].lower() == prefix.lower():
+            return norm[len(prefix):]
+    return norm
+
+
+_ANCHORED_PATH_RE = re.compile(r"/|[A-Za-z]:/")
+_DRIVE_SEGMENT_RE = re.compile(r"[A-Za-z]:")
+
+
+def _error_path(norm: str) -> str:
+    """The path an error id carries: never an absolute one (C16.5). A path no root made relative (an absolute path, or
+    a collapsed relative path that still climbs above every root with a leading `../`) shows its last two segments
+    (after the root or drive)."""
+    if not _ANCHORED_PATH_RE.match(norm) and not norm.startswith("../"):
+        return norm
+    segments = [segment for segment in norm.split("/") if segment and segment != ".."]
+    if segments and _DRIVE_SEGMENT_RE.fullmatch(segments[0]):
+        segments = segments[1:]
+    return "/".join(segments[-2:])
+
+
+def _under_artifact_base(norm: str) -> bool:
+    """Under docs/agentic-sdlc/: a relative path that starts there, or an absolute path no root could make relative
+    (a codex-exec transcript records no cwd) that holds a docs/agentic-sdlc/ segment."""
+    if norm.startswith(ARTIFACT_BASE):
+        return True
+    return _ANCHORED_PATH_RE.match(norm) is not None and "/" + ARTIFACT_BASE in norm
+
+
+def _normalized_writes(trace: Trace, roots: list[str]) -> list[tuple[int, str]]:
+    """(timeline index, normalized path) of every write; the timeline holds top-level writes only (AC17), and a write
+    whose result is an error is not one (C16.4)."""
+    return [(index, normalize_tool_path(record["path"], roots)) for index, record in _top_level_writes(trace)
+            if isinstance(record.get("path"), str)]
+
+
+def _subagent_writes(trace: Trace, roots: list[str]) -> list[tuple[int, str]]:
+    """(timeline index, normalized path) of every sub-agent Write/Edit/MultiEdit/NotebookEdit call whose result is
+    not an error: stop_at_gate counts them (C16.3), the other checks do not (AC17)."""
+    failed = _failed_call_ids(trace)
+    writes: list[tuple[int, str]] = []
+    for index, record in enumerate(trace.timeline):
+        if record["kind"] != "tool_call" or not record.get("parent_tool_use_id") or record.get("id") in failed:
+            continue
+        target = _write_target(record.get("name"), record.get("input"))
+        if target is not None:
+            writes.append((index, normalize_tool_path(target, roots)))
+    return writes
+
+
+def _counted_skills(strict_config: dict[str, Any]) -> frozenset[str]:
+    """Short names under strict.skill_call_counts: DELEGATION_SATISFIES does not credit them (C7)."""
+    counts = strict_config.get("skill_call_counts")
+    return frozenset(name.rsplit(":", 1)[-1] for name in counts) if isinstance(counts, dict) else frozenset()
+
+
+def red_before_source_errors(strict_config: dict[str, Any], writes: list[tuple[int, str]],
+                             runs: list[AttributableRun], req: dict[str, Any]) -> list[str]:
+    """An attributable failing run strictly between Wt (first test write) and Ws (first production write).
+
+    Ws absent: only strict_source_edit_unobserved, and only when require_red_green is set (C15.2); a shell-only write
+    leaves no timeline write.
+    """
+    test_at = next((index for index, path in writes if is_test_path(path, req)), None)
+    source_at = next((index for index, path in writes if is_source_path(path, req)), None)
+    if source_at is None:
+        return ["strict_source_edit_unobserved"] if strict_config.get("require_red_green") else []
+    if test_at is None or not any(run.exit != 0 and test_at < run.index < source_at for run in runs):
+        return ["strict_red_not_before_source_edit"]
+    return []
+
+
+def _codex_messages(trace: Trace) -> list[str]:
+    """One text per distinct assistant message (C15.5): a task_complete or event_msg copy equal to the preceding
+    response_item message is dropped; every other message, a repeated marker included, counts."""
+    messages: list[str] = []
+    previous_item: str | None = None
+    for record in trace.timeline:
+        if record["kind"] != "assistant_text":
+            continue
+        text = record.get("text") or ""
+        carrier = record.get("carrier")
+        if carrier in ROLLOUT_COPY_CARRIERS and text == previous_item:
+            continue
+        if carrier == "response_item":
+            previous_item = text
+        messages.append(text)
+    return messages
+
+
+def skill_call_count(trace: Trace, name: str) -> int:
+    """Main-loop `Skill` calls whose skill is exactly `name` or `agentic-sdlc:<name>`, minus calls whose only result is
+    an error (C16.4); on Codex, the distinct assistant messages that carry the `Codex Adapter Gate: <name>` marker."""
+    short = name.rsplit(":", 1)[-1]
+    if _is_codex_trace(trace):
+        marker = re.compile(re.escape(f"Codex Adapter Gate: {short}") + r"(?![A-Za-z0-9_-])")
+        return sum(1 for text in _codex_messages(trace) if marker.search(text))
+    failed = _failed_call_ids(trace)
+    count = 0
+    for record in trace.timeline:
+        if record["kind"] != "tool_call" or record.get("parent_tool_use_id") or record.get("id") in failed:
+            continue
+        payload = record.get("input") if isinstance(record.get("input"), dict) else {}
+        if str(record.get("name", "")).lower() == "skill" and payload.get("skill") in (short, HOUSE_PREFIX + short):
+            count += 1
+    return count
+
+
+def skill_count_errors(trace: Trace, counts: dict[str, list[int]]) -> list[str]:
+    errors: list[str] = []
+    for name, (low, high) in counts.items():
+        count = skill_call_count(trace, name)
+        if not low <= count <= high:
+            errors.append(f"strict_skill_call_count:{name.rsplit(':', 1)[-1]}={count}")
+    return errors
+
+
+# The input keys forbid_skills_anywhere scans on every tool for a focused SKILL.md path (C16.7; Grep's `glob`, C17.3).
+FORBIDDEN_SKILL_SCAN_KEYS = ("path", "pattern", "glob", "file_path", "command", "notebook_path")
+
+
+def forbidden_skill_errors(trace: Trace, names: list[str]) -> list[str]:
+    """Every timeline tool_call, sub-agent calls included: a `Skill` call with an exact listed name, or a string under
+    one of FORBIDDEN_SKILL_SCAN_KEYS naming a listed skill's SKILL.md in either separator style (the strings C7
+    pattern 2 matches)."""
+    shorts = list(dict.fromkeys(name.rsplit(":", 1)[-1] for name in names if name))
+    if not shorts:
+        return []
+    by_lower = {short.lower(): short for short in shorts}
+    path_re = re.compile(
+        "(" + "|".join(re.escape(short) for short in sorted(shorts, key=len, reverse=True)) + r")[\\/]+SKILL\.md",
+        re.IGNORECASE)
+    hits: list[str] = []
+    for record in trace.timeline:
+        if record["kind"] != "tool_call":
+            continue
+        payload = record.get("input") if isinstance(record.get("input"), dict) else {}
+        tool = str(record.get("name", "")).lower()
+        if tool == "skill":
+            hits += [short for short in shorts if payload.get("skill") in (short, HOUSE_PREFIX + short)]
+        for target in (payload.get(key) for key in FORBIDDEN_SKILL_SCAN_KEYS):
+            if isinstance(target, str):
+                hits += [by_lower[match.group(1).lower()] for match in path_re.finditer(target)]
+    return [f"strict_forbidden_skill:{name}" for name in dict.fromkeys(hits)]
+
+
+REVIEWED_AFTER_EDIT_STEPS = ("security", "control")
+
+
+def reviewer_after_edit_errors(trace: Trace, reviewers: list[dict[str, Any]], writes: list[tuple[int, str]],
+                               req: dict[str, Any]) -> list[str]:
+    """For the `security` and `control` steps, a member dispatched after the last production-source write and whose
+    result clears (C16.2: the dispatch call is compared, not the result, so a reviewer launched before an edit never
+    covers it). A step with no clearing result adds nothing here (strict_reviewer_result_missing reports it, C15.3)."""
+    sources = [index for index, path in writes if is_source_path(path, req)]
+    if not sources:
+        return []
+    errors: list[str] = []
+    for reviewer in reviewers:
+        if reviewer.get("step") not in REVIEWED_AFTER_EDIT_STEPS:
+            continue
+        calls = reviewer_clearing_call_indices(trace, reviewer)
+        if calls and calls[-1] < sources[-1]:
+            errors.append(f"strict_reviewer_before_last_edit:{reviewer['step']}")
+    return errors
+
+
+def tdd_evidence_errors(trace: Trace, reviewers: list[dict[str, Any]], writes: list[tuple[int, str]]) -> list[str]:
+    """A top-level `.tdd.md` write under docs/agentic-sdlc/ before the dispatch call of the first clearing `control`
+    member (C16.2); no clearing member adds nothing here (C15.3)."""
+    control = next((reviewer for reviewer in reviewers if reviewer.get("step") == "control"), None)
+    calls = reviewer_clearing_call_indices(trace, control) if control is not None else []
+    if not calls:
+        return []
+    if any(index < calls[0] and _under_artifact_base(path) and path.endswith(TDD_EVIDENCE_SUFFIX)
+           for index, path in writes):
+        return []
+    return ["strict_missing_tdd_evidence"]
+
+
+def _fragment_statuses(text: str) -> list[str]:
+    """`status:` values on the lines of an edit fragment, read line by line as parse_frontmatter reads a line."""
+    statuses = []
+    for line in text.splitlines():
+        key, sep, value = line.partition(":")
+        if sep and key.strip() == "status":
+            statuses.append(value.strip())
+    return statuses
+
+
+def _spec_statuses(trace: Trace, cwd: Path, writes: list[tuple[int, str]], roots: list[str]) -> list[str]:
+    """Statuses recorded for every spec written (C7): the spec on disk under the fixture root when present, else its
+    latest non-empty Write content; plus every top-level Edit new_string and Codex Update File `+` text on it. A write
+    or Edit whose result is an error records nothing (C16.4)."""
+    specs = list(dict.fromkeys(path for _index, path in writes if _is_artifact_path(path, "spec")))
+    if not specs:
+        return []
+    spec_set = frozenset(specs)  # membership tests stay O(1) per record (C17.5)
+    validator = _load_validator()
+    failed = _failed_call_ids(trace)
+    latest: dict[str, str] = {}
+    for _index, record in _top_level_writes(trace):
+        content = record.get("content")
+        if isinstance(content, str) and content and normalize_tool_path(record.get("path", ""), roots) in spec_set:
+            latest[normalize_tool_path(record["path"], roots)] = content
+    statuses: list[str] = []
+    for spec in specs:
+        text = latest.get(spec, "")
+        try:
+            disk = resolve_under(cwd, spec, "spec status path")
+            if disk.is_file():
+                text = disk.read_text(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass  # an absolute, escaping or unreadable path: the transcript content is the only record
+        status = validator.parse_frontmatter(text).get("status")
+        if status:
+            statuses.append(status)
+    for record in trace.timeline:
+        payload = record.get("input") if isinstance(record.get("input"), dict) else {}
+        if (record["kind"] == "tool_call" and not record.get("parent_tool_use_id")
+                and record.get("name") in ("Edit", "MultiEdit") and record.get("id") not in failed
+                and normalize_tool_path(payload.get("file_path", ""), roots) in spec_set):
+            edits = payload.get("edits") if record.get("name") == "MultiEdit" else [payload]
+            for edit in edits if isinstance(edits, list) else []:
+                if isinstance(edit, dict) and isinstance(edit.get("new_string"), str):
+                    statuses += _fragment_statuses(edit["new_string"])
+        elif (record["kind"] == "write" and isinstance(record.get("added"), str)
+              and normalize_tool_path(record.get("path", ""), roots) in spec_set):
+            statuses += _fragment_statuses(record["added"])
+    return statuses
+
+
+def gate_stop_errors(trace: Trace, cwd: Path, writes: list[tuple[int, str]], roots: list[str]) -> list[str]:
+    """stop_at_gate "spec-review": no write outside docs/agentic-sdlc/ anywhere in the run, sub-agent writes included
+    (C16.3; one error per distinct path, in first-write order, never an absolute path); after the first spec write no
+    plan write and no spec status at or past `approved`; the final assistant text names the spec review. Every other
+    id is reported at most once (C15.4)."""
+    errors: list[str] = []
+    every_write = sorted(writes + _subagent_writes(trace, roots))
+    outside = [_error_path(path) for _index, path in every_write if not _under_artifact_base(path)]
+    errors += [f"strict_edit_after_spec_gate:{path}" for path in dict.fromkeys(outside)]
+    spec_at = _artifact_write_index(trace, "spec")
+    if spec_at is not None:
+        later = [path for index, path in writes if index > spec_at]
+        if any(_is_artifact_path(path, "plan") for path in later):
+            errors.append("strict_plan_after_spec_gate")
+        if any(status in LATE_SPEC_STATUSES for status in _spec_statuses(trace, cwd, writes, roots)):
+            errors.append("strict_spec_status_without_approval")
+    if not GATE_STOP_TEXT_RE.search(trace.final_assistant_text or ""):
+        errors.append("strict_missing_gate_stop")
+    return errors
+
+
+def zero_delegation_errors(trace: Trace, strict_config: dict[str, Any], runs: list[AttributableRun], cwd: Path,
+                           contained_root: Path | None) -> list[str]:
+    """The C7 strict keys: red_before_source_edit, skill_call_counts, forbid_skills_anywhere,
+    reviewers_after_last_source_edit, evidence_file_before_control and stop_at_gate."""
+    errors: list[str] = []
+    roots = _path_roots(trace, cwd, contained_root)
+    writes = _normalized_writes(trace, roots)
+    reviewers = strict_config.get("reviewers", [])
+    req = load_flow_requirements()
+    if strict_config.get("red_before_source_edit"):
+        errors += red_before_source_errors(strict_config, writes, runs, req)
+    if strict_config.get("skill_call_counts"):
+        errors += skill_count_errors(trace, strict_config["skill_call_counts"])
+    if strict_config.get("forbid_skills_anywhere"):
+        errors += forbidden_skill_errors(trace, strict_config["forbid_skills_anywhere"])
+    if strict_config.get("reviewers_after_last_source_edit"):
+        errors += reviewer_after_edit_errors(trace, reviewers, writes, req)
+    if strict_config.get("evidence_file_before_control"):
+        errors += tdd_evidence_errors(trace, reviewers, writes)
+    if strict_config.get("stop_at_gate") == "spec-review":
+        errors += gate_stop_errors(trace, cwd, writes, roots)
+    return errors
+
+
+def acceptance_excluded(error: str) -> bool:
+    """C15.7: acceptance does not count the auditor verdict (its own column) or unsafe_artifact_path, which since C17.1
+    names only a spec/plan path no root can relativize."""
+    return error.startswith("strict_critical_audit:") or "unsafe_artifact_path" in error
+
+
 def evaluate_case(
     case: dict[str, Any], trace: Trace, cwd: Path, *, strict: bool = False, contained_root: Path | None = None
 ) -> list[str]:
     errors = []
     haystack = trace.haystack()
+    roots = _path_roots(trace, cwd, contained_root)  # the depth check relativizes with the strict roots (C17.1)
     if case.get("fail_on_runtime_errors", True):
         errors += [f"runtime_error:{error}" for error in trace.runtime_errors]
     if case.get("fail_on_permission_denials", True):
         errors += [f"permission_denied:{denial}" for denial in trace.permission_denials]
+    # Default mode keeps the delegation credit; under --strict-evidence a counted skill gets none (C7, C15.8).
+    uncredited = _counted_skills(case["strict"]) if strict and isinstance(case.get("strict"), dict) else frozenset()
     for skill in case.get("required_skills", []):
-        if not required_skill_satisfied(trace, skill) and not runtime_adapter_satisfies(trace, case, "skill", skill):
+        if not required_skill_satisfied(trace, skill, uncredited) and not runtime_adapter_satisfies(
+                trace, case, "skill", skill):
             errors.append(f"missing_skill:{skill}")
     for workflow in case.get("required_workflows", []):
         if not tool_invoked(trace, "Workflow", workflow) and not runtime_adapter_satisfies(trace, case, "workflow", workflow):
@@ -2150,11 +2691,12 @@ def evaluate_case(
         if regex_present(pattern, haystack):
             errors.append(f"forbidden_pattern:{pattern}")
     if case.get("check_artifact_depth", False):
-        errors += evaluate_artifact_depth(trace, cwd)
+        errors += evaluate_artifact_depth(trace, cwd, roots)
     if strict:
         strict_config = case.get("strict") if isinstance(case.get("strict"), dict) else {}
         runs: list[AttributableRun] = []
-        if strict_config.get("require_red_green") or strict_config.get("required_order"):
+        if (strict_config.get("require_red_green") or strict_config.get("required_order")
+                or strict_config.get("red_before_source_edit")):
             test_re = load_test_re()
             runs = attributable_test_runs(trace, test_re)
             if strict_config.get("require_red_green"):
@@ -2164,7 +2706,8 @@ def evaluate_case(
             errors += step_order_errors(trace, strict_config, runs)
         # strict.check_artifact_depth runs the depth check whatever the case-level flag says (never twice).
         if strict_config.get("check_artifact_depth") and not case.get("check_artifact_depth", False):
-            errors += evaluate_artifact_depth(trace, cwd)
+            errors += evaluate_artifact_depth(trace, cwd, roots)
+        errors += zero_delegation_errors(trace, strict_config, runs, cwd, contained_root)
         if auditor_verdict_unobservable(trace):
             errors.append("strict_auditor_verdict_unobservable")
         else:
@@ -3092,6 +3635,12 @@ def main(argv: list[str] | None = None) -> int:
                 if packet_error:
                     packet_errors.append(packet_error)  # named, fails the run, next case continues
             outputs.append(f"case_{case['id']}={'failed' if errors else 'passed'}")
+            if args.strict_evidence:
+                # C15.7: acceptance counts every strict error except the auditor verdict and the deferred path errors,
+                # which are listed in their own column.
+                excluded = [error for error in errors if acceptance_excluded(error)]
+                outputs.append(f"case_{case['id']}_acceptance={'fail' if len(excluded) < len(errors) else 'pass'}")
+                outputs.append(f"case_{case['id']}_acceptance_excluded={','.join(excluded)}")
             outputs.append(f"case_{case['id']}_tools={len(trace.tools)}")
             outputs.append(f"case_{case['id']}_transcript={transcript_path}")
             all_errors += [f"{case['id']}:{e}" for e in errors]

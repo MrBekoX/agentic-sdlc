@@ -20,6 +20,29 @@ Each entry includes:
 
 ---
 
+## 2026-10-17 — A growth-ratio timing test on allocation-heavy code must turn the garbage collector off
+
+- **Date:** 2026-10-17
+- **Task / context:** CI for the pipeline v2 pull request ran `TestC17SpecStatusMembershipLinear`, which times the strict grader's spec-status read over 4 doublings of spec writes (1000 to 16000) and asserts the growth ratio stays under 40x.
+- **Symptom:** The Windows runner measured 43x (`[0.0138, 0.0283, 0.1116, 0.2504, 0.6003]` s). Locally the same linear code measured 20–27x with single 3–4x steps, while the quadratic regression it guards against measured 90–100x.
+- **Root cause:** The code under test allocates many objects per record. Python's cyclic collector runs full passes that scan the whole live heap, and the heap grows with the trace, so collector time grows faster than the read itself. That noise lands in the same range as the threshold. Best-of-three does not remove it, because each run triggers the same collections.
+- **Correct fix:** Time the call the way `timeit` does: `gc.collect()`, then `gc.disable()` around the timed call, re-enabled in `finally`. Then the linear read measured 15–17x and the list-membership regression 64–119x. Start the ladder at 2000, where the gap is widest (15x against 119x), and keep the 40x threshold. A negative control that patches the set back to a list still fails at 122x.
+- **Preventive rule / automated check:** A ratio test for code that allocates per input item disables the collector inside the timed region. Before choosing the threshold, measure both the fixed and the regressed version at the chosen sizes, and size the ladder so that the regressed ratio is at least about 2.5x the threshold.
+- **Related files & tests:** `tests/test_procedure_eval.py::TestC17SpecStatusMembershipLinear`; `scripts/run_procedure_eval.py` (`_spec_statuses`).
+
+---
+
+## 2026-10-16 — An alternation of overlapping branches under `+` is exponential; one character class is not
+
+- **Task / context:** Pipeline v2.1 contract C7 added a procedure-eval `forbidden_patterns` entry to catch focused `SKILL.md` reads in any separator style, written as `(?:<six skills>)(?:[\\/]|\\\\)+SKILL\.md` so that `/`, `\` and the JSON-doubled `\\` would all match.
+- **Symptom:** An Opus code review timed `regex_present` over a `json.dumps` haystack holding `skills\feature-build` plus a run of N backslashes and a non-matching tail: 33 backslashes 0.41 s, 41 backslashes 21.1 s, 49 backslashes did not finish in 300 s. The pattern runs on the whole transcript haystack (including Codex command output) in default and strict mode with no timeout, so an untrusted run could hang the grader.
+- **Root cause:** `\\\\` (two backslashes) and `[\\/]` (one) both match backslashes, so the engine can split a run of k backslashes into one- and two-character pieces in Fibonacci-many ways, and it tries every split before the failing `SKILL\.md` anchor rejects the input. Overlapping branches inside a repeated group are the trap; the ReDoS lesson of 2026-07-01 (greedy whitespace before `$`) did not name this shape, and the pattern was written into a contract and copied into three files before any timing check ran.
+- **Correct fix:** `[\\/]+SKILL\.md`. One character class already covers the doubled form, matches exactly the same strings, and stays linear (16 ms at 100k backslashes).
+- **Preventive rule / automated check:** Never repeat a group whose branches can match the same characters (`(?:a|aa)+`, `(?:[\\/]|\\\\)+`, `(?:\s|\s\s)*`); collapse it to one character class or make the branches disjoint. Any regex that scans agent-influenced text gets a timing test that grows the dangerous run over 4 doublings and asserts a RATIO, written before the pattern is copied anywhere.
+- **Related files & tests:** `tests/skills/procedure/agentic-sdlc-pipeline.json`, `tests/skills/procedure/agentic-sdlc-pipeline-gate-stop.json`, `tests/test_pipeline_zero_delegation.py` (`FOCUSED_SKILL_PATH`); `tests/test_procedure_eval.py::TestC16ForbiddenPatternLinear`.
+
+---
+
 ## 2026-10-13 — Review completion covers every requested response
 
 - **Date:** 2026-10-13

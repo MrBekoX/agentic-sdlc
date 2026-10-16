@@ -1,6 +1,6 @@
 {
   "name": "agentic-sdlc",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Gated SDLC skills for spec, plan, TDD, security review, and evidence-backed delivery on Grok CLI.",
   "author": {
     "name": "Beko",

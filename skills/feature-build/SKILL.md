@@ -1,6 +1,6 @@
 ---
 name: feature-build
-description: This skill should be used first in any language to add a new feature, endpoint, screen, or capability without the full agentic-sdlc-pipeline envelope, via implementation-control. Not for bug/root-cause fixes, test-only work, or behavior-preserving refactors.
+description: This skill should be used first in any language to add a new feature, endpoint, screen, or capability without the full agentic-sdlc-pipeline envelope, via implementation-control. Not for bug/root-cause fixes, test-only work, or behavior-preserving refactors. Not for steps inside an active agentic-sdlc-pipeline run.
 ---
 
 # Skill: feature-build
@@ -55,11 +55,14 @@ Two read-only fan-out points: the **scope map** (one `context-analyst` per affec
 2. **Scope map** — affected layers/files, existing signatures/conventions to follow, integration points. For multi-file features, fan this out with the runtime's workflow/subagent/parallel equivalent (don't scan serially in the main loop). Output feeds the spec.
 3. **Spec** (contract 02) — business rules · acceptance criteria (testable) · edge cases · definition of done · must-not-change behaviors. Use `spec-plan-author` → `spec-plan-critic` for depth.
 4. **Plan + approval** (contract 03) — small single-purpose tasks, each mapped to acceptance criteria, files + TDD points named. **Get user approval before big changes.** Use the runtime goal tool when available; otherwise write the Goal Lock template inline and treat it as the scope lock.
-5. **Failing test** (contract 05) — identify the project's available test command, write the smallest test for the requested behavior and run it; show RED caused by the missing behavior before implementation. A missing runner does not authorize installing packages: use an already available equivalent that executes the intended tests, or report the prerequisite for approval. Preserve failure exit status; a fallback runner must exit nonzero when an assertion fails, not catch failures and return success.
-6. **Implementation + verification** — follow the existing architecture and conventions; only files in scope; justify new abstractions. Write interdependent code in the main loop, delegate independent fixed-pattern pieces. Make the RED test GREEN, then run the suite and show output. Use the runtime loop tool when available; otherwise record each fail -> fix -> retest cycle with command evidence.
-7. **Security analysis** (contract 06) — validation, authN/authZ (IDOR), secrets, injection, dependency risk, logging hygiene. Fix→re-check→retest on findings.
-8. **Refactor** (contract 07) — only if needed; behavior unchanged; retest after.
-9. **Documentation** (contract 09) — update stale docs, env vars, API signatures, setup.
+
+Read [references/core.md](references/core.md) before step 5 and run the steps marked "core step" exactly as its `## Core steps` section writes them. Resolve the link from this installed skill's directory. In Claude Code, use `Read`; in Codex, use the available file-reading tool for the exact installed reference path. Reload it after resume, compaction, or a supplied summary.
+
+5. **Failing test** — core step 1.
+6. **Implementation + verification** — core step 2.
+7. **Security analysis** — core step 3.
+8. **Refactor** — core step 4.
+9. **Documentation** — core step 5.
 10. **Implementation control** — run **`implementation-control`** before finalizing; complete any gap and re-run. Don't give the final answer if a critical step is missing.
 
 ## Final Response

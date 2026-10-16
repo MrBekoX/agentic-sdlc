@@ -428,6 +428,27 @@ class TestFrontmatterRequirements(unittest.TestCase):
             self.assertNotEqual(rc, 0, out + err)
             self.assertIn("error=invalid_status:nearly-done", out)
 
+    def test_approved_status_is_accepted_for_spec_and_plan(self):
+        # `approved` is the approval receipt: the pipeline writes it only after a user approval
+        # turn or explicit pre-approval text. Lifecycle: draft -> reviewed -> approved ->
+        # in_progress -> ready_for_audit -> complete.
+        self.assertIn("approved", va.FRONTMATTER_STATUSES)
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = self._write(tmp, _with_frontmatter(
+                _body_only(COMPLETE_SPEC), work_id="w1", status="approved"), "spec.md")
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec), "--strict")
+            self.assertNotIn("invalid_status", out, out + err)
+            self.assertEqual(rc, 0, out + err)
+            plan_spec = self._write(tmp, _with_frontmatter(
+                _body_only(PLAN_SPEC), work_id="w1", status="approved"), "plan-spec.md")
+            plan = self._write(tmp, _with_frontmatter(
+                _body_only(PLAN_FULL), work_id="w1", spec="../specs/w1.md",
+                branch="feature/w1", status="approved"), "plan.md")
+            rc, out, err = run_cli(
+                "--mode", "plan", "--file", str(plan), "--spec", str(plan_spec), "--strict")
+            self.assertNotIn("invalid_status", out, out + err)
+            self.assertEqual(rc, 0, out + err)
+
     def test_an_empty_value_counts_as_missing(self):
         # The resolver tests truthiness, not presence: `status:` with no value is not a status.
         with tempfile.TemporaryDirectory() as tmp:

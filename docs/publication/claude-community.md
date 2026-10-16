@@ -11,7 +11,7 @@ This packet prepares an `agentic-sdlc` submission to the Anthropic plugin direct
 | Description | "Claude Code skill library for gated spec, plan, TDD, security, and review workflows" (copied from `.claude-plugin/plugin.json`) |
 | Product description | A local development plugin for Claude Code and Codex that packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents and workflows: a router picks the smallest sufficient skill, and a gated pipeline covers end-to-end or high-risk work. |
 | Support channel | Repository issues on `MrBekoX/agentic-sdlc`, plus the reporting path in `SECURITY.md`. The repository is public since 2026-10-12 (unauthenticated URL 200 in `docs/publication/link-checks.json`) and issues are enabled; GitHub private vulnerability reporting is enabled (API `enabled=true`, 2026-10-12). |
-| Source and package identity | Plugin `agentic-sdlc`, marketplace `mrbekox`, install id `agentic-sdlc@mrbekox`. The release commit and archive hash are bound to the ledger rows `archive_verify` and `clean_package_native_validation` in [`../release-evidence-0.5.0.md`](../release-evidence-0.5.0.md); read their state there. |
+| Source and package identity | Plugin `agentic-sdlc`, marketplace `mrbekox`, install id `agentic-sdlc@mrbekox`. The release commit and archive hash are bound to the ledger rows `archive_verify` and `clean_package_native_validation` in [`../release-evidence-0.6.0.md`](../release-evidence-0.6.0.md); read their state there. |
 | Evidence links | Ledger rows `clean_package_native_validation`, `archive_verify`, `archive_reproducibility`, `claude_routing_eval`, `claude_pipeline_procedure`, `security_report_mechanism`, `submission_cases_group` and `path_verdicts`. |
 
 ## Policy checklist

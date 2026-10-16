@@ -137,6 +137,10 @@ AGENTIC_FLOW_GATE_BLOCK=true
 
 The flow guards re-derive evidence from the current transcript, validated `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/` artifacts, real tool calls, and real commands. Prose such as "I ran the gate" does not satisfy a required step.
 
+`flow-step-guard.mjs` also warns when an `agentic-sdlc-pipeline` turn ends on the `dispatch-strategy` decision: the pipeline skill was invoked in the current turn, the turn's last top-level tool call is that `Skill` call, and the final assistant text is known and contains no `?`. `AGENTIC_FLOW_GATE_BLOCK=true` blocks it with the same reason; a missing-step finding takes precedence and silences it.
+
+If the flow guards stay silent during a pipeline run, check how the run started. Hook flow activation is by the `Skill` tool: a pipeline run started only by the `/agentic-sdlc-pipeline` slash command activates no hook flow and is covered by the offline procedure eval.
+
 The `branch` and `review-result` steps are warn-only by design: they never block, even with `AGENTIC_FLOW_GATE_BLOCK=true`. For strict Codex evaluation, run the offline `python3 scripts/strict_flow_evidence.py --rollout <path> --cwd <dir>`, or set `AGENTIC_FLOW_STRICT_EVIDENCE=true` to make the live Codex `tests` evidence strict.
 
 ## Secret Scanner False Positive
@@ -180,6 +184,7 @@ Check the runtime:
 
 - Claude procedure evidence should show native `Skill` and, for pipeline spec/plan, `Workflow` events.
 - Codex procedure evidence should show the embedded author/critic adapter path and validator commands instead of Claude Workflow events.
+- In `agentic-sdlc-pipeline` cases, the `security-audit` and `implementation-control` entries are met by `Agent` calls to `security-reviewer` and `implementation-auditor` (on Codex, their adapter gate markers and reviewer output). A `Skill` call to either, or to any other focused skill, fails the case's forbidden patterns.
 
 If the runtime lacks a native mechanism, the transcript must include an explicit `Delegation Degraded: <capability> unavailable` note plus the smallest safe fallback.
 
@@ -187,6 +192,6 @@ If the runtime lacks a native mechanism, the transcript must include an explicit
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
-Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
 If a brand-new per-package plan is not discovered by `resolve_work_package.py`, remember that per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
