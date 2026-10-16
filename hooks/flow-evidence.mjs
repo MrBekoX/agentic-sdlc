@@ -206,7 +206,7 @@ function exactNameFields(input) {
 export function parseTranscript(transcriptPath) {
   const empty = {
     tools: [], commands: [], edits: [], lastText: '', raw: '',
-    results: new Map(), receipts: new Map(), completions: new Map(),
+    results: new Map(), receipts: new Map(), stringResults: new Set(), completions: new Map(),
     turnTools: [], lastRecordText: '', resultPos: new Map(), lastTopTextPos: -1,
   };
   if (!transcriptPath) return empty;
@@ -217,6 +217,7 @@ export function parseTranscript(transcriptPath) {
   const edits = [];
   const results = new Map(); // tool_use id -> { nonError } from native user tool_result records
   const receipts = new Map(); // tool_use id -> { status, error } for a single-result user record
+  const stringResults = new Set(); // tool_use ids whose single-result user record has a string toolUseResult
   const completions = new Map(); // tool_use id -> Set of BR8 notification statuses
   let lastText = '';
   let turnTools = []; // top-level tool_uses since the last top-level genuine user prompt (C14 turn)
@@ -253,6 +254,8 @@ export function parseTranscript(transcriptPath) {
         if (RECEIPT_STATUSES.has(status) || (error != null && error !== '')) {
           receipts.set(id, { status, error });
         }
+      } else if (resultItems.length === 1 && typeof tus === 'string') {
+        stringResults.add(resultItems[0].tool_use_id); // C17 item 6: the real Claude Code error shape
       }
       for (const r of resultItems) {
         resultPos.set(r.tool_use_id, pos);
@@ -292,14 +295,23 @@ export function parseTranscript(transcriptPath) {
     }
   }
   return {
-    tools, commands, edits, lastText, raw, results, receipts, completions, turnTools, lastRecordText,
-    resultPos, lastTopTextPos,
+    tools, commands, edits, lastText, raw, results, receipts, stringResults, completions, turnTools,
+    lastRecordText, resultPos, lastTopTextPos,
   };
 }
 
+// Did the call with this tool_use id fail? Three shapes count (C6, amended by C17 item 6):
+//   - an object toolUseResult with a non-empty `error` (the launch-receipt shape);
+//   - a string toolUseResult: the shape real Claude Code session files record for a failed call (a
+//     successful Skill, Agent or Workflow result has an object toolUseResult, or none);
+//   - every correlated tool_result has is_error true (one non-error result clears it).
+// A call with no id, or with no recorded result, is not errored: it still counts.
 function receiptHasError(trace, id) {
   const rec = trace.receipts?.get(id);
-  return rec != null && rec.error != null && rec.error !== '';
+  if (rec != null && rec.error != null && rec.error !== '') return true;
+  if (trace.stringResults?.has(id)) return true;
+  const res = trace.results?.get(id);
+  return res != null && !res.nonError;
 }
 
 function notificationCompleted(trace, id) {

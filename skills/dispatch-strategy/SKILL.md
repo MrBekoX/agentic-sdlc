@@ -14,7 +14,7 @@ This scope is fenced:
 - **Never wholesale-delegate a multi-step skill.** The skill always coordinates from the main loop; only its *parts* receive a mechanism — a multi-step skill run inside one sub-agent would nest its own delegations and degrade its fresh-context gates.
 - **Never touch the skill's internal mechanism.** Its steps, their order, whether a step runs, the mandated integrity gates (a `spec-plan-critic` for a drafted spec/plan, an `implementation-auditor` for self-graded code/findings), and the content/correctness verdicts belong to the skill and its contracts — not to this decision.
 
-**Called by a skill or the pipeline:** when another skill or `agentic-sdlc-pipeline` invoked you (the user did not ask for a mechanism decision), the decision is never the final answer. State the map in at most 5 lines, then continue with the caller's next step in the same turn; end the turn only when the caller's flow says so. Within one `agentic-sdlc-pipeline` run you are called once, at Step 1, and the pipeline reuses that map.
+**Called by a skill or the pipeline:** when another skill or `agentic-sdlc-pipeline` invoked you (the user did not ask for a mechanism decision), the decision is never the final answer. State the map in at most 5 lines, then continue with the caller's next step in the same turn; end the turn only when the caller's flow says so. Within one `agentic-sdlc-pipeline` run you are called once, at kickoff, before Step 1, and the pipeline reuses that map.
 
 In one line: dispatch sets the **working strategy**; the skill owns **what the work is and how it is sequenced**.
 

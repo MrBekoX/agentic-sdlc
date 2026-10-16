@@ -89,7 +89,7 @@ The pipeline runs Steps 8–13 itself and never invokes a focused skill or reads
 | Behavior-preserving refactor | `skills/safe-refactor/references/core.md` |
 | Test-only work | `skills/test-authoring/references/core.md` |
 
-The standalone skill reads the same core file, so the work-type rules exist once. The pipeline calls `dispatch-strategy` once, at Step 1, and `completion-claim-gate` before any done or ready claim. Its security passes (Steps 11 and 14) dispatch the `security-reviewer` agent, and its implementation-control gate runs `resolve_work_package.py` and dispatches the `implementation-auditor` agent. The `security-audit` and `implementation-control` skills remain standalone entry points.
+The standalone skill reads the same core file, so the work-type rules exist once. The pipeline calls `dispatch-strategy` once, at kickoff, before Step 1, and `completion-claim-gate` before any done or ready claim. Its security passes (Steps 11 and 14) dispatch the `security-reviewer` agent, and its implementation-control gate runs `resolve_work_package.py` and dispatches the `implementation-auditor` agent. The `security-audit` and `implementation-control` skills remain standalone entry points.
 
 `spec-authoring` and `plan-authoring` are standalone prompt-level skills. They are not internal pipeline substeps.
 
@@ -222,7 +222,7 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
-Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 

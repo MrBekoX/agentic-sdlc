@@ -23,7 +23,7 @@ For the component reference see [`plugin-readme.md`](./plugin-readme.md); for ru
 Focused skills and the pipeline are two separate entry points:
 
 - **Focused skills** are standalone entry points. They must **not** call `agentic-sdlc-pipeline` and stay maximally unaware of each other; a focused skill calls another only when its own flow genuinely needs it.
-- **Inside an `agentic-sdlc-pipeline` run**, the pipeline does not invoke `feature-build`, `root-cause-fix`, `safe-refactor`, `test-authoring`, `security-audit`, or `implementation-control`, and does not read their `SKILL.md` files. Steps 8–13 read the selected work-type core file (`skills/<skill>/references/core.md` of `feature-build`, `root-cause-fix`, `safe-refactor` or `test-authoring`), the security steps dispatch the `security-reviewer` agent, and the implementation-control gate runs `resolve_work_package.py` and dispatches the `implementation-auditor` agent. The pipeline's own `Skill` calls are `dispatch-strategy` (once, at Step 1), `completion-claim-gate`, and the companions `mind-spark` and `feedback-triage`.
+- **Inside an `agentic-sdlc-pipeline` run**, the pipeline does not invoke `feature-build`, `root-cause-fix`, `safe-refactor`, `test-authoring`, `security-audit`, or `implementation-control`, and does not read their `SKILL.md` files. Steps 8–13 read the selected work-type core file (`skills/<skill>/references/core.md` of `feature-build`, `root-cause-fix`, `safe-refactor` or `test-authoring`), the security steps dispatch the `security-reviewer` agent, and the implementation-control gate runs `resolve_work_package.py` and dispatches the `implementation-auditor` agent. The pipeline's own `Skill` calls are `dispatch-strategy` (once, at kickoff, before Step 1), `completion-claim-gate`, the read-only `git-safety-check` command at Step 16, and the companions `mind-spark` and `feedback-triage`.
 - **One copy of the work-type rules.** The standalone skill and the pipeline read the same core file, so the pipeline never duplicates spec/plan/TDD logic inline. Each focused skill's description ends with "Not for steps inside an active agentic-sdlc-pipeline run."
 
 This keeps the dependency graph one-directional and prevents the pipeline from becoming a god-object.
@@ -72,7 +72,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Should trigger:** user asks for end-to-end implementation with spec, plan, TDD, tests, security review, PR-ready diff; production-impacting areas (auth, payment, DB migration, API contract, permissions, user data, token/session, RLS).
 - **Should NOT trigger:** narrow feature/fix/test/spec/plan/refactor/review/audit requests; as the default for every implementation question.
 - **Produces:** approved `docs/agentic-sdlc/specs/<work_id>.md` + `docs/agentic-sdlc/plans/<work_id>.md`, implementation, tests, a TDD evidence file, security findings, final implementation report.
-- **Delegates to:** the `dispatch-strategy` skill (once, at Step 1) and the `completion-claim-gate` skill; the `spec-plan-draft` workflow (Claude Code); the `context-analyst`, `security-reviewer` and `implementation-auditor` agents. Steps 8–13 run from the selected work-type core file of `root-cause-fix`/`feature-build`/`safe-refactor`/`test-authoring`; no focused skill is invoked.
+- **Delegates to:** the `dispatch-strategy` skill (once, at kickoff, before Step 1) and the `completion-claim-gate` skill; the `spec-plan-draft` workflow (Claude Code); the `context-analyst`, `security-reviewer` and `implementation-auditor` agents. Steps 8–13 run from the selected work-type core file of `root-cause-fix`/`feature-build`/`safe-refactor`/`test-authoring`; no focused skill is invoked.
 - **Contracts:** all of `00`–`10`.
 
 ### `spec-authoring`
@@ -134,7 +134,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Purpose:** decide how work should run — main loop, sub-agent, dynamic-workflow, or agent-team.
 - **Scope (fenced):** chooses the execution mechanism over a skill's named parts (a map produced at the start); never wholesale-delegates a multi-step skill — the skill coordinates from the main loop and only its parts get a mechanism — and never governs the skill's internal steps, their order, or its mandated integrity gates (critic/auditor).
 - **Should trigger:** "should this run in the main loop, a sub-agent, a workflow, or an agent-team?"; work with 2+ independent parts, heavy exploration, verification/research fan-out, multi-file generation, or multi-angle review/audit.
-- **Should NOT trigger:** as a substitute for doing the domain work; when the skill request already implies a specific focused skill (the focused skill consults `dispatch-strategy` internally); a second time inside one `agentic-sdlc-pipeline` run (the pipeline calls it once, at Step 1, reuses that map, and continues in the same turn).
+- **Should NOT trigger:** as a substitute for doing the domain work; when the skill request already implies a specific focused skill (the focused skill consults `dispatch-strategy` internally); a second time inside one `agentic-sdlc-pipeline` run (the pipeline calls it once, at kickoff, before Step 1, reuses that map, and continues in the same turn).
 - **Produces:** a mechanism recommendation with cost/caveat rationale.
 - **Delegates to:** the chosen runtime mechanism; no domain work is performed here.
 - **Contracts:** `00`, `10`.
@@ -296,7 +296,7 @@ Interactive, collaborative, continuous parallel work where peers talk and a live
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`). `spec-authoring`/`plan-authoring` and the pipeline write to whichever layout the work package uses; the resolver discovers both.
 
-Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 

@@ -126,7 +126,7 @@ Codex has no Claude Code Workflow runtime. Therefore `agentic-sdlc-pipeline` doe
 
 Emit `Runtime: Codex` once. At each gate below, emit `Codex Adapter Gate: <gate>` so `codex exec --json` transcripts have deterministic evidence. When Codex has no native `Skill` transcript event, record `Delegation Degraded: native Skill transcript events unavailable`; the adapter still runs the step: it activates or reads the `dispatch-strategy` and `completion-claim-gate` instructions, reads the work-type core file, and runs the reviewer roles as fresh-context subagents. The pipeline activates no focused skill and reads no focused skill's `SKILL.md`.
 
-1. Activate `dispatch-strategy` once, at Step 1, and reuse its mechanism map for every later heavy, independent, or parallel step; record `Codex Adapter Gate: dispatch-strategy activated`.
+1. Activate `dispatch-strategy` once, at kickoff, before Step 1, and reuse its mechanism map for every later heavy, independent, or parallel step; record `Codex Adapter Gate: dispatch-strategy activated`.
 2. Run `<runtime-root>/scripts/detect_context.py`, with `<runtime-root>` resolved as described under [Runtime Root](#runtime-root).
 3. Draft the spec inside `agentic-sdlc-pipeline` using the spec contract and `spec-plan-author` role instructions.
 4. Run a fresh-context critic pass with `spec-plan-critic` instructions when Codex subagents are available; otherwise record a degraded inline critic pass.
@@ -150,7 +150,7 @@ Focused skills are independently routable in Codex. Inside a pipeline run none o
 | Bug or regression | Work-type core file of `root-cause-fix` |
 | Behavior-preserving refactor | Work-type core file of `safe-refactor` |
 | Test-only work | Work-type core file of `test-authoring` |
-| Execution mechanism choice | `dispatch-strategy`, activated once at Step 1 |
+| Execution mechanism choice | `dispatch-strategy`, activated once at kickoff, before Step 1 |
 | Security gates | `security-reviewer` role in a fresh-context subagent |
 | Pre-final audit | `resolve_work_package.py`, then the `implementation-auditor` role in a fresh-context subagent |
 | Final evidence claim | `completion-claim-gate` |
@@ -178,7 +178,7 @@ Use Codex eval output as evidence for Codex routing only. Use procedure transcri
 
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
-Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 
