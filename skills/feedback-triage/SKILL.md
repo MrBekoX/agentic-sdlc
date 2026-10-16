@@ -195,7 +195,8 @@ This skill stays in the main loop: items are verified and tested one at a time, 
 so they can't be fanned out to parallel workers (a later item's fix may depend on an earlier
 one's outcome). If a review is genuinely huge, the unit of delegation is the *change*, not the
 items — IMPLEMENT defers behavior work to `test-authoring` / `root-cause-fix`, which make their own
-dispatch-strategy calls.
+dispatch-strategy calls (inside an `agentic-sdlc-pipeline` run, the work-type core runs under the
+pipeline's single kickoff map instead).
 
 ## Checklist
 

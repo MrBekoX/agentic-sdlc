@@ -137,6 +137,10 @@ AGENTIC_FLOW_GATE_BLOCK=true
 
 The flow guards re-derive evidence from the current transcript, validated `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/` artifacts, real tool calls, and real commands. Prose such as "I ran the gate" does not satisfy a required step.
 
+`flow-step-guard.mjs` also warns when an `agentic-sdlc-pipeline` turn ends on the `dispatch-strategy` decision: the pipeline skill was invoked in the current turn, the turn's last top-level tool call is that `Skill` call, and the final assistant text is known and contains no `?`. `AGENTIC_FLOW_GATE_BLOCK=true` blocks it with the same reason; a missing-step finding takes precedence and silences it.
+
+If the flow guards stay silent during a pipeline run, check how the run started. Hook flow activation is by the `Skill` tool: a pipeline run started only by the `/agentic-sdlc-pipeline` slash command activates no hook flow and is covered by the offline procedure eval.
+
 The `branch` and `review-result` steps are warn-only by design: they never block, even with `AGENTIC_FLOW_GATE_BLOCK=true`. For strict Codex evaluation, run the offline `python3 scripts/strict_flow_evidence.py --rollout <path> --cwd <dir>`, or set `AGENTIC_FLOW_STRICT_EVIDENCE=true` to make the live Codex `tests` evidence strict.
 
 ## Secret Scanner False Positive
@@ -180,6 +184,7 @@ Check the runtime:
 
 - Claude procedure evidence should show native `Skill` and, for pipeline spec/plan, `Workflow` events.
 - Codex procedure evidence should show the embedded author/critic adapter path and validator commands instead of Claude Workflow events.
+- In `agentic-sdlc-pipeline` cases, the `security-audit` and `implementation-control` entries are met by `Agent` calls to `security-reviewer` and `implementation-auditor` (on Codex, their adapter gate markers and reviewer output). A `Skill` call to either, or to any other focused skill, fails the case's forbidden patterns.
 
 If the runtime lacks a native mechanism, the transcript must include an explicit `Delegation Degraded: <capability> unavailable` note plus the smallest safe fallback.
 

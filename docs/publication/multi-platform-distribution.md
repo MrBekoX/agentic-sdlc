@@ -15,7 +15,8 @@ Microsoft Store alias). Python 3.12 is the tested version; the helpers skills ru
 kept import-compatible with 3.8 by a static check, not by a runtime test. Maintainer and
 release tooling (`build_release.py`, `bump_version.py`, the Codex hook trust check, the
 eval runners) needs Python 3.12. Keep the full plugin directory: isolated SKILL.md copies
-omit shared contracts, scripts and reviewers. Skills locate the installed plugin with
+omit shared contracts, scripts, reviewers and skill references such as the four work-type
+`references/core.md` files that the focused skills and `agentic-sdlc-pipeline` read. Skills locate the installed plugin with
 the **Plugin root** rule (two levels above the loaded `SKILL.md`); per-runtime
 fallbacks are in [runtime-adapter.md](../runtime-adapter.md#capability-fallbacks-on-all-five-runtimes).
 

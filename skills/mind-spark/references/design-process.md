@@ -48,7 +48,8 @@ into agentic-sdlc-pipeline's Spec phase.
 **The one decision test for a fix/refactor request:** does the request already carry a testable
 definition of done — a spec, a ticket with acceptance criteria, or a bug whose correct behavior is
 clearly described? **Yes** → this skill does not fire; route to `root-cause-fix` / `safe-refactor`, which own
-already-specified work. **No** → the missing definition *is* the design question; stay here. This single
+already-specified work (inside an `agentic-sdlc-pipeline` run, return control to the pipeline instead).
+**No** → the missing definition *is* the design question; stay here. This single
 test resolves the boundary both ways: don't grab a clearly-specified fix, and don't wave an
 underspecified one through as "just a fix".
 
@@ -198,7 +199,7 @@ Keep it as short as the task allows — this is the agreed intent, not the spec.
 ## Checklist
 
 - [ ] Existing context (files, docs, commits, patterns) read before questioning.
-- [ ] Fix/refactor decision test applied — already-specified work routed to root-cause-fix/safe-refactor, not grabbed.
+- [ ] Fix/refactor decision test applied — already-specified work routed to root-cause-fix/safe-refactor (or back to the pipeline inside a run), not grabbed.
 - [ ] Scope checked; oversized requests decomposed, first sub-project chosen.
 - [ ] Questions asked one at a time, multiple-choice preferred.
 - [ ] 2-3 approaches offered with trade-offs and a recommendation.

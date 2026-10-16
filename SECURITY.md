@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest `0.4.x` release. Older releases are unsupported; verify
+Security fixes are provided for the latest `0.6.x` release. Older releases are unsupported; verify
 the current version in `VERSION` before reporting.
 
 ## Reporting a vulnerability

@@ -19,7 +19,8 @@ No external listing or publication has been performed.
   Kimi manifest before advertising that remote installation.
 - `scripts/bump_version.py` tracks the Kimi plugin version. Catalog schema
   version `"2"` remains unchanged by a plugin version bump.
-- The full directory includes shared hooks, scripts, contracts and role files.
+- The full directory includes shared hooks, scripts, contracts and role files, and
+  the four work-type `references/core.md` files that `agentic-sdlc-pipeline` reads.
 
 ## Supported distribution and update methods
 

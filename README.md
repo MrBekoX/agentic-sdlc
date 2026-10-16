@@ -207,7 +207,7 @@ State: GAP. Native install, skill discovery, recopy and removal of a package bui
 
 ### ZCode marketplace installs (experimental, not a release-gated path)
 
-> **Experimental adapter.** ZCode was not a supported 0.4.3 release target; the next release includes it as an experimental adapter. These install paths carry no go/no-go verdict and no official submission exists. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
+> **Experimental adapter.** ZCode was not a supported 0.4.3 release target; 0.5.0 and 0.6.0 include it as an experimental adapter. These install paths carry no go/no-go verdict and no official submission exists. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
 
 **Prerequisites.** The ZCode desktop client (builds for Windows x64/ARM64, macOS Apple Silicon/Intel DMG and Linux x64 AppImage) and `node` on `PATH`; a file-source or directory marketplace add also needs a package directory (see [Get the package](#get-the-package)).
 
@@ -392,7 +392,7 @@ Deterministic hook scripts live in [`hooks/`](hooks/). Runtime wiring differs:
 | Cursor | [`hooks/hooks-cursor.json`](hooks/hooks-cursor.json), declared by `.cursor-plugin/plugin.json`: `beforeShellExecution` command guards, `preToolUse` write scan and flow-order, `sessionStart`, and a `stop` worktree scan. Launch code reads `process.env.CURSOR_PLUGIN_ROOT`. Claude transcript Stop readers stay unwired. See [`.cursor-plugin/README.md`](.cursor-plugin/README.md). |
 | Google Antigravity (experimental adapter) | Not wired by default: Antigravity's `hooks.json` supports only `PreToolUse` and `PostToolUse` with `toolCall` payloads and top-level `decision` outputs (`allow`\|`deny`), without `SessionStart`, `Stop`, or `CLAUDE_PLUGIN_ROOT` / `PLUGIN_ROOT` injection. Use repo-level git hooks (`python3 <runtime-root>/scripts/install_git_hooks.py`), explicit validator scripts, and `/git-safety-check`; see [`.antigravity-plugin/README.md`](.antigravity-plugin/README.md). |
 
-Claude Code wires flow enforcement through `flow-order-guard.mjs` and `flow-step-guard.mjs`. Codex uses its own `flow-order-guard-codex.mjs` and `flow-step-guard-codex.mjs` adapters over the same [`hooks/flow-requirements.json`](hooks/flow-requirements.json); the Codex order gate is opt-in and its Stop gate can continue the turn but cannot undo effects.
+Claude Code wires flow enforcement through `flow-order-guard.mjs` and `flow-step-guard.mjs`. Codex uses its own `flow-order-guard-codex.mjs` and `flow-step-guard-codex.mjs` adapters over the same [`hooks/flow-requirements.json`](hooks/flow-requirements.json); the Codex order gate is opt-in and its Stop gate can continue the turn but cannot undo effects. For `agentic-sdlc-pipeline` on Claude Code, the flow hooks match the `Skill` call to `dispatch-strategy` and the `Agent` dispatches of `security-reviewer` and `implementation-auditor` by exact name, `flow-order-guard.mjs` checks for a test command before the first production edit (`red-first`), and `flow-step-guard.mjs` warns when a pipeline turn ends on the `dispatch-strategy` decision. Hook flow activation is by the `Skill` tool: a pipeline run started only by the `/agentic-sdlc-pipeline` slash command activates no hook flow and is covered by the offline procedure eval.
 
 Guarding happens at two layers, because one of them provably cannot be complete.
 
@@ -439,6 +439,8 @@ This proves metadata consistency, static skill wiring, fixture health, hook/work
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
 Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+
+From Step 8 the pipeline's main loop also writes a TDD evidence file, `docs/agentic-sdlc/<slug>/evidence/<work_id>.tdd.md` per-package or `docs/agentic-sdlc/evidence/<work_id>.tdd.md` flat, with every test run until `implementation-auditor` is dispatched; it is git-ignored, has no validator and never gates resolution.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: the whole `docs/` tree is git-ignored, so `git status` never reports new per-package plans and the resolver scans the filesystem instead.
 

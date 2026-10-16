@@ -35,7 +35,7 @@ Skills are intentionally stored in root `skills/`. Do not duplicate them into `.
 
 In Claude Code, `agentic-sdlc-pipeline` must use the named Workflow `agentic-sdlc:spec-plan-draft` for its internal Spec and Plan phases. It must not call standalone `spec-authoring` or `plan-authoring` for steps 4-5. Dynamic workflows are available on paid plans, with Anthropic API access, and on Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry; on Pro, turn them on from `/config` ([workflows](https://code.claude.com/docs/en/workflows), fetched 2026-10-07). This is not a live test on 2.1.293.
 
-The full-mode transcript must show native calls for the pipeline gates: `Skill` (`dispatch-strategy`, `completion-claim-gate`), `Workflow` (`spec-plan-draft`), and `Agent`/`Task` (`security-reviewer`, `implementation-auditor`, and `context-analyst` when used). Manual prose does not replace a tool call when the runtime supports that tool.
+The full-mode transcript must show native calls for the pipeline gates: `Skill` (`dispatch-strategy`, `completion-claim-gate`), `Workflow` (`spec-plan-draft`), `Read` of the selected work-type core file, and `Agent`/`Task` (`security-reviewer`, `implementation-auditor`, and `context-analyst` when used). Manual prose does not replace a tool call when the runtime supports that tool.
 
 ## Hooks
 
@@ -43,12 +43,14 @@ Claude Code wires the full hook set through `hooks/hooks-claude.json`:
 
 - `PreToolUse`: commit secret scan, destructive-command guard, branch guard, and flow-order guard before active-flow source edits.
 - `PostToolUse`: write secret scan.
-- `SessionStart`: AGENTIC-SDLC bootstrap and git status summary.
+- `SessionStart`: AGENTIC-SDLC bootstrap (including the line that the pipeline owns every step inside an active `agentic-sdlc-pipeline` run) and git status summary.
 - `Stop`: completion-claim guard, flow-step evidence guard, and `worktree-scan.mjs`.
 
 `flow-order-guard.mjs` and `flow-step-guard.mjs` both read `hooks/flow-requirements.json` through `flow-evidence.mjs`. They re-derive evidence from validated artifacts, real tool calls, and command transcripts; prose claims do not satisfy a step. They warn by default and block/deny only when `AGENTIC_FLOW_GATE_BLOCK=true`.
 
 The Stop guard also lists two warn-level steps for the house flows. `branch` flags a source edit while the Stop-time working directory is on `main` or `master`. `review-result` flags a reviewer that was dispatched (the control reviewers `implementation-control` / `implementation-auditor`, and where a flow has a security step, `security-audit` / `security-reviewer`; for `agentic-sdlc-pipeline` only the `Agent` dispatches of `implementation-auditor` and `security-reviewer`, matched by exact name) when the only result is a launch receipt (`toolUseResult.status` `async_launched` or `remote_launched`) or no completed result exists. A runtime task-notification with `completed`, or an in-flight Stop `background_tasks` subagent naming that reviewer, clears it ([hooks](https://code.claude.com/docs/en/hooks), fetched 2026-10-07). Neither step ever blocks or denies, even with `AGENTIC_FLOW_GATE_BLOCK=true`; `branch-guard.mjs` remains the commit and push guard.
+
+For `agentic-sdlc-pipeline`, the `dispatch`, `security` and `control` steps match the `Skill` call to `dispatch-strategy` and the `Agent` dispatches of `security-reviewer` and `implementation-auditor` by exact name. Its `red-first` step makes `flow-order-guard.mjs` look for a test command before the first production edit; whether that run failed is checked only by the offline strict grader. `flow-step-guard.mjs` also warns when a pipeline turn ends on the `dispatch-strategy` decision, and blocks that only when `AGENTIC_FLOW_GATE_BLOCK=true`. Hook flow activation is by the `Skill` tool: a pipeline run started only by the `/agentic-sdlc-pipeline` slash command activates no hook flow and is covered by the offline procedure eval. Details: [`../hooks/README.md`](../hooks/README.md).
 
 All paths resolve through `${CLAUDE_PLUGIN_ROOT}`. `node` must be on `PATH`.
 
@@ -78,5 +80,7 @@ The repository gate rejects frontmatter keys outside that list. Public skill doc
 Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdlc/{specs,plans}/<id>.md` (back-compat, unchanged) and the per-package canonical `docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md`, where `<slug>` is lowercase kebab-case `^[a-z0-9][a-z0-9-]{0,63}$` and never a reserved name (`specs`, `plans`, `evidence`, `notes`, `spec`, `plan`).
 
 Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution; the Claude flow guards never activate on an evidence write). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
+
+From Step 8 the pipeline's main loop also writes a TDD evidence file, `docs/agentic-sdlc/<slug>/evidence/<work_id>.tdd.md` per-package or `docs/agentic-sdlc/evidence/<work_id>.tdd.md` flat, with every test run until `implementation-auditor` is dispatched; it is git-ignored, has no validator and never gates resolution.
 
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.

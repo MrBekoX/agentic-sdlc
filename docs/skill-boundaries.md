@@ -16,7 +16,7 @@ For the component reference see [`plugin-readme.md`](./plugin-readme.md); for ru
 - The intent spans the full SDLC envelope, **or** touches production-impacting areas (auth, payment, database migrations, API contracts, permissions, user data, tokens/sessions, RLS) → escalate to `agentic-sdlc-pipeline`.
 - The user asks *which skill to use*, *how to route*, or *whether scope has shifted* → stay in `using-agentic-sdlc`.
 
-`agentic-sdlc-pipeline` is the **escalation path, not the default**. Step-skills must not call it unless the user is intentionally escalating to the full flow.
+`agentic-sdlc-pipeline` is the **escalation path, not the default**. Focused skills must not call it unless the user is intentionally escalating to the full flow.
 
 ## Two branches
 
@@ -24,7 +24,7 @@ Focused skills and the pipeline are two separate entry points:
 
 - **Focused skills** are standalone entry points. They must **not** call `agentic-sdlc-pipeline` and stay maximally unaware of each other; a focused skill calls another only when its own flow genuinely needs it.
 - **Inside an `agentic-sdlc-pipeline` run**, the pipeline does not invoke `feature-build`, `root-cause-fix`, `safe-refactor`, `test-authoring`, `security-audit`, or `implementation-control`, and does not read their `SKILL.md` files. Steps 8–13 read the selected work-type core file (`skills/<skill>/references/core.md` of `feature-build`, `root-cause-fix`, `safe-refactor` or `test-authoring`), the security steps dispatch the `security-reviewer` agent, and the implementation-control gate runs `resolve_work_package.py` and dispatches the `implementation-auditor` agent. The pipeline's own `Skill` calls are `dispatch-strategy` (once, at kickoff, before Step 1), `completion-claim-gate`, the read-only `git-safety-check` command at Step 16, and the companions `mind-spark` and `feedback-triage`.
-- **One copy of the work-type rules.** The standalone skill and the pipeline read the same core file, so the pipeline never duplicates spec/plan/TDD logic inline. Each focused skill's description ends with "Not for steps inside an active agentic-sdlc-pipeline run."
+- **One source for the work-type steps.** The standalone skill and the pipeline read the same core file, so the implementation steps exist once; the depth blocks are copied byte-identical into each focused `SKILL.md`, and a parity test pins the copies. The pipeline does not restate them inline. Each focused skill's description ends with "Not for steps inside an active agentic-sdlc-pipeline run."
 
 This keeps the dependency graph one-directional and prevents the pipeline from becoming a god-object.
 
@@ -97,7 +97,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 
 - **Purpose:** build a new feature or endpoint in small, reversible, convention-respecting steps.
 - **Should trigger:** "add/build a new feature, endpoint, screen, flow, or capability"; focused new functionality when the full pipeline envelope has **not** been requested.
-- **Should NOT trigger:** bug/root-cause fixes (→ `root-cause-fix`); test-only work (→ `test-authoring`); behavior-preserving refactors (→ `safe-refactor`); full SDLC envelope requests (→ `agentic-sdlc-pipeline`).
+- **Should NOT trigger:** bug/root-cause fixes (→ `root-cause-fix`); test-only work (→ `test-authoring`); behavior-preserving refactors (→ `safe-refactor`); full SDLC envelope requests (→ `agentic-sdlc-pipeline`); steps inside an active `agentic-sdlc-pipeline` run (the pipeline reads this skill's work-type core file).
 - **Produces:** implemented feature, tests, security notes, final report.
 - **Delegates to:** `context-analyst` for per-layer scope mapping; `dispatch-strategy` for exploration/verification fan-out; `implementation-control` for pre-final audit; `completion-claim-gate` before success claims.
 - **Contracts:** `01`, `02`, `03`, `04`, `05`, `06`, `07`, `08`, `09`, `10`.
@@ -106,7 +106,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 
 - **Purpose:** find the root cause of a bug or failing behavior and fix it with a regression test.
 - **Should trigger:** "fix a bug / error / broken behavior / failing test / production issue / incident / regression"; "find and fix / root cause / null reference / webhook / expired-token failures".
-- **Should NOT trigger:** new features (→ `feature-build`); pure refactors (→ `safe-refactor`); received review feedback (→ `feedback-triage`).
+- **Should NOT trigger:** new features (→ `feature-build`); pure refactors (→ `safe-refactor`); received review feedback (→ `feedback-triage`); steps inside an active `agentic-sdlc-pipeline` run (the pipeline reads this skill's work-type core file).
 - **Produces:** a minimal fix, regression test, test output, security pass, final report.
 - **Delegates to:** `debugger`, `context-analyst`, `dispatch-strategy`, `security-audit`, `implementation-control`, `completion-claim-gate`.
 - **Contracts:** `01`, `02`, `03`, `05`, `06`, `07`, `08`, `10`.
@@ -115,7 +115,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 
 - **Purpose:** improve structure while preserving behavior, guarded by characterization tests.
 - **Should trigger:** "refactor / restructure / clean up / simplify / improve readability / reduce duplication / change architecture without changing behavior"; requests requiring characterization tests and approval for broad scope.
-- **Should NOT trigger:** bug fixes (→ `root-cause-fix`); new features (→ `feature-build`); test-only work (→ `test-authoring`).
+- **Should NOT trigger:** bug fixes (→ `root-cause-fix`); new features (→ `feature-build`); test-only work (→ `test-authoring`); steps inside an active `agentic-sdlc-pipeline` run (the pipeline reads this skill's work-type core file).
 - **Produces:** restructured code, proof behavior is unchanged (tests green before and after), remaining risks.
 - **Delegates to:** `software-architect`/`context-analyst` for per-module characterization; `dispatch-strategy` for multi-file fan-out; `implementation-control` for pre-final audit.
 - **Contracts:** `01`, `04`, `05`, `06`, `07`, `08`, `10`.
@@ -124,7 +124,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 
 - **Purpose:** design and write meaningful tests, or repair broken ones.
 - **Should trigger:** "write / add / repair / design tests: unit, integration, regression, e2e, flaky tests, failing tests, meaningful assertions, coverage, test doubles, test strategy"; test-only work that must not change production behavior.
-- **Should NOT trigger:** feature implementation (→ `feature-build`); bug fixes (→ `root-cause-fix`); refactors (→ `safe-refactor`).
+- **Should NOT trigger:** feature implementation (→ `feature-build`); bug fixes (→ `root-cause-fix`); refactors (→ `safe-refactor`); steps inside an active `agentic-sdlc-pipeline` run (the pipeline reads this skill's work-type core file).
 - **Produces:** tests with RED→GREEN evidence, suite output, assertion-quality review.
 - **Delegates to:** `test-engineer` for coverage-gap analysis; `root-cause-fix` if the failing test reveals a bug; `dispatch-strategy` for large multi-file passes.
 - **Contracts:** `00`, `01`, `05`.
@@ -143,7 +143,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 
 - **Purpose:** systematically audit changes or designs for vulnerabilities.
 - **Should trigger:** "audit / review code, diff, endpoint, login flow, or feature for security"; input validation, auth, authorization/IDOR, secrets, injection, dependencies, data exposure, logging, rate limiting, permission boundaries.
-- **Should NOT trigger:** general code-quality review (→ `code-quality-review`); bug fixing or feature implementation.
+- **Should NOT trigger:** general code-quality review (→ `code-quality-review`); bug fixing or feature implementation; the security steps inside an active `agentic-sdlc-pipeline` run (the pipeline dispatches the `security-reviewer` agent).
 - **Produces:** a findings table `Severity | Category | File:Line | Risk | Recommendation`, secrets masked as `***MASKED***`.
 - **Delegates to:** `root-cause-fix` or `feature-build` to implement fixes; `security-reviewer` agent for deep single-lens analysis.
 - **Contracts:** `00`, `06`, `10`.
@@ -163,14 +163,14 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Should trigger:** "apply / triage / judge CodeRabbit comments, reviewer comments, PR/MR feedback, bot/CI/linter review output"; "is this review feedback right?"
 - **Should NOT trigger:** writing a fresh quality review of someone else's change (→ `code-quality-review`); feature or bug work not driven by external feedback.
 - **Produces:** evaluated feedback items, planned/applied changes, reasoned pushback where appropriate.
-- **Delegates to:** `code-quality-review` for cross-reference; `test-authoring` or `root-cause-fix` for behavior changes triggered by feedback.
+- **Delegates to:** `code-quality-review` for cross-reference; `test-authoring` or `root-cause-fix` for behavior changes triggered by feedback; inside an `agentic-sdlc-pipeline` run, the pipeline's selected work-type core instead.
 - **Contracts:** `00`, `02`, `03` (scope lock), `04`.
 
 ### `implementation-control`
 
 - **Purpose:** mandatory pre-final audit that the required implementation flow was actually followed.
 - **Should trigger:** "pre-final audit", "verify the required flow was followed", "before the final answer check the flow"; any final implementation report in `feature-build`/`root-cause-fix`/`safe-refactor`.
-- **Should NOT trigger:** starting new implementation; review feedback triage; listing only security findings.
+- **Should NOT trigger:** starting new implementation; review feedback triage; listing only security findings; the implementation-control gate inside an active `agentic-sdlc-pipeline` run (the pipeline runs `resolve_work_package.py` and dispatches the `implementation-auditor` agent).
 - **Produces:** an **Implementation Control Report** with PASS / PARTIAL / FAIL per checked step.
 - **Delegates to:** `implementation-auditor` agent for an independent fresh-context pass (degraded to main loop only if the agent is unavailable).
 - **Contracts:** audits the full implementation-contract set (`00`–`10`); performs no code changes.
@@ -298,6 +298,8 @@ Work-package artifacts resolve in two layouts: the legacy flat `docs/agentic-sdl
 
 Per-package evidence persists to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get no Finalize evidence), overwritten in place per run (single canonical file, last run wins), git-ignored, and with no validator (it never gates resolution). That evidence write is performed by the main pipeline finalize step, not the read-only `implementation-auditor` sub-agent.
 
+From Step 8 the pipeline's main loop also writes a TDD evidence file, `docs/agentic-sdlc/<slug>/evidence/<work_id>.tdd.md` per-package or `docs/agentic-sdlc/evidence/<work_id>.tdd.md` flat, with every test run until `implementation-auditor` is dispatched; it is git-ignored, has no validator and never gates resolution.
+
 Per-package plan change-detection runs as a filesystem scan, not a `git status` query: new generated plans can be git-ignored, so the resolver scans the filesystem; published plugin documentation is tracked separately.
 
 ## Method mapping relative to Superpowers
@@ -309,7 +311,7 @@ This section maps five method slices of [Superpowers at `b36e0829c6d0140e93cfef2
 | design gate | `mind-spark`, `spec-authoring`, `using-agentic-sdlc` |
 | written plan | `plan-authoring`, `agentic-sdlc-pipeline`, contract `03-plan-mode` |
 | TDD implementation | `feature-build`, `root-cause-fix`, `safe-refactor`, `test-authoring` and their work-type core files (read by `agentic-sdlc-pipeline` Steps 8–13), contract `05-testing`, `hooks/flow-step-guard.mjs`, `hooks/flow-order-guard.mjs` |
-| review | `code-quality-review`, `security-audit`, `feedback-triage`, `implementation-control` |
+| review | `code-quality-review`, `security-audit`, `feedback-triage`, `implementation-control`, and the `security-reviewer` and `implementation-auditor` agents that `agentic-sdlc-pipeline` dispatches directly |
 | verification-before-completion | `completion-claim-gate`, `hooks/completion-claim-guard.mjs`, `hooks/completion-claim-guard-codex.mjs` |
 
 The mapping is structural, not a live parity or trigger-rate claim. A Superpowers catalog name with no house skill of the same name is not a gap, and the default process owner stays AGENTIC-SDLC.
