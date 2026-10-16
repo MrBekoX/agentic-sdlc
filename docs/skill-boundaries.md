@@ -18,14 +18,13 @@ For the component reference see [`plugin-readme.md`](./plugin-readme.md); for ru
 
 `agentic-sdlc-pipeline` is the **escalation path, not the default**. Step-skills must not call it unless the user is intentionally escalating to the full flow.
 
-## The onion rule
+## Two branches
 
-The skill architecture is a directed onion:
+Focused skills and the pipeline are two separate entry points:
 
-- `agentic-sdlc-pipeline` **knows the step-skills and calls them.**
-- Step-skills must **not** call `agentic-sdlc-pipeline` and stay maximally unaware of each other.
-- A step-skill calls another step-skill only when its own flow genuinely needs it.
-- `agentic-sdlc-pipeline` **delegates the core** — it never duplicates spec/plan/TDD logic inline.
+- **Focused skills** are standalone entry points. They must **not** call `agentic-sdlc-pipeline` and stay maximally unaware of each other; a focused skill calls another only when its own flow genuinely needs it.
+- **Inside an `agentic-sdlc-pipeline` run**, the pipeline does not invoke `feature-build`, `root-cause-fix`, `safe-refactor`, `test-authoring`, `security-audit`, or `implementation-control`, and does not read their `SKILL.md` files. Steps 8–13 read the selected work-type core file (`skills/<skill>/references/core.md` of `feature-build`, `root-cause-fix`, `safe-refactor` or `test-authoring`), the security steps dispatch the `security-reviewer` agent, and the implementation-control gate runs `resolve_work_package.py` and dispatches the `implementation-auditor` agent. The pipeline's own `Skill` calls are `dispatch-strategy` (once, at Step 1), `completion-claim-gate`, and the companions `mind-spark` and `feedback-triage`.
+- **One copy of the work-type rules.** The standalone skill and the pipeline read the same core file, so the pipeline never duplicates spec/plan/TDD logic inline. Each focused skill's description ends with "Not for steps inside an active agentic-sdlc-pipeline run."
 
 This keeps the dependency graph one-directional and prevents the pipeline from becoming a god-object.
 
@@ -72,8 +71,8 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Purpose:** full-envelope SDLC orchestrator for production-impacting, end-to-end work.
 - **Should trigger:** user asks for end-to-end implementation with spec, plan, TDD, tests, security review, PR-ready diff; production-impacting areas (auth, payment, DB migration, API contract, permissions, user data, token/session, RLS).
 - **Should NOT trigger:** narrow feature/fix/test/spec/plan/refactor/review/audit requests; as the default for every implementation question.
-- **Produces:** approved `docs/agentic-sdlc/specs/<work_id>.md` + `docs/agentic-sdlc/plans/<work_id>.md`, implementation, tests, security findings, final implementation report.
-- **Delegates to:** `dispatch-strategy`; `root-cause-fix`/`feature-build`/`safe-refactor`/`test-authoring` for the core; `security-audit`, `implementation-control`, `completion-claim-gate` for gates.
+- **Produces:** approved `docs/agentic-sdlc/specs/<work_id>.md` + `docs/agentic-sdlc/plans/<work_id>.md`, implementation, tests, a TDD evidence file, security findings, final implementation report.
+- **Delegates to:** the `dispatch-strategy` skill (once, at Step 1) and the `completion-claim-gate` skill; the `spec-plan-draft` workflow (Claude Code); the `context-analyst`, `security-reviewer` and `implementation-auditor` agents. Steps 8–13 run from the selected work-type core file of `root-cause-fix`/`feature-build`/`safe-refactor`/`test-authoring`; no focused skill is invoked.
 - **Contracts:** all of `00`–`10`.
 
 ### `spec-authoring`
@@ -135,7 +134,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 - **Purpose:** decide how work should run — main loop, sub-agent, dynamic-workflow, or agent-team.
 - **Scope (fenced):** chooses the execution mechanism over a skill's named parts (a map produced at the start); never wholesale-delegates a multi-step skill — the skill coordinates from the main loop and only its parts get a mechanism — and never governs the skill's internal steps, their order, or its mandated integrity gates (critic/auditor).
 - **Should trigger:** "should this run in the main loop, a sub-agent, a workflow, or an agent-team?"; work with 2+ independent parts, heavy exploration, verification/research fan-out, multi-file generation, or multi-angle review/audit.
-- **Should NOT trigger:** as a substitute for doing the domain work; when the skill request already implies a specific focused skill (the focused skill consults `dispatch-strategy` internally).
+- **Should NOT trigger:** as a substitute for doing the domain work; when the skill request already implies a specific focused skill (the focused skill consults `dispatch-strategy` internally); a second time inside one `agentic-sdlc-pipeline` run (the pipeline calls it once, at Step 1, reuses that map, and continues in the same turn).
 - **Produces:** a mechanism recommendation with cost/caveat rationale.
 - **Delegates to:** the chosen runtime mechanism; no domain work is performed here.
 - **Contracts:** `00`, `10`.
@@ -170,7 +169,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 ### `implementation-control`
 
 - **Purpose:** mandatory pre-final audit that the required implementation flow was actually followed.
-- **Should trigger:** "pre-final audit", "verify the required flow was followed", "before the final answer check the flow"; any final implementation report in `feature-build`/`root-cause-fix`/`safe-refactor`/`agentic-sdlc-pipeline`.
+- **Should trigger:** "pre-final audit", "verify the required flow was followed", "before the final answer check the flow"; any final implementation report in `feature-build`/`root-cause-fix`/`safe-refactor`.
 - **Should NOT trigger:** starting new implementation; review feedback triage; listing only security findings.
 - **Produces:** an **Implementation Control Report** with PASS / PARTIAL / FAIL per checked step.
 - **Delegates to:** `implementation-auditor` agent for an independent fresh-context pass (degraded to main loop only if the agent is unavailable).
@@ -309,7 +308,7 @@ This section maps five method slices of [Superpowers at `b36e0829c6d0140e93cfef2
 |---|---|
 | design gate | `mind-spark`, `spec-authoring`, `using-agentic-sdlc` |
 | written plan | `plan-authoring`, `agentic-sdlc-pipeline`, contract `03-plan-mode` |
-| TDD implementation | `feature-build`, `root-cause-fix`, `safe-refactor`, `test-authoring`, contract `05-testing`, `hooks/flow-step-guard.mjs` |
+| TDD implementation | `feature-build`, `root-cause-fix`, `safe-refactor`, `test-authoring` and their work-type core files (read by `agentic-sdlc-pipeline` Steps 8–13), contract `05-testing`, `hooks/flow-step-guard.mjs`, `hooks/flow-order-guard.mjs` |
 | review | `code-quality-review`, `security-audit`, `feedback-triage`, `implementation-control` |
 | verification-before-completion | `completion-claim-gate`, `hooks/completion-claim-guard.mjs`, `hooks/completion-claim-guard-codex.mjs` |
 

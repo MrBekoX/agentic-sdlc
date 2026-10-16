@@ -42,10 +42,8 @@ LOCK_DIGESTS = {
     # The pre-edit ordering gate: whether required evidence exists before a source edit.
     "hooks/flow-order-guard.mjs":
         "f584b0c25d1b6a8a655b2bc37fbad37350ee9c80545b412d2bd49e30d6a3b646",
-    # The Stop-time flow-step gate: whether a flow's required steps actually ran.
-    # Rebased for Claude Code 2.1.293: last_assistant_message + background_tasks on Stop.
-    "hooks/flow-step-guard.mjs":
-        "e5f66136c69096748375ea1fb357b1f6282d478f9857ddca974a29853595e165",
+    # hooks/flow-step-guard.mjs (the Stop-time flow-step gate) is no longer locked here.
+    # Released 2026-10 (pipeline v2.1 D7): the block reason named implementation-control, which the pipeline no longer invokes; behavior is pinned by tests/test_flow_guards.py PINNED_STEP_BLOCK_MAIN and the pipeline block pin.
     # The completion-claim backstop.
     # Rebased for Claude Code 2.1.293: prefer last_assistant_message; block only when caught up.
     "hooks/completion-claim-guard.mjs":
@@ -733,7 +731,8 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
         #   hooks/hooks-claude.json       - Bash-only matcher; bypassable `if` subcommand filter
         # Claude flow files (spec §7).
         "hooks/flow-order-guard.mjs",
-        "hooks/flow-step-guard.mjs",
+        # hooks/flow-step-guard.mjs RELEASED (no longer locked).
+        # Released 2026-10 (pipeline v2.1 D7): the block reason named implementation-control, which the pipeline no longer invokes; behavior is pinned by tests/test_flow_guards.py PINNED_STEP_BLOCK_MAIN and the pipeline block pin.
         # hooks/flow-evidence.mjs and hooks/codex-flow-evidence.mjs are NOT locked here — the AP2
         # "regression surface untouched" guarantee is intentionally SUPERSEDED for these two files
         # by work-package-artifact-resolution (per-package recognition + Claude Stop co-located
@@ -786,6 +785,28 @@ class TestRegressionSurfaceUntouched(unittest.TestCase):
                     if line.strip().startswith("#")]
         self.assertTrue(any("publication-readiness 0.4.3 (BR17)" in line for line in comments),
                         "the lock release needs its rationale comment beside the list")
+
+    def test_released_flow_step_guard_not_locked_and_rationale_present(self):  # C6 / D7
+        self.assertNotIn("hooks/flow-step-guard.mjs", self.BYTE_LOCKED)
+        self.assertNotIn("hooks/flow-step-guard.mjs", LOCK_DIGESTS)
+        comments = [line.strip() for line in Path(__file__).read_text(encoding="utf-8").splitlines()
+                    if line.strip().startswith("#")]
+        self.assertGreaterEqual(sum(line == "# " + FLOW_STEP_GUARD_RELEASE for line in comments), 2,
+                                "the release needs its C6 rationale beside both LOCK_DIGESTS and BYTE_LOCKED")
+        # The guards that stay locked keep their literal digests.
+        for rel in ("hooks/flow-order-guard.mjs", "hooks/completion-claim-guard.mjs",
+                    "hooks/flow-step-guard-codex.mjs"):
+            with self.subTest(file=rel):
+                self.assertIn(rel, LOCK_DIGESTS)
+                self.assertIn(rel, self.BYTE_LOCKED)
+
+
+# The C6 release rationale, verbatim (pipeline v2.1 contracts, "Releasing the flow-step-guard.mjs lock").
+FLOW_STEP_GUARD_RELEASE = (
+    "Released 2026-10 (pipeline v2.1 D7): the block reason named implementation-control, which the "
+    "pipeline no longer invokes; behavior is pinned by tests/test_flow_guards.py PINNED_STEP_BLOCK_MAIN and "
+    "the pipeline block pin."
+)
 
 
 # ==== B5 (#5 write-form symmetry): drivers + tests ==========================

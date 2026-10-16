@@ -271,7 +271,9 @@ class TestProcedureEvalHarness(unittest.TestCase):
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:dispatch-strategy"})
         self.assertTrue(procedure_eval.required_skill_satisfied(trace, "agentic-sdlc:dispatch-strategy"))
 
-    def test_pipeline_case_fails_when_relevant_core_workflow_skill_is_missing(self):
+    def test_pipeline_case_needs_no_focused_skill_and_forbids_calling_one(self):
+        # C7 / D1: case 1 no longer requires feature-build, its two gate skills are met by their agents, and a Skill
+        # call to a focused skill trips forbidden pattern 1 even in default mode.
         case = procedure_eval.load_eval(REPO / "tests/skills/procedure/agentic-sdlc-pipeline.json")[0]
         trace = procedure_eval.Trace()
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:dispatch-strategy"})
@@ -293,15 +295,17 @@ class TestProcedureEvalHarness(unittest.TestCase):
             "shell_command",
             {"command": "python ${PLUGIN_ROOT}/scripts/validate_artifacts.py --mode plan --file docs/agentic-sdlc/plans/greeting-suffix.md --spec docs/agentic-sdlc/specs/greeting-suffix.md --strict"},
         )
-        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:security-audit"})
-        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:implementation-control"})
+        procedure_eval._record_tool(trace, "Agent", {"subagent_type": "agentic-sdlc:security-reviewer"})
+        procedure_eval._record_tool(trace, "Agent", {"subagent_type": "agentic-sdlc:implementation-auditor"})
         procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:completion-claim-gate"})
 
         errors = procedure_eval.evaluate_case(case, trace, REPO)
+        self.assertEqual([e for e in errors if e.startswith(("missing_", "forbidden_"))], [])
 
-        self.assertIn("missing_skill:agentic-sdlc:feature-build", errors)
-        self.assertNotIn("missing_skill:agentic-sdlc:security-audit", errors)
-        self.assertNotIn("missing_workflow:agentic-sdlc:spec-plan-draft", errors)
+        procedure_eval._record_tool(trace, "Skill", {"skill": "agentic-sdlc:feature-build"})
+        errors = procedure_eval.evaluate_case(case, trace, REPO)
+        self.assertEqual([e for e in errors if e.startswith(("missing_", "forbidden_"))],
+                         [f"forbidden_pattern:{FORBIDDEN_SKILL_CALL}"])
 
     def test_live_fixture_has_baseline_commit_before_claude_runs(self):
         case = {
@@ -1846,12 +1850,13 @@ class TestStrictAuditorCarriers(unittest.TestCase):
                 self.assertEqual(self.critical(trace), expected)
 
 
-STRICT_ORDER = ["dispatch-strategy", "spec-written", "plan-written", "core-skill", "red-run", "green-run",
-                "security", "control", "completion-claim-gate"]
-SECURITY_REVIEWER = {"step": "security", "skills": ["agentic-sdlc:security-audit"], "agents": ["security-reviewer"],
-                     "codex_result": "findings-table"}
-CONTROL_REVIEWER = {"step": "control", "skills": ["agentic-sdlc:implementation-control"],
-                    "agents": ["implementation-auditor"], "codex_result": "control-verdict"}
+STRICT_ORDER = ["dispatch-strategy", "spec-written", "plan-written", "core-read", "red-run", "green-run", "security",
+                "control", "completion-claim-gate"]  # contract C7/C15.10: core-skill is gone, core-read joins
+SECURITY_REVIEWER = {"step": "security", "skills": [], "agents": ["security-reviewer"], "codex_result": "findings-table"}
+CONTROL_REVIEWER = {"step": "control", "skills": [], "agents": ["implementation-auditor"],
+                    "codex_result": "control-verdict"}
+# Skill membership is still a grader mechanism (no pipeline case uses it after C7); these probes keep it exercised.
+SKILL_LISTING_SECURITY_REVIEWER = dict(SECURITY_REVIEWER, skills=["agentic-sdlc:security-audit"])
 FINDINGS_TABLE = ("Severity | Category | File:Line | Risk | Recommendation\n|---|---|---|---|---|\n"
                   "| Low | Input handling | greeting.py:3 | Suffix is not length-bounded | Keep as is for the fixture |")
 CONTROL_REPORT = "# Implementation Control Report\n\n## Overall Status\nPASS\n\n## Final Decision\nallow-final\n"
@@ -1875,15 +1880,16 @@ class TestStrictReviewerOrder(unittest.TestCase):
         return procedure_eval.evaluate_case(case, trace, REPO, strict=True)
 
     def test_both_pipeline_cases_carry_valid_strict_config(self):
+        # Contract C7: cases 1 and 2 carry the full strict object literally (case 2 keeps check_artifact_depth true).
         cases = procedure_eval.load_eval(REPO / PIPELINE_EVAL)
         self.assertEqual(len(cases), 2)
+        self.assertEqual([case["id"] for case in cases], list(PIPELINE_CASES))
         for case in cases:
             with self.subTest(case=case["id"]):
-                strict = case["strict"]
-                self.assertEqual({r["step"] for r in strict["reviewers"]}, {"security", "control"})
-                self.assertEqual(strict["required_order"], STRICT_ORDER)
-                self.assertIs(strict["require_red_green"], True)
-                self.assertIs(strict["check_artifact_depth"], True)
+                self.assertIn("strict", case)
+                self.assertEqual(case["strict"], C7_FULL_RUN_STRICT)
+                self.assertEqual(case["strict"]["required_order"], STRICT_ORDER)
+                self.assertEqual(case["strict"]["reviewers"], [SECURITY_REVIEWER, CONTROL_REVIEWER])
 
     def test_missing_reviewer_result_fails_named(self):
         trace = procedure_eval.trace_events([full_tool_use("s1", "Agent", {"subagent_type": "agentic-sdlc:security-reviewer"})])
@@ -1910,7 +1916,7 @@ class TestStrictReviewerOrder(unittest.TestCase):
             full_tool_use("s1", "Agent", {"subagent_type": "agentic-sdlc:security-reviewer"}),
             claude_result("s1", False, FINDINGS_TABLE),
         ])
-        self.assertEqual(reviewer_errors(self.evaluate(reviewer_case(SECURITY_REVIEWER), trace)), [])
+        self.assertEqual(reviewer_errors(self.evaluate(reviewer_case(SKILL_LISTING_SECURITY_REVIEWER), trace)), [])
 
     def test_codex_reviewer_result_read_from_documented_output(self):
         """Codex has no reviewer dispatch or result event (AC39): the documented reviewer output clears the step.
@@ -1924,12 +1930,12 @@ class TestStrictReviewerOrder(unittest.TestCase):
         self.assertEqual(complete.runtime, "codex-rollout")
         self.assertEqual(reviewer_errors(self.evaluate(case, complete)), [])
         no_table = procedure_eval.trace_events(
-            [assistant_message("Codex Adapter Gate: security-audit"), assistant_message(CONTROL_REPORT)], strict=True)
+            [assistant_message("Codex Adapter Gate: security-reviewer"), assistant_message(CONTROL_REPORT)], strict=True)
         self.assertEqual(reviewer_errors(self.evaluate(case, no_table)), ["strict_reviewer_result_missing:security"])
 
     def test_codex_never_reports_errored(self):
         trace = procedure_eval.trace_events(
-            [assistant_message("Codex Adapter Gate: security-audit"),
+            [assistant_message("Codex Adapter Gate: security-reviewer"),
              exec_call("c1", "python -m pytest -q"), exec_output("c1", 1, "1 failed\n")], strict=True)
         errors = self.evaluate(reviewer_case(SECURITY_REVIEWER, CONTROL_REVIEWER), trace)
         self.assertFalse([e for e in errors if e.startswith("strict_reviewer_result_errored:")], errors)
@@ -1942,7 +1948,8 @@ class TestStrictReviewerOrder(unittest.TestCase):
             full_tool_use("d1", "Skill", {"skill": "agentic-sdlc:dispatch-strategy"}), claude_result("d1", False, "ok"),
             full_tool_use("w1", "Write", {"file_path": "docs/agentic-sdlc/specs/x.md", "content": "spec"}),
             full_tool_use("w2", "Write", {"file_path": "docs/agentic-sdlc/plans/x.md", "content": "plan"}),
-            full_tool_use("f1", "Skill", {"skill": "agentic-sdlc:feature-build"}), claude_result("f1", False, "ok"),
+            full_tool_use("cr1", "Read", {"file_path": "/opt/agentic-sdlc/skills/feature-build/references/core.md"}),
+            claude_result("cr1", False, "# feature-build - work-type core"),
             full_tool_use("s1", "Agent", {"subagent_type": "agentic-sdlc:security-reviewer"}),
             claude_result("s1", False, FINDINGS_TABLE),
             *claude_run("r1", "python -m pytest -q", True, "1 failed"),
@@ -1984,7 +1991,7 @@ class TestStrictReviewerMembership(unittest.TestCase):
     def test_skill_args_naming_reviewer_skill_is_not_a_member(self):
         # Probe P3c. Mutation: matching the reviewer skill name anywhere in the Skill input (here: args).
         errors = self.dispatch_errors("Skill", {"skill": "agentic-sdlc:feature-build", "args": "then run security-audit"},
-                                      [SECURITY_REVIEWER])
+                                      [SKILL_LISTING_SECURITY_REVIEWER])
         self.assertEqual(errors, ["strict_reviewer_result_missing:security"])
 
     def test_agent_type_must_equal_listed_agent_or_house_prefix(self):
@@ -2004,7 +2011,8 @@ class TestStrictReviewerMembership(unittest.TestCase):
         for skill, expected in (("agentic-sdlc:security-audit", []), ("security-audit", []),
                                 ("agentic-sdlc:security-audit-extra", missing)):
             with self.subTest(skill=skill):
-                self.assertEqual(self.dispatch_errors("Skill", {"skill": skill}, [SECURITY_REVIEWER]), expected)
+                self.assertEqual(self.dispatch_errors("Skill", {"skill": skill}, [SKILL_LISTING_SECURITY_REVIEWER]),
+                                 expected)
 
 
 PACKET_CASE = "agentic-sdlc-pipeline-feature-no-commit"
@@ -2127,7 +2135,8 @@ class TestEvidencePacket(unittest.TestCase):
             packet = json.loads(packet_path.read_text(encoding="utf-8"))
             self.assertLessEqual(PACKET_FIELDS, set(packet))
             self.assertEqual((packet["schema_version"], packet["case_id"]), (1, PACKET_CASE))
-            # QUAL-15: the pass transcript is a Claude stream, and its strict replay fails (no attributable GREEN).
+            # QUAL-15: the pass transcript is a Claude stream, and its strict replay fails (its spec and plan are the
+            # shallow "spec"/"plan" stubs, so the strict depth check reports them).
             self.assertEqual(packet["runtime"], "claude")
             self.assertIn(f"case_{PACKET_CASE}=failed", proc.stdout.splitlines())
             self.assertEqual(packet["terminal_status"], "failed")
@@ -2809,21 +2818,42 @@ TRANSCRIPTS = REPO / "tests" / "fixtures" / "transcripts"
 PIPELINE_CASES = ("agentic-sdlc-pipeline-feature-no-commit", "agentic-sdlc-pipeline-per-package")
 
 
-def strict_fixture_replay(td, fixture_name):
+def strict_fixture_replay(td, fixture_name, case_ids=PIPELINE_CASES, eval_set=PIPELINE_EVAL):
+    """CLI strict replay of one committed fixture against the named cases only (contract C7 test helpers).
+
+    Each case id is passed as `--case-id`, so a full-run fixture is graded against cases 1/2 only and a single-case
+    fixture (the per-package run, the gate-stop runs) against its own case, whatever else the eval set holds.
+    """
     root = Path(td) / "fixture"
     if not root.exists():
         shutil.copytree(BASIC_FIXTURE, root)
-    return run_cli("--eval-set", PIPELINE_EVAL, "--transcript", TRANSCRIPTS / fixture_name, "--strict-evidence",
-                   "--fixture-root", root)
+    args = ["--eval-set", eval_set, "--transcript", TRANSCRIPTS / fixture_name, "--strict-evidence",
+            "--fixture-root", root]
+    for case_id in case_ids:
+        args += ["--case-id", case_id]
+    return run_cli(*args)
 
 
 class StrictFixtureAssertions(unittest.TestCase):
-    def assert_positive_strict_pass(self, fixture_name):
+    def require_eval_set(self, eval_set):
+        self.assertTrue((REPO / eval_set).is_file(),
+                        f"{eval_set} is missing: contract C7 puts the gate-stop case (case 3) in this separate file")
+
+    def load_cases(self, eval_set):
+        """load_eval for a committed eval set; a missing file or a rejected case is this test's failure, not an error."""
+        self.require_eval_set(eval_set)
+        try:
+            return procedure_eval.load_eval(REPO / eval_set)
+        except ValueError as exc:
+            self.fail(f"{eval_set} does not load: {exc}")
+
+    def assert_positive_strict_pass(self, fixture_name, case_ids=PIPELINE_CASES, eval_set=PIPELINE_EVAL):
+        self.require_eval_set(eval_set)
         with tempfile.TemporaryDirectory() as td:
-            proc = strict_fixture_replay(td, fixture_name)
+            proc = strict_fixture_replay(td, fixture_name, case_ids, eval_set)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("procedure_eval=passed", proc.stdout)
-        for case_id in PIPELINE_CASES:
+        for case_id in case_ids:
             self.assertIn(f"case_{case_id}=passed", proc.stdout)
 
     def assert_negative_fixtures(self, expectations):
@@ -2858,9 +2888,10 @@ class TestStrictClaudeFixtures(StrictFixtureAssertions):
         self.assert_negative_fixtures((
             ("procedure-strict-claude-echo-hidden-red.jsonl", ["strict_missing_red_before_green"]),
             ("procedure-strict-claude-auditor-partial-overridden.jsonl", ["strict_critical_audit:"]),
-            ("procedure-strict-claude-missing-core.jsonl", [
-                "agentic-sdlc-pipeline-feature-no-commit:missing_skill:agentic-sdlc:feature-build",
-                "agentic-sdlc-pipeline-per-package:strict_step_missing:core-skill",
+            # C7/C15.10: the core's first step (the failing-test write) is missing, so RED precedes any test edit.
+            ("procedure-strict-claude-missing-failing-test.jsonl", [
+                "agentic-sdlc-pipeline-feature-no-commit:strict_red_not_before_source_edit",
+                "agentic-sdlc-pipeline-per-package:strict_red_not_before_source_edit",
             ]),
             ("agentic-sdlc-pipeline-procedure-permission-denied.jsonl", ["permission_denied:"]),
             ("agentic-sdlc-pipeline-procedure-runtime-error.jsonl", ["runtime_error:"]),
@@ -2873,7 +2904,9 @@ class TestStrictClaudeFixtures(StrictFixtureAssertions):
 
     @unittest.skipUnless(shutil.which("node"), "node unavailable: the redaction check needs hooks/redact-sensitive.mjs")
     def test_strict_fixtures_are_committed_clean_lf(self):
-        self.assert_committed_clean_lf("procedure-strict-claude-*.jsonl", 4)
+        # 4 pre-C7 fixtures (missing-core renamed missing-failing-test) + 14 C7/C15 full-run + 6 gate-stop fixtures
+        # + the 9 C16 review probes (7 full-run, 2 gate-stop).
+        self.assert_committed_clean_lf("procedure-strict-claude-*.jsonl", 33)
 
 
 class TestStrictCodexFixtures(StrictFixtureAssertions):
@@ -2886,6 +2919,8 @@ class TestStrictCodexFixtures(StrictFixtureAssertions):
         "procedure-strict-codex-green-only.jsonl",
         "procedure-strict-codex-reviewer-missing-security.jsonl",
         "procedure-strict-codex-reviewer-missing-control.jsonl",
+        "procedure-strict-codex-focused-adapter-gate.jsonl",
+        "procedure-strict-codex-gate-stop-spec-approved.jsonl",
     )
 
     def test_completed_codex_positive_fixture_passes_strict(self):
@@ -2982,7 +3017,28 @@ CLAUDE_WORKFLOW_FIXTURES = (
     "procedure-strict-claude-complete-pass.jsonl",
     "procedure-strict-claude-echo-hidden-red.jsonl",
     "procedure-strict-claude-auditor-partial-overridden.jsonl",
-    "procedure-strict-claude-missing-core.jsonl",
+    "procedure-strict-claude-missing-failing-test.jsonl",  # renamed from missing-core (C15.10)
+    # Contract C7/C15 fixtures (pipeline v2.1): every one carries spec-plan-draft Workflow calls.
+    "procedure-strict-claude-missing-core-read.jsonl",
+    "procedure-strict-claude-absolute-paths-pass.jsonl",
+    "procedure-strict-claude-gate-stop-absolute-edit.jsonl",
+    "procedure-strict-claude-forbidden-skill-top-level.jsonl",
+    "procedure-strict-claude-forbidden-skill-in-subagent.jsonl",
+    "procedure-strict-claude-focused-skill-read-posix.jsonl",
+    "procedure-strict-claude-focused-skill-read-windows.jsonl",
+    "procedure-strict-claude-piped-red.jsonl",
+    "procedure-strict-claude-red-before-source-pass.jsonl",
+    "procedure-strict-claude-red-after-source-edit.jsonl",
+    "procedure-strict-claude-source-edit-unobserved.jsonl",
+    "procedure-strict-claude-dispatch-twice.jsonl",
+    "procedure-strict-claude-dispatch-substituted.jsonl",
+    "procedure-strict-claude-reviewer-before-last-edit.jsonl",
+    "procedure-strict-claude-missing-tdd-evidence.jsonl",
+    "procedure-strict-claude-gate-stop-pass.jsonl",
+    "procedure-strict-claude-gate-stop-edit-after-spec.jsonl",
+    "procedure-strict-claude-gate-stop-spec-approved.jsonl",
+    "procedure-strict-claude-gate-stop-plan-written.jsonl",
+    "procedure-strict-claude-gate-stop-no-stop-text.jsonl",
 )
 
 
@@ -3210,8 +3266,9 @@ class TestClaudeChildEnvironment(unittest.TestCase):
 class TestFixtureWorkflowInput(unittest.TestCase):
     """AC24: Claude fixtures model Workflow input as name, not workflow."""
 
-    def test_ac24_eight_claude_fixtures_use_name_not_workflow(self):
-        self.assertEqual(len(CLAUDE_WORKFLOW_FIXTURES), 8)
+    def test_ac24_claude_fixtures_use_name_not_workflow(self):
+        self.assertEqual(len(CLAUDE_WORKFLOW_FIXTURES), 28)  # 8 pre-C7 fixtures + 20 contract C7/C15 fixtures
+        self.assertEqual(len(set(CLAUDE_WORKFLOW_FIXTURES)), len(CLAUDE_WORKFLOW_FIXTURES))
         for name in CLAUDE_WORKFLOW_FIXTURES:
             with self.subTest(fixture=name):
                 events = procedure_eval.load_json_lines(TRANSCRIPTS / name)
@@ -3228,3 +3285,1134 @@ class TestFixtureWorkflowInput(unittest.TestCase):
                 data = (TRANSCRIPTS / name).read_bytes()
                 self.assertNotIn(b'"workflow":', data)
                 self.assertFalse(b"\r" in data)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Contract C7 (pipeline v2.1, plan D11/D12) with the C15 rulings: the new strict keys, the three forbidden patterns,
+# cases 1-3, the final-assistant-text field, the path helpers and the acceptance lines. Every expected value is a literal
+# copied from the contract; the fixtures are the committed tests/fixtures/transcripts/*.jsonl files (replay only, no
+# model CLI is ever started).
+GATE_STOP_EVAL = "tests/skills/procedure/agentic-sdlc-pipeline-gate-stop.json"
+GATE_STOP_CASE = "agentic-sdlc-pipeline-gate-stop"
+GATE_STOP_ONLY = {"eval_set": GATE_STOP_EVAL, "case_ids": (GATE_STOP_CASE,)}
+FOCUSED_SKILLS = ["feature-build", "root-cause-fix", "safe-refactor", "test-authoring", "security-audit",
+                  "implementation-control"]
+FORBIDDEN_SKILL_CALL = (r'"skill":\s*"(?:agentic-sdlc:)?(?:feature-build|root-cause-fix|safe-refactor|test-authoring|'
+                        r'security-audit|implementation-control)"')
+# C16.1: one character class. The earlier `(?:[\\/]|\\\\)+` alternation backtracked exponentially on a backslash run.
+FORBIDDEN_SKILL_PATH = (r'(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|'
+                        r'implementation-control)[\\/]+SKILL\.md')
+FORBIDDEN_ADAPTER_GATE = (r'Adapter Gate:\s*(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|'
+                          r'implementation-control)\b')
+C7_FORBIDDEN_PATTERNS = [FORBIDDEN_SKILL_CALL, FORBIDDEN_SKILL_PATH, FORBIDDEN_ADAPTER_GATE]
+P1_HIT = f"forbidden_pattern:{FORBIDDEN_SKILL_CALL}"
+P2_HIT = f"forbidden_pattern:{FORBIDDEN_SKILL_PATH}"
+P3_HIT = f"forbidden_pattern:{FORBIDDEN_ADAPTER_GATE}"
+GIT_PUBLISH_COMMANDS = ["\\bgit\\s+commit\\b", "\\bgit\\s+push\\b", "\\bgit\\s+merge\\b"]
+C7_FULL_RUN_STRICT = {
+    "require_red_green": True, "check_artifact_depth": True, "red_before_source_edit": True,
+    "skill_call_counts": {"dispatch-strategy": [1, 1]},
+    "forbid_skills_anywhere": ["feature-build", "root-cause-fix", "safe-refactor", "test-authoring", "security-audit",
+                               "implementation-control"],
+    "reviewers_after_last_source_edit": True, "evidence_file_before_control": True,
+    "reviewers": [{"step": "security", "skills": [], "agents": ["security-reviewer"], "codex_result": "findings-table"},
+                  {"step": "control", "skills": [], "agents": ["implementation-auditor"],
+                   "codex_result": "control-verdict"}],
+    "required_order": ["dispatch-strategy", "spec-written", "plan-written", "core-read", "red-run", "green-run",
+                       "security", "control", "completion-claim-gate"],  # C15.10 adds core-read
+}
+C7_GATE_STOP_STRICT = {
+    "stop_at_gate": "spec-review", "skill_call_counts": {"dispatch-strategy": [1, 1]},
+    "forbid_skills_anywhere": ["feature-build", "root-cause-fix", "safe-refactor", "test-authoring", "security-audit",
+                               "implementation-control"],
+    "required_order": ["dispatch-strategy", "spec-written"],
+}
+C7_CASE1_PROMPT = (
+    "Use /agentic-sdlc-pipeline to add a small production-impacting feature to this fixture: expose a new greeting "
+    "suffix behavior in greeting.py. This is an automated eval: after saving the spec and plan, treat the Spec Review "
+    "and Plan Review gates as approved so you can continue. Follow spec, plan, TDD, security review, implementation "
+    "control, and do not commit, push, or merge."
+)
+C7_CASE2_PROMPT = (
+    "Use /agentic-sdlc-pipeline to add a small production-impacting feature using the per-package artifact layout: "
+    "expose a new greeting suffix behavior in greeting.py, and write the spec and plan under docs/agentic-sdlc/<slug>/spec/ "
+    "and docs/agentic-sdlc/<slug>/plan/. This is an automated eval: after saving the spec and plan, treat the Spec Review "
+    "and Plan Review gates as approved so you can continue. Follow spec, plan, TDD, security review, implementation "
+    "control, and do not commit, push, or merge."
+)
+C7_GATE_STOP_PROMPT = (
+    "Use /agentic-sdlc-pipeline to add a small production-impacting feature to this fixture: expose a new greeting "
+    "suffix behavior in greeting.py. Do not commit, push, or merge."
+)
+C7_REQUIRED_SKILLS = ["agentic-sdlc:dispatch-strategy", "agentic-sdlc:security-audit",
+                      "agentic-sdlc:implementation-control", "agentic-sdlc:completion-claim-gate"]
+C7_ADAPTER_SATISFIES = ["skill:agentic-sdlc:dispatch-strategy", "skill:agentic-sdlc:security-audit",
+                        "skill:agentic-sdlc:implementation-control", "skill:agentic-sdlc:completion-claim-gate",
+                        "workflow:agentic-sdlc:spec-plan-draft"]
+C7_ADAPTER_PATTERNS = ["Runtime:\\s*Codex|OpenCode|Kimi Code|non-Claude",
+                       "Workflow unavailable|embedded author/critic adapter", "Codex Adapter Gate", "dispatch-strategy",
+                       "work-type core", "security-reviewer", "implementation-auditor", "completion-claim-gate",
+                       "spec-plan-author", "spec-plan-critic", "docs/agentic-sdlc/specs/", "docs/agentic-sdlc/plans/"]
+# Every error id the C7 checks can emit (the forbidden-pattern hits included).
+C7_ERROR_PREFIXES = (
+    "forbidden_pattern:", "strict_forbidden_skill:", "strict_skill_call_count:", "strict_red_not_before_source_edit",
+    "strict_source_edit_unobserved", "strict_reviewer_before_last_edit:", "strict_missing_tdd_evidence",
+    "strict_edit_after_spec_gate:", "strict_spec_status_without_approval", "strict_plan_after_spec_gate",
+    "strict_missing_gate_stop",
+)
+FLAT_SPEC_PATH = "docs/agentic-sdlc/specs/greeting-suffix.md"
+PP_SPEC_PATH = "docs/agentic-sdlc/greeting-suffix/spec/greeting-suffix.md"
+FLAT_TDD_PATH = "docs/agentic-sdlc/evidence/greeting-suffix.tdd.md"
+CORE_READ_PATH = "/opt/agentic-sdlc/skills/feature-build/references/core.md"
+SHALLOW_STUBS = ["shallow_artifact:docs/agentic-sdlc/plans/greeting-suffix.md",
+                 "shallow_artifact:docs/agentic-sdlc/specs/greeting-suffix.md"]
+ABSOLUTE_UNSAFE = ["unsafe_artifact_path:/work/greeting-suffix/docs/agentic-sdlc/plans/greeting-suffix.md",
+                   "unsafe_artifact_path:/work/greeting-suffix/docs/agentic-sdlc/specs/greeting-suffix.md"]
+UNATTRIBUTED_RED = ["strict_missing_red_before_green", "strict_red_not_before_source_edit",
+                    "strict_step_missing:red-run", "strict_test_run_unattributable"]
+NO_ATTRIBUTABLE_RUN = ["strict_missing_green", "strict_red_not_before_source_edit", "strict_step_missing:green-run",
+                       "strict_step_missing:red-run", "strict_test_run_unattributable"]
+CLAUDE_FINAL_TEXT = "Greeting suffix feature implemented; see the verification summary above."
+CODEX_FINAL_TEXT = ("Codex Adapter Gate: completion-claim-gate\nVerified: tests ran red then green, the security review "
+                    "and implementation control completed.\n<!-- agentic-sdlc:gate:completion-claim:verified -->")
+GATE_STOP_FINAL_TEXT = ("Stopped at the Spec Review gate. Please review docs/agentic-sdlc/specs/greeting-suffix.md and "
+                        "approve it, or ask for changes, before I write the plan.")
+STRICT_POSITIVE_RUNS = (  # (fixture, eval set, case ids): each must pass strict replay with no error at all
+    ("procedure-strict-claude-complete-pass.jsonl", PIPELINE_EVAL, PIPELINE_CASES),
+    ("procedure-strict-claude-red-before-source-pass.jsonl", PIPELINE_EVAL, PIPELINE_CASES),
+    ("procedure-strict-codex-complete-pass.jsonl", PIPELINE_EVAL, PIPELINE_CASES),
+    ("agentic-sdlc-pipeline-procedure-per-package-pass.jsonl", PIPELINE_EVAL, (PER_PACKAGE_CASE_ID,)),
+    ("procedure-strict-claude-gate-stop-pass.jsonl", GATE_STOP_EVAL, (GATE_STOP_CASE,)),
+)
+DEFAULT_POSITIVE_RUNS = (  # (fixture, case ids): each must pass default-mode replay
+    ("agentic-sdlc-pipeline-procedure-pass.jsonl", PIPELINE_CASES),
+    ("agentic-sdlc-pipeline-procedure-codex-adapter-pass.jsonl", PIPELINE_CASES),
+    ("agentic-sdlc-pipeline-procedure-codex-exec-current.jsonl", PIPELINE_CASES),
+    ("agentic-sdlc-pipeline-procedure-codex-exec-bash-wrapper.jsonl", PIPELINE_CASES),
+    ("procedure-strict-claude-complete-pass.jsonl", PIPELINE_CASES),
+    ("procedure-strict-claude-red-before-source-pass.jsonl", PIPELINE_CASES),
+    ("procedure-strict-claude-absolute-paths-pass.jsonl", PIPELINE_CASES),
+    ("agentic-sdlc-pipeline-procedure-per-package-pass.jsonl", (PER_PACKAGE_CASE_ID,)),
+)
+
+
+def c7_errors(errors):
+    return sorted(e for e in errors if e.startswith(C7_ERROR_PREFIXES))
+
+
+def fixture_events(name):
+    return procedure_eval.load_json_lines(TRANSCRIPTS / name)
+
+
+def claude_blocks(event):
+    message = event.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return [block for block in content if isinstance(block, dict)] if isinstance(content, list) else []
+
+
+def claude_call_ids(event):
+    ids = set()
+    for block in claude_blocks(event):
+        if block.get("type") == "tool_use":
+            ids.add(block.get("id"))
+        elif block.get("type") == "tool_result":
+            ids.add(block.get("tool_use_id"))
+    return ids
+
+
+def index_after(events, call_id, kind):
+    """Index just after the event holding call_id's `tool_use` or `tool_result` block."""
+    key = "id" if kind == "tool_use" else "tool_use_id"
+    for index, event in enumerate(events):
+        if any(block.get("type") == kind and block.get(key) == call_id for block in claude_blocks(event)):
+            return index + 1
+    raise AssertionError(f"fixture has no {kind} for {call_id}")
+
+
+def rollout_text_index(events, text):
+    for index, event in enumerate(events):
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        parts = payload.get("content") if isinstance(payload.get("content"), list) else []
+        if any(isinstance(part, dict) and part.get("text") == text for part in parts):
+            return index
+    raise AssertionError(f"rollout fixture has no assistant message {text!r}")
+
+
+def replaced(events, old, new, call_ids=None):
+    """Events with `old` replaced by `new` in their JSON text (only in the events of `call_ids` when given)."""
+    return [json.loads(json.dumps(event).replace(json.dumps(old)[1:-1], json.dumps(new)[1:-1]))
+            if call_ids is None or claude_call_ids(event) & call_ids else event for event in events]
+
+
+def subagent_call(tool_id, name, input_obj, parent, text):
+    return [full_tool_use(tool_id, name, input_obj, parent_tool_use_id=parent),
+            dict(claude_result(tool_id, False, text), parent_tool_use_id=parent)]
+
+
+class C7FixtureReplay(StrictFixtureAssertions):
+    """In-process replay exactly as main() grades a transcript: load_trace, then evaluate_case per case with the cwd and
+    the contained root set to a copy of the basic fixture (the `--fixture-root` replay). `disk` adds files to that copy."""
+
+    def replay(self, transcript, *, eval_set=PIPELINE_EVAL, case_ids=PIPELINE_CASES, strict=True, disk=None):
+        cases = {case["id"]: case for case in self.load_cases(eval_set)}
+        path = transcript if isinstance(transcript, Path) else TRANSCRIPTS / transcript
+        self.assertTrue(path.is_file(), f"fixture missing: {path.name}")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "fixture"
+            shutil.copytree(BASIC_FIXTURE, root)
+            for relative, content in (disk or {}).items():
+                (root / relative).parent.mkdir(parents=True, exist_ok=True)
+                (root / relative).write_bytes(content.encode("utf-8"))
+            trace = procedure_eval.load_trace(path, strict)
+            results = {}
+            for case_id in case_ids:
+                self.assertIn(case_id, cases, f"{eval_set} has no case {case_id}")
+                results[case_id] = procedure_eval.evaluate_case(cases[case_id], trace, root, strict=strict,
+                                                                contained_root=root)
+        return results
+
+    def replay_events(self, events, **kwargs):
+        with tempfile.TemporaryDirectory() as td:
+            return self.replay(write_jsonl(Path(td) / "derived.jsonl", events), **kwargs)
+
+    def assert_errors(self, results, expected):
+        """Exact sorted errors per case (C15.4: never a set); `expected` is one list or a {case id: list} map."""
+        for case_id, errors in results.items():
+            want = expected[case_id] if isinstance(expected, dict) else expected
+            with self.subTest(case=case_id):
+                self.assertEqual(sorted(errors), sorted(want))
+
+    def assert_fixture_errors(self, fixture, expected, **kwargs):
+        with self.subTest(fixture=fixture):
+            self.assert_errors(self.replay(fixture, **kwargs), expected)
+
+
+class TestC7EvalSets(StrictFixtureAssertions):
+    """C7: the pipeline eval files carry the zero-delegation cases literally (cases 1/2 here, case 3 separately)."""
+
+    def main_cases(self):
+        cases = self.load_cases(PIPELINE_EVAL)
+        self.assertEqual([case["id"] for case in cases], list(PIPELINE_CASES))
+        return cases
+
+    def gate_stop_cases(self):
+        return self.load_cases(GATE_STOP_EVAL)
+
+    def test_case_prompts_drop_smoke_depth_and_pre_approve_the_gates(self):
+        first, second = self.main_cases()
+        self.assertEqual(first["prompt"], C7_CASE1_PROMPT)
+        self.assertEqual(second["prompt"], C7_CASE2_PROMPT)
+
+    def test_case1_gates_are_met_by_agents_and_c5_markers(self):
+        first = self.main_cases()[0]
+        self.assertIn("required_skills", first)
+        self.assertEqual(first["required_skills"], C7_REQUIRED_SKILLS)
+        adapters = first.get("required_runtime_adapters", [])
+        self.assertEqual(len(adapters), 1)  # regression guard: C7 changes the one adapter, it does not add one
+        self.assertEqual(adapters[0].get("satisfies"), C7_ADAPTER_SATISFIES)
+        self.assertEqual(adapters[0].get("required_patterns"), C7_ADAPTER_PATTERNS)
+        # Regression guard: C7 leaves required_workflows as it is.
+        self.assertEqual(first.get("required_workflows"), ["agentic-sdlc:spec-plan-draft"])
+
+    def test_every_pipeline_case_forbids_the_three_patterns_and_git_publishing(self):
+        for case in list(self.main_cases()) + list(self.gate_stop_cases()):
+            with self.subTest(case=case["id"]):
+                self.assertIn("forbidden_patterns", case)
+                self.assertCountEqual(case["forbidden_patterns"], C7_FORBIDDEN_PATTERNS)
+                self.assertEqual(case.get("forbidden_commands"), GIT_PUBLISH_COMMANDS)
+
+    def test_gate_stop_file_holds_one_strict_only_case(self):
+        cases = self.gate_stop_cases()
+        self.assertEqual(len(cases), 1)
+        case = cases[0]
+        self.assertEqual(case["id"], GATE_STOP_CASE)
+        self.assertEqual(case.get("fixture_dir"), "tests/fixtures/agentic-sdlc-pipeline-basic")  # C15.12
+        self.assertEqual(case["prompt"], C7_GATE_STOP_PROMPT)
+        self.assertEqual(case.get("required_commands"), ["detect_context\\.py", "validate_artifacts\\.py"])
+        self.assertEqual(case.get("required_patterns"), ["docs/agentic-sdlc/(?:specs|[a-z0-9][a-z0-9-]*/spec)/"])
+        self.assertIn("strict", case)
+        self.assertEqual(case["strict"], C7_GATE_STOP_STRICT)
+
+    def test_gate_stop_file_dry_run_passes(self):
+        self.require_eval_set(GATE_STOP_EVAL)
+        proc = run_cli("--eval-set", GATE_STOP_EVAL, "--dry-run", "--strict-evidence")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("cases=1", proc.stdout.splitlines())
+
+    def test_forbidden_pattern_literals_catch_only_the_focused_shapes(self):
+        # Guards the literals this file copies from C7: each catches its shape and stays silent on the allowed ones.
+        hits = {
+            FORBIDDEN_SKILL_CALL: ['"skill": "agentic-sdlc:feature-build"', '"skill":"implementation-control"'],
+            FORBIDDEN_SKILL_PATH: ["skills/feature-build/SKILL.md", "skills\\root-cause-fix\\SKILL.md",
+                                   "skills\\\\safe-refactor\\\\SKILL.md", "skills/test-authoring//SKILL.md"],
+            FORBIDDEN_ADAPTER_GATE: ["Codex Adapter Gate: security-audit", "Grok Adapter Gate: test-authoring activated",
+                                     "Cursor Adapter Gate:implementation-control"],
+        }
+        misses = {
+            FORBIDDEN_SKILL_CALL: ['"skill": "agentic-sdlc:dispatch-strategy"', '"skill": "agentic-sdlc:feature-build-x"',
+                                   "run security-audit later"],
+            FORBIDDEN_SKILL_PATH: ["skills/feature-build/references/core.md",
+                                   "skills\\feature-build\\references\\core.md", "skills/dispatch-strategy/SKILL.md"],
+            FORBIDDEN_ADAPTER_GATE: ["Codex Adapter Gate: security-reviewer", "Codex Adapter Gate: implementation-auditor",
+                                     "Codex Adapter Gate: work-type core feature",
+                                     "Codex Adapter Gate: dispatch-strategy activated"],
+        }
+        for pattern, samples in hits.items():
+            for sample in samples:
+                with self.subTest(pattern=pattern[:20], sample=sample):
+                    self.assertTrue(procedure_eval.regex_present(pattern, sample))
+        for pattern, samples in misses.items():
+            for sample in samples:
+                with self.subTest(pattern=pattern[:20], sample=sample):
+                    self.assertFalse(procedure_eval.regex_present(pattern, sample))
+
+    @unittest.skipUnless(shutil.which("node"), "node unavailable: the redaction check needs hooks/redact-sensitive.mjs")
+    def test_pipeline_fixtures_outside_the_strict_globs_are_committed_clean_lf(self):
+        # C15.14: the agentic-sdlc-pipeline-* fixtures (incl. per-package-pass, codex-adapter-pass, codex-exec-current
+        # and the codex-exec bash-wrapper run) get the same LF and redaction pin as the procedure-strict-* globs.
+        self.assert_committed_clean_lf("agentic-sdlc-pipeline-*.jsonl", 7)
+
+
+C7_MALFORMED_STRICT_VALUES = (
+    ("red_before_source_edit", "yes"), ("red_before_source_edit", 1), ("red_before_source_edit", None),
+    ("stop_at_gate", "plan-review"), ("stop_at_gate", True), ("stop_at_gate", ["spec-review"]),
+    ("skill_call_counts", ["dispatch-strategy"]), ("skill_call_counts", {"dispatch-strategy": 1}),
+    ("skill_call_counts", {"dispatch-strategy": [1]}), ("skill_call_counts", {"dispatch-strategy": [1, 1, 1]}),
+    ("skill_call_counts", {"dispatch-strategy": ["1", "1"]}),
+    ("skill_call_counts", {"dispatch-strategy": [2, 1]}),  # C15.14: min above max
+    ("skill_call_counts", {"dispatch-strategy": [-1, 1]}),  # C15.14: a negative bound
+    ("skill_call_counts", {"dispatch-strategy": [True, True]}),  # C15.14: booleans are not counts
+    ("skill_call_counts", {"dispatch-strategy": [1.0, 1]}),
+    ("forbid_skills_anywhere", "feature-build"), ("forbid_skills_anywhere", [1]),
+    ("forbid_skills_anywhere", {"feature-build": True}), ("forbid_skills_anywhere", [True]),
+    ("reviewers_after_last_source_edit", "true"), ("reviewers_after_last_source_edit", None),
+    ("evidence_file_before_control", 0), ("evidence_file_before_control", "yes"),
+    ("required_order", ["dispatch-strategy", "core-step"]),
+)
+
+
+class TestC7StrictConfig(unittest.TestCase):
+    """C7: validate_strict_config accepts the six new keys and rejects malformed values by name."""
+
+    def assert_accepted(self, call, *args):
+        try:
+            return call(*args)
+        except ValueError as exc:  # a rejection is this test's failure, never an error of the test itself
+            self.fail(f"C7 strict config rejected: {exc}")
+
+    def test_validate_strict_config_accepts_the_c7_keys(self):
+        self.assert_accepted(procedure_eval.validate_strict_config, "c7-full", C7_FULL_RUN_STRICT)
+        self.assert_accepted(procedure_eval.validate_strict_config, "c7-gate", C7_GATE_STOP_STRICT)
+        for key, value in (("red_before_source_edit", False), ("reviewers_after_last_source_edit", False),
+                           ("evidence_file_before_control", False), ("stop_at_gate", "spec-review"),
+                           ("skill_call_counts", {"dispatch-strategy": [0, 2], "completion-claim-gate": [1, 1]}),
+                           ("forbid_skills_anywhere", ["feature-build"]),
+                           ("required_order", ["dispatch-strategy", "core-read", "core-skill"])):
+            with self.subTest(key=key):
+                self.assert_accepted(procedure_eval.validate_strict_config, "c7-key", {key: value})
+
+    def test_load_eval_accepts_a_case_with_every_c7_key(self):
+        with tempfile.TemporaryDirectory() as td:
+            eval_set = Path(td) / "eval.json"
+            strict = dict(C7_FULL_RUN_STRICT, stop_at_gate="spec-review")
+            eval_set.write_text(json.dumps({"cases": [{"id": "c7-probe", "prompt": "p", "strict": strict}]}),
+                                encoding="utf-8")
+            cases = self.assert_accepted(procedure_eval.load_eval, eval_set)
+        self.assertEqual(cases[0]["strict"], strict)
+
+    def test_validate_strict_config_rejects_malformed_c7_values(self):
+        for key, value in C7_MALFORMED_STRICT_VALUES:
+            with self.subTest(key=key, value=value):
+                with self.assertRaisesRegex(ValueError, rf"^case c7-bad invalid strict\.{re.escape(key)}$"):
+                    procedure_eval.validate_strict_config("c7-bad", {key: value})
+
+    def test_order_ids_add_core_read_and_keep_core_skill(self):
+        # C15.10: core-read joins STRICT_ORDER_IDS; core-skill stays defined but no pipeline case uses it.
+        self.assertEqual(procedure_eval.STRICT_ORDER_IDS, frozenset({
+            "dispatch-strategy", "spec-written", "plan-written", "core-skill", "core-read", "red-run", "green-run",
+            "security", "control", "completion-claim-gate"}))
+        self.assertNotIn("core-skill", C7_FULL_RUN_STRICT["required_order"])
+
+
+class TestC7FinalAssistantText(unittest.TestCase):
+    """C7: the final assistant text comes from the rollout final_assistant_text, else the LAST Claude `result` string,
+    else the last codex-exec agent_message."""
+
+    def test_claude_result_string_is_the_final_text(self):
+        events = [assistant_text_event("Spec Review gate reached; asking for approval."),
+                  {"type": "result", "subtype": "success", "is_error": False,
+                   "result": "Stopped at the Spec Review gate."}]
+        self.assertEqual(procedure_eval.trace_events(events, strict=True).final_assistant_text,
+                         "Stopped at the Spec Review gate.")
+
+    def test_codex_exec_last_agent_message_is_the_final_text(self):
+        events = [
+            {"type": "item.completed", "item": {"id": "m1", "type": "agent_message", "text": "Runtime: Codex."}},
+            {"type": "item.completed", "item": {"id": "c1", "type": "command_execution", "command": "python -m pytest -q",
+                                                "aggregated_output": "1 passed\n", "exit_code": 0, "status": "completed"}},
+            {"type": "item.completed", "item": {"id": "m2", "type": "agent_message",
+                                                "text": "Stopped at the Spec Review gate."}},
+            {"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}},
+        ]
+        self.assertEqual(procedure_eval.trace_events(events, strict=True).final_assistant_text,
+                         "Stopped at the Spec Review gate.")
+
+    def test_committed_fixtures_expose_their_final_text(self):
+        for fixture, expected in (
+            ("procedure-strict-claude-complete-pass.jsonl", CLAUDE_FINAL_TEXT),
+            ("procedure-strict-claude-absolute-paths-pass.jsonl", CLAUDE_FINAL_TEXT),  # the second of two results
+            ("procedure-strict-claude-gate-stop-pass.jsonl", GATE_STOP_FINAL_TEXT),
+            ("procedure-strict-claude-gate-stop-absolute-edit.jsonl", GATE_STOP_FINAL_TEXT),  # second of two results
+            ("procedure-strict-claude-gate-stop-no-stop-text.jsonl", "The spec is saved and validated."),
+            ("procedure-strict-codex-complete-pass.jsonl", CODEX_FINAL_TEXT),
+            ("procedure-strict-codex-gate-stop-spec-approved.jsonl", GATE_STOP_FINAL_TEXT),
+            ("agentic-sdlc-pipeline-procedure-codex-exec-bash-wrapper.jsonl",
+             "Codex Adapter Gate: completion-claim-gate\nImplemented the greeting suffix; tests ran red then green."),
+        ):
+            with self.subTest(fixture=fixture):
+                trace = procedure_eval.load_trace(TRANSCRIPTS / fixture, True)
+                self.assertEqual(trace.final_assistant_text, expected)
+        exec_trace = procedure_eval.load_trace(TRANSCRIPTS / "agentic-sdlc-pipeline-procedure-codex-exec-current.jsonl", True)
+        self.assertTrue(exec_trace.final_assistant_text.startswith(
+            "Codex Adapter Gate: completion-claim-gate satisfied before the final report."), exec_trace.final_assistant_text)
+
+
+class TestC7ForbiddenSkills(C7FixtureReplay):
+    """C7 forbid_skills_anywhere and the three forbidden_patterns: each fires on its negative and stays silent on every
+    positive (pattern 2 in both separator styles; a sub-agent call is caught only by forbid_skills_anywhere, AC17)."""
+
+    def test_top_level_focused_skill_call(self):
+        self.assert_fixture_errors("procedure-strict-claude-forbidden-skill-top-level.jsonl",
+                                   [P1_HIT, "strict_forbidden_skill:feature-build"])
+
+    def test_focused_skill_call_inside_a_subagent(self):
+        self.assert_fixture_errors("procedure-strict-claude-forbidden-skill-in-subagent.jsonl",
+                                   ["strict_forbidden_skill:security-audit"])
+
+    def test_focused_skill_md_read_posix_and_windows_paths(self):
+        self.assert_fixture_errors("procedure-strict-claude-focused-skill-read-posix.jsonl",
+                                   [P2_HIT, "strict_forbidden_skill:feature-build"])
+        self.assert_fixture_errors("procedure-strict-claude-focused-skill-read-windows.jsonl",
+                                   [P2_HIT, "strict_forbidden_skill:root-cause-fix"])
+
+    def test_focused_skill_md_read_inside_a_subagent(self):
+        events = fixture_events("procedure-strict-claude-complete-pass.jsonl")
+        at = index_after(events, "toolu_s18", "tool_use")
+        events[at:at] = subagent_call("toolu_n02", "Read",
+                                      {"file_path": "D:\\plugins\\agentic-sdlc\\skills\\safe-refactor\\SKILL.md"},
+                                      "toolu_s18", "---\nname: safe-refactor\n---")
+        self.assert_errors(self.replay_events(events), ["strict_forbidden_skill:safe-refactor"])
+        self.assert_errors(self.replay_events(events, strict=False), [])  # sub-agent records stay out of the haystack
+
+    def test_focused_skill_md_read_through_a_claude_shell_command(self):
+        events = fixture_events("procedure-strict-claude-complete-pass.jsonl")
+        at = index_after(events, "toolu_s11", "tool_result")
+        events[at:at] = claude_run("toolu_b02", "cat /opt/agentic-sdlc/skills/test-authoring/SKILL.md", False,
+                                   "---\nname: test-authoring\n---")
+        self.assert_errors(self.replay_events(events), [P2_HIT, "strict_forbidden_skill:test-authoring"])
+
+    def test_codex_focused_adapter_gate_marker(self):
+        self.assert_fixture_errors("procedure-strict-codex-focused-adapter-gate.jsonl", [P3_HIT])
+
+    def test_codex_focused_skill_md_command(self):
+        events = fixture_events("procedure-strict-codex-complete-pass.jsonl")
+        at = rollout_text_index(events, "Codex Adapter Gate: work-type core feature") + 1
+        events[at:at] = [exec_call("call_x1", 'cat "$PLUGIN_ROOT/skills/security-audit/SKILL.md"'),
+                         exec_output("call_x1", 0, "---\nname: security-audit\n---\n")]
+        self.assert_errors(self.replay_events(events), [P2_HIT, "strict_forbidden_skill:security-audit"])
+
+    def test_default_mode_reports_the_haystack_patterns(self):
+        for fixture, expected in (
+            ("procedure-strict-claude-forbidden-skill-top-level.jsonl", [P1_HIT]),
+            ("procedure-strict-claude-focused-skill-read-posix.jsonl", [P2_HIT]),
+            ("procedure-strict-claude-focused-skill-read-windows.jsonl", [P2_HIT]),
+            ("procedure-strict-claude-forbidden-skill-in-subagent.jsonl", []),
+        ):
+            self.assert_fixture_errors(fixture, expected, strict=False)
+        events = fixture_events("agentic-sdlc-pipeline-procedure-codex-exec-current.jsonl")
+        events.insert(len(events) - 1, {"type": "item.completed", "item": {
+            "id": "item_x", "type": "agent_message", "text": "Codex Adapter Gate: safe-refactor activated"}})
+        self.assert_errors(self.replay_events(events, strict=False), [P3_HIT])
+
+    def test_positive_fixtures_pass_default_mode(self):
+        for fixture, case_ids in DEFAULT_POSITIVE_RUNS:
+            self.assert_fixture_errors(fixture, [], strict=False, case_ids=case_ids)
+
+
+class TestC7StrictKeys(C7FixtureReplay):
+    """C7/C15 red_before_source_edit, skill_call_counts, reviewers_after_last_source_edit, evidence_file_before_control,
+    stop_at_gate and core-read: each negative fails with exactly its contract error ids; every positive has none."""
+
+    def test_red_before_source_edit(self):
+        # No test write before the RED run (the core's first step is missing).
+        self.assert_fixture_errors("procedure-strict-claude-missing-failing-test.jsonl",
+                                   ["strict_red_not_before_source_edit"])
+        # Test edit and a first production edit both land before the only failing run.
+        self.assert_fixture_errors("procedure-strict-claude-red-after-source-edit.jsonl",
+                                   ["strict_red_not_before_source_edit"])
+        # A piped or echoed RED is unattributable, so no failing run separates Wt from Ws.
+        self.assert_fixture_errors("procedure-strict-claude-piped-red.jsonl", UNATTRIBUTED_RED)
+        self.assert_fixture_errors("procedure-strict-claude-echo-hidden-red.jsonl", UNATTRIBUTED_RED)
+        self.assert_fixture_errors("procedure-strict-codex-green-only.jsonl", [
+            "strict_missing_red_before_green", "strict_red_not_before_source_edit", "strict_step_missing:red-run"])
+        self.assert_fixture_errors("procedure-strict-codex-fail-open.jsonl", NO_ATTRIBUTABLE_RUN)
+
+    def test_codex_exec_bash_wrapper_runs_stay_unattributed(self):
+        # C15.13: pins the CURRENT outcome. Real codex exec wraps every command as `/bin/bash -lc '<cmd>'`, which BR6
+        # does not attribute, so RED and GREEN are both unattributable. Extending attribution is open decision O5.
+        self.assert_fixture_errors("agentic-sdlc-pipeline-procedure-codex-exec-bash-wrapper.jsonl", NO_ATTRIBUTABLE_RUN)
+
+    def test_green_required_but_source_write_unobserved(self):
+        # C15.2: Ws absent emits only strict_source_edit_unobserved (require_red_green is true in cases 1/2).
+        self.assert_fixture_errors("procedure-strict-claude-source-edit-unobserved.jsonl",
+                                   ["strict_source_edit_unobserved"])
+
+    def test_core_read_order_id(self):
+        # C15.10: a run that never reads the work-type core file misses the core-read step.
+        self.assert_fixture_errors("procedure-strict-claude-missing-core-read.jsonl", ["strict_step_missing:core-read"])
+
+    def test_skill_call_counts(self):
+        self.assert_fixture_errors("procedure-strict-claude-dispatch-twice.jsonl",
+                                   ["strict_skill_call_count:dispatch-strategy=2"])
+        # With the key present, DELEGATION_SATISFIES no longer lets an Agent call stand in for dispatch-strategy (L858
+        # required_skills and L2050 step order).
+        self.assert_fixture_errors("procedure-strict-claude-dispatch-substituted.jsonl", {
+            PIPELINE_CASES[0]: ["missing_skill:agentic-sdlc:dispatch-strategy",
+                                "strict_skill_call_count:dispatch-strategy=0", "strict_step_missing:dispatch-strategy"],
+            PIPELINE_CASES[1]: ["strict_skill_call_count:dispatch-strategy=0", "strict_step_missing:dispatch-strategy"],
+        })
+        # C15.8: every strict key is inert in default mode, which keeps the delegation credit.
+        self.assert_fixture_errors("procedure-strict-claude-dispatch-substituted.jsonl", [], strict=False,
+                                   case_ids=(PIPELINE_CASES[0],))
+        events = fixture_events("procedure-strict-codex-complete-pass.jsonl")  # Codex counts the gate markers
+        at = rollout_text_index(events, "Codex Adapter Gate: security-reviewer")
+        events[at:at] = [assistant_message("Codex Adapter Gate: dispatch-strategy activated")]
+        self.assert_errors(self.replay_events(events), ["strict_skill_call_count:dispatch-strategy=2"])
+
+    def test_skill_call_counts_main_loop_exact_names_only(self):
+        events = fixture_events("procedure-strict-claude-complete-pass.jsonl")
+        with self.subTest(variant="a sub-agent dispatch-strategy call does not count"):
+            sub = list(events)
+            at = index_after(sub, "toolu_s18", "tool_use")
+            sub[at:at] = subagent_call("toolu_n03", "Skill", {"skill": "agentic-sdlc:dispatch-strategy"}, "toolu_s18",
+                                       "Launching skill: agentic-sdlc:dispatch-strategy")
+            self.assert_errors(self.replay_events(sub), [])
+        with self.subTest(variant="a near-miss name and an args mention do not count"):
+            near = list(events)
+            at = index_after(near, "toolu_s10", "tool_result")
+            near[at:at] = (
+                [full_tool_use("toolu_x1", "Skill", {"skill": "agentic-sdlc:dispatch-strategy-x"}),
+                 claude_result("toolu_x1", False, "Unknown skill: agentic-sdlc:dispatch-strategy-x")]
+                + [full_tool_use("toolu_x2", "Skill", {"skill": "agentic-sdlc:mind-spark",
+                                                       "args": "follow the dispatch-strategy map"}),
+                   claude_result("toolu_x2", False, "Launching skill: agentic-sdlc:mind-spark")])
+            self.assert_errors(self.replay_events(near), [])
+
+    def test_codex_marker_counting_drops_duplicate_carriers(self):
+        # C15.5: the positive carries its final message on a response_item AND on task_complete; a task_complete or
+        # event_msg copy of the preceding response_item message is one message, and one message counts once.
+        counted = {"id": "count-probe", "prompt": "p", "strict": {
+            "skill_call_counts": {"dispatch-strategy": [1, 1], "completion-claim-gate": [1, 1]}}}
+        trace = procedure_eval.load_trace(TRANSCRIPTS / "procedure-strict-codex-complete-pass.jsonl", True)
+        self.assertEqual(c7_errors(procedure_eval.evaluate_case(counted, trace, REPO, strict=True)), [])
+        events = fixture_events("procedure-strict-codex-complete-pass.jsonl")
+        first = "Runtime: Codex. Activated agentic-sdlc-pipeline. Codex Adapter Gate: dispatch-strategy activated"
+        at = rollout_text_index(events, first) + 1
+        with self.subTest(variant="event_msg copy of the dispatch message"):
+            copied = events[:at] + [rollout({"type": "agent_message", "message": first}, "event_msg")] + events[at:]
+            self.assert_errors(self.replay_events(copied), [])
+        with self.subTest(variant="the marker twice inside one message"):
+            twice = replaced(events, first, first + ". Codex Adapter Gate: dispatch-strategy map reused for Steps 8-16")
+            self.assert_errors(self.replay_events(twice), [])
+
+    def test_reviewers_after_last_source_edit(self):
+        self.assert_fixture_errors("procedure-strict-claude-reviewer-before-last-edit.jsonl",
+                                   ["strict_reviewer_before_last_edit:security"])
+        events = fixture_events("procedure-strict-claude-complete-pass.jsonl")  # an edit after the auditor result
+        at = index_after(events, "toolu_s20", "tool_result")
+        events[at:at] = (
+            [full_tool_use("toolu_e11", "Edit", {"file_path": "greeting.py", "old_string": "-> str:",
+                                                 "new_string": "-> str:  # suffix-aware"}),
+             claude_result("toolu_e11", False, "The file greeting.py has been updated.")]
+            + claude_run("toolu_e12", "python -m pytest -q", False, "...\n3 passed in 0.02s")
+            + [full_tool_use("toolu_e13", "Agent", {"subagent_type": "agentic-sdlc:security-reviewer",
+                                                    "prompt": "Re-review greeting.py after the last edit."}),
+               claude_result("toolu_e13", False, FINDINGS_TABLE)])
+        self.assert_errors(self.replay_events(events), ["strict_reviewer_before_last_edit:control"])
+
+    def test_evidence_file_before_control(self):
+        self.assert_fixture_errors("procedure-strict-claude-missing-tdd-evidence.jsonl", ["strict_missing_tdd_evidence"])
+        tdd_calls = {"toolu_s14", "toolu_s17"}
+        events = fixture_events("procedure-strict-claude-complete-pass.jsonl")
+        moved = [event for event in events if claude_call_ids(event) & tdd_calls]
+        rest = [event for event in events if not claude_call_ids(event) & tdd_calls]
+        self.assertEqual(len(moved), 4)
+        at = index_after(rest, "toolu_s20", "tool_result")
+        with self.subTest(variant="written after the auditor"):
+            self.assert_errors(self.replay_events(rest[:at] + moved + rest[at:]), ["strict_missing_tdd_evidence"])
+        with self.subTest(variant="written by a sub-agent (AC17)"):
+            tagged = [dict(event, parent_tool_use_id="agent-1") if claude_call_ids(event) & tdd_calls else event
+                      for event in events]
+            self.assert_errors(self.replay_events(tagged), ["strict_missing_tdd_evidence"])
+        with self.subTest(variant="a .tdd.md outside docs/agentic-sdlc/"):
+            outside = replaced(events, FLAT_TDD_PATH, "notes/greeting-suffix.tdd.md", call_ids=tdd_calls)
+            self.assert_errors(self.replay_events(outside), ["strict_missing_tdd_evidence"])
+
+    def test_stop_at_gate(self):
+        self.assert_fixture_errors("procedure-strict-claude-gate-stop-edit-after-spec.jsonl",
+                                   ["strict_edit_after_spec_gate:greeting.py"], **GATE_STOP_ONLY)
+        self.assert_fixture_errors("procedure-strict-claude-gate-stop-spec-approved.jsonl",
+                                   ["strict_spec_status_without_approval"], **GATE_STOP_ONLY)
+        self.assert_fixture_errors("procedure-strict-claude-gate-stop-plan-written.jsonl",
+                                   ["strict_plan_after_spec_gate"], **GATE_STOP_ONLY)
+        # A deliberate probe of WHICH field is read: an earlier assistant text says "Spec Review gate", but the final
+        # assistant text (the result string) does not, so the gate stop is missing.
+        self.assert_fixture_errors("procedure-strict-claude-gate-stop-no-stop-text.jsonl",
+                                   ["strict_missing_gate_stop"], **GATE_STOP_ONLY)
+        # C15.13: init cwd, absolute paths, two results; the path is relativized and the LAST result is the final text.
+        self.assert_fixture_errors("procedure-strict-claude-gate-stop-absolute-edit.jsonl",
+                                   ["strict_edit_after_spec_gate:greeting.py"], **GATE_STOP_ONLY)
+
+    def test_stop_at_gate_multiplicity_and_notebook_writes(self):
+        # C15.4: one strict_edit_after_spec_gate per distinct normalized path; C15.6: NotebookEdit writes notebook_path.
+        events = fixture_events("procedure-strict-claude-gate-stop-edit-after-spec.jsonl")
+        at = index_after(events, "toolu_g06", "tool_result")
+        extra = ([full_tool_use("toolu_g07", "Edit", {"file_path": "greeting.py", "old_string": "-> str:",
+                                                      "new_string": "-> str:  # second edit"}),
+                  claude_result("toolu_g07", False, "The file greeting.py has been updated.")]
+                 + [full_tool_use("toolu_g08", "Edit", {"file_path": "test_greeting.py", "old_string": "def test_greet",
+                                                        "new_string": "def test_greet_default"}),
+                    claude_result("toolu_g08", False, "The file test_greeting.py has been updated.")])
+        with self.subTest(variant="two edits to greeting.py, one to test_greeting.py"):
+            self.assert_errors(self.replay_events(events[:at] + extra + events[at:], **GATE_STOP_ONLY),
+                               ["strict_edit_after_spec_gate:greeting.py", "strict_edit_after_spec_gate:test_greeting.py"])
+        gate = fixture_events("procedure-strict-claude-gate-stop-pass.jsonl")
+        at = index_after(gate, "toolu_g05", "tool_result")
+        notebook = [full_tool_use("toolu_g09", "NotebookEdit", {"notebook_path": "notebooks/explore.ipynb",
+                                                                "cell_id": "c1", "new_source": "greet('Ada', '?')"}),
+                    claude_result("toolu_g09", False, "Updated cell c1")]
+        with self.subTest(variant="a NotebookEdit after the spec"):
+            self.assert_errors(self.replay_events(gate[:at] + notebook + gate[at:], **GATE_STOP_ONLY),
+                               ["strict_edit_after_spec_gate:notebooks/explore.ipynb"])
+
+    def test_stop_at_gate_status_sources(self):
+        gate = fixture_events("procedure-strict-claude-gate-stop-pass.jsonl")
+        at = index_after(gate, "toolu_g05", "tool_result")
+        approve = [full_tool_use("toolu_g06", "Edit", {"file_path": FLAT_SPEC_PATH, "old_string": "status: reviewed",
+                                                       "new_string": "status: approved"}),
+                   claude_result("toolu_g06", False, f"The file {FLAT_SPEC_PATH} has been updated.")]
+        with self.subTest(variant="an Edit new_string sets the status"):
+            self.assert_errors(self.replay_events(gate[:at] + approve + gate[at:], **GATE_STOP_ONLY),
+                               ["strict_spec_status_without_approval"])
+        for status in ("approved", "in_progress", "ready_for_audit", "complete", "draft", "reviewed"):
+            with self.subTest(written_status=status):
+                expected = [] if status in ("draft", "reviewed") else ["strict_spec_status_without_approval"]
+                written = replaced(gate, "status: reviewed", f"status: {status}", call_ids={"toolu_g04"})
+                self.assert_errors(self.replay_events(written, **GATE_STOP_ONLY), expected)
+        on_disk = "---\nwork_id: greeting-suffix\nstatus: {}\n---\n\n# Spec\n"
+        with self.subTest(variant="the spec on disk wins over the Write content (approved on disk)"):
+            self.assert_fixture_errors("procedure-strict-claude-gate-stop-pass.jsonl",
+                                       ["strict_spec_status_without_approval"],
+                                       disk={FLAT_SPEC_PATH: on_disk.format("approved")}, **GATE_STOP_ONLY)
+        with self.subTest(variant="the spec on disk wins over the Write content (reviewed on disk)"):
+            self.assert_fixture_errors("procedure-strict-claude-gate-stop-spec-approved.jsonl", [],
+                                       disk={FLAT_SPEC_PATH: on_disk.format("reviewed")}, **GATE_STOP_ONLY)
+
+    def test_stop_at_gate_per_package_layout(self):
+        gate = replaced(fixture_events("procedure-strict-claude-gate-stop-pass.jsonl"), FLAT_SPEC_PATH, PP_SPEC_PATH)
+        self.assert_errors(self.replay_events(gate, **GATE_STOP_ONLY), [])
+        at = index_after(gate, "toolu_g05", "tool_result")
+        plan = [full_tool_use("toolu_g06", "Write", {"file_path": "docs/agentic-sdlc/greeting-suffix/plan/greeting-suffix.md",
+                                                     "content": "---\nwork_id: greeting-suffix\nstatus: draft\n---\n"}),
+                claude_result("toolu_g06", False, "File created successfully")]
+        self.assert_errors(self.replay_events(gate[:at] + plan + gate[at:], **GATE_STOP_ONLY),
+                           ["strict_plan_after_spec_gate"])
+
+    def test_codex_update_file_hunks(self):
+        # C15.9: the `+` lines of an Update File hunk on the spec count like an Edit new_string, and an empty Update
+        # record never replaces the spec content (the Codex positive patches status approved with no shallow_artifact).
+        self.assert_fixture_errors("procedure-strict-codex-gate-stop-spec-approved.jsonl",
+                                   ["strict_spec_status_without_approval"], **GATE_STOP_ONLY)
+        events = fixture_events("procedure-strict-codex-gate-stop-spec-approved.jsonl")
+        unapproved = [event for event in events if (event.get("payload") or {}).get("call_id") != "call_g04"]
+        self.assertEqual(len(events) - len(unapproved), 2)
+        self.assert_errors(self.replay_events(unapproved, **GATE_STOP_ONLY), [])
+        self.assert_fixture_errors("procedure-strict-codex-complete-pass.jsonl", [])
+
+    def test_full_run_positive_fails_the_gate_stop_case(self):
+        # Why case 3 lives in its own file: a pre-approved full run breaks every stop_at_gate rule, each id once.
+        self.assert_fixture_errors("procedure-strict-claude-complete-pass.jsonl", [
+            "strict_edit_after_spec_gate:greeting.py", "strict_edit_after_spec_gate:test_greeting.py",
+            "strict_missing_gate_stop", "strict_plan_after_spec_gate", "strict_spec_status_without_approval"],
+            **GATE_STOP_ONLY)
+
+    def test_rewritten_negatives_fail_only_for_their_intended_reason(self):
+        self.assert_fixture_errors("procedure-strict-claude-auditor-partial-overridden.jsonl", BOTH_CRITICAL)
+        # C15.14: deep spec/plan content, so each runtime negative fails for its one named reason.
+        self.assert_fixture_errors("agentic-sdlc-pipeline-procedure-permission-denied.jsonl", [
+            "permission_denied:Bash:python C:/repo/agentic-sdlc/scripts/detect_context.py --path ."])
+        self.assert_fixture_errors("agentic-sdlc-pipeline-procedure-runtime-error.jsonl", [
+            "runtime_error:Reached maximum budget ($2)", "runtime_error:error_max_budget_usd"])
+        self.assert_fixture_errors("procedure-strict-codex-semicolon-forged.jsonl", [
+            "strict_missing_green", "strict_step_missing:green-run", "strict_test_run_unattributable"])
+        # C15.3: a missing clearing result adds nothing beyond strict_reviewer_result_missing and the order gap.
+        self.assert_fixture_errors("procedure-strict-codex-reviewer-missing-security.jsonl", [
+            "strict_reviewer_result_missing:security", "strict_step_missing:security"])
+        self.assert_fixture_errors("procedure-strict-codex-reviewer-missing-control.jsonl", [
+            "strict_reviewer_result_missing:control", "strict_step_missing:control"])
+
+    def test_positive_fixtures_have_no_strict_error(self):
+        for fixture, eval_set, case_ids in STRICT_POSITIVE_RUNS:
+            self.assert_fixture_errors(fixture, [], eval_set=eval_set, case_ids=case_ids)
+        # The default-mode pass fixture keeps the shallow "spec"/"plan" stubs, which is its only strict failure.
+        self.assert_fixture_errors("agentic-sdlc-pipeline-procedure-pass.jsonl", SHALLOW_STUBS)
+        # C15.13: absolute spec/plan paths are the deferred L3c-F1 normalization; acceptance excludes them (C15.7).
+        self.assert_fixture_errors("procedure-strict-claude-absolute-paths-pass.jsonl", ABSOLUTE_UNSAFE)
+
+    def test_positive_fixtures_pass_strict_cli_replay(self):
+        for fixture, eval_set, case_ids in STRICT_POSITIVE_RUNS:
+            if "complete-pass" in fixture:
+                continue  # the two complete-pass CLI replays live in TestStrictClaudeFixtures / TestStrictCodexFixtures
+            with self.subTest(fixture=fixture):
+                self.assert_positive_strict_pass(fixture, case_ids, eval_set)
+
+
+def cli_case_fields(stdout):
+    return dict(line.split("=", 1) for line in stdout.splitlines() if line.startswith("case_") and "=" in line)
+
+
+class TestC7AcceptanceLines(StrictFixtureAssertions):
+    """C15.7: the grader prints case_<id>_acceptance=pass|fail and case_<id>_acceptance_excluded=<comma list> next to
+    the unchanged case_<id>= line; strict_critical_audit:* and unsafe_artifact_path errors are excluded."""
+
+    def assert_acceptance(self, fixture, case_status, acceptance, excluded):
+        with tempfile.TemporaryDirectory() as td:
+            proc = strict_fixture_replay(td, fixture)
+        fields = cli_case_fields(proc.stdout)
+        for case_id in PIPELINE_CASES:
+            with self.subTest(fixture=fixture, case=case_id):
+                for suffix in ("", "_acceptance", "_acceptance_excluded"):
+                    self.assertIn(f"case_{case_id}{suffix}", fields, proc.stdout + proc.stderr)
+                self.assertEqual(fields[f"case_{case_id}"], case_status)
+                self.assertEqual(fields[f"case_{case_id}_acceptance"], acceptance)
+                value = fields[f"case_{case_id}_acceptance_excluded"]
+                self.assertEqual(sorted(value.split(",")) if value else [], sorted(excluded))
+
+    def test_clean_run(self):
+        self.assert_acceptance("procedure-strict-claude-complete-pass.jsonl", "passed", "pass", [])
+
+    def test_auditor_verdict_is_reported_in_its_own_column(self):
+        self.assert_acceptance("procedure-strict-claude-auditor-partial-overridden.jsonl", "failed", "pass",
+                               BOTH_CRITICAL)
+
+    def test_unsafe_artifact_path_is_excluded(self):
+        self.assert_acceptance("procedure-strict-claude-absolute-paths-pass.jsonl", "failed", "pass", ABSOLUTE_UNSAFE)
+
+    def test_a_counted_error_fails_acceptance(self):
+        self.assert_acceptance("procedure-strict-claude-missing-tdd-evidence.jsonl", "failed", "fail", [])
+
+
+PATH_CASE = {"id": "path-probe", "prompt": "probe", "strict": {"require_red_green": True, "red_before_source_edit": True}}
+PATH_TEST_FORMS = ("tests/test_app.py", "test/app.py", "pkg/tests/helpers.py", "test_app.py", "pkg/app_test.go",
+                   "web/app.test.ts", "web/app.spec.js", "C:\\work\\repo\\tests\\app.py")
+PATH_SOURCE_FORMS = ("src/app.py", "greeting.py", "lib/app.go", "web/app.tsx", "C:\\work\\repo\\src\\app.ts")
+PATH_NON_SOURCE_FORMS = ("README.md", "docs/agentic-sdlc/evidence/w.tdd.md", "docs/agentic-sdlc/specs/w.md",
+                         "docs/agentic-sdlc/plans/sketch.py", "config/settings.yaml", "notes.txt")
+# C15.6: one shared table for the grader helpers and the hook's isSourceFile: (path, is_test_path, is_source_path).
+PATH_PARITY_ROWS = (
+    ("tests/test_app.py", True, False), ("test/app.py", True, False), ("pkg/tests/helpers.py", True, False),
+    ("test_app.py", True, False), ("pkg/app_test.go", True, False), ("web/app.test.ts", True, False),
+    ("web/app.spec.js", True, False), ("src/test_helpers/util.py", True, False),
+    ("C:\\work\\repo\\tests\\app.py", True, False),
+    ("src/app.py", False, True), ("greeting.py", False, True), ("lib/app.go", False, True), ("web/app.tsx", False, True),
+    ("src/App.PY", False, True), ("attest.py", False, True), ("contest_entry.py", False, True),
+    ("C:\\work\\repo\\src\\app.ts", False, True),
+    ("README.md", False, False), ("notes.txt", False, False), ("config/settings.yaml", False, False),
+    ("docs/agentic-sdlc/specs/w.md", False, False), ("docs/agentic-sdlc/plans/sketch.py", False, False),
+    ("docs/agentic-sdlc/evidence/w.tdd.md", False, False),
+)
+IS_SOURCE_BATCH_JS = (
+    "import { pathToFileURL } from 'node:url';"
+    "let s='';process.stdin.on('data',d=>s+=d).on('end',async()=>{"
+    "const q=JSON.parse(s);const m=await import(pathToFileURL(q.module).href);"
+    "process.stdout.write(JSON.stringify(q.paths.map(p=>m.isSourceFile(p,q.req))));});"
+)
+
+
+def red_green_events(before, after, init_cwd=None):
+    """Main-loop writes before one failing run and after it, then a passing run. Each write is a path or a
+    (path, parent_tool_use_id, tool) tuple; tool defaults to Write."""
+    events = []
+    if init_cwd is not None:
+        events.append({"type": "system", "subtype": "init", "cwd": init_cwd, "model": "claude-sonnet-5"})
+
+    def writes(prefix, items):
+        out = []
+        for number, item in enumerate(items):
+            path, parent, tool = (tuple(item) + (None, "Write"))[:3] if isinstance(item, tuple) else (item, None, "Write")
+            tool = tool or "Write"
+            payload = ({"file_path": path, "edits": [{"old_string": "x", "new_string": "y"}]} if tool == "MultiEdit"
+                       else {"file_path": path, "content": "x = 1\n"})
+            out.append(full_tool_use(f"{prefix}{number}", tool, payload, parent_tool_use_id=parent))
+        return out
+
+    events += writes("wb", before)
+    events += claude_run("r1", "python -m pytest -q", True, "1 failed")
+    events += writes("wa", after)
+    events += claude_run("g1", "python -m pytest -q", False, "1 passed")
+    return events
+
+
+class TestC7PathRules(unittest.TestCase):
+    """C7 path rules for Wt and Ws: `\\` becomes `/`, paths under the fixture root or the init cwd become relative, a
+    source path has a sourceGlobs extension outside the artifact roots and the test regex, and a test path matches
+    `(^|/)tests?/|(^|/)test_|_test\\.|\\.test\\.|\\.spec\\.`. Sub-agent writes are neither (AC17)."""
+
+    RED_NOT_BEFORE = ["strict_red_not_before_source_edit"]
+
+    def errors(self, events, cwd=REPO, contained_root=None, case=PATH_CASE):
+        trace = procedure_eval.trace_events(events, strict=True)
+        return c7_errors(procedure_eval.evaluate_case(case, trace, cwd, strict=True, contained_root=contained_root))
+
+    def test_test_path_forms_are_the_first_test_write(self):
+        for path in PATH_TEST_FORMS:
+            with self.subTest(path=path):
+                self.assertEqual(self.errors(red_green_events([path], ["src/app.py"])), [])
+                self.assertEqual(self.errors(red_green_events([], [path, "src/app.py"])), self.RED_NOT_BEFORE)
+
+    def test_source_path_forms_are_the_first_production_write(self):
+        for path in PATH_SOURCE_FORMS:
+            with self.subTest(path=path):
+                self.assertEqual(self.errors(red_green_events(["tests/test_app.py"], [path])), [])
+                self.assertEqual(self.errors(red_green_events(["tests/test_app.py", path], [])), self.RED_NOT_BEFORE)
+
+    def test_non_source_paths_are_never_the_production_write(self):
+        self.assertEqual(self.errors(red_green_events(["tests/test_app.py", "src/app.py"], [])), self.RED_NOT_BEFORE)
+        for path in PATH_NON_SOURCE_FORMS:
+            with self.subTest(path=path):
+                self.assertEqual(self.errors(red_green_events(["tests/test_app.py", path], ["src/app.py"])), [])
+
+    def test_multiedit_writes_count(self):
+        # The positives use Edit (C15.14); the legacy MultiEdit is still a write for Wt and Ws.
+        self.assertEqual(self.errors(red_green_events([("tests/test_app.py", None, "MultiEdit")],
+                                                      [("src/app.py", None, "MultiEdit")])), [])
+        self.assertEqual(self.errors(red_green_events(["tests/test_app.py", ("src/app.py", None, "MultiEdit")], [])),
+                         self.RED_NOT_BEFORE)
+
+    def test_source_write_absent(self):
+        # C15.2: Ws absent emits only strict_source_edit_unobserved, and only when require_red_green is true.
+        no_source = red_green_events(["tests/test_app.py"], [])
+        self.assertEqual(self.errors(no_source), ["strict_source_edit_unobserved"])
+        lenient = {"id": "path-probe", "prompt": "probe", "strict": {"red_before_source_edit": True}}
+        self.assertEqual(self.errors(no_source, case=lenient), [])
+
+    def test_paths_are_made_relative_to_the_init_cwd(self):
+        # Without relativizing, /work/tests/... makes every write a test path and Ws is never observed.
+        cwd = "/work/tests/sample"
+        test, source = cwd + "/test_greeting.py", cwd + "/greeting.py"
+        self.assertEqual(self.errors(red_green_events([test], [source], init_cwd=cwd)), [])
+        self.assertEqual(self.errors(red_green_events([test, source], [], init_cwd=cwd)), self.RED_NOT_BEFORE)
+
+    def test_paths_are_made_relative_to_the_fixture_root(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "tests" / "proj"
+            root.mkdir(parents=True)
+            test, source = str(root / "test_greeting.py"), str(root / "greeting.py")
+            self.assertEqual(self.errors(red_green_events([test], [source]), cwd=root, contained_root=root), [])
+            self.assertEqual(self.errors(red_green_events([test, source], []), cwd=root, contained_root=root),
+                             self.RED_NOT_BEFORE)
+
+    def test_subagent_writes_are_neither_the_test_nor_the_production_write(self):  # AC17
+        sub_source = red_green_events(["tests/test_app.py", ("src/app.py", "agent-1")], ["src/app.py"])
+        main_source = red_green_events(["tests/test_app.py", "src/app.py"], ["src/app.py"])
+        sub_test = red_green_events([("tests/test_app.py", "agent-1")], ["src/app.py"])
+        self.assertEqual(self.errors(sub_source), [])
+        self.assertEqual(self.errors(main_source), self.RED_NOT_BEFORE)
+        self.assertEqual(self.errors(sub_test), self.RED_NOT_BEFORE)
+
+
+@unittest.skipUnless(shutil.which("node"), "node unavailable: the parity check runs hooks/flow-evidence.mjs isSourceFile")
+class TestC7PathHelperParity(unittest.TestCase):
+    """C15.6: the grader's is_test_path / is_source_path and the hook's isSourceFile agree on one shared path table."""
+
+    def hook_verdicts(self, req):
+        node = shutil.which("node")
+        payload = {"module": str(REPO / "hooks" / "flow-evidence.mjs"), "req": req,
+                   "paths": [row[0] for row in PATH_PARITY_ROWS]}
+        proc = subprocess.run([node, "--input-type=module", "-e", IS_SOURCE_BATCH_JS], input=json.dumps(payload),
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+        self.assertEqual(proc.returncode, 0, "node isSourceFile probe crashed: " + proc.stderr[-400:])
+        return json.loads(proc.stdout)
+
+    def requirements(self):
+        return json.loads((REPO / "hooks" / "flow-requirements.json").read_text(encoding="utf-8"))
+
+    def test_hook_is_source_file_matches_the_table(self):
+        for (path, _is_test, is_source), verdict in zip(PATH_PARITY_ROWS, self.hook_verdicts(self.requirements())):
+            with self.subTest(path=path):
+                self.assertIs(verdict, is_source)
+
+    def test_grader_helpers_match_the_table_and_the_hook(self):
+        for name in ("is_test_path", "is_source_path"):
+            self.assertTrue(callable(getattr(procedure_eval, name, None)), f"C15.6: grader helper {name} is missing")
+        req = self.requirements()
+        for (path, is_test, is_source), verdict in zip(PATH_PARITY_ROWS, self.hook_verdicts(req)):
+            with self.subTest(path=path):
+                self.assertIs(bool(procedure_eval.is_source_path(path, req)), verdict)
+                self.assertIs(bool(procedure_eval.is_source_path(path, req)), is_source)
+                self.assertIs(bool(procedure_eval.is_test_path(path)), is_test)
+
+
+# Contract C16 items 1-7 (the grader fix round after the Phase 2 reviews). The procedure-strict-claude-* fixtures named
+# here are the Phase 2 review probes, committed as they were built (compact JSON, LF); every expected value is the
+# contract outcome.
+FAILED_EDIT_TEXT = "<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>"
+DRIVE_CASE_UNSAFE = ["unsafe_artifact_path:c:/tmp/pytest-0/test_run0/docs/agentic-sdlc/plans/greeting-suffix.md",
+                     "unsafe_artifact_path:c:/tmp/pytest-0/test_run0/docs/agentic-sdlc/specs/greeting-suffix.md"]
+# Times regex_present on the grader's haystack shape: a JSON-dumped command naming a focused skill, then a backslash run
+# and no SKILL.md. Each size is the best of three runs, so one slow run does not skew the ratio.
+PATTERN_TIMING_CHILD = r"""
+import json, sys, time
+sys.path.insert(0, '.')
+from scripts.run_procedure_eval import regex_present
+q = json.loads(sys.stdin.read())
+out = []
+for n in q['sizes']:
+    text = json.dumps({'commands': ['type skills\\feature-build' + '\\' * n + 'X']})
+    best = None
+    for _ in range(3):
+        started = time.perf_counter()
+        regex_present(q['pattern'], text)
+        took = time.perf_counter() - started
+        best = took if best is None else min(best, took)
+    out.append(best)
+print(json.dumps(out))
+"""
+
+
+class TestC16ForbiddenPatternLinear(StrictFixtureAssertions):
+    """C16.1: pattern 2 is `(?:<six>)[\\/]+SKILL\\.md`, linear on a long backslash run (lesson 2026-07-01: assert the
+    growth RATIO across doublings, never an absolute time)."""
+
+    SIZES = [25000 * 2 ** step for step in range(5)]  # 4 doublings of the source backslash run
+    MAX_GROWTH = 48  # linear is about 16x over 4 doublings and quadratic about 256x; the old alternation never finished
+    CHILD_TIMEOUT = 30
+
+    def test_pattern2_time_grows_linearly_across_doublings(self):
+        patterns = []
+        for eval_set in (PIPELINE_EVAL, GATE_STOP_EVAL):
+            for case in self.load_cases(eval_set):
+                patterns += [pattern for pattern in case.get("forbidden_patterns", []) if "SKILL" in pattern]
+        patterns = list(dict.fromkeys(patterns))  # whatever the eval files hold (the literal is pinned in TestC7EvalSets)
+        self.assertTrue(patterns, "no pipeline case carries forbidden pattern 2")
+        for pattern in patterns:
+            with self.subTest(pattern=pattern):
+                try:
+                    proc = subprocess.run([sys.executable, "-c", PATTERN_TIMING_CHILD], cwd=REPO,
+                                          input=json.dumps({"pattern": pattern, "sizes": self.SIZES}),
+                                          capture_output=True, text=True, encoding="utf-8",
+                                          timeout=self.CHILD_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    self.fail(f"pattern 2 is super-linear: {len(self.SIZES)} sizes up to {self.SIZES[-1]} backslashes "
+                              f"did not finish in {self.CHILD_TIMEOUT} s")
+                self.assertEqual(proc.returncode, 0, proc.stderr[-400:])
+                timings = json.loads(proc.stdout)
+                growth = timings[-1] / max(timings[0], 1e-9)
+                self.assertLess(growth, self.MAX_GROWTH, f"pattern 2 grew {growth:.0f}x over 4 doublings: {timings}")
+
+    def test_pattern2_still_catches_every_separator_style(self):
+        for sample in ("skills/feature-build/SKILL.md", "skills\\root-cause-fix\\SKILL.md",
+                       json.dumps("skills\\safe-refactor\\SKILL.md"), "skills/test-authoring//SKILL.md",
+                       "skills\\/security-audit\\/SKILL.md"):
+            with self.subTest(sample=sample):
+                self.assertTrue(procedure_eval.regex_present(FORBIDDEN_SKILL_PATH, sample))
+
+
+class TestC16DispatchTiming(C7FixtureReplay):
+    """C16.2: a reviewer clears the last source edit only when its dispatch call comes after that edit and its result
+    clears; the TDD evidence file must be written before the first clearing auditor DISPATCH, not its result."""
+
+    def test_a_reviewer_dispatched_before_the_last_edit_does_not_clear_it(self):
+        # The security-reviewer call is issued, a source Edit lands, then the reviewer's clearing result arrives.
+        self.assert_fixture_errors("procedure-strict-claude-edit-during-security-review.jsonl",
+                                   ["strict_reviewer_before_last_edit:security"])
+        # A background security-reviewer launch, a source Edit, then the completed task notification.
+        self.assert_fixture_errors("procedure-strict-claude-background-reviewer-then-edit.jsonl",
+                                   ["strict_reviewer_before_last_edit:security"])
+
+    def test_tdd_evidence_written_after_the_auditor_dispatch_is_missing(self):
+        tdd_calls = {"toolu_s14", "toolu_s17"}
+        events = fixture_events("procedure-strict-claude-complete-pass.jsonl")
+        moved = [event for event in events if claude_call_ids(event) & tdd_calls]
+        rest = [event for event in events if not claude_call_ids(event) & tdd_calls]
+        self.assertEqual(len(moved), 4)
+        at = index_after(rest, "toolu_s20", "tool_use")  # after the auditor call, before its clearing result
+        self.assert_errors(self.replay_events(rest[:at] + moved + rest[at:]), ["strict_missing_tdd_evidence"])
+
+
+class TestC16GateStopScope(C7FixtureReplay):
+    """C16.3: under stop_at_gate any write outside docs/agentic-sdlc/ fails, anywhere in the run and in sub-agents too;
+    the plan-write and status checks still start at the first spec write."""
+
+    def test_writes_before_the_spec_fail(self):
+        self.assert_fixture_errors("procedure-strict-claude-gate-stop-source-before-spec.jsonl",
+                                   ["strict_edit_after_spec_gate:greeting.py",
+                                    "strict_edit_after_spec_gate:tests/test_suffix.py"], **GATE_STOP_ONLY)
+
+    def test_sub_agent_writes_fail(self):
+        self.assert_fixture_errors("procedure-strict-claude-gate-stop-subagent-edit.jsonl",
+                                   ["strict_edit_after_spec_gate:greeting.py"], **GATE_STOP_ONLY)
+        gate = fixture_events("procedure-strict-claude-gate-stop-pass.jsonl")
+        at = index_after(gate, "toolu_g02", "tool_result")  # before the spec write
+        calls = (subagent_call("toolu_a2", "Write", {"file_path": "src/new.py", "content": "x = 1\n"}, "toolu_a1",
+                               "File created successfully at: src/new.py")
+                 + subagent_call("toolu_a3", "MultiEdit", {"file_path": "greeting.py",
+                                                           "edits": [{"old_string": "a", "new_string": "b"}]},
+                                 "toolu_a1", "Applied 1 edit to greeting.py")
+                 + subagent_call("toolu_a4", "NotebookEdit", {"notebook_path": "notebooks/explore.ipynb",
+                                                              "cell_id": "c1", "new_source": "x"},
+                                 "toolu_a1", "Updated cell c1")
+                 + subagent_call("toolu_a5", "Write", {"file_path": "docs/agentic-sdlc/notes/sketch.md",
+                                                       "content": "notes\n"}, "toolu_a1", "File created successfully")
+                 + [full_tool_use("toolu_a6", "Edit", {"file_path": "lib/other.py", "old_string": "a", "new_string": "b"},
+                                  parent_tool_use_id="toolu_a1"),  # a failed sub-agent write is not a write (C16.4)
+                    dict(claude_result("toolu_a6", True, FAILED_EDIT_TEXT), parent_tool_use_id="toolu_a1")])
+        dispatch = [full_tool_use("toolu_a1", "Agent", {"subagent_type": "general-purpose", "prompt": "Prototype it."})]
+        done = [claude_result("toolu_a1", False, "Prototyped.")]
+        self.assert_errors(self.replay_events(gate[:at] + dispatch + calls + done + gate[at:], **GATE_STOP_ONLY),
+                           ["strict_edit_after_spec_gate:greeting.py", "strict_edit_after_spec_gate:notebooks/explore.ipynb",
+                            "strict_edit_after_spec_gate:src/new.py"])
+
+
+class TestC16FailedCalls(C7FixtureReplay):
+    """C16.4: a Claude write whose correlated tool_result is an error is not a write, and skill_call_counts skips a
+    Skill call whose only result is an error (the hook's receiptHasError rule)."""
+
+    def test_a_failed_source_edit_before_red_is_not_the_production_write(self):
+        self.assert_fixture_errors("procedure-strict-claude-failed-source-edit-before-red.jsonl", [])
+
+    def test_failed_writes_do_not_break_the_gate_stop(self):
+        gate = fixture_events("procedure-strict-claude-gate-stop-pass.jsonl")
+        at = index_after(gate, "toolu_g05", "tool_result")
+        failed = [full_tool_use("toolu_f0", "Write", {"file_path": FLAT_SPEC_PATH,
+                                                      "content": "---\nwork_id: greeting-suffix\nstatus: approved\n---\n"}),
+                  claude_result("toolu_f0", True, FAILED_EDIT_TEXT),
+                  full_tool_use("toolu_f1", "Edit", {"file_path": "greeting.py", "old_string": "a", "new_string": "b"}),
+                  claude_result("toolu_f1", True, FAILED_EDIT_TEXT),
+                  full_tool_use("toolu_f2", "Edit", {"file_path": FLAT_SPEC_PATH, "old_string": "status: draft",
+                                                     "new_string": "status: approved"}),
+                  claude_result("toolu_f2", True, "<tool_use_error>String to replace not found in file.</tool_use_error>"),
+                  full_tool_use("toolu_f3", "Write", {"file_path": "docs/agentic-sdlc/plans/greeting-suffix.md",
+                                                      "content": "---\nstatus: draft\n---\n"}),
+                  claude_result("toolu_f3", True, "<tool_use_error>Permission to write was denied.</tool_use_error>")]
+        self.assert_errors(self.replay_events(gate[:at] + failed + gate[at:], **GATE_STOP_ONLY), [])
+        with self.subTest(variant="a write with no result still counts"):
+            pending = [full_tool_use("toolu_f4", "Edit", {"file_path": "greeting.py", "old_string": "a",
+                                                          "new_string": "b"})]
+            self.assert_errors(self.replay_events(gate[:at] + pending + gate[at:], **GATE_STOP_ONLY),
+                               ["strict_edit_after_spec_gate:greeting.py"])
+
+    def test_an_errored_skill_call_is_not_counted(self):
+        # An unknown-name dispatch-strategy call errors, then the real call runs: one call counts.
+        self.assert_fixture_errors("procedure-strict-claude-dispatch-errored-retry.jsonl", [])
+        events = fixture_events("procedure-strict-claude-complete-pass.jsonl")
+        at = index_after(events, "toolu_s01", "tool_result")
+        with self.subTest(variant="a second call with no result still counts"):
+            pending = [full_tool_use("toolu_d2", "Skill", {"skill": "agentic-sdlc:dispatch-strategy"})]
+            self.assert_errors(self.replay_events(events[:at] + pending + events[at:]),
+                               ["strict_skill_call_count:dispatch-strategy=2"])
+
+
+class TestC16PathNormalization(C7FixtureReplay):
+    """C16.5: a leading `./` is stripped, a root prefix compares case-insensitively, the Codex rollout cwd is a root, and
+    an error id never carries an absolute path (an unrelativized path shows its last two segments)."""
+
+    def test_dot_slash_tdd_evidence_path(self):
+        self.assert_fixture_errors("procedure-strict-claude-dot-slash-tdd-evidence.jsonl", [])
+
+    def test_drive_letter_case_mismatch_with_the_init_cwd(self):
+        # init cwd C:/tmp/pytest-0/test_run0, tool paths c:/tmp/pytest-0/test_run0/... (a pytest tmp_path shape whose
+        # test_ segment makes every unrelativized write a test path). Only the deferred L3c-F1 depth paths remain, and
+        # only where the OS reads `c:/...` as absolute (Windows); on POSIX that string is relative, so the depth check
+        # has nothing to flag. The C16 path-normalization outcome is the same on both.
+        expected = DRIVE_CASE_UNSAFE if os.path.isabs("c:/tmp") else []
+        self.assert_fixture_errors("procedure-strict-claude-drive-case-cwd.jsonl", expected)
+
+    def test_codex_rollout_cwd_is_a_root(self):
+        events = fixture_events("procedure-strict-codex-complete-pass.jsonl")
+        root = "/srv/tests/greeting-suffix"  # a tests/ segment: unrelativized, every write would be a test path
+        absolute = replaced(replaced(events, "*** Update File: greeting.py", f"*** Update File: {root}/greeting.py"),
+                            "*** Update File: test_greeting.py", f"*** Update File: {root}/test_greeting.py")
+        self.assertNotEqual(absolute, events)
+        for carrier in ("session_meta", "turn_context"):
+            with self.subTest(carrier=carrier):
+                rooted = [dict(event, payload=dict(event["payload"], cwd=root)) if event.get("type") == carrier
+                          else event for event in absolute]
+                self.assert_errors(self.replay_events(rooted), [])
+        with self.subTest(variant="no rollout cwd: the absolute paths are kept, never guessed"):
+            self.assert_errors(self.replay_events(absolute), ["strict_source_edit_unobserved"])
+
+    def test_error_ids_never_carry_an_absolute_path(self):
+        gate = fixture_events("procedure-strict-claude-gate-stop-pass.jsonl")
+        at = index_after(gate, "toolu_g05", "tool_result")
+        for path, shown in (("/elsewhere/project/greeting.py", "project/greeting.py"),
+                            ("D:\\other\\repo\\src\\app.py", "src/app.py"),
+                            ("//server/share/tools/run.py", "tools/run.py"),
+                            ("c:/app.py", "app.py"),
+                            ("./greeting.py", "greeting.py")):
+            with self.subTest(path=path):
+                edit = [full_tool_use("toolu_g06", "Edit", {"file_path": path, "old_string": "a", "new_string": "b"}),
+                        claude_result("toolu_g06", False, "The file has been updated.")]
+                self.assert_errors(self.replay_events(gate[:at] + edit + gate[at:], **GATE_STOP_ONLY),
+                                   [f"strict_edit_after_spec_gate:{shown}"])
+        with self.subTest(variant="an init cwd differing only in case makes the path relative"):
+            init = [dict(gate[0], cwd="C:/Work/Repo")] + gate[1:at]
+            edit = [full_tool_use("toolu_g07", "Edit", {"file_path": "c:/work/repo/greeting.py", "old_string": "a",
+                                                        "new_string": "b"}),
+                    claude_result("toolu_g07", False, "The file has been updated.")]
+            self.assert_errors(self.replay_events(init + edit + gate[at:], **GATE_STOP_ONLY),
+                               ["strict_edit_after_spec_gate:greeting.py"])
+
+
+class TestC16ArtifactDepthEmptyContent(C7FixtureReplay):
+    """C16.6: only an empty Codex `*** Update File:` record is ignored for depth; an empty Claude Write (or an empty Add
+    File) is the latest content and yields shallow_artifact, as at 4262a19."""
+
+    def test_an_emptied_claude_spec_is_shallow(self):
+        self.assert_fixture_errors("procedure-strict-claude-spec-emptied.jsonl",
+                                   ["shallow_artifact:docs/agentic-sdlc/specs/greeting-suffix.md"])
+
+    def test_an_empty_codex_add_file_is_shallow_but_an_update_file_is_ignored(self):
+        events = fixture_events("procedure-strict-codex-complete-pass.jsonl")
+        at = rollout_text_index(events, "Codex Adapter Gate: work-type core feature")
+        empty_add = [patch_call("call_e1", f"*** Begin Patch\n*** Add File: {FLAT_SPEC_PATH}\n*** End Patch\n"),
+                     patch_success("call_e1", "A", FLAT_SPEC_PATH)]
+        self.assert_errors(self.replay_events(events[:at] + empty_add + events[at:]),
+                           ["shallow_artifact:docs/agentic-sdlc/specs/greeting-suffix.md"])
+        self.assert_fixture_errors("procedure-strict-codex-complete-pass.jsonl", [])  # its Update File records
+
+
+class TestC16ForbiddenSkillScanKeys(C7FixtureReplay):
+    """C16.7: forbid_skills_anywhere scans the path, pattern, file_path and command keys of every tool, plus
+    notebook_path (here inside a sub-agent, so the haystack patterns stay silent and only the strict id fires)."""
+
+    def test_every_path_key_of_every_tool(self):
+        events = fixture_events("procedure-strict-claude-complete-pass.jsonl")
+        at = index_after(events, "toolu_s18", "tool_use")
+        for tool, payload, name in (
+            ("Grep", {"pattern": "Steps", "path": "/opt/agentic-sdlc/skills/feature-build/SKILL.md"}, "feature-build"),
+            ("Glob", {"pattern": "**/root-cause-fix/SKILL.md"}, "root-cause-fix"),
+            ("Write", {"file_path": "skills/safe-refactor/SKILL.md", "content": "x\n"}, "safe-refactor"),
+            ("NotebookEdit", {"notebook_path": "skills\\test-authoring\\SKILL.md", "new_source": "x"}, "test-authoring"),
+            ("Bash", {"command": "cat skills/security-audit/SKILL.md"}, "security-audit"),
+        ):
+            with self.subTest(tool=tool):
+                derived = list(events)
+                derived[at:at] = subagent_call("toolu_n09", tool, payload, "toolu_s18", "ok")
+                self.assert_errors(self.replay_events(derived), [f"strict_forbidden_skill:{name}"])
+        with self.subTest(variant="other keys and non-string values are not scanned"):
+            derived = list(events)
+            derived[at:at] = subagent_call("toolu_n10", "Grep", {"pattern": ["feature-build/SKILL.md"], "glob": "*.md",
+                                                                 "prompt": "skills/feature-build/SKILL.md"},
+                                           "toolu_s18", "ok")
+            self.assert_errors(self.replay_events(derived), [])

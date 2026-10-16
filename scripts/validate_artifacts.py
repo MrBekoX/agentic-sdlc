@@ -151,7 +151,7 @@ FRONTMATTER_REQUIRED = {
     "spec": ("work_id", "status"),
     "plan": ("work_id", "spec", "branch", "status"),
 }
-FRONTMATTER_STATUSES = {"draft", "reviewed", "in_progress", "ready_for_audit", "complete"}
+FRONTMATTER_STATUSES = {"draft", "reviewed", "approved", "in_progress", "ready_for_audit", "complete"}
 
 
 def parse_frontmatter(text):

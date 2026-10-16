@@ -1,13 +1,13 @@
 ---
 name: implementation-control
-description: This skill should be used first for a pre-final audit in any language that the implementation followed the required flow across spec, plan, TDD, tests run, security pass, scoped diff, and final evidence. Requests to audit the spec-plan-TDD-security flow before the final response are active audit tasks, not passive session preferences. It applies as the first action, before running git diff/status/log or reading files and even when evidence is missing, because its auditor inspects the diff itself; missing evidence is an audit outcome, not a reason to defer activation. Not for starting new implementation.
+description: This skill should be used first for a pre-final audit in any language that the implementation followed the required flow across spec, plan, TDD, tests run, security pass, scoped diff, and final evidence. Requests to audit the spec-plan-TDD-security flow before the final response are active audit tasks, not passive session preferences. It applies as the first action, before running git diff/status/log or reading files and even when evidence is missing, because its read-only auditor independently checks the supplied diff, artifacts, and test evidence; missing evidence is an audit outcome, not a reason to defer activation. Not for starting new implementation. Not for steps inside an active agentic-sdlc-pipeline run.
 ---
 
 # Skill: implementation-control
 
 > **Argument:** `/implementation-control $ARGUMENTS`. Match the user's language; keep the report headings in English. This skill **audits**, it does not implement.
 
-Runs before the final response of any implementation flow to confirm the work was done properly — not just that code exists. For a thorough audit it delegates to the **`implementation-auditor`** agent or runtime equivalent (fresh context, sees the diff and the resolved work package, not the reasoning that produced them).
+Runs before the final response of any implementation flow to confirm the work was done properly — not just that code exists. For a thorough audit it delegates to the **`implementation-auditor`** agent or runtime equivalent (fresh context, receives the diff and the resolved work package, not the reasoning that produced them).
 
 ## Invariant
 The audit reports what the evidence shows — a step is "done" only when its artifact/output exists, and missing steps are named, not glossed.
@@ -110,7 +110,7 @@ PASS / PARTIAL / FAIL
 ```
 
 ## Evidence persistence
-For **per-package** work the Final Implementation Report is persisted to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get none), using the slug `resolve_work_package.py` reports; a re-run **overwrites** it in place (single canonical file, last run wins). This persisting write is done by the **main control/finalize step** this skill runs in (the main pipeline finalize step), not the read-only `implementation-auditor` sub-agent it dispatches — the auditor only consumes the report and resolver output as input. Evidence has **no validator** and never gates resolution (AC12).
+For **per-package** work the Final Implementation Report is persisted to `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` — per-package only (flat packages get none), using the slug `resolve_work_package.py` reports; a re-run **overwrites** it in place (single canonical file, last run wins). This persisting write is done by the **main control/finalize step** of the flow that called this skill, not the read-only `implementation-auditor` sub-agent it dispatches — the auditor only consumes the supplied evidence and resolver output as input. Evidence has **no validator** and never gates resolution (AC12).
 
 ## Limits
 - Audits only; performs no code changes.

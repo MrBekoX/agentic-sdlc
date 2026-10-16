@@ -161,25 +161,57 @@ def _write_pp_artifact(cwd, slug, role, work_id, ac_id="AC1"):
 
 BR6_TABLE = REPO / "tests" / "fixtures" / "transcripts" / "br6-attribution-cases.json"
 
-# Exact stdout captured on this tree before the branch and review-result steps existed (the 5801cb9
-# flow engine), for AC33, AC34 and AC40.
+# Exact flow-step-guard block stdout, for AC33, AC34 and AC40. The step list is the 5801cb9 engine's;
+# the reason text is the flow-neutral C6 sentence (pipeline v2.1 D7), which replaced the old
+# "invoke implementation-control" wording when the hooks/flow-step-guard.mjs byte lock was released.
+# These pins are that file's behavioural lock now - see the release comment in the lock suites.
+FLOW_STEP_BLOCK_TAIL = (
+    "have no evidence this turn. Produce them before finishing - for example write and validate the "
+    "spec/plan, run the tests, and run the required reviewer or audit step. Evidence is re-derived, not "
+    "taken from text."
+)
 PINNED_STEP_BLOCK_MAIN = (
     '{"decision":"block","reason":"root-cause-fix: required step(s) [spec, plan, tests, control] have no '
-    'evidence this turn. Produce them before finishing - write+validate the spec/plan, run the tests, and '
-    'invoke implementation-control. Evidence is re-derived, not taken from text.","systemMessage":'
-    '"flow-step-guard: blocked - required flow steps lack evidence."}'
+    'evidence this turn. Produce them before finishing - for example write and validate the spec/plan, run '
+    'the tests, and run the required reviewer or audit step. Evidence is re-derived, not taken from text.",'
+    '"systemMessage":"flow-step-guard: blocked - required flow steps lack evidence."}'
+)
+# C14: the flow-step-guard.mjs branches the C6 edit does NOT change stay byte-identical to 4262a19.
+# Each literal below was captured by running the unmodified hooks/flow-step-guard.mjs at 4262a19
+# (2026-10-16) over the event set named in its test, then pasted here - the expected value is fixed,
+# not recomputed. With the digest lock released, these pins are what notices a drift in those branches.
+PINNED_STEP_WARN_RCF = (
+    '{"systemMessage":"flow-step-guard: missing evidence for step(s): spec, plan, tests, security, control"}'
+)
+PINNED_STEP_WARN_ONLY_UNDER_BLOCK_FLAG = (
+    '{"systemMessage":"flow-step-guard: missing evidence for step(s): security, review-result"}'
+)
+PINNED_STEP_NO_FLOW_HEURISTIC = (
+    '{"systemMessage":"flow-step-guard: implementation edits and a completion claim, but no flow skill was '
+    'invoked - did you skip root-cause-fix?"}'
 )
 PINNED_ORDER_BLOCK_MAIN = (
     '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":'
     '"root-cause-fix: produce spec and plan before editing source (missing: spec, plan). Externalize them as '
     'validated artifacts first."},"systemMessage":"flow-order-guard: spec/plan required before source edits."}'
 )
-PINNED_PIPE_CORE_BLOCK = (
-    '{"decision":"block","reason":"agentic-sdlc-pipeline: required step(s) [core] have no evidence this turn. '
-    'Produce them before finishing - write+validate the spec/plan, run the tests, and invoke '
-    'implementation-control. Evidence is re-derived, not taken from text.","systemMessage":'
+# The pipeline block pin (C6): every pipeline step satisfied except `control`, which only the
+# implementation-auditor agent clears now.
+PINNED_PIPE_CONTROL_BLOCK = (
+    '{"decision":"block","reason":"agentic-sdlc-pipeline: required step(s) [control] have no evidence this '
+    'turn. Produce them before finishing - for example write and validate the spec/plan, run the tests, and '
+    'run the required reviewer or audit step. Evidence is re-derived, not taken from text.","systemMessage":'
     '"flow-step-guard: blocked - required flow steps lack evidence."}'
 )
+DS = "agentic-sdlc:dispatch-strategy"
+# The O4 dispatch-terminal Stop message (C6), verbatim.
+DISPATCH_TERMINAL_MESSAGE = ("agentic-sdlc-pipeline: the turn ended on the dispatch-strategy decision. "
+                             "Continue with the pipeline's next step in the same turn.")
+# The pipeline's flow-order deny reason for a missing red-first. The sentence is the locked
+# flow-order-guard.mjs text ("produce spec and plan..."), which D7 accepts as a limitation; the
+# part that carries the C6 behaviour is "(missing: red-first)".
+PIPE_RED_FIRST_DENY_REASON = ("agentic-sdlc-pipeline: produce spec and plan before editing source (missing: "
+                              "red-first). Externalize them as validated artifacts first.")
 BRANCH_GIT_ARGV = {
     "symbolicRef": ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=", "--no-pager",
                     "symbolic-ref", "--quiet", "--short", "HEAD"],
@@ -220,35 +252,41 @@ SATISFIED = with_results([
 ])
 
 
+def _run_step_guard_raw(test, events, *, block=False, stop_active=False, cwd=None, env_extra=None,
+                       last_assistant_message=None, background_tasks=None):
+    """Run flow-step-guard.mjs over `events` and return its raw stdout (exit code asserted 0)."""
+    with tempfile.TemporaryDirectory() as td:
+        run_cwd = cwd or td
+        tpath = Path(td) / "transcript.jsonl"
+        tpath.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
+        env = os.environ.copy()
+        env.pop("AGENTIC_FLOW_STRICT_EVIDENCE", None)
+        env.pop("AGENTIC_FLOW_GATE_BLOCK", None)  # the warn path must not inherit an ambient flag
+        # A temp cwd must never resolve an enclosing repository's branch (the branch step).
+        env["GIT_CEILING_DIRECTORIES"] = str(Path(run_cwd).resolve().parent)
+        if block:
+            env["AGENTIC_FLOW_GATE_BLOCK"] = "true"
+        if env_extra:
+            env.update(env_extra)
+        payload = {"transcript_path": str(tpath), "stop_hook_active": stop_active}
+        if last_assistant_message is not None:
+            payload["last_assistant_message"] = last_assistant_message
+        if background_tasks is not None:
+            payload["background_tasks"] = background_tasks
+        proc = subprocess.run(
+            [NODE, str(STEP_GUARD)],
+            input=json.dumps(payload),
+            capture_output=True, text=True, encoding="utf-8", cwd=run_cwd, env=env,
+        )
+        test.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout or ""
+
+
 @unittest.skipIf(NODE is None, "node not available")
 class TestFlowStepGuard(unittest.TestCase):
-    def run_guard(self, events, *, block=False, stop_active=False, cwd=None, env_extra=None,
-                  last_assistant_message=None, background_tasks=None):
-        with tempfile.TemporaryDirectory() as td:
-            run_cwd = cwd or td
-            tpath = Path(td) / "transcript.jsonl"
-            tpath.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
-            env = os.environ.copy()
-            env.pop("AGENTIC_FLOW_STRICT_EVIDENCE", None)
-            # A temp cwd must never resolve an enclosing repository's branch (the branch step).
-            env["GIT_CEILING_DIRECTORIES"] = str(Path(run_cwd).resolve().parent)
-            if block:
-                env["AGENTIC_FLOW_GATE_BLOCK"] = "true"
-            if env_extra:
-                env.update(env_extra)
-            payload = {"transcript_path": str(tpath), "stop_hook_active": stop_active}
-            if last_assistant_message is not None:
-                payload["last_assistant_message"] = last_assistant_message
-            if background_tasks is not None:
-                payload["background_tasks"] = background_tasks
-            proc = subprocess.run(
-                [NODE, str(STEP_GUARD)],
-                input=json.dumps(payload),
-                capture_output=True, text=True, encoding="utf-8", cwd=run_cwd, env=env,
-            )
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            out = (proc.stdout or "").strip()
-            return json.loads(out) if out else {}
+    def run_guard(self, events, **kw):
+        out = _run_step_guard_raw(self, events, **kw).strip()
+        return json.loads(out) if out else {}
 
     def test_blocks_missing_spec_when_flag_set(self):  # AC1
         out = self.run_guard([skill(RCF), edit("src/app.py"), ev_text("Fixed.")], block=True)
@@ -325,6 +363,34 @@ class TestFlowStepGuard(unittest.TestCase):
         ])
         self.assertEqual(self.run_guard(events, block=True), {})
 
+    # ---- C14: exact-stdout pins for the unchanged branches (released digest lock) ----
+    def test_warn_reminder_stdout_pinned(self):  # C14: byte-identical to 4262a19
+        out = _run_step_guard_raw(self, [skill(RCF), edit("src/app.py"), ev_text("Fixed.")])
+        self.assertEqual(out, PINNED_STEP_WARN_RCF)
+
+    def test_warn_only_steps_under_block_flag_stdout_pinned(self):  # C14: warn steps never block
+        events = [skill(RCF), edit("src/app.py"), workflow("agentic-sdlc:spec-plan-draft"),
+                  bash("python -m pytest -q"), agent("agentic-sdlc:implementation-auditor"), ev_text("Done.")]
+        self.assertEqual(_run_step_guard_raw(self, events, block=True), PINNED_STEP_WARN_ONLY_UNDER_BLOCK_FLAG)
+
+    def test_no_flow_heuristic_stdout_pinned(self):  # C14: the line-78 heuristic text, flag on or off
+        events = [edit("src/app.py"), edit("src/two.py"), ev_text("All tests passing, feature complete.")]
+        for block in (False, True):
+            with self.subTest(block=block):
+                self.assertEqual(_run_step_guard_raw(self, events, block=block), PINNED_STEP_NO_FLOW_HEURISTIC)
+
+    # ---- C14: `contains` items keep substring matching (unchanged behaviour, green before and after C6) ----
+    def test_contains_items_still_match_by_substring(self):  # C14
+        # One general-purpose agent whose prompt names both reviewers satisfies the substring
+        # security and control steps of the focused flows - exact matching is pipeline-only.
+        reviewer = ev_tool("Agent", {"subagent_type": "general-purpose",
+                                     "prompt": "Act as security-reviewer, then as implementation-auditor."})
+        for flow in (RCF, FB):
+            with self.subTest(flow=flow):
+                events = with_results([skill(flow), edit("src/app.py"), workflow("agentic-sdlc:spec-plan-draft"),
+                                       bash("python -m pytest -q"), reviewer, ev_text("Done.")])
+                self.assertEqual(self.run_guard(events, block=True), {})
+
     def test_feature_build_blocks_missing_spec(self):
         out = self.run_guard([skill(FB), edit("src/app.py"), ev_text("Built.")], block=True)
         self.assertEqual(out.get("decision"), "block")
@@ -352,24 +418,38 @@ class TestFlowStepGuard(unittest.TestCase):
         ])
         self.assertEqual(self.run_guard(events, block=True), {})
 
-    def test_pipeline_blocks_missing_delegation_and_spec(self):
+    def test_pipeline_blocks_missing_dispatch_and_spec(self):  # C6: no `core` step; red-first has no stop
         out = self.run_guard([skill(PIPE), edit("src/app.py"), ev_text("Shipped.")], block=True)
         self.assertEqual(out.get("decision"), "block")
-        self.assertTrue(any(k in out.get("reason", "").lower() for k in ("dispatch", "spec")))
+        self.assertEqual(_block_ids(out), ["dispatch", "spec", "plan", "tests", "security", "control"])
+        self.assertTrue(out.get("reason", "").endswith(FLOW_STEP_BLOCK_TAIL), out.get("reason"))
 
-    def test_pipeline_satisfied_is_silent(self):
+    def test_pipeline_satisfied_is_silent(self):  # C6: Agent reviewers, no focused Skill call
         events = with_results([
             skill(PIPE),
-            skill("agentic-sdlc:dispatch-strategy"),
+            skill(DS),
             workflow("agentic-sdlc:spec-plan-draft"),
-            skill("agentic-sdlc:feature-build"),  # core handoff
+            bash("py -3 -m unittest tests.test_app"),  # RED run before the first production edit
             edit("src/app.py"),
             bash("py -3 -m unittest tests.test_app"),
-            skill("agentic-sdlc:security-audit"),
-            skill("agentic-sdlc:implementation-control"),
+            agent("agentic-sdlc:security-reviewer"),
+            agent("agentic-sdlc:implementation-auditor"),
             ev_text("Done."),
         ])
         self.assertEqual(self.run_guard(events, block=True), {})
+
+    def test_pipeline_focused_skill_calls_do_not_satisfy_reviewer_steps(self):  # C6: Agent-only security/control
+        # The old satisfiers - a Skill call to security-audit / implementation-control - no longer count
+        # inside the pipeline: the pipeline dispatches the agents directly (D5).
+        events = with_results([
+            skill(PIPE), skill(DS), workflow("agentic-sdlc:spec-plan-draft"),
+            bash("py -3 -m unittest tests.test_app"), edit("src/app.py"),
+            skill("agentic-sdlc:security-audit"), skill("agentic-sdlc:implementation-control"),
+            ev_text("Done."),
+        ])
+        out = self.run_guard(events, block=True)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertEqual(_block_ids(out), ["security", "control"])
 
     # ---- per-package layout (work-package-artifact-resolution: AC11/AC12/AC14/AC15/BR10) ----
     # These all run an active flow (root-cause-fix) plus a real source edit so the Stop
@@ -475,10 +555,9 @@ def _satisfied_events(flow):
         RCF: implement,
         FB: implement,
         SR: [bash("py -3 -m unittest tests.test_characterization"), agent("agentic-sdlc:implementation-auditor")],
-        # core delegation through test-authoring: a core member that activates no second flow
-        PIPE: [skill("agentic-sdlc:dispatch-strategy"), workflow("agentic-sdlc:spec-plan-draft"),
-               skill("agentic-sdlc:test-authoring"), bash("py -3 -m unittest tests.test_app"),
-               skill("agentic-sdlc:security-audit"), skill("agentic-sdlc:implementation-control")],
+        # C6: the pipeline invokes no focused skill; its reviewers are the two agents.
+        PIPE: [skill(DS), workflow("agentic-sdlc:spec-plan-draft"), bash("py -3 -m unittest tests.test_app"),
+               agent("agentic-sdlc:security-reviewer"), agent("agentic-sdlc:implementation-auditor")],
     }
     return with_results([skill(flow), edit("src/app.py"), *tails[flow], ev_text("Done.")])
 
@@ -541,9 +620,12 @@ class TestBranchStep(unittest.TestCase):
                     self.assertNotIn(branch, raw)  # no branch name outside the fixed step text
 
     def test_two_active_flows_branch_listed_per_flow(self):  # AC32
-        events = with_results([skill(PIPE), skill(FB), edit("src/app.py"), skill("agentic-sdlc:dispatch-strategy"),
+        # Two genuinely separate standalone activations in one session (root-cause-fix, then
+        # feature-build). The pipeline no longer invokes a focused skill (C6/D1), so it is not used
+        # to stand up the second flow.
+        events = with_results([skill(RCF), skill(FB), edit("src/app.py"),
                                workflow("agentic-sdlc:spec-plan-draft"), bash("py -3 -m unittest tests.test_app"),
-                               skill("agentic-sdlc:security-audit"), skill("agentic-sdlc:implementation-control"),
+                               agent("agentic-sdlc:security-reviewer"), agent("agentic-sdlc:implementation-auditor"),
                                ev_text("Done.")])
         self.assertEqual(_reminder_ids(self.stop(events, self.make_repo("main"))), ["branch", "branch"])
 
@@ -799,11 +881,17 @@ class TestReviewResultStep(unittest.TestCase):
         self.assertEqual(step_ids([(SECURITY_AGENT, "error")]), ["control"])
         self.assertEqual(step_ids([(CONTROL_SKILL, "missing")]), ["security"])
 
-    def test_pipeline_missing_core_reported_as_before(self):  # AC40
-        events = [skill(PIPE), skill("agentic-sdlc:dispatch-strategy"), workflow("agentic-sdlc:spec-plan-draft"),
-                  edit("src/app.py"), bash("py -3 -m unittest tests.test_app"), skill("agentic-sdlc:security-audit"),
-                  skill("agentic-sdlc:implementation-control"), ev_text("Done.")]
-        self.assertEqual(self.run_guard(events, block=True), json.loads(PINNED_PIPE_CORE_BLOCK))
+    def test_pipeline_missing_control_block_pinned(self):  # AC40, C6 pipeline block pin
+        events = [skill(PIPE), skill(DS), workflow("agentic-sdlc:spec-plan-draft"),
+                  edit("src/app.py"), bash("py -3 -m unittest tests.test_app"),
+                  agent("agentic-sdlc:security-reviewer"), ev_text("Done.")]
+        self.assertEqual(self.run_guard(events, block=True), json.loads(PINNED_PIPE_CONTROL_BLOCK))
+
+    def test_pipeline_block_stdout_bytes_pinned(self):  # C6: exact bytes, not just the parsed object
+        events = [skill(PIPE), skill(DS), workflow("agentic-sdlc:spec-plan-draft"),
+                  edit("src/app.py"), bash("py -3 -m unittest tests.test_app"),
+                  agent("agentic-sdlc:security-reviewer"), ev_text("Done.")]
+        self.assertEqual(_run_step_guard_raw(self, events, block=True), PINNED_PIPE_CONTROL_BLOCK)
 
 
 @unittest.skipIf(NODE is None, "node not available")
@@ -814,6 +902,7 @@ class TestFlowOrderGuard(unittest.TestCase):
             tpath = Path(td) / "transcript.jsonl"
             tpath.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
             env = os.environ.copy()
+            env.pop("AGENTIC_FLOW_GATE_BLOCK", None)  # the warn path must not inherit an ambient flag
             if block:
                 env["AGENTIC_FLOW_GATE_BLOCK"] = "true"
             proc = subprocess.run(
@@ -865,9 +954,53 @@ class TestFlowOrderGuard(unittest.TestCase):
         out = self.run_guard("src/app.py", events, block=True)
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_pipeline_denies_source_edit_before_delegation(self):
+    def test_pipeline_denies_source_edit_before_dispatch_spec_plan_and_red_first(self):  # C6
         out = self.run_guard("src/app.py", [skill(PIPE)], block=True)
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecisionReason"],
+                         "agentic-sdlc-pipeline: produce spec and plan before editing source (missing: dispatch, "
+                         "spec, plan, red-first). Externalize them as validated artifacts first.")
+
+    # ---- C6 red-first: a test command must run before the first production edit (pipeline) ----
+    def _pipe_ready(self):
+        """Pipeline active with dispatch, spec and plan satisfied - red-first is the only open
+        beforeSourceEdit step."""
+        return [skill(PIPE), skill(DS), workflow("agentic-sdlc:spec-plan-draft")]
+
+    def test_pipeline_source_edit_before_test_command_warns_red_first(self):  # C6, warn by default
+        out = self.run_guard("src/app.py", self._pipe_ready())
+        self.assertNotIn("hookSpecificOutput", out)
+        self.assertEqual(out, {"systemMessage": "flow-order-guard: spec/plan not present before a source edit "
+                                                "(missing: red-first)."})
+
+    def test_pipeline_source_edit_before_test_command_denied_under_block_flag(self):  # C6
+        # The deny sentence is the locked flow-order-guard.mjs text (D7 accepted limitation); the
+        # C6 behaviour is the `missing: red-first` part.
+        out = self.run_guard("src/app.py", self._pipe_ready(), block=True)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("missing: red-first)", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecisionReason"], PIPE_RED_FIRST_DENY_REASON)
+
+    def test_pipeline_test_command_before_edit_clears_red_first(self):  # C6
+        for command in ("python -m pytest -q", "py -3 -m unittest tests.test_app"):
+            with self.subTest(command=command):
+                events = self._pipe_ready() + [bash(command)]
+                self.assertEqual(self.run_guard("src/app.py", events, block=True), {})
+                self.assertEqual(self.run_guard("src/app.py", events), {})
+
+    def test_pipeline_powershell_test_command_clears_red_first(self):  # C6 + AC1 (PowerShell parity)
+        events = self._pipe_ready() + [powershell("python -m pytest -q")]
+        self.assertEqual(self.run_guard("src/app.py", events, block=True), {})
+
+    def test_pipeline_echoed_test_command_does_not_clear_red_first(self):  # C6 + A2 shape gate
+        events = self._pipe_ready() + [bash("echo pytest")]
+        out = self.run_guard("src/app.py", events, block=True)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecisionReason"], PIPE_RED_FIRST_DENY_REASON)
+
+    def test_pipeline_test_file_edit_is_not_a_source_edit(self):  # C6: writing the RED test comes first
+        for path in ("tests/test_app.py", "src/app_test.py", "src/app.test.ts", "web/app.spec.js"):
+            with self.subTest(path=path):
+                self.assertEqual(self.run_guard(path, self._pipe_ready(), block=True), {})
 
     # ---- per-package session-scoped (PreToolUse) recognition (AC12/AC14/AC15) ----
     def test_allows_source_edit_after_per_package_spec_plan_drafted_claude(self):  # AC15
@@ -1173,6 +1306,526 @@ class TestWorkflowLaunchError(unittest.TestCase):
         missing = _block_ids(out)
         self.assertIn("spec", missing)
         self.assertIn("plan", missing)
+
+
+# ---- C6 / D3 / D7: exact-name evidence (`exactName`) and exact flow activation -------------
+def _pipe_events(*, dispatch=DS, security="agentic-sdlc:security-reviewer",
+                 control="agentic-sdlc:implementation-auditor"):
+    """A pipeline run with every Stop step satisfied, each reviewer/dispatch name swappable. A name
+    set to None leaves that call out. Every call carries a correlated non-error tool_result."""
+    events = [skill(PIPE)]
+    if dispatch is not None:
+        events.append(skill(dispatch))
+    events += [workflow("agentic-sdlc:spec-plan-draft"), bash("py -3 -m unittest tests.test_app"),
+               edit("src/app.py"), bash("py -3 -m unittest tests.test_app")]
+    if security is not None:
+        events.append(agent(security))
+    if control is not None:
+        events.append(agent(control))
+    return with_results(events) + [ev_text("Done.")]
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestExactNameEvidence(unittest.TestCase):
+    """C6: an `exactName` toolUse item is satisfied only when `input.skill` (Skill) or
+    `input.subagent_type` (Agent) equals X or agentic-sdlc:X - never by a substring of the
+    serialized input. The receiptHasError rule is unchanged."""
+
+    run_guard = TestFlowStepGuard.run_guard
+
+    def test_prefixed_and_bare_names_both_satisfy(self):
+        cases = {
+            "prefixed": {},
+            "bare dispatch": {"dispatch": "dispatch-strategy"},
+            "bare security": {"security": "security-reviewer"},
+            "bare control": {"control": "implementation-auditor"},
+            "all bare": {"dispatch": "dispatch-strategy", "security": "security-reviewer",
+                         "control": "implementation-auditor"},
+        }
+        for name, kw in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(self.run_guard(_pipe_events(**kw), block=True), {})
+
+    def test_lookalike_names_do_not_satisfy(self):
+        cases = {
+            "dispatch": {"dispatch": "agentic-sdlc:dispatch-strategy-extra"},
+            "security": {"security": "agentic-sdlc:security-reviewer-extra"},
+            "control": {"control": "agentic-sdlc:implementation-auditor-extra"},
+            "foreign prefix security": {"security": "other-plugin:security-reviewer"},
+        }
+        for step, kw in cases.items():
+            with self.subTest(case=step):
+                out = self.run_guard(_pipe_events(**kw), block=True)
+                self.assertEqual(out.get("decision"), "block")
+                self.assertEqual(_block_ids(out), [step.split()[-1]])
+
+    def test_name_only_in_args_or_prompt_does_not_satisfy(self):
+        # The marker appears in the serialized input, but not as the skill / subagent_type itself.
+        dispatch_in_args = ev_tool("Skill", {"skill": "agentic-sdlc:mind-spark",
+                                             "args": "then run dispatch-strategy"})
+        security_in_prompt = ev_tool("Agent", {"subagent_type": "general-purpose",
+                                               "prompt": "act as security-reviewer and review the diff"})
+        control_in_prompt = ev_tool("Agent", {"subagent_type": "general-purpose",
+                                              "prompt": "run the implementation-auditor checklist"})
+        events = with_results([skill(PIPE), dispatch_in_args, workflow("agentic-sdlc:spec-plan-draft"),
+                               bash("py -3 -m unittest tests.test_app"), edit("src/app.py"),
+                               security_in_prompt, control_in_prompt]) + [ev_text("Done.")]
+        out = self.run_guard(events, block=True)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertEqual(_block_ids(out), ["dispatch", "security", "control"])
+
+    def test_event_without_id_or_result_still_counts(self):  # receiptHasError rule retained
+        # No id and no result on any call (the bare helpers): every block step still counts, so the
+        # only finding is the warn-level review-result step, whose reviewers returned nothing.
+        events = [skill(PIPE), skill(DS), workflow("agentic-sdlc:spec-plan-draft"),
+                  bash("py -3 -m unittest tests.test_app"), edit("src/app.py"),
+                  agent("agentic-sdlc:security-reviewer"), agent("agentic-sdlc:implementation-auditor"),
+                  ev_text("Done.")]
+        out = self.run_guard(events, block=True)
+        self.assertNotEqual(out.get("decision"), "block", out)
+        self.assertEqual(_reminder_ids(out), ["review-result"])
+
+    def test_errored_receipt_does_not_count(self):  # receiptHasError rule retained for exactName items
+        events = with_results([skill(PIPE), skill(DS), workflow("agentic-sdlc:spec-plan-draft"),
+                               bash("py -3 -m unittest tests.test_app"), edit("src/app.py"),
+                               agent("agentic-sdlc:implementation-auditor")])
+        events.append(tool_with_id("Agent", {"subagent_type": "agentic-sdlc:security-reviewer",
+                                             "prompt": "do the audit"}, "toolu_sec_err"))
+        events.append(launch_receipt("toolu_sec_err", include_tool_result=True, error="stopped"))
+        events.append(ev_text("Done."))
+        out = self.run_guard(events, block=True)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertEqual(_block_ids(out), ["security"])
+
+    def test_review_result_reviewer_membership_is_exact(self):  # C6: same rule for reviewResult reviewers
+        # The real security-reviewer was dispatched and returned nothing; a lookalike returned a clean
+        # result. Under substring membership the lookalike's result would clear the security group.
+        events = with_results([skill(PIPE), skill(DS), workflow("agentic-sdlc:spec-plan-draft"),
+                               bash("py -3 -m unittest tests.test_app"), edit("src/app.py"),
+                               agent("agentic-sdlc:implementation-auditor"),
+                               agent("agentic-sdlc:security-reviewer-extra")])
+        events.append(tool_with_id("Agent", {"subagent_type": "agentic-sdlc:security-reviewer",
+                                             "prompt": "do the audit"}, "toolu_sec_pending"))
+        events.append(ev_text("Done."))
+        self.assertEqual(_reminder_ids(self.run_guard(events)), ["review-result"])
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestExactFlowActivation(unittest.TestCase):
+    """C6: a flow is active only when a non-errored Skill tool_use has input.skill equal to the
+    marker or to agentic-sdlc:<marker>."""
+
+    run_step = TestFlowStepGuard.run_guard
+    run_order = TestFlowOrderGuard.run_guard
+
+    def test_dispatch_strategy_args_naming_a_flow_do_not_activate_it(self):
+        mention = ev_tool("Skill", {"skill": DS, "args": "route this feature-build work; consider root-cause-fix"})
+        events = [mention, ev_text("Mechanism: single session for the feature-build."), edit("src/app.py"),
+                  ev_text("Edited.")]
+        self.assertEqual(self.run_step(events, block=True), {})
+        self.assertEqual(self.run_order("src/app.py", [mention], block=True), {})
+
+    def test_lookalike_or_foreign_skill_names_do_not_activate(self):
+        for name in ("agentic-sdlc:root-cause-fix-lite", "other-plugin:feature-build",
+                     "agentic-sdlc:agentic-sdlc-pipeline-v2"):
+            with self.subTest(skill=name):
+                self.assertEqual(self.run_order("src/app.py", [skill(name)], block=True), {})
+                self.assertEqual(self.run_step([skill(name), edit("src/app.py"), ev_text("Edited.")],
+                                               block=True), {})
+
+    def test_errored_pipeline_skill_call_activates_nothing(self):  # C6: receiptHasError still excludes
+        def errored_pipe(error):
+            call = tool_with_id("Skill", {"skill": PIPE}, "toolu_pipe")
+            result = {"type": "user", "toolUseResult": {"error": error} if error else {},
+                      "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_pipe",
+                                               "content": "result", "is_error": bool(error)}]}}
+            return [call, result]
+        self.assertEqual(self.run_order("src/app.py", errored_pipe("Unknown skill"), block=True), {})
+        # Control: the same call without the error receipt activates the pipeline and the edit is denied.
+        order = self.run_order("src/app.py", errored_pipe(None), block=True)
+        self.assertEqual(order["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_prefixed_and_bare_flow_skill_still_activate(self):
+        for name in (FB, "feature-build", PIPE, "agentic-sdlc-pipeline"):
+            with self.subTest(skill=name):
+                out = self.run_step([skill(name), edit("src/app.py"), ev_text("Built.")], block=True)
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("spec", _block_ids(out))
+                order = self.run_order("src/app.py", [skill(name)], block=True)
+                self.assertEqual(order["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestPipelineInFlightReviewer(unittest.TestCase):
+    """C6: inFlightReviewer for the pipeline - background_tasks agent_type equals X or agentic-sdlc:X."""
+
+    run_guard = TestFlowStepGuard.run_guard
+
+    def ids(self, events, **kw):
+        return _reminder_ids(self.run_guard(events, **kw))
+
+    @staticmethod
+    def _events():
+        """Pipeline with every step satisfied; the auditor is a launch receipt with no result yet."""
+        events = with_results([skill(PIPE), skill(DS), workflow("agentic-sdlc:spec-plan-draft"),
+                               bash("py -3 -m unittest tests.test_app"), edit("src/app.py"),
+                               agent("agentic-sdlc:security-reviewer")])
+        events.append(tool_with_id("Agent", {"subagent_type": "agentic-sdlc:implementation-auditor",
+                                             "prompt": "do the audit"}, AUDITOR_ID))
+        events.append(launch_receipt(AUDITOR_ID, include_tool_result=False))
+        return events + [ev_text("Done.")]
+
+    def test_pending_auditor_without_in_flight_task_lists_review_result(self):
+        self.assertEqual(self.ids(self._events()), ["review-result"])
+
+    def test_in_flight_auditor_clears_review_result(self):
+        for agent_type in ("agentic-sdlc:implementation-auditor", "implementation-auditor"):
+            with self.subTest(agent_type=agent_type):
+                tasks = [{"type": "subagent", "agent_type": agent_type}]
+                self.assertEqual(self.ids(self._events(), background_tasks=tasks), [])
+
+    def test_in_flight_lookalike_does_not_clear_review_result(self):
+        for agent_type in ("agentic-sdlc:implementation-auditor-extra", "general-purpose implementation-auditor"):
+            with self.subTest(agent_type=agent_type):
+                tasks = [{"type": "subagent", "agent_type": agent_type}]
+                self.assertEqual(self.ids(self._events(), background_tasks=tasks), ["review-result"])
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestContainsInFlightReviewer(unittest.TestCase):
+    """C14: for a `contains` reviewer (the focused flows), in-flight matching stays a substring match.
+    Green before and after C6 - it guards the unchanged behaviour."""
+
+    run_guard = TestFlowStepGuard.run_guard
+
+    def ids(self, events, **kw):
+        return _reminder_ids(self.run_guard(events, **kw))
+
+    @staticmethod
+    def _events(flow):
+        """`flow` satisfied, with the control reviewer a pending general-purpose agent whose prompt names
+        implementation-auditor (no result yet)."""
+        events = with_results([skill(flow), edit("src/app.py"), workflow("agentic-sdlc:spec-plan-draft"),
+                               bash("python -m pytest -q"), agent("agentic-sdlc:security-reviewer")])
+        events.append(tool_with_id("Agent", {"subagent_type": "general-purpose",
+                                             "prompt": "run the implementation-auditor checklist"}, AUDITOR_ID))
+        events.append(launch_receipt(AUDITOR_ID, include_tool_result=False))
+        return events + [ev_text("Done.")]
+
+    def test_substring_agent_type_clears_review_result(self):
+        tasks = [{"type": "subagent", "agent_type": "general-purpose implementation-auditor"}]
+        for flow in (RCF, FB):
+            with self.subTest(flow=flow):
+                self.assertEqual(self.ids(self._events(flow), background_tasks=tasks), [])
+
+    def test_without_in_flight_task_review_result_is_listed(self):  # control for the case above
+        for flow in (RCF, FB):
+            with self.subTest(flow=flow):
+                self.assertEqual(self.ids(self._events(flow)), ["review-result"])
+
+
+# ---- C6 / O4 + C14: dispatch-terminal Stop check -----------------------------------------
+# C14 scope, as these tests encode it:
+#   - turn: everything after the last genuine user prompt record (type "user", content a string or
+#     text blocks, not a tool_result); only tool_uses after it count. Not genuine: a record with
+#     isMeta true, with origin.kind "task-notification", or whose string content starts with
+#     "<task-notification>" (system-generated, amended C14);
+#   - top-level: a record with no parent_tool_use_id that is not a sidechain record;
+#   - question: the final assistant text contains an ASCII "?" anywhere; the final text is
+#     last_assistant_message when it is a string, otherwise the transcript's last assistant text;
+#   - precedence: when a missing-step finding fires too, only the missing-step output is emitted.
+def user_prompt(text, *, blocks=False):
+    """A genuine user prompt record: string content, or a list of text blocks (never a tool_result)."""
+    content = [{"type": "text", "text": text}] if blocks else text
+    return {"type": "user", "message": {"content": content}}
+
+
+PROMPT = user_prompt("Use /agentic-sdlc-pipeline to add a greeting suffix to greeting.py.")
+NO_QUESTION = "Mechanism: single session; the steps are tightly coupled."
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestDispatchTerminalStop(unittest.TestCase):
+    run_guard = TestFlowStepGuard.run_guard
+
+    def stop(self, events, final_text, **kw):
+        return self.run_guard(events + [ev_text(final_text)], last_assistant_message=final_text, **kw)
+
+    @staticmethod
+    def _ended_on_dispatch(dispatch=DS):
+        return [PROMPT] + with_results([skill(PIPE), skill(dispatch)])
+
+    def test_warns_when_turn_ends_on_dispatch_without_question(self):
+        for dispatch in (DS, "dispatch-strategy"):
+            with self.subTest(dispatch=dispatch):
+                out = self.stop(self._ended_on_dispatch(dispatch),
+                                "Mechanism: single session; the steps are tightly coupled.")
+                self.assertEqual(out, {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+
+    def test_blocks_under_block_flag(self):
+        out = self.stop(self._ended_on_dispatch(), "Mechanism: single session; the steps are tightly coupled.",
+                        block=True)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertEqual(out.get("reason"), DISPATCH_TERMINAL_MESSAGE)
+
+    def test_silent_when_another_tool_follows_dispatch(self):
+        for follow in (workflow("agentic-sdlc:spec-plan-draft"), bash("python3 scripts/detect_context.py")):
+            with self.subTest(follow=follow["message"]["content"][0]["name"]):
+                events = with_results([skill(PIPE), skill(DS), follow])
+                self.assertEqual(self.stop(events, "Mechanism: single session. Spec drafted.", block=True), {})
+
+    def test_silent_when_final_text_asks_the_user_a_question(self):
+        out = self.stop(self._ended_on_dispatch(), "Mechanism: single session. Should I draft the spec now?",
+                        block=True)
+        self.assertEqual(out, {})
+
+    def test_silent_when_no_pipeline_flow_is_active(self):
+        cases = {
+            "dispatch alone": with_results([skill(DS)]),
+            "feature-build flow": with_results([skill(FB), skill(DS)]),
+        }
+        for name, events in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(self.stop(events, "Mechanism: single session.", block=True), {})
+
+    def test_silent_when_last_skill_is_a_lookalike(self):  # exactName dispatch-strategy
+        out = self.stop(self._ended_on_dispatch("agentic-sdlc:dispatch-strategy-extra"),
+                        "Mechanism: single session.", block=True)
+        self.assertEqual(out, {})
+
+    def test_silent_when_stop_hook_active(self):  # the existing loop guard still runs first
+        out = self.stop(self._ended_on_dispatch(), "Mechanism: single session.", block=True, stop_active=True)
+        self.assertEqual(out, {})
+
+    # ---- C14 turn boundary ----
+    def test_silent_when_a_later_user_prompt_opened_a_new_turn(self):  # C14
+        # Turn 1 ended on the dispatch decision with a question; the user answered; turn 2 has no
+        # tool_use at all. The dispatch call belongs to the earlier turn, so O4 stays silent.
+        for blocks in (False, True):
+            with self.subTest(prompt_content="text blocks" if blocks else "string"):
+                events = with_results([skill(PIPE), skill(DS)]) + [
+                    ev_text("Mechanism: single session. Should I draft the spec now?"),
+                    user_prompt("Before that, explain the mechanism choice.", blocks=blocks),
+                ]
+                out = self.stop(events, "Single session because the steps are tightly coupled.", block=True)
+                self.assertEqual(out, {})
+
+    def test_warns_when_dispatch_comes_after_the_last_user_prompt(self):  # C14
+        events = [user_prompt("What does greeting.py do?"), ev_text("It builds greetings."),
+                  PROMPT] + with_results([skill(PIPE), skill(DS)])
+        self.assertEqual(self.stop(events, NO_QUESTION), {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+        blocked = self.stop(events, NO_QUESTION, block=True)
+        self.assertEqual((blocked.get("decision"), blocked.get("reason")), ("block", DISPATCH_TERMINAL_MESSAGE))
+
+    def test_tool_results_do_not_open_a_new_turn(self):  # C14: a tool_result record is not a prompt
+        # with_results already follows every call with a tool_result user record; an extra
+        # is_error=false result after the dispatch call must not hide it either.
+        events = self._ended_on_dispatch() + [tool_result("toolu_001", False)]
+        self.assertEqual(self.stop(events, NO_QUESTION), {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+
+    # ---- C14 top-level ----
+    def test_sidechain_or_child_tool_use_after_dispatch_does_not_count(self):  # C14
+        sidechain = ev_tool("Bash", {"command": "python3 scripts/detect_context.py"})
+        sidechain["isSidechain"] = True
+        child = ev_tool("Read", {"file_path": "greeting.py"})
+        child["parent_tool_use_id"] = "toolu_agent_1"
+        for name, record in (("sidechain", sidechain), ("parent_tool_use_id", child)):
+            with self.subTest(record=name):
+                out = self.stop(self._ended_on_dispatch() + [record], NO_QUESTION)
+                self.assertEqual(out, {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+
+    def test_sidechain_dispatch_after_a_top_level_tool_does_not_count(self):  # C14
+        # The last TOP-LEVEL tool_use is the Workflow call; a sub-agent's later dispatch-strategy call
+        # is not the main loop ending on the decision.
+        nested = ev_tool("Skill", {"skill": DS})
+        nested["isSidechain"] = True
+        events = [PROMPT] + with_results([skill(PIPE), skill(DS), workflow("agentic-sdlc:spec-plan-draft")]) + [nested]
+        self.assertEqual(self.stop(events, NO_QUESTION, block=True), {})
+
+    # ---- C14 question rule and final-text source ----
+    def test_question_mark_anywhere_counts(self):  # C14
+        out = self.stop(self._ended_on_dispatch(),
+                        "Mechanism: single session (is that fine with you?) - the spec comes next.", block=True)
+        self.assertEqual(out, {})
+
+    def test_last_assistant_message_wins_over_transcript_text(self):  # C14: mirrors completion-claim-guard
+        events = self._ended_on_dispatch()
+        # Field without "?", transcript with "?": the field decides -> warn.
+        warn = self.run_guard(events + [ev_text("Should I draft the spec now?")],
+                              last_assistant_message=NO_QUESTION)
+        self.assertEqual(warn, {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+        # Field with "?", transcript without: the field decides -> silent.
+        silent = self.run_guard(events + [ev_text(NO_QUESTION)],
+                                last_assistant_message="Should I draft the spec now?", block=True)
+        self.assertEqual(silent, {})
+
+    def test_transcript_text_used_when_field_absent(self):  # C14
+        events = self._ended_on_dispatch()
+        self.assertEqual(self.run_guard(events + [ev_text(NO_QUESTION)]),
+                         {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+        self.assertEqual(self.run_guard(events + [ev_text("Should I draft the spec now?")], block=True), {})
+
+    # ---- C14 precedence ----
+    def test_missing_step_output_wins_over_dispatch_terminal(self):  # C14
+        events = [PROMPT] + with_results([skill(PIPE), edit("src/app.py"), skill(DS)])
+        warn = self.stop(events, NO_QUESTION)
+        self.assertEqual(warn, {"systemMessage": "flow-step-guard: missing evidence for step(s): spec, plan, tests, "
+                                                 "security, control"})
+        blocked = self.stop(events, NO_QUESTION, block=True)
+        self.assertEqual(blocked, {
+            "decision": "block",
+            "reason": "agentic-sdlc-pipeline: required step(s) [spec, plan, tests, security, control] "
+                      + FLOW_STEP_BLOCK_TAIL,
+            "systemMessage": "flow-step-guard: blocked - required flow steps lack evidence.",
+        })
+
+    def test_skill_body_meta_record_does_not_open_a_new_turn(self):  # C14 (amended)
+        # Shape observed in a local Claude Code session transcript (2026-10-16): after a Skill tool_use
+        # and its tool_result, a type "user" record with isMeta true, text content (the skill body) and
+        # a sourceToolUseID. It is tool output, not the user speaking. Without this exclusion every real
+        # dispatch-strategy call would be followed by a "new turn" and O4 could never fire.
+        for name, content in (("text blocks", [{"type": "text", "text": "# dispatch-strategy\n\nPick the mechanism."}]),
+                              ("string", "# dispatch-strategy\n\nPick the mechanism.")):
+            with self.subTest(content=name):
+                meta = {"type": "user", "isMeta": True, "sourceToolUseID": "toolu_001", "message": {"content": content}}
+                out = self.stop(self._ended_on_dispatch() + [meta], NO_QUESTION)
+                self.assertEqual(out, {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+
+    def test_task_notification_record_does_not_open_a_new_turn(self):  # C14 (amended)
+        # A background-task notification is system-generated: by origin.kind, or by string content that
+        # starts with <task-notification> when no origin is recorded.
+        cases = {
+            "origin + string": task_notification("toolu_bg_1"),
+            "origin + text blocks": task_notification("toolu_bg_1", as_blocks=True),
+            "string prefix, no origin": task_notification("toolu_bg_1", origin=False),
+        }
+        for name, note in cases.items():
+            with self.subTest(record=name):
+                out = self.stop(self._ended_on_dispatch() + [note], NO_QUESTION)
+                self.assertEqual(out, {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+
+    # ---- C16 items 8-10 (fix round after the Phase 2 reviews; probes h1-h4) ----
+    @staticmethod
+    def _call(skill_name, tool_id, *, result=True):
+        """A Skill call with an explicit id, followed by its non-error tool_result unless result=False."""
+        call = [tool_with_id("Skill", {"skill": skill_name}, tool_id)]
+        return call + [tool_result(tool_id, False)] if result else call
+
+    def test_silent_when_the_pipeline_was_activated_in_an_earlier_turn(self):  # C16 item 8 (probe h4)
+        # The pipeline ran in an earlier turn and stopped at its Spec Review gate. In a later turn the user
+        # asks only for a mechanism decision; the router calls dispatch-strategy and answers. The pipeline
+        # activation is not inside this turn, so O4 stays silent (a false negative, never a false block).
+        earlier = [PROMPT] + self._call(PIPE, "t1") + self._call(DS, "t2") + [
+            ev_text("Spec Review gate: approve docs/agentic-sdlc/specs/x.md or ask for changes?"),
+            user_prompt("Separate topic: for the docs audit next week, workflow or sub-agents? Just pick."),
+        ]
+        answer = "Use parallel sub-agents: the audit slices are independent."
+        for block in (False, True):
+            with self.subTest(block=block):
+                self.assertEqual(self.stop(earlier + self._call(DS, "t3"), answer, block=block), {})
+        # Control: a pipeline activation inside the later turn still makes O4 fire.
+        again = earlier + self._call(PIPE, "t3") + self._call(DS, "t4")
+        self.assertEqual(self.stop(again, NO_QUESTION), {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+
+    def test_errored_pipeline_call_in_the_current_turn_is_not_an_activation(self):  # C16 item 8
+        # The earlier turn's successful activation does not carry over, and this turn's pipeline call
+        # failed (receiptHasError), so no pipeline activation is inside the current turn.
+        errored = [tool_with_id("Skill", {"skill": PIPE}, "t3"),
+                   {"type": "user", "toolUseResult": {"error": "Unknown skill"},
+                    "message": {"content": [{"type": "tool_result", "tool_use_id": "t3", "content": "result",
+                                             "is_error": True}]}}]
+        events = [PROMPT] + self._call(PIPE, "t1") + self._call(DS, "t2") + [
+            ev_text("Spec Review gate: approve docs/agentic-sdlc/specs/x.md or ask for changes?"),
+            user_prompt("Run it again for the farewell suffix."),
+        ] + errored + self._call(DS, "t4")
+        self.assertEqual(self.stop(events, NO_QUESTION, block=True), {})
+
+    def test_non_top_level_user_prompt_does_not_open_a_new_turn(self):  # C16 item 9 (probe h1)
+        # Only a top-level genuine prompt opens a turn: a sidechain user record (the older in-file
+        # sub-agent transcript shape) or one carrying parent_tool_use_id is a sub-agent's prompt.
+        sidechain = user_prompt("Analyse the repo context.")
+        sidechain["isSidechain"] = True
+        child = user_prompt("Analyse the repo context.", blocks=True)
+        child["parent_tool_use_id"] = "toolu_agent_1"
+        for name, record in (("sidechain", sidechain), ("parent_tool_use_id", child)):
+            with self.subTest(record=name):
+                out = self.stop(self._ended_on_dispatch() + [record], NO_QUESTION)
+                self.assertEqual(out, {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+
+    def test_compact_summary_record_does_not_open_a_new_turn(self):  # C16 item 9 (probe h3)
+        summary = "This session is being continued from a previous conversation..."
+        for name, content in (("string", summary), ("text blocks", [{"type": "text", "text": summary}])):
+            with self.subTest(content=name):
+                compact = {"type": "user", "isCompactSummary": True, "message": {"content": content}}
+                out = self.stop(self._ended_on_dispatch() + [compact], NO_QUESTION, block=True)
+                self.assertEqual((out.get("decision"), out.get("reason")), ("block", DISPATCH_TERMINAL_MESSAGE))
+
+    def test_silent_without_the_field_until_text_follows_the_dispatch_result(self):  # C16 item 10 (probe h2)
+        # No last_assistant_message and the transcript has not caught up: the last assistant text on disk
+        # predates the dispatch call, so it is not the turn's final text.
+        lagging = [PROMPT] + self._call(PIPE, "t1") + [ev_text("Picking the mechanism first.")] + self._call(DS, "t2")
+        no_result = ([PROMPT] + self._call(PIPE, "t1") + [ev_text("Picking the mechanism first.")]
+                     + self._call(DS, "t2", result=False))
+        for name, events in (("result, no text after it", lagging), ("no result yet", no_result)):
+            for block in (False, True):
+                with self.subTest(case=name, block=block):
+                    self.assertEqual(self.run_guard(events, block=block), {})
+        # Control: once an assistant text record lands after the result, O4 reads it and fires.
+        self.assertEqual(self.run_guard(lagging + [ev_text(NO_QUESTION)]),
+                         {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+        # Control: a string last_assistant_message is the final text itself; the caught-up guard is not used.
+        self.assertEqual(self.run_guard(lagging, last_assistant_message=NO_QUESTION),
+                         {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+
+    def test_sidechain_text_after_the_dispatch_result_is_not_caught_up(self):  # C16 item 10 + C14 top-level
+        # A sub-agent's assistant text is not the main loop's final message, so it does not show that the
+        # transcript has caught up.
+        side = ev_text("Sub-agent: repository context gathered.")
+        side["isSidechain"] = True
+        lagging = [PROMPT] + self._call(PIPE, "t1") + self._call(DS, "t2") + [side]
+        self.assertEqual(self.run_guard(lagging, block=True), {})
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestParseTranscriptKeepsOnlyExactNameFields(unittest.TestCase):
+    """C16 item 11: parseTranscript keeps `inputStr`, `input.skill` and `input.subagent_type` for each
+    tool_use and drops the rest of the parsed `input` object, so a large Write body is not held twice."""
+
+    def test_tool_entries_keep_only_the_exact_name_fields(self):
+        big = "x" * 20000
+        inputs = [
+            ("Skill", {"skill": PIPE, "args": "route this feature-build work"}),
+            ("Agent", {"subagent_type": "agentic-sdlc:security-reviewer", "prompt": "review the diff",
+                       "description": "security review"}),
+            ("Write", {"file_path": "src/app.py", "content": big}),
+            ("Bash", {"command": "python -m pytest -q", "description": "run the tests"}),
+            ("Skill", {"skill": {"not": "a string"}}),
+        ]
+        events = [user_prompt("go")] + [tool_with_id(name, inp, "t%d" % n) for n, (name, inp) in enumerate(inputs)]
+        with tempfile.TemporaryDirectory() as td:
+            tpath = Path(td) / "transcript.jsonl"
+            tpath.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
+            script = ("const m = await import(%s); const tr = m.parseTranscript(process.argv[1]);"
+                      "process.stdout.write(JSON.stringify({tools: tr.tools.map((t) => ({name: t.name, id: t.id,"
+                      " input: t.input, inputStr: t.inputStr})), edits: tr.edits, commands: tr.commands}));"
+                      % json.dumps(FLOW_EVID.as_uri()))
+            proc = subprocess.run([NODE, "--input-type=module", "-e", script, str(tpath)], capture_output=True,
+                                  text=True, encoding="utf-8")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        got = json.loads(proc.stdout)
+        self.assertEqual([t["input"] for t in got["tools"]], [
+            {"skill": PIPE},
+            {"subagent_type": "agentic-sdlc:security-reviewer"},
+            {},
+            {},
+            {},
+        ])
+        # The serialized input is unchanged, so `contains` items still match anywhere in it.
+        self.assertEqual([t["inputStr"] for t in got["tools"]],
+                         [json.dumps(inp, separators=(",", ":")) for _, inp in inputs])
+        self.assertEqual([t["id"] for t in got["tools"]], ["t0", "t1", "t2", "t3", "t4"])
+        self.assertEqual(got["edits"], ["src/app.py"])
+        self.assertEqual(got["commands"], ["python -m pytest -q"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,37 @@
+{
+  "_comment": "Strict-only procedure eval for the agentic-sdlc-pipeline Spec Review gate stop (contract C7 case 3). It lives in its own file because a strict replay grades every case of an eval set, and a pre-approved full-run transcript breaks every stop_at_gate rule. The prompt does not pre-approve the Review gates, so the run must save and validate the spec with status reviewed, write no plan, source or test file, and end by asking for the Spec Review.",
+  "cases": [
+    {
+      "id": "agentic-sdlc-pipeline-gate-stop",
+      "fixture_dir": "tests/fixtures/agentic-sdlc-pipeline-basic",
+      "prompt": "Use /agentic-sdlc-pipeline to add a small production-impacting feature to this fixture: expose a new greeting suffix behavior in greeting.py. Do not commit, push, or merge.",
+      "required_commands": [
+        "detect_context\\.py",
+        "validate_artifacts\\.py"
+      ],
+      "required_patterns": [
+        "docs/agentic-sdlc/(?:specs|[a-z0-9][a-z0-9-]*/spec)/"
+      ],
+      "forbidden_commands": [
+        "\\bgit\\s+commit\\b",
+        "\\bgit\\s+push\\b",
+        "\\bgit\\s+merge\\b"
+      ],
+      "forbidden_patterns": [
+        "\"skill\":\\s*\"(?:agentic-sdlc:)?(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|implementation-control)\"",
+        "(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|implementation-control)[\\\\/]+SKILL\\.md",
+        "Adapter Gate:\\s*(?:feature-build|root-cause-fix|safe-refactor|test-authoring|security-audit|implementation-control)\\b"
+      ],
+      "_strict_note": "The strict fields are inert without --strict-evidence. stop_at_gate spec-review fails any write outside docs/agentic-sdlc/ anywhere in the run (sub-agent writes included), a plan write after the first spec write, a spec status of approved or later, and a final assistant text that does not name the spec review.",
+      "strict": {
+        "stop_at_gate": "spec-review",
+        "skill_call_counts": {"dispatch-strategy": [1, 1]},
+        "forbid_skills_anywhere": ["feature-build", "root-cause-fix", "safe-refactor", "test-authoring", "security-audit", "implementation-control"],
+        "required_order": [
+          "dispatch-strategy",
+          "spec-written"
+        ]
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 ---
 name: safe-refactor
-description: This skill should be used first in any language to refactor, restructure, clean up, simplify, or reduce duplication without changing behavior. It applies as the first action, before Glob/Read or file-existence checks and even for broad scope needing approval; announcing you will refactor is not the same as invoking it. Includes characterization tests and approval for broad scope. Not for bug fixes, new features, or test-only work.
+description: This skill should be used first in any language to refactor, restructure, clean up, simplify, or reduce duplication without changing behavior. It applies as the first action, before Glob/Read or file-existence checks and even for broad scope needing approval; announcing you will refactor is not the same as invoking it. Includes characterization tests and approval for broad scope. Not for bug fixes, new features, or test-only work. Not for steps inside an active agentic-sdlc-pipeline run.
 ---
 
 # Skill: safe-refactor
@@ -51,19 +51,15 @@ Characterizing current behavior across modules is a read-only fan-out: dispatch 
 - **Degrade:** inside a delegated sub-agent (no nesting) or a runtime without parallel agents → characterize/edit in the main loop and flag `Delegation Degraded: parallel specialists unavailable`.
 
 ## Flow
-1. **Characterize current behavior** — identify the behavior that must not change. If tests don't cover it, **add characterization tests first** and see them pass (show output). This is the safety net.
+Read [references/core.md](references/core.md) before step 1 and run the steps marked "core step" exactly as its `## Core steps` section writes them. Resolve the link from this installed skill's directory. In Claude Code, use `Read`; in Codex, use the available file-reading tool for the exact installed reference path. Reload it after resume, compaction, or a supplied summary. Read it after the `dispatch-strategy` call, never before it.
+
+1. **Characterize current behavior** — core step 1.
 2. **Define scope** — what is being restructured and what is explicitly out of scope. Use the runtime goal tool when available; otherwise write the Goal Lock template inline and treat it as the scope lock.
 3. **Approval gate** — for large/architectural refactors, get user approval before starting.
-4. **Small steps** — one structural change at a time (extract, rename, dedupe, simplify). After **each** step run the relevant tests and **show output**. Use the runtime loop tool when available; otherwise record each fail -> fix -> retest cycle with command evidence.
-5. **No behavior change** — if a "refactor" alters behavior, stop: that is a feature/fix, not a refactor.
-6. **Security re-check** (contract 06) if the refactor touches auth/config/data paths.
-7. **Implementation control** — run **`implementation-control`** before finalizing. When this refactor runs on its own it has no spec or plan by design: state `Flow: safe-refactor` and pass the Goal Lock from step 2, and the audit grades the Goal Lock and the characterization tests in their place (every other audit row still applies). When a spec or plan already exists for the work (for example, this refactor is a step inside `agentic-sdlc-pipeline`), do not claim the light path: the audit grades that spec and plan as usual.
+4. **Small steps** — core step 2.
+5. **No behavior change** — core step 3.
+6. **Security re-check** — core step 4.
+7. **Implementation control** — run **`implementation-control`** before finalizing. When this refactor runs on its own it has no spec or plan by design: state `Flow: safe-refactor` and pass the Goal Lock from step 2, and the audit grades the Goal Lock and the characterization tests in their place (every other audit row still applies). When a spec or plan already exists for the work (for example, a spec and plan written with `spec-authoring` and `plan-authoring` for this refactor), do not claim the light path: the audit grades that spec and plan as usual.
 
 ## Final Response
 What was restructured · files changed · proof behavior is unchanged (tests green before & after, with output) · remaining risks.
-
-## Forbidden
-- Refactoring without a passing-test safety net.
-- Mixing behavior changes into the refactor.
-- Large architectural change without approval.
-- Drive-by refactors bundled into unrelated work.

@@ -1,6 +1,6 @@
 ---
 name: test-authoring
-description: This skill should be used first in any language to write, add, repair, or design tests before inspecting code for test-only prompts covering unit, integration, regression, e2e, flaky/failing tests, meaningful assertions, coverage, test doubles, or test strategy. Test-only work that must not change production behavior; not for features, fixes, or refactors.
+description: This skill should be used first in any language to write, add, repair, or design tests before inspecting code for test-only prompts covering unit, integration, regression, e2e, flaky/failing tests, meaningful assertions, coverage, test doubles, or test strategy. Test-only work that must not change production behavior; not for features, fixes, or refactors. Not for steps inside an active agentic-sdlc-pipeline run.
 ---
 
 # Skill: test-authoring
@@ -54,30 +54,11 @@ After loading `test-authoring`, do not read files, run shell commands, or take a
 For a broad suite across several behavior-areas or modules, dispatch **one `test-engineer` per area in a single message** to analyze coverage gaps and judge whether existing tests pin real behavior — read-only, concurrent. You (main loop) stay the **coordinator**: merge the gap reports, prioritize, decide what to write. Writing/repairing the tests stays serial in the main loop (or worktree-isolated for a large multi-file pass) — never two agents on one file.
 - **Degrade:** a single small target, or running inside a delegated sub-agent (no nesting), or a runtime without parallel agents → analyze in the main loop and flag `Delegation Degraded: parallel specialists unavailable`.
 
-## Test types
-- **Unit** — one unit in isolation; fast; dependencies faked.
-- **Integration** — real collaboration across components/boundaries (DB, queue, HTTP).
-- **Regression** — reproduces a past bug so it can't return.
-- **E2E** — user-facing flow through the whole system.
-
-## Principles
-- **TDD:** failing test first (RED) → see it fail → minimal code (GREEN). For a bug, reproduce it with a test before fixing.
-- **Arrange / Act / Assert**; one clear reason to fail per test.
-- **Descriptive names** stating scenario + expectation (e.g. `returns_401_when_token_expired`).
-- **Test doubles:** prefer real objects; use mock/fake/stub only at true boundaries. Assert **behavior**, not the mock.
-- **Meaningful coverage:** a test that can't fail for a real reason is noise. Cover edge cases — empty/null, boundaries, error paths, authorization.
-- Prefer the smallest scope that proves the behavior; run the full suite before claiming done.
-- **Always show real test output.**
-
 ## Flow
-1. Identify what behavior needs proving and at which level (unit/integration/regression/e2e).
-2. Write the failing test; confirm it fails for the right reason.
-3. Implement (or fix) the minimum to pass.
-4. Run targeted tests, then the suite; show output. Use the runtime loop tool when available; otherwise record each fail -> fix -> retest cycle with command evidence.
-5. Review: are the assertions meaningful? Edge cases covered? Any flaky timing/order dependence?
+Read [references/core.md](references/core.md) before step 1 and run the steps marked "core step" exactly as its `## Core steps` section writes them. Resolve the link from this installed skill's directory. In Claude Code, use `Read`; in Codex, use the available file-reading tool for the exact installed reference path. Reload it after resume, compaction, or a supplied summary. Read it after the `dispatch-strategy` call, never before it.
 
-## Forbidden
-- "Passed" without output.
-- Implementation before the failing test for new behavior.
-- Assertion-free tests, or tests asserting mocks instead of behavior.
-- Over-mocking that turns the test into a tautology.
+1. **Behavior and test level** — core step 1.
+2. **Failing test** — core step 2.
+3. **Pass without changing production code** — core step 3.
+4. **Targeted run, then the suite** — core step 4.
+5. **Assertion review** — core step 5.

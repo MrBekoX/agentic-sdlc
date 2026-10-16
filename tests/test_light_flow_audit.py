@@ -55,10 +55,14 @@ class TestSafeRefactorAuditPath(unittest.TestCase):
         self.assertIn("no spec or plan", step[0])
 
     def test_safe_refactor_does_not_claim_the_light_path_when_a_spec_or_plan_exists(self):
-        # agentic-sdlc-pipeline delegates a step to safe-refactor AFTER a real spec and plan exist.
+        # A spec and plan can already exist when safe-refactor runs - written with spec-authoring
+        # and plan-authoring. Since pipeline v2.1 the pipeline never invokes safe-refactor, so the
+        # example no longer names agentic-sdlc-pipeline (contract C11).
         step = [line for line in self.refactor.splitlines() if "Implementation control" in line][0]
         self.assertIn("When a spec or plan already exists", step)
-        self.assertIn("agentic-sdlc-pipeline", step)
+        self.assertIn("(for example, a spec and plan written with `spec-authoring` and "
+                      "`plan-authoring` for this refactor)", step)
+        self.assertNotIn("(for example, this refactor is a step inside `agentic-sdlc-pipeline`)", step)
         self.assertRegex(step, r"do not claim the light path")
 
     def test_the_flow_line_is_a_claim_not_evidence_in_both_contracts(self):

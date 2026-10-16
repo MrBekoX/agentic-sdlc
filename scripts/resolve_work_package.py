@@ -16,7 +16,7 @@ from pathlib import Path
 SPEC_ROOT = Path("docs") / "agentic-sdlc" / "specs"
 PLAN_ROOT = Path("docs") / "agentic-sdlc" / "plans"
 AGENTIC_ROOT = Path("docs") / "agentic-sdlc"
-STATUSES = {"draft", "reviewed", "in_progress", "ready_for_audit", "complete"}
+STATUSES = {"draft", "reviewed", "approved", "in_progress", "ready_for_audit", "complete"}
 PLAN_REQUIRED = ("work_id", "spec", "branch", "status")
 SPEC_REQUIRED = ("work_id", "status")
 

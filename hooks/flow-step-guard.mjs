@@ -17,6 +17,10 @@ import {
   stepSatisfied,
   isSourceFile,
   completionClaimPresent,
+  turnEndsOnSkill,
+  turnInvokesSkill,
+  turnTextAfterLastResult,
+  finalAssistantText,
   emit,
 } from './flow-evidence.mjs';
 
@@ -67,10 +71,21 @@ try {
   const block = missing.filter((m) => m.mode === 'block');
   const warn = missing.filter((m) => m.mode === 'warn');
 
+  // O4 dispatch-terminal check (pipeline v2.1 C6/C14/C16): the pipeline was activated inside the current
+  // turn (a later turn's standalone dispatch decision stays silent), the turn's last top-level tool_use is
+  // the dispatch-strategy Skill call, the final text is known (a string last_assistant_message, or a
+  // transcript that caught up: a top-level assistant text after that call's result), and it asks the user
+  // nothing (no ASCII '?'). Missing-step output wins: this branch is reached only when none is emitted.
+  const dispatchTerminal = flows.includes('agentic-sdlc-pipeline')
+    && turnInvokesSkill(trace, 'agentic-sdlc-pipeline')
+    && turnEndsOnSkill(trace, 'dispatch-strategy')
+    && (typeof lastAssistant === 'string' || turnTextAfterLastResult(trace))
+    && !finalAssistantText(trace, lastAssistant).includes('?');
+
   if (blockFlag() && block.length) {
     emit({
       decision: 'block',
-      reason: `${block[0].flow}: required step(s) [${block.map((m) => m.id).join(', ')}] have no evidence this turn. Produce them before finishing - write+validate the spec/plan, run the tests, and invoke implementation-control. Evidence is re-derived, not taken from text.`,
+      reason: `${block[0].flow}: required step(s) [${block.map((m) => m.id).join(', ')}] have no evidence this turn. Produce them before finishing - for example write and validate the spec/plan, run the tests, and run the required reviewer or audit step. Evidence is re-derived, not taken from text.`,
       systemMessage: 'flow-step-guard: blocked - required flow steps lack evidence.',
     });
   } else if (block.length || warn.length || heuristic) {
@@ -78,6 +93,9 @@ try {
       ? 'implementation edits and a completion claim, but no flow skill was invoked - did you skip root-cause-fix?'
       : `missing evidence for step(s): ${missing.map((m) => m.id).join(', ')}`;
     emit({ systemMessage: `flow-step-guard: ${detail}` });
+  } else if (dispatchTerminal) {
+    const reason = "agentic-sdlc-pipeline: the turn ended on the dispatch-strategy decision. Continue with the pipeline's next step in the same turn.";
+    emit(blockFlag() ? { decision: 'block', reason } : { systemMessage: reason });
   } else {
     emit({});
   }

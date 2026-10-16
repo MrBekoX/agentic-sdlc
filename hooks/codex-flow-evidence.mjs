@@ -134,7 +134,7 @@ export function workIdOf(target) {
 // The merged Codex-observable stop:block step set across artifact-bearing flows (BR4a): a flow
 // qualifies if it has at least one `artifact` evidence step; from each qualifier take stop==="block"
 // steps that carry an `artifact` or `command` evidence form, deduplicated by step id. Result is
-// {spec(artifact), plan(artifact), tests(command)}; toolUse-only control/dispatch/core/security and
+// {spec(artifact), plan(artifact), tests(command)}; toolUse-only control/dispatch/security and
 // the artifact-less safe-refactor flow are excluded (BR11/DP-C/DP-G).
 function mergedBlockSteps(req) {
   const byId = new Map();
