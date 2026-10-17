@@ -90,7 +90,7 @@ Focused skills are independently invocable. Inside a pipeline run the pipeline i
 | Pre-final audit | `resolve_work_package.py`, then `Agent` `implementation-auditor`. |
 | Final evidence claim | `Skill` `agentic-sdlc:completion-claim-gate`. |
 
-The flow hooks match the pipeline's dispatch, security and control steps by exact skill or agent name. Hook flow activation is by the `Skill` tool: a pipeline run started only by the `/agentic-sdlc-pipeline` slash command activates no hook flow and is covered by the offline procedure eval.
+The flow hooks match the pipeline's dispatch, security and control steps by exact skill or agent name. On Claude Code the flow hooks activate a flow from a `Skill` tool call or from a slash-command start: a pipeline run started with `/agentic-sdlc-pipeline` or `/agentic-sdlc:agentic-sdlc-pipeline` (recorded as `<command-name>/agentic-sdlc:agentic-sdlc-pipeline</command-name>` in headless `claude -p` on Claude Code 2.1.302; an interactive-session start was not captured) is gated the same way.
 
 `spec-authoring` and `plan-authoring` remain standalone prompt-level skills. They are not internal pipeline substeps.
 

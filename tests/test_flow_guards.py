@@ -1424,8 +1424,9 @@ class TestExactNameEvidence(unittest.TestCase):
 
 @unittest.skipIf(NODE is None, "node not available")
 class TestExactFlowActivation(unittest.TestCase):
-    """C6: a flow is active only when a non-errored Skill tool_use has input.skill equal to the
-    marker or to agentic-sdlc:<marker>."""
+    """C6: a Skill tool_use activates a flow only when it is non-errored and its input.skill equals the
+    marker or agentic-sdlc:<marker>. (A slash-command start is the other activation path; see
+    TestSlashCommandFlowActivation.)"""
 
     run_step = TestFlowStepGuard.run_guard
     run_order = TestFlowOrderGuard.run_guard
@@ -1465,6 +1466,167 @@ class TestExactFlowActivation(unittest.TestCase):
                 self.assertIn("spec", _block_ids(out))
                 order = self.run_order("src/app.py", [skill(name)], block=True)
                 self.assertEqual(order["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
+SLASH_FIXTURE = REPO / "tests" / "fixtures" / "transcripts" / "claude-2.1.302-slash-pipeline-start.jsonl"
+
+
+def slash_records():
+    """The two records Claude Code 2.1.302 wrote for `/agentic-sdlc-pipeline add a greeting helper`
+    (captured 2026-10-17 with no model call; the bare and the namespaced form record the same thing):
+    the user's slash-command start, then the isMeta skill-body record."""
+    return [json.loads(line) for line in SLASH_FIXTURE.read_text(encoding="utf-8").splitlines() if line]
+
+
+def slash_start(command_name, args="add a greeting helper", *, blocks=False):
+    """A slash-command start record in the captured shape, for `/<command_name> <args>`."""
+    text = (f"<command-message>{command_name}</command-message>\n<command-name>/{command_name}</command-name>\n"
+            f"<command-args>{args}</command-args>")
+    return user_prompt(text, blocks=blocks)
+
+
+@unittest.skipIf(NODE is None, "node not available")
+class TestSlashCommandFlowActivation(unittest.TestCase):
+    """D7: a flow started by a slash command is active like one started by a Skill tool call. The start
+    is the top-level user record whose content opens with <command-message> and names
+    <command-name>/X</command-name>, where X is the marker or agentic-sdlc:<marker>."""
+
+    run_step = TestFlowStepGuard.run_guard
+    run_order = TestFlowOrderGuard.run_guard
+
+    def stop(self, events, final_text, **kw):
+        return self.run_step(events + [ev_text(final_text)], last_assistant_message=final_text, **kw)
+
+    @staticmethod
+    def _call(skill_name, tool_id):
+        return [tool_with_id("Skill", {"skill": skill_name}, tool_id), tool_result(tool_id, False)]
+
+    def test_captured_slash_start_activates_the_pipeline_for_flow_order(self):
+        out = self.run_order("src/app.py", slash_records(), block=True)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecisionReason"],
+                         "agentic-sdlc-pipeline: produce spec and plan before editing source (missing: dispatch, "
+                         "spec, plan, red-first). Externalize them as validated artifacts first.")
+        warn = self.run_order("src/app.py", slash_records())
+        self.assertEqual(warn, {"systemMessage": "flow-order-guard: spec/plan not present before a source edit "
+                                                 "(missing: dispatch, spec, plan, red-first)."})
+
+    def test_captured_slash_start_activates_the_pipeline_for_flow_step(self):
+        out = self.run_step(slash_records() + [edit("src/app.py"), ev_text("Shipped.")], block=True)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertEqual(_block_ids(out), ["dispatch", "spec", "plan", "tests", "security", "control"])
+
+    def test_bare_and_prefixed_command_names_activate(self):
+        # 2.1.302 records the namespaced name for both typed forms; a skill installed without the plugin
+        # namespace would record the bare name (not captured).
+        for name in ("agentic-sdlc:agentic-sdlc-pipeline", "agentic-sdlc-pipeline"):
+            for blocks in (False, True):
+                with self.subTest(name=name, blocks=blocks):
+                    out = self.run_order("src/app.py", [slash_start(name, blocks=blocks)], block=True)
+                    self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_slash_start_of_a_focused_flow_activates_that_flow(self):
+        out = self.run_step([slash_start("agentic-sdlc:feature-build"), edit("src/app.py"), ev_text("Built.")],
+                            block=True)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("spec", _block_ids(out))
+
+    def test_records_that_are_not_a_slash_start_activate_nothing(self):
+        start = slash_start("agentic-sdlc:agentic-sdlc-pipeline")
+        sidechain = dict(start, isSidechain=True)
+        child = dict(start, parent_tool_use_id="toolu_agent_1")
+        meta = dict(start, isMeta=True)
+        quoted = tool_result("toolu_grep", False)
+        quoted["message"]["content"][0]["content"] = start["message"]["content"]
+        cases = {
+            "prose mention of the command": PROMPT,
+            "tags after prose": user_prompt("Run this: " + start["message"]["content"]),
+            "lookalike name": slash_start("agentic-sdlc:agentic-sdlc-pipeline-v2"),
+            "foreign prefix": slash_start("other-plugin:agentic-sdlc-pipeline"),
+            "sidechain record": sidechain,
+            "sub-agent record": child,
+            "isMeta record": meta,
+            "tool_result text": quoted,
+        }
+        for name, record in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(self.run_order("src/app.py", [record], block=True), {})
+                self.assertEqual(self.run_step([record, edit("src/app.py"), ev_text("Edited.")], block=True), {})
+
+    def test_recorded_variants_of_the_start_activate(self):
+        canon = slash_start(PIPE)["message"]["content"]
+        variants = {
+            "crlf": canon.replace("\n", "\r\n"),
+            "leading whitespace": " \r\n" + canon,
+            "name tag first": (f"<command-name>/{PIPE}</command-name>\n<command-message>{PIPE}</command-message>\n"
+                               "<command-args></command-args>"),
+            "running message": ("<command-message>agentic-sdlc-pipeline is running…</command-message>\n"
+                                "<command-name>/agentic-sdlc-pipeline</command-name>"),
+        }
+        for name, text in variants.items():
+            with self.subTest(variant=name):
+                out = self.run_order("src/app.py", [user_prompt(text)], block=True)
+                self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_more_records_that_are_not_a_slash_start(self):
+        start = slash_start(PIPE)
+        cases = {
+            "args name the flow, the command does not": user_prompt(
+                "<command-message>other:cmd</command-message>\n<command-name>/other:cmd</command-name>\n"
+                f"<command-args><command-name>/{PIPE}</command-name></command-args>"),
+            "name without the slash": user_prompt(
+                f"<command-message>{PIPE}</command-message>\n<command-name>{PIPE}</command-name>\n"
+                "<skill-format>true</skill-format>"),
+            "local_command system record": {"type": "system", "subtype": "local_command",
+                                            "content": start["message"]["content"]},
+            "compaction summary": dict(start, isCompactSummary=True),
+            "task notification": dict(start, origin={"kind": "task-notification"}),
+            "tag after 4 KiB": user_prompt("<command-message>x</command-message>" + " " * 5000
+                                           + f"<command-name>/{PIPE}</command-name>"),
+        }
+        for name, record in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(self.run_order("src/app.py", [record], block=True), {})
+
+    def test_a_slash_start_keeps_the_flow_active_in_later_turns(self):
+        out = self.run_order("src/app.py", slash_records() + [user_prompt("Continue.")], block=True)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_slash_detection_grows_linearly(self):  # lessons 2026-07-01 / 2026-10-16: assert a RATIO
+        sizes = [125000 * 2 ** step for step in range(5)]
+        script = (
+            "const m = await import(%s); const fs = await import('node:fs'); const path = await import('node:path');"
+            "const [dir, sizes] = [process.argv[1], JSON.parse(process.argv[2])]; const out = [];"
+            "for (const n of sizes) { const p = path.join(dir, 't' + n + '.jsonl');"
+            "  const content = ' '.repeat(n) + '<command-message>' + '<command-name>/a'.repeat(n / 16);"
+            "  fs.writeFileSync(p, JSON.stringify({type: 'user', message: {content}}));"
+            "  let best = Infinity; for (let i = 0; i < 3; i++) { const t0 = process.hrtime.bigint();"
+            "    if (m.parseTranscript(p).slashCommands.length) throw new Error('activated');"
+            "    best = Math.min(best, Number(process.hrtime.bigint() - t0)); } out.push(best); }"
+            "process.stdout.write(JSON.stringify(out));" % json.dumps(FLOW_EVID.as_uri()))
+        with tempfile.TemporaryDirectory() as td:
+            proc = subprocess.run([NODE, "--input-type=module", "-e", script, td, json.dumps(sizes)],
+                                  capture_output=True, text=True, encoding="utf-8", timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-400:])
+        timings = json.loads(proc.stdout)
+        # Linear is about 16x over 4 doublings; a scan that retried from every whitespace position would be
+        # quadratic (about 256x).
+        self.assertLess(timings[-1] / max(timings[0], 1), 48, timings)
+
+    def test_dispatch_terminal_fires_after_a_slash_start_in_the_same_turn(self):  # O4
+        events = slash_records() + self._call(DS, "t1")
+        self.assertEqual(self.stop(events, NO_QUESTION), {"systemMessage": DISPATCH_TERMINAL_MESSAGE})
+        blocked = self.stop(events, NO_QUESTION, block=True)
+        self.assertEqual((blocked.get("decision"), blocked.get("reason")), ("block", DISPATCH_TERMINAL_MESSAGE))
+
+    def test_dispatch_terminal_ignores_a_slash_start_from_an_earlier_turn(self):  # O4 turn rule (C16 item 8)
+        events = slash_records() + self._call(DS, "t1") + [
+            ev_text("Spec Review gate: approve the spec or ask for changes?"),
+            user_prompt("Separate topic: workflow or sub-agents for the docs audit? Just pick."),
+        ] + self._call(DS, "t2")
+        for block in (False, True):
+            with self.subTest(block=block):
+                self.assertEqual(self.stop(events, "Use parallel sub-agents.", block=block), {})
 
 
 @unittest.skipIf(NODE is None, "node not available")

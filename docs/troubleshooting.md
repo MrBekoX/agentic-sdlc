@@ -137,9 +137,9 @@ AGENTIC_FLOW_GATE_BLOCK=true
 
 The flow guards re-derive evidence from the current transcript, validated `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/` artifacts, real tool calls, and real commands. Prose such as "I ran the gate" does not satisfy a required step.
 
-`flow-step-guard.mjs` also warns when an `agentic-sdlc-pipeline` turn ends on the `dispatch-strategy` decision: the pipeline skill was invoked in the current turn, the turn's last top-level tool call is that `Skill` call, and the final assistant text is known and contains no `?`. `AGENTIC_FLOW_GATE_BLOCK=true` blocks it with the same reason; a missing-step finding takes precedence and silences it.
+`flow-step-guard.mjs` also warns when an `agentic-sdlc-pipeline` turn ends on the `dispatch-strategy` decision: the pipeline skill was invoked in the current turn (a `Skill` call or a slash-command start), the turn's last top-level tool call is that `Skill` call, and the final assistant text is known and contains no `?`. `AGENTIC_FLOW_GATE_BLOCK=true` blocks it with the same reason; a missing-step finding takes precedence and silences it.
 
-If the flow guards stay silent during a pipeline run, check how the run started. Hook flow activation is by the `Skill` tool: a pipeline run started only by the `/agentic-sdlc-pipeline` slash command activates no hook flow and is covered by the offline procedure eval.
+If the flow guards stay silent during a pipeline run, check how the run started. The hooks activate a flow from a `Skill` tool call or from a slash-command start (`/agentic-sdlc-pipeline` or `/agentic-sdlc:agentic-sdlc-pipeline`, recorded as `<command-name>/agentic-sdlc:agentic-sdlc-pipeline</command-name>` in headless `claude -p` on Claude Code 2.1.302; an interactive-session start was not captured). A run that only reads `SKILL.md`, or a prompt that mentions the command in prose, activates no flow.
 
 The `branch` and `review-result` steps are warn-only by design: they never block, even with `AGENTIC_FLOW_GATE_BLOCK=true`. For strict Codex evaluation, run the offline `python3 scripts/strict_flow_evidence.py --rollout <path> --cwd <dir>`, or set `AGENTIC_FLOW_STRICT_EVIDENCE=true` to make the live Codex `tests` evidence strict.
 
