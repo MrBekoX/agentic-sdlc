@@ -84,7 +84,7 @@ Hook commands read `CURSOR_PLUGIN_ROOT` inside Node. They do not splice the inst
 - Claude `completion-claim-guard.mjs` and `flow-step-guard.mjs` are not wired. They read Claude transcripts. Completion evidence stays the `completion-claim-gate` skill.
 - The default worktree-scan advisory is not shown. Cursor's documented `stop` output is `followup_message`, and sending the advisory there would start another turn. Set `AGENTIC_WORKTREE_SCAN_BLOCK=true` to forward a finding as that follow-up.
 - Flow-order warns by default. Cursor `preToolUse` has no documented allow-time context field, so the warning is not converted into a deny. `AGENTIC_FLOW_GATE_BLOCK=true` denies the edit.
-- Flow-order activates only on a `Skill` tool call to a flow skill in the transcript. Cursor's documented invocations, `/<skill-name>` and reading `SKILL.md`, record no such call, so flow-order does not gate `agentic-sdlc-pipeline` or any other flow; no test covers activation from a real Cursor transcript.
+- Flow-order activates on a `Skill` tool call to a flow skill, or on a Claude Code slash-command record (`<command-name>/<skill></command-name>`). Cursor's documented invocations, `/<skill-name>` and reading `SKILL.md`, are not known to record either, so flow-order is not known to gate `agentic-sdlc-pipeline` or any other flow; no test covers activation from a real Cursor transcript.
 - A write-scan finding is a `preToolUse` deny. `afterFileEdit` documents no model-visible output.
 - `beforeShellExecution` warnings, including the default protected-branch warning, use `permission: ask`.
 - There is no MCP server in this plugin.

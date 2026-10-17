@@ -1,5 +1,5 @@
 // Stop — deterministic backstop for the flow-step gate (root-cause-fix and other flows).
-// At stop, for each ACTIVE flow (its activeWhen.skill appears in a real Skill tool_use), this
+// At stop, for each ACTIVE flow (its activeWhen.skill appears in a real Skill tool_use or a slash-command start), this
 // re-derives evidence for every step that carries a `stop` field. A step counts only when its
 // evidence is observable: an artifact that re-validates via validate_artifacts.py, a real
 // tool_use, or a real command — never the agent's prose.

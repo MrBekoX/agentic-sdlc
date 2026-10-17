@@ -144,6 +144,23 @@ function isTopLevel(e) {
   return !e.isSidechain && e.parent_tool_use_id == null;
 }
 
+// D7 slash-command start. Claude Code records `/name args` typed by the user as a genuine top-level user
+// prompt whose content holds <command-name>/name</command-name> (captured in headless `claude -p` on
+// 2.1.302, 2026-10-17: `/agentic-sdlc-pipeline` and `/agentic-sdlc:agentic-sdlc-pipeline` both record the
+// namespaced name, after <command-message>name</command-message>). The record must open, after optional
+// whitespace, with <command-message> or <command-name>, so a prose mention or a quoted tool output starts
+// nothing; a prompt the user opens with those tags does. Only the first 4 KiB are searched and the name is
+// bounded, so the scan is linear (TestSlashCommandFlowActivation times it).
+const SLASH_HEADER = /^\s*<command-(?:message|name)>/;
+const SLASH_NAME = /<command-name>\/([A-Za-z0-9:_-]{1,200})<\/command-name>/;
+
+function slashCommandName(e) {
+  const text = userRecordText(e);
+  if (!SLASH_HEADER.test(text)) return null;
+  const match = SLASH_NAME.exec(text.slice(0, 4096));
+  return match ? match[1] : null;
+}
+
 // The text of one assistant record: string content, or its text blocks joined by newlines - the same
 // reading completion-claim-guard uses for its transcript fallback.
 function assistantRecordText(content) {
@@ -208,6 +225,7 @@ export function parseTranscript(transcriptPath) {
     tools: [], commands: [], edits: [], lastText: '', raw: '',
     results: new Map(), receipts: new Map(), stringResults: new Set(), completions: new Map(),
     turnTools: [], lastRecordText: '', resultPos: new Map(), lastTopTextPos: -1,
+    slashCommands: [], turnSlashCommands: [],
   };
   if (!transcriptPath) return empty;
   let raw = '';
@@ -221,6 +239,8 @@ export function parseTranscript(transcriptPath) {
   const completions = new Map(); // tool_use id -> Set of BR8 notification statuses
   let lastText = '';
   let turnTools = []; // top-level tool_uses since the last top-level genuine user prompt (C14 turn)
+  const slashCommands = []; // D7: command names of every top-level slash-command start
+  let turnSlashCommands = []; // D7: the current turn's slash-command start, if its prompt was one
   let lastRecordText = ''; // text of the last assistant record that has any (completion-claim-guard reading)
   // C16 item 10 (O4 caught-up guard): record positions, so Stop can tell whether a top-level assistant
   // text record landed after a call's result.
@@ -266,7 +286,15 @@ export function parseTranscript(transcriptPath) {
       }
       // A new user turn starts here. C16 item 9: only a TOP-LEVEL genuine prompt opens one; a sidechain
       // or parent_tool_use_id user record is a sub-agent's prompt.
-      if (isTopLevel(e) && isGenuinePrompt(e)) turnTools = [];
+      if (isTopLevel(e) && isGenuinePrompt(e)) {
+        turnTools = [];
+        turnSlashCommands = [];
+        const slash = slashCommandName(e);
+        if (slash) {
+          slashCommands.push(slash);
+          turnSlashCommands.push(slash);
+        }
+      }
     }
     if (e?.type !== 'assistant') continue;
     const content = e?.message?.content;
@@ -296,7 +324,7 @@ export function parseTranscript(transcriptPath) {
   }
   return {
     tools, commands, edits, lastText, raw, results, receipts, stringResults, completions, turnTools,
-    lastRecordText, resultPos, lastTopTextPos,
+    lastRecordText, resultPos, lastTopTextPos, slashCommands, turnSlashCommands,
   };
 }
 
@@ -359,14 +387,21 @@ function toolUsePresent(trace, item, tools = trace.tools) {
   });
 }
 
+// D7: did a slash-command start in `names` name the skill exactly (X or agentic-sdlc:X)?
+function slashStarted(names, marker) {
+  return (names || []).some((name) => isExactName(name, marker));
+}
+
 // Flows whose activeWhen.skill marker IS the skill of a real Skill tool_use (exact name, C6): a
 // dispatch-strategy call whose args mention feature-build activates nothing. An errored call
-// (receiptHasError) still activates nothing; a call with no id or no result still counts.
+// (receiptHasError) still activates nothing; a call with no id or no result still counts. A slash-command
+// start of that skill (D7) activates the flow the same way.
 export function activeFlowNames(trace, req) {
   const out = [];
   for (const [name, flow] of Object.entries(req.flows || {})) {
     const marker = flow?.activeWhen?.skill;
-    if (marker && toolUsePresent(trace, { tool: 'Skill', exactName: marker })) out.push(name);
+    if (marker && (toolUsePresent(trace, { tool: 'Skill', exactName: marker })
+      || slashStarted(trace.slashCommands, marker))) out.push(name);
   }
   return out;
 }
@@ -381,9 +416,11 @@ export function turnEndsOnSkill(trace, name) {
 }
 
 // C16 item 8: does the current turn itself contain a top-level, non-error Skill call to `name` (exact
-// name, the activeFlowNames rule)? A flow activated in an earlier turn does not count.
+// name, the activeFlowNames rule), or did its prompt start `name` as a slash command (D7)? A flow
+// activated in an earlier turn does not count.
 export function turnInvokesSkill(trace, name) {
-  return toolUsePresent(trace, { tool: 'Skill', exactName: name }, trace.turnTools || []);
+  return toolUsePresent(trace, { tool: 'Skill', exactName: name }, trace.turnTools || [])
+    || slashStarted(trace.turnSlashCommands, name);
 }
 
 // C16 item 10: has a top-level assistant text record landed after the result of the turn's last
