@@ -64,11 +64,11 @@ A refund reduces the gross total exactly once. Currency rounding follows the
 banker's rounding rule. Each transaction id is unique within a settlement day.
 
 ## 3. Acceptance criteria
-- Given a refund for an existing charge, when the job runs, then the gross total
+- AC1: Given a refund for an existing charge, when the job runs, then the gross total
   is reduced by the refund amount exactly once.
-- Given a duplicate refund event, when the job runs, it returns the prior result
+- AC2: Given a duplicate refund event, when the job runs, it returns the prior result
   and does not double-reduce the total.
-- Given an empty settlement file, the job returns an empty ledger -> exit 0.
+- AC3: Given an empty settlement file, the job returns an empty ledger -> exit 0.
 
 ## 4. Edge cases
 Empty file, null amount, a refund larger than the original charge, and two
@@ -82,6 +82,10 @@ updated; and finance signs off on a sample day.
 The existing settlement file format and the public ledger API stay identical.
 No change to the nightly schedule.
 """
+
+# The same spec written the way the authoring guidance allowed before ids were required:
+# Given/When/Then bullets with no `AC<n>` label, so the plan gate has nothing to check (FM-4).
+IDLESS_SPEC = COMPLETE_SPEC.replace("- AC1: ", "- ").replace("- AC2: ", "- ").replace("- AC3: ", "- ")
 
 
 class TestCli(unittest.TestCase):
@@ -159,8 +163,8 @@ class TestSpecChecks(unittest.TestCase):
     def test_vague_criterion_warns(self):
         # An acceptance-criteria bullet with no testable marker warns.
         vague = COMPLETE_SPEC.replace(
-            "- Given an empty settlement file, the job returns an empty ledger -> exit 0.",
-            "- The system should work well and be fast.",
+            "- AC3: Given an empty settlement file, the job returns an empty ledger -> exit 0.",
+            "- AC3: The system should work well and be fast.",
         )
         result = va.check_spec(vague)
         self.assertTrue(
@@ -278,8 +282,8 @@ class TestScanner(unittest.TestCase):
             self.assertIn("artifacts_validation=passed", out)
 
 
-# A full-coverage plan fixture: every AC in COMPLETE_SPEC (none here) — we use a
-# dedicated mini spec for plan tests so AC ids are deterministic.
+# A full-coverage plan fixture. Plan tests use a dedicated mini spec rather than
+# COMPLETE_SPEC so the AC ids and the tasks that cover them stay small and deterministic.
 PLAN_SPEC = """\
 ---
 work_id: mini
@@ -541,6 +545,165 @@ class TestPlanChecks(unittest.TestCase):
             any(w.startswith("ac_not_covered:") for w in result["warnings"]),
             result["warnings"],
         )
+
+
+# A plan with full frontmatter and no task at all, and one whose only task is unrelated to the
+# spec. Both passed `--mode plan --strict` against an id-less spec (audit finding L3b-F4).
+PLAN_EMPTY = """\
+---
+work_id: mini
+spec: ../specs/mini.md
+branch: feat/mini
+status: draft
+---
+
+# Mini Plan
+"""
+
+PLAN_UNRELATED = """\
+---
+work_id: mini
+spec: ../specs/mini.md
+branch: feat/mini
+status: draft
+---
+
+# Mini Plan
+
+## Task 1 — Update README wording
+Modify `README.md`. TDD: add a failing test (RED) for the wording check first.
+Run: pytest tests/test_readme.py
+"""
+
+HYPHEN_SPEC = PLAN_SPEC.replace("- AC1:", "- AC-1:").replace("- AC2:", "- AC-2:")
+
+
+def _warnings_with(prefix, warnings):
+    return sorted(w for w in warnings if w.startswith(prefix))
+
+
+class TestAcIdObligations(unittest.TestCase):
+    """FM-4: the plan gate failed open when the spec gave it no `AC<n>` id to check.
+
+    Coverage obligations are the ids mined from the spec. A spec written as plain Given/When/Then
+    bullets, or with `AC-1`-style ids, produced none, so an empty plan or an unrelated one passed
+    `--strict`. Contract 03 says every acceptance criterion maps to at least one task.
+    """
+
+    def _write(self, tmp, text, name):
+        p = Path(tmp) / name
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def test_hyphenated_spec_ids_are_coverage_obligations(self):
+        plan = PLAN_UNCOVERED.replace("(AC1)", "(AC-1)")
+        result = va.check_plan(plan, HYPHEN_SPEC)
+        self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]),
+                         ["ac_not_covered:AC-2"], result["warnings"])
+
+    def test_either_spelling_covers_the_other(self):
+        # A plan citing `AC1` covers a spec's `AC-1`, and the reverse: one criterion, one number.
+        hyphen_plan = PLAN_FULL.replace("(AC1)", "(AC-1)").replace("(AC2)", "(AC-2)")
+        for plan, spec in ((PLAN_FULL, HYPHEN_SPEC), (hyphen_plan, PLAN_SPEC)):
+            with self.subTest(spec_ids="AC-n" if spec is HYPHEN_SPEC else "ACn"):
+                result = va.check_plan(plan, spec)
+                self.assertEqual(result["metrics"]["plan_ac_covered"], 2, result)
+                self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]), [])
+
+    def test_spec_criterion_without_id_warns(self):
+        result = va.check_spec(IDLESS_SPEC)
+        self.assertEqual(_warnings_with("ac_missing_id:", result["warnings"]),
+                         ["ac_missing_id:1", "ac_missing_id:2", "ac_missing_id:3"])
+        labelled = va.check_spec(COMPLETE_SPEC)
+        self.assertEqual(_warnings_with("ac_missing_id:", labelled["warnings"]), [])
+
+    def test_only_the_unlabelled_criterion_is_named(self):
+        # The index is the criterion's position, the same one `untestable_criterion:<n>` uses.
+        mixed = COMPLETE_SPEC.replace("- AC2: ", "- ")
+        self.assertEqual(_warnings_with("ac_missing_id:", va.check_spec(mixed)["warnings"]),
+                         ["ac_missing_id:2"])
+
+    def test_plan_gate_does_not_guess_unlabelled_criteria(self):
+        # Telling a criterion bullet from a detail bullet is a heuristic. Real pipeline specs
+        # split Given/When/Then over bullets under a bold `**AC-A1**` line, or add a "Guards:"
+        # bullet that says "when", so the strict plan gate reports only what the ids show.
+        mixed = COMPLETE_SPEC.replace("- AC2: ", "- ")
+        self.assertEqual(_warnings_with("ac_missing_id:", va.check_plan(PLAN_FULL, mixed)["warnings"]), [])
+        split = PLAN_SPEC.replace(
+            "- AC1: given a refund, then the total is reduced once.",
+            "**AC1 (refund)**\n- Given a refund\n- When the job runs\n- Then the total is reduced once.")
+        result = va.check_plan(PLAN_FULL, split)
+        self.assertEqual(_warnings_with("ac_missing_id:", result["warnings"]), [])
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 2, result)
+
+    def test_detail_lines_are_not_unlabelled_criteria(self):
+        # Shapes seen in real pipeline specs: a bold group heading, a nested "Guards:" or
+        # "Variant:" bullet under a labelled criterion. None of them is a criterion of its own,
+        # so none may block the strict plan gate as an unlabelled one.
+        detailed = COMPLETE_SPEC.replace(
+            "- AC1: Given a refund",
+            "**Refunds**\n\n- AC1: Given a refund",
+        ).replace(
+            "  and does not double-reduce the total.\n",
+            "  and does not double-reduce the total.\n"
+            "  - Guards: a replayed event, when it arrives late, then reduces the total twice.\n",
+        )
+        self.assertEqual(_warnings_with("ac_missing_id:", va.check_spec(detailed)["warnings"]), [])
+        self.assertEqual(_warnings_with("ac_missing_id:", va.check_plan(PLAN_FULL, detailed)["warnings"]), [])
+
+    def test_grouped_ids_are_coverage_obligations(self):
+        # `AC-A1` style: a letter group, then a number. A1 and B1 are different criteria.
+        spec = PLAN_SPEC.replace("- AC1:", "- AC-A1:").replace("- AC2:", "- AC-B1:")
+        plan = PLAN_FULL.replace("(AC1)", "(AC-A1)").replace("(AC2)", "(AC-A2)")
+        result = va.check_plan(plan, spec)
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 1, result)
+        self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]), ["ac_not_covered:AC-B1"])
+
+    def test_words_that_start_with_ac_are_not_ids(self):
+        spec = PLAN_SPEC + "\nThe ACE2 and ACK1 names in the domain glossary are not criteria.\n"
+        result = va.check_plan(PLAN_FULL, spec)
+        self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]), [])
+
+    def test_plan_gate_fails_on_idless_spec(self):
+        # The L3b-F4 repro: an unrelated one-task plan against an id-less spec.
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self._write(tmp, PLAN_UNRELATED, "plan.md")
+            spec = self._write(tmp, IDLESS_SPEC, "spec.md")
+            rc, out, err = run_cli("--mode", "plan", "--file", str(plan), "--spec", str(spec), "--strict")
+            self.assertNotEqual(rc, 0, out + err)
+            self.assertIn("error=ac_source_empty", out)
+            self.assertIn("artifacts_validation=failed", out)
+
+    def test_plan_gate_fails_when_spec_names_no_ids(self):
+        # Criteria written as prose, not bullets: no id and no bullet to name.
+        prose = IDLESS_SPEC.replace(
+            "- Given a refund for an existing charge", "Given a refund for an existing charge")
+        prose = prose.replace("- Given a duplicate", "Given a duplicate").replace(
+            "- Given an empty", "Given an empty")
+        result = va.check_plan(PLAN_FULL, prose)
+        self.assertIn("ac_source_empty", result["warnings"])
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 0)
+
+    def test_plan_without_tasks_fails_strict(self):
+        for spec_text in (PLAN_SPEC, None):
+            with self.subTest(spec=spec_text is not None):
+                result = va.check_plan(PLAN_EMPTY, spec_text)
+                self.assertEqual(result["metrics"]["plan_tasks"], 0)
+                self.assertIn("plan_no_tasks", result["warnings"])
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self._write(tmp, PLAN_EMPTY, "plan.md")
+            spec = self._write(tmp, IDLESS_SPEC, "spec.md")
+            rc, out, err = run_cli("--mode", "plan", "--file", str(plan), "--spec", str(spec), "--strict")
+            self.assertNotEqual(rc, 0, out + err)
+            self.assertIn("error=plan_no_tasks", out)
+
+    def test_labelled_spec_and_covering_plan_still_pass_strict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self._write(tmp, PLAN_FULL, "plan.md")
+            spec = self._write(tmp, HYPHEN_SPEC, "spec.md")
+            rc, out, err = run_cli("--mode", "plan", "--file", str(plan), "--spec", str(spec), "--strict")
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn("plan_ac_covered=2", out)
 
 
 class TestModeAll(unittest.TestCase):

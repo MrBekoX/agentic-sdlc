@@ -4389,19 +4389,23 @@ class TestC16PathNormalization(C7FixtureReplay):
 
 class TestC16ArtifactDepthEmptyContent(C7FixtureReplay):
     """C16.6: only an empty Codex `*** Update File:` record is ignored for depth; an empty Claude Write (or an empty Add
-    File) is the latest content and yields shallow_artifact, as at 4262a19."""
+    File) is the latest content and yields shallow_artifact, as at 4262a19.
+
+    The plan paired with the emptied spec is shallow too: the strict plan gate no longer passes a plan whose spec
+    yields no `AC<n>` id to cover (`ac_source_empty`, FM-4)."""
+
+    EMPTIED_SPEC_ERRORS = ["shallow_artifact:docs/agentic-sdlc/plans/greeting-suffix.md",
+                           "shallow_artifact:docs/agentic-sdlc/specs/greeting-suffix.md"]
 
     def test_an_emptied_claude_spec_is_shallow(self):
-        self.assert_fixture_errors("procedure-strict-claude-spec-emptied.jsonl",
-                                   ["shallow_artifact:docs/agentic-sdlc/specs/greeting-suffix.md"])
+        self.assert_fixture_errors("procedure-strict-claude-spec-emptied.jsonl", self.EMPTIED_SPEC_ERRORS)
 
     def test_an_empty_codex_add_file_is_shallow_but_an_update_file_is_ignored(self):
         events = fixture_events("procedure-strict-codex-complete-pass.jsonl")
         at = rollout_text_index(events, "Codex Adapter Gate: work-type core feature")
         empty_add = [patch_call("call_e1", f"*** Begin Patch\n*** Add File: {FLAT_SPEC_PATH}\n*** End Patch\n"),
                      patch_success("call_e1", "A", FLAT_SPEC_PATH)]
-        self.assert_errors(self.replay_events(events[:at] + empty_add + events[at:]),
-                           ["shallow_artifact:docs/agentic-sdlc/specs/greeting-suffix.md"])
+        self.assert_errors(self.replay_events(events[:at] + empty_add + events[at:]), self.EMPTIED_SPEC_ERRORS)
         self.assert_fixture_errors("procedure-strict-codex-complete-pass.jsonl", [])  # its Update File records
 
 

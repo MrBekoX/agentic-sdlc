@@ -21,7 +21,7 @@ Initial hypothesis:
 ## Problem / Goal / Non-goals
 ## Current vs Expected Behavior
 ## Business Rules & Validation
-## Acceptance Criteria   # each testable: "given X → returns Y"
+## Acceptance Criteria   # each labelled and testable: "- AC1: given X → returns Y"
 ## Edge Cases            # empty/null, boundaries, authz, error paths
 ## Security Requirements
 ## Must-not-change behaviors (regression surface)
@@ -35,7 +35,7 @@ Do **not** leak the HOW (files/methods) into the spec.
 ## Task N: <title>
 Purpose · Files to inspect · Files likely to change · TDD point (which failing test first) · Validation · Risks
 ```
-Every acceptance criterion maps to ≥1 task.
+Every acceptance criterion maps to ≥1 task, and that task names its id (`AC1`); the plan validator checks coverage by id.
 
 ## Documentation Verification (step 6 — Context7)
 ```md

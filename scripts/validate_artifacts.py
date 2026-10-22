@@ -75,7 +75,17 @@ TASK_HEADING_RE = re.compile(r"^\s{0,3}#{2,4}\s*Task\b", re.IGNORECASE)
 TASK_TID_RE = re.compile(r"\bT\d+\b")
 TASK_TID_START_RE = re.compile(r"^[\s>*\-#]*\*{0,2}\s*(T\d+)\b")
 
-AC_ID_RE = re.compile(r"\bAC\d+\b")
+# An acceptance-criterion id: `AC1`, `AC-1`, or a grouped `AC-A1` (pipeline specs use all three).
+# `AC1` and `AC-1` name the same criterion, so ids are compared by `_ac_key`, never by spelling.
+# The group letter needs the hyphen, so a word such as `ACE2` is not an id.
+AC_ID_RE = re.compile(r"\bAC(?:-?(\d+)|-([A-Z])(\d+))\b")
+
+
+def _ac_key(match):
+    """('', 1) for `AC1`/`AC-1`/`AC01`; ('A', 1) for `AC-A1`."""
+    if match.group(1) is not None:
+        return ("", int(match.group(1)))
+    return (match.group(2), int(match.group(3)))
 
 FILE_REF_RE = re.compile(r"\b(Create|Modify)\b", re.IGNORECASE)
 TDD_MARKER_RE = re.compile(r"\b(TDD|RED|failing test)\b", re.IGNORECASE)
@@ -130,6 +140,41 @@ def _section_body(text, start_lineno):
             break
         body.append(line)
     return "\n".join(body)
+
+
+def _acceptance_criteria(text):
+    """Return [(index, line, nested)] for each bullet of the first acceptance-criteria section.
+
+    The index is the bullet's 1-based position: `untestable_criterion:<n>` and
+    `ac_missing_id:<n>` name the same bullet by it. `nested` is True for a bullet indented
+    under another one. No section means no criteria.
+    """
+    needle = REQUIRED_SPEC_SECTIONS["acceptance-criteria"]
+    for lineno, _raw, norm in _iter_headings(text):
+        if needle in norm:
+            body = _section_body(text, lineno)
+            break
+    else:
+        return []
+    criteria = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("-", "*")) or re.match(r"^\d+\.", stripped):
+            indent = line[:len(line) - len(line.lstrip())]
+            criteria.append((len(criteria) + 1, stripped, "\t" in indent or len(indent) >= 2))
+    return criteria
+
+
+def _unlabelled_criteria(text):
+    """Indexes of the criteria the plan gate cannot check: a top-level bullet that reads as a
+    criterion (it has a testable marker) and carries no `AC<n>` id.
+
+    Real pipeline specs put a bold group heading, or a nested "Guards:"/"Variant:" line, inside the
+    section. Neither is a criterion of its own, so neither is reported here. A top-level detail
+    bullet that happens to say "when" still is, which is why only the spec check uses this.
+    """
+    return [index for index, line, nested in _acceptance_criteria(text)
+            if not nested and TESTABLE_MARKERS.search(line) and not AC_ID_RE.search(line)]
 
 
 # Frontmatter the pipeline gates on. These MIRROR scripts/resolve_work_package.py, which
@@ -196,7 +241,9 @@ def check_spec(text):
 
     Errors: a required section is absent.
     Warnings: a present section is thin (<40 non-blank chars before the next
-    heading); an acceptance-criteria bullet lacks a testable marker.
+    heading); an acceptance-criteria bullet lacks a testable marker or an `AC<n>`
+    id (the plan gate checks coverage by id, so an unlabelled criterion is one
+    it cannot check).
     """
     errors = []
     warnings = []
@@ -220,16 +267,11 @@ def check_spec(text):
         if len(non_blank) < 40:
             warnings.append(f"thin_section:{slug}")
 
-    # Testable-criteria check, scoped to the acceptance-criteria section body.
-    if "acceptance-criteria" in found:
-        ac_body = _section_body(text, found["acceptance-criteria"])
-        index = 0
-        for line in ac_body.splitlines():
-            stripped = line.strip()
-            if stripped.startswith(("-", "*")) or re.match(r"^\d+\.", stripped):
-                index += 1
-                if not TESTABLE_MARKERS.search(stripped):
-                    warnings.append(f"untestable_criterion:{index}")
+    # Per-criterion checks, scoped to the acceptance-criteria section body.
+    for index, criterion, _nested in _acceptance_criteria(text):
+        if not TESTABLE_MARKERS.search(criterion):
+            warnings.append(f"untestable_criterion:{index}")
+    warnings += [f"ac_missing_id:{index}" for index in _unlabelled_criteria(text)]
 
     # Security hand-wave: only when a security section exists AND its short body is
     # nothing but a bare dismissal. A grounded note (which cites an input->sink, or
@@ -342,6 +384,12 @@ def check_plan(text, spec_text):
     AC ids are sourced from `spec_text` ONLY (DP-2): no mining from the plan body,
     because mining would reward spec/plan leakage. If `spec_text` is missing, we
     cannot judge coverage -> single `ac_source_missing` warning.
+
+    Coverage must not pass by having nothing to check: a plan with no task block
+    warns `plan_no_tasks`, and a spec that yields no id warns `ac_source_empty`.
+    A single criterion without an id is reported by the spec check
+    (`ac_missing_id:<n>`), not here: telling a criterion bullet from a detail
+    bullet is a heuristic, and this check is the strict plan gate.
     """
     errors = []
     warnings = []
@@ -349,6 +397,8 @@ def check_plan(text, spec_text):
 
     blocks = _iter_task_blocks(text)
     metrics["plan_tasks"] = len(blocks)
+    if not blocks:
+        warnings.append("plan_no_tasks")
 
     # Per-task structural checks.
     for number, block in blocks:
@@ -379,14 +429,19 @@ def check_plan(text, spec_text):
         warnings.append("ac_source_missing")
         metrics["plan_ac_covered"] = 0
     else:
-        ac_ids = sorted(set(AC_ID_RE.findall(spec_text)), key=lambda s: int(s[2:]))
+        # One obligation per criterion, reported in the spec's own spelling.
+        spec_ids = {}
+        for m in AC_ID_RE.finditer(spec_text):
+            spec_ids.setdefault(_ac_key(m), m.group(0))
+        if not spec_ids:
+            warnings.append("ac_source_empty")
+        cited = [{_ac_key(m) for m in AC_ID_RE.finditer(block)} for _, block in blocks]
         covered = 0
-        for ac in ac_ids:
-            ac_re = re.compile(r"\b" + re.escape(ac) + r"\b")
-            if any(ac_re.search(block) for _, block in blocks):
+        for key in sorted(spec_ids):
+            if any(key in ids for ids in cited):
                 covered += 1
             else:
-                warnings.append(f"ac_not_covered:{ac}")
+                warnings.append(f"ac_not_covered:{spec_ids[key]}")
         metrics["plan_ac_covered"] = covered
 
     return {"errors": errors, "warnings": warnings, "metrics": metrics}

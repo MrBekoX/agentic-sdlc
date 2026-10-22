@@ -19,7 +19,7 @@ Scale depth to the change: a one-line tweak earns a short draft, a payment or au
 1. **Problem** — the concrete problem being solved (not a restatement of the feature name).
 2. **User need** — what the feature must do, from the user's side.
 3. **Business / domain rules** — e.g. "email is unique", "password >= 8 chars"; each stated so it is checkable, with no internal contradiction between rules.
-4. **Acceptance criteria** — each as **Given/When/Then** **and** the failure it guards (what breaks if this criterion is violated). A bare label ("counter increments correctly") or "should work" is forbidden — if you cannot phrase it Given/When/Then, the behavior is not yet specified, so say that as a decision point.
+4. **Acceptance criteria** — each labelled with an id (`AC1`, `AC2`, …) and written as **Given/When/Then** **and** the failure it guards (what breaks if this criterion is violated). The plan validator checks task coverage by id, so an unlabelled criterion is one it cannot check. A bare label ("counter increments correctly") or "should work" is forbidden — if you cannot phrase it Given/When/Then, the behavior is not yet specified, so say that as a decision point.
 5. **Edge cases** — the concrete unhandled input/scenario, not a category name: empty/null, the boundary value on both sides, conflicting state, the authorization/IDOR path, the error path. Name the input.
 6. **Security note** — trace the untrusted **input->sink**: name the entry point and the dangerous sink it reaches, or state "no untrusted input reaches <sink>, because <reason>". A bare "safe" / "standard handling" / "N/A" without that reasoning is a finding, not a pass.
 7. **Definition of done** — concrete checklist items (observable conditions), not a header.
@@ -28,7 +28,7 @@ Scale depth to the change: a one-line tweak earns a short draft, a payment or au
 => Do NOT write files/layers/tasks/code. "How it's coded" does not belong in the spec (that's the plan).
 
 ## PLAN mode — the HOW (developer-focused; an APPROVED spec is given)
-1. **Task list (Task 1..N)** covering **every** acceptance criterion of the spec. Each task carries, concretely:
+1. **Task list (Task 1..N)** covering **every** acceptance criterion of the spec; each task names the ids it covers (`AC1`). Each task carries, concretely:
    - **Files** — exact paths, each Create/Modify + what changes.
    - **RED test** — the failing test point: concrete test name + what it asserts, written to be seen failing (RED) before the code exists.
    - **Runnable verification** — the exact command to run and the expected pass/fail (e.g. the test runner invocation, the lint/build check). A task a reviewer cannot run is not a task.

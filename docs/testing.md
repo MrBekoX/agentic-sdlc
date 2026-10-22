@@ -512,6 +512,7 @@ python3 scripts/resolve_work_package.py
 - Required sections present: Problem, Business rules, Acceptance criteria, Edge cases, Definition of done, Must-not-change.
 - Each present section has enough content (non-gating warning if thin).
 - Acceptance-criteria bullets contain a testable marker (`Given`, `When`, `Then`, `returns`, `exit`, `->`, `=>`).
+- A top-level acceptance-criteria bullet with a testable marker carries an id: `AC1`, `AC-1` or a grouped `AC-A1`. One without an id warns as `ac_missing_id:<n>`, numbered like `untestable_criterion:<n>`. Nested bullets and bullets with no testable marker (a bold group heading, a "Guards:" line) are not checked for an id.
 - Security sections cannot be bare dismissals; `security_handwave` warns on claims such as "safe string handling only" without an input-to-sink explanation.
 - No `TODO`/`TBD`/`FIXME`/`XXX` placeholders remain in prose (fenced code and inline code are skipped).
 - No secret-shaped content (explicit narrow patterns only; no entropy detector).
@@ -523,7 +524,10 @@ python3 scripts/resolve_work_package.py
 - Each task includes runnable verification; missing commands or expected signals warn as `task_no_verification`.
 - Deferral hand-waves such as "Non-task step" or "executed later after gates" warn as `deferred_work`.
 - Tasks are ordered with strictly increasing numbers.
-- Every acceptance-criterion id (`AC1`, `AC2`, …) from the spec is covered by at least one task block.
+- The plan has at least one task block; a plan with none warns as `plan_no_tasks`.
+- Every acceptance-criterion id from the spec is cited inside at least one task block; a coverage table above the first task does not count. `AC1` and `AC-1` name the same criterion, so either spelling covers it.
+- Coverage cannot pass with nothing to check: a spec that yields no id warns as `ac_source_empty`. The pipeline runs the plan check with `--strict`, so `plan_no_tasks`, `ac_source_empty` and `ac_not_covered:<id>` block the Plan Review gate.
+- The plan check does not report a single unlabelled criterion: that is the spec check's `ac_missing_id:<n>`, which the pipeline's spec gate runs without `--strict`. A spec that labels some criteria and not others therefore passes both gates with the unlabelled ones unchecked.
 
 > The validator is **structural only** — it cannot tell whether the spec is *about the requested work*. At the Spec Review gate also confirm the spec's topic matches the requested task (a mis-carried workflow context can yield a structurally-valid but **off-target** spec).
 
@@ -655,6 +659,8 @@ Question: do the pipeline's feeder skills fire at the right step, and does it ru
 | `safety_evidence_absent` | A safety scenario's `guardrail_evidence` substring is not found in the cited file. | Restore the guardrail text in the cited contract/skill/hook, or update the fixture if the guardrail moved. |
 | `missing_section:must-not-change` | A spec is missing the Must-not-change section. | Add a `## Must-not-change (regression surface)` section to the spec. |
 | `ac_not_covered:AC2` | The plan does not reference acceptance criterion `AC2`. | Add `AC2` to a task block, or adjust the spec's AC ids. |
+| `ac_missing_id:2` or `ac_source_empty` | The second acceptance criterion has no `AC<n>` id, or the spec has no id at all, so plan coverage cannot be checked. | Label each criterion in the spec (`- AC2: Given …`), then cite the id in the task that covers it. |
+| `plan_no_tasks` | The plan has no `## Task N` heading or line-leading `TN` marker. | Write the tasks in one of those two forms. |
 | `placeholder:` | A markdown artifact still contains `TODO`/`TBD`/`FIXME`/`XXX` in prose. | Resolve the placeholder or move it into inline/fenced code if it is illustrative. |
 | `possible_secret:` | A secret-shaped pattern was detected. | Remove or mask the value; never commit real credentials. |
 | Trigger eval reports `q0_mismatch` | The model did not select the target skill at or above the threshold. | Inspect the transcript; tune the skill description or add near-miss negatives to the eval set. |

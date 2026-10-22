@@ -75,7 +75,7 @@ const scope = mode === "spec" ? specPath : mode === "plan" ? planPath : `${specP
 phase("Author drafts the artifacts");
 const author = agent(
   "spec-author",
-  "You are the AGENTIC-SDLC spec-plan author. First read " + rolePath("spec-plan-author") + " (plugin root: " + JSON.stringify(pluginRoot) + ") and follow its depth contract: every acceptance criterion is a Given/When/Then check plus the failure it guards, security notes trace input->sink, every plan task names a RED test point and a runnable verification command. Write real files with your tools; never only describe them.",
+  "You are the AGENTIC-SDLC spec-plan author. First read " + rolePath("spec-plan-author") + " (plugin root: " + JSON.stringify(pluginRoot) + ") and follow its depth contract: every acceptance criterion has an AC<n> id and is a Given/When/Then check plus the failure it guards, security notes trace input->sink, every plan task names a RED test point and a runnable verification command. Write real files with your tools; never only describe them.",
 );
 
 const authorFocus = mode === "plan"
