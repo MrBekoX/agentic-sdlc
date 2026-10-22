@@ -20,6 +20,18 @@ Each entry includes:
 
 ---
 
+## 2026-10-22 — Replay real model-written artifacts before tightening a strict gate
+
+- **Date:** 2026-10-22
+- **Task / context:** Closing FM-4: `scripts/validate_artifacts.py` passed `--mode plan --strict` when the spec gave it no `AC<n>` id, so an empty or unrelated plan cleared the pipeline's Plan Review gate.
+- **Symptom:** The first fix also reported every acceptance-criteria bullet without an id (`ac_missing_id:<n>`) in plan mode. It passed the new synthetic tests. Then specs and plans from the stored 4262a19 audit runs went through the old and the new validator. Well-formed specs then failed the strict plan gate: the check flagged bold group headings (`**Happy path**`, counted as a bullet because it starts with `*`), Given/When/Then split over three bullets under a bold `**AC-A1 (...)**` line, and a top-level "Guards:" bullet that said "when". The same replay showed models writing `AC-A1` and `A1` ids, which the first regex did not read.
+- **Root cause:** Telling a criterion bullet from a detail bullet is a heuristic, and the synthetic fixtures held only the one shape the guidance asks for (`- AC1: Given …`). A heuristic false positive in a check that runs under `--strict` blocks a gate the pipeline cannot pass without editing an approved spec.
+- **Correct fix:** The strict plan gate uses only facts the ids decide: `plan_no_tasks`, `ac_source_empty` (no id in the spec at all) and `ac_not_covered:<id>`, with `AC1`, `AC-1` and `AC-A1` compared by key. The per-bullet `ac_missing_id:<n>` stays a spec-mode warning, limited to top-level bullets that carry a testable marker. In the replay, the 15 plans went from 15 passing to 9 passing; the 6 new failures are 3 plans whose spec has no `AC` id and 3 plans whose uncovered ids appear only in a coverage table above the first task.
+- **Preventive rule / automated check:** Before tightening a check that runs under `--strict`, or anywhere a false positive blocks a gate, run the old and the new version over real artifacts a model wrote, and read every new failure. Put each real shape you find into a fixture. Keep heuristic checks out of the strict path.
+- **Related files & tests:** `scripts/validate_artifacts.py` (`AC_ID_RE`, `_ac_key`, `_unlabelled_criteria`, `check_plan`); `tests/test_validate_artifacts.py::TestAcIdObligations` (`test_detail_lines_are_not_unlabelled_criteria`, `test_plan_gate_does_not_guess_unlabelled_criteria`, `test_grouped_ids_are_coverage_obligations`).
+
+---
+
 ## 2026-10-17 — A growth-ratio timing test on allocation-heavy code must turn the garbage collector off
 
 - **Date:** 2026-10-17

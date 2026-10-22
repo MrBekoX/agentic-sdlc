@@ -730,8 +730,8 @@ TESTING_STRICT_NEEDS = ("failed write", "relativiz", "unsafe_artifact_path")
 # C17.16: CHANGELOG 0.6.0 known limitations.
 CHANGELOG = "CHANGELOG.md"
 CHANGELOG_NO_LIVE_RUN = (
-    "No live pipeline run has measured 0.6.0 yet; the zero-delegation behaviour is enforced by text, "
-    "hooks (Claude Code) and the offline grader."
+    "No live pipeline run has measured 0.6.0 yet; the zero-delegation behaviour is stated in the skill text, "
+    "checked by the Claude Code flow hooks (warn by default) and graded offline by the strict procedure eval."
 )
 CHANGELOG_TDD_PATHS = (
     "per-package `docs/agentic-sdlc/<slug>/evidence/<work_id>.tdd.md`",

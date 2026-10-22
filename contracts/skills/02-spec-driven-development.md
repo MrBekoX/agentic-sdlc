@@ -10,7 +10,7 @@ Before any non-trivial implementation (new feature, multi-file change, behavior 
 A spec (the **WHAT**, independent of code) must state:
 - Problem / requirement.
 - Business rules / domain rules.
-- Acceptance criteria — each **testable** ("given X input, returns Y"; vague "should work" is banned).
+- Acceptance criteria — each **testable** ("given X input, returns Y"; vague "should work" is banned) and labelled with an id (`AC1`, `AC2`, …) that plan tasks cite.
 - Edge cases — empty/null, boundaries, conflicts, authorization, error paths.
 - Definition of done.
 - Must-not-change behaviors (regression surface).
@@ -24,7 +24,7 @@ For deeper specs, the `spec-plan-author` → `spec-plan-critic` loop (workflow `
 
 ## Checklist
 - [ ] Problem + business rules stated.
-- [ ] Every acceptance criterion is testable.
+- [ ] Every acceptance criterion is testable and has an `AC<n>` id.
 - [ ] Edge cases enumerated.
 - [ ] Must-not-change behaviors listed.
 - [ ] Spec stays code-independent.

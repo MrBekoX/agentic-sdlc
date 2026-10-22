@@ -15,7 +15,7 @@ Own the WHAT only: problem, business rules, acceptance criteria, edge cases, def
 This is a standalone entry skill. `agentic-sdlc-pipeline` owns its own end-to-end Spec phase and must not call `spec-authoring` as an internal substep.
 
 ## Depth contract (proportional — scale rigor to the change)
-For each acceptance criterion give Given/When/Then **and** the failure it guards. For each edge case give the concrete unhandled scenario, not a category name. A security note must cite the input->sink it reasons about, or state "no external input reaches this code, because <reason>" — never a bare "safe".
+For each acceptance criterion give an id (`AC1`, `AC2`, …), Given/When/Then **and** the failure it guards; the plan validator checks task coverage by that id. For each edge case give the concrete unhandled scenario, not a category name. A security note must cite the input->sink it reasons about, or state "no external input reaches this code, because <reason>" — never a bare "safe".
 
 ## Excuse -> check
 | Excuse | Check |
