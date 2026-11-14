@@ -185,11 +185,14 @@ class TestReleaseReadinessDocs(unittest.TestCase):
             "docs/publication/openai-skills-only.md",
             "docs/publication/agent-skills-record.md",
             "docs/publication/link-checks.json",
+            "docs/analysis/2026-11-14-durum-analizi.md",
         ):
             self.assertEqual(check_ignore_exit(rel), 1, f"{rel} must not be ignored")
         for rel in (
             "docs/publication/notes.json",
             "docs/publication/sub/x.md",
+            "docs/analysis/notes.json",
+            "docs/analysis/sub/x.md",
             "docs/new-report.md",
             "docs/codex-plugin-runtime-debug-report/x.md",
             "docs/agentic-sdlc/publication-readiness/spec/x.md",
@@ -210,6 +213,8 @@ class TestReleaseReadinessDocs(unittest.TestCase):
                 "!docs/publication/*.md",
                 "!docs/publication/link-checks.json",
                 "!docs/zcode-runtime-adapter.md",
+                "!docs/analysis/",
+                "!docs/analysis/*.md",
             },
         )
 

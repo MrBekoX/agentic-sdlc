@@ -37,6 +37,10 @@ docs/codex-plugin-runtime-debug-report/
 docs/publication/*
 !docs/publication/*.md
 !docs/publication/link-checks.json
+# Dated status analyses that plan the next phases (YYYY-MM-DD-<topic>.md); tracked on purpose.
+!docs/analysis/
+docs/analysis/*
+!docs/analysis/*.md
 !docs/agentic-sdlc/
 docs/agentic-sdlc/*
 !docs/agentic-sdlc/evidence/
