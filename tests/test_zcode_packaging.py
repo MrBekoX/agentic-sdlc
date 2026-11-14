@@ -312,6 +312,10 @@ class TestZcodeWorkflowClaimSweep(unittest.TestCase):
     STALE_CLAIM = ("has no Workflow runtime", "\u6ca1\u6709 Workflow")
     #: An API name that appears in no shipped workflow script and in no vendor document.
     UNSOURCED_API = "CreateWorkflow"
+    #: The runner's ZCode launch card prints this tool name (runner contract §10; design §5.9.2 records
+    #: it from the 2026-10-22 platform research). Plan Task 13 replaces this sweep with pins for the
+    #: official name; until then only the runner's loop module and its test may carry it.
+    LAUNCH_CARD_FILES = ("scripts/sdlc_runner/loop.py", "tests/test_sdlc_loop.py")
 
     def _tracked_text_files(self):
         git = shutil.which("git")
@@ -348,7 +352,8 @@ class TestZcodeWorkflowClaimSweep(unittest.TestCase):
 
     def test_no_tracked_file_asserts_the_unsourced_api_name(self):
         offenders = [
-            rel for rel, text in self._tracked_text_files() if self.UNSOURCED_API in text
+            rel for rel, text in self._tracked_text_files()
+            if self.UNSOURCED_API in text and rel not in self.LAUNCH_CARD_FILES
         ]
         self.assertEqual(
             offenders, [],

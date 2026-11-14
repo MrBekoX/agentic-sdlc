@@ -191,7 +191,8 @@ def start(args) -> int:
             "request_sha256": st["request_sha256"], "runner_version": RUNNER_VERSION,
         })
         write_json_atomic(pkg / strategy_mod.DEFAULT_FILE,
-                          strategy_mod.default_map(flow, shared, st["probes"], args.runtime, options), within=pkg)
+                          strategy_mod.default_map(flow, shared, st["probes"], args.runtime, options,
+                                                   form=args.form, work_type=args.work_type), within=pkg)
         ctx = engine.Context(project, root, pkg, st, flow, shared)
         outcome = engine.advance(ctx, write=True)
     _print(args, outcome.card)
@@ -356,11 +357,12 @@ def escalate(args) -> int:
             st["loop"] = loop
         st.update({"flow": target_id, "form": form, "risk": risk, "work_type": work_type,
                    "manifest_sha256": _manifest_sha(ctx.root, target), "waiting": None})
+        strategy_added = strategy_mod.amend_for_escalate(ctx, target, st)  # ctx.flow is still the source
         reason = _masked(args.reason)
         ctx.log({"kind": "escalate", "from": source_id, "to": target_id, "reason": reason, "form": form,
                  "risk": risk, "work_type": work_type, "added": [step["id"] for step in added],
                  "transition_cap": st["transition_cap"], "red_order": st["red"].get("order"),
-                 "gate_order": st.get("gate_order")})
+                 "gate_order": st.get("gate_order"), "strategy_added": strategy_added})
         state_mod.save(pkg, st)
         ctx.flow = target
         outcome = engine.advance(ctx, write=False)

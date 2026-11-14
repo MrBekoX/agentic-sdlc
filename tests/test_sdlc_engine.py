@@ -59,19 +59,12 @@ SPEC_BODY = (
     "## Definition of Done\n\n- The export works for every report type and its tests pass in continuous integration.\n\n"
     "## Must-Not-Change\n\n- The report page layout and its existing download buttons stay exactly as they are.\n"
 )
-PLAN_BODY = "# Plan: report export\n\n## Task 1: CSV export (AC1)\n\nWrite the exporter and its test.\n"
-STRATEGY = {
-    "schema": "agentic-sdlc/strategy@1",
-    "runtime": "codex",
-    "capabilities": {"workflow": "no", "subagent": "yes", "team": "no"},
-    "entries": {
-        "context": {"mechanism": "main", "reason": "small change", "source": "default"},
-        "draft": {"mechanism": "runner-loop", "reason": "no workflow engine", "source": "default"},
-        "implement": {"mechanism": "main", "reason": "one task", "source": "default"},
-        "security": {"mechanism": "subagent", "reason": "fresh context", "source": "default"},
-    },
-    "degraded": [],
-}
+# A plan that passes the strict plan gate against SPEC_BODY (one task, AC1 covered).
+PLAN_BODY = (
+    "# Plan: report export\n\n## Task 1: CSV export (AC1)\n\n"
+    "Create `src/export.py` and its test `tests/test_export.py`.\n\n"
+    "- RED: write the failing test for AC1 first.\n- Run: `pytest tests/test_export.py`\n"
+)
 
 
 def card_fields(text: str) -> dict:
@@ -158,8 +151,12 @@ class EngineCase(unittest.TestCase):
     # -- environment ---------------------------------------------------------------------------
 
     def make_root(self, root: Path, shared_edit=None) -> Path:
-        """A plugin root holding the real flows, the fixture flow and its step files."""
-        for path in (REPO / "flows").rglob("*.json"):
+        """A plugin root holding the real flows, the fixture flow and its step files, and the two
+        spec/plan role files and contracts the loop stages."""
+        copies = list((REPO / "flows").rglob("*.json"))
+        copies += [REPO / "agents" / "spec-plan-author.md", REPO / "agents" / "spec-plan-critic.md"]
+        copies += sorted((REPO / "contracts" / "skills").glob("0[23]-*.md"))
+        for path in copies:
             target = root / path.relative_to(REPO)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(str(path), str(target))
@@ -255,18 +252,25 @@ class EngineCase(unittest.TestCase):
     def records(self, kind, slug="demo", step=None) -> list:
         return [r for r in self.transitions(slug) if r["kind"] == kind and (step is None or r.get("step") == step)]
 
-    def confirm_strategy(self, slug="demo", runtime="codex"):
-        strategy = copy.deepcopy(STRATEGY)
-        strategy["runtime"] = runtime
-        self.put("strategy.json", json.dumps(strategy, indent=2) + "\n", slug=slug)
+    def confirm_strategy(self, slug="demo", capabilities="workflow=no,subagent=yes,team=no", *overrides):
+        """`sdlc strategy confirm` with the default map (what a model with sub-agents and no workflow
+        engine would run on Codex)."""
+        argv = ["strategy", "confirm", "--slug", slug, "--capabilities", capabilities]
+        for item in overrides:
+            argv += ["--set", item]
+        code, text = self.sdlc(*argv)
+        self.assertEqual(code, 0, text)
+        return text
 
-    def approve(self, text, slug="demo", gate="review"):
+    def approve(self, text, slug="demo", gate="review", source="reply", quote="Yes, go ahead.", expect=0):
+        """`sdlc approve` with the fingerprint the gate card printed."""
         fingerprint = card_value(text, "fingerprint")
         self.assertRegex(fingerprint or "", r"^[0-9a-f]{16}$", text)
-        logs.append(self.pkg(slug) / "approvals.jsonl", {
-            "kind": "approve", "gate": gate, "fingerprint": fingerprint, "quote": "Yes, go ahead.",
-            "source": "reply", "critic": "fresh", "task_hashes": [],
-        })
+        code, out = self.sdlc("approve", gate, "--slug", slug, "--fingerprint", fingerprint, "--quote", quote,
+                              "--source", source)
+        if expect is not None:
+            self.assertEqual(code, expect, out)
+        return code, out
 
     def red_green(self, slug="demo"):
         self.write("tests/test_new.py", b"def test_new():\n    assert False\n")
@@ -426,7 +430,8 @@ class TestEngine(EngineCase):
         code, text = self.next()
         fields = card_fields(text)
         self.assertEqual((fields["step"], fields["visit"], fields["transition"]), ("context", "1/3", "2/60"))
-        self.assertEqual(fields["mechanism"], "main")
+        confirmed = json.loads((self.pkg() / "strategy.json").read_text(encoding="utf-8"))
+        self.assertEqual(fields["mechanism"], confirmed["entries"]["context"]["mechanism"])
         self.put("context.md", "# Context\n")
         code, text = self.next()
         self.assertEqual(card_fields(text)["step"], "snapshot")  # extra does not apply
@@ -818,13 +823,15 @@ class TestFlowOps(EngineCase):
         self.start(flow="bugfix", work_type="bugfix")
         self.confirm_strategy()
         self.next()
-        strategy_bytes = (self.pkg() / "strategy.json").read_bytes()
+        strategy_before = json.loads((self.pkg() / "strategy.json").read_text(encoding="utf-8"))
         before = self.state()
         self.assertEqual(before["current"], "context")
         code, text = self.sdlc("escalate", "full", "--reason", "the fix needs a spec")
         self.assertEqual(code, 0, text)
         after = self.state()
-        self.assertEqual((self.pkg() / "strategy.json").read_bytes(), strategy_bytes)
+        strategy_after = json.loads((self.pkg() / "strategy.json").read_text(encoding="utf-8"))
+        for key, entry in strategy_before["entries"].items():  # carried; only missing keys are added
+            self.assertEqual(strategy_after["entries"][key], entry, key)
         self.assertEqual(after["transitions"], before["transitions"])
         old_ids = {s["id"] for s in manifest.load_flow(self.root, "bugfix")["steps"]}
         added = [s for s in manifest.load_flow(self.root, "full")["steps"] if s["id"] not in old_ids]

@@ -164,17 +164,45 @@ def _header(ctx, kind, step) -> list:
     return lines
 
 
+def _loop_lines(loop) -> list:
+    """The role or launch lines of a loop step's card (loop.next_role builds `loop`)."""
+    lines = ["mechanism=%s degraded=%s" % (loop.get("mechanism"), "_".join(str(loop.get("degraded")).split()))]
+    if loop.get("launch"):
+        return lines + ["engine=%s" % loop.get("engine"), "launch=" + loop["launch"]]
+    lines.append("role=%s round=%d/%d" % (loop["role"], loop["round"], loop["max_rounds"]))
+    lines.append("role_file=" + json.dumps(loop["role_file"], ensure_ascii=False))
+    lines.append("prompt=" + loop["prompt"])
+    lines += ["read=" + json.dumps(path, ensure_ascii=False) for path in loop["reads"]]
+    lines.append("write=" + loop["write"])
+    if loop.get("schema"):
+        lines.append("schema=" + json.dumps(loop["schema"], ensure_ascii=False))
+    lines.append("delegate=" + json.dumps(loop["delegate"], ensure_ascii=False))
+    return lines
+
+
 def _do_lines(ctx, step, extra) -> list:
     lines = []
     key = step.get("mechanism_key")
-    if key:
+    loop = extra.get("loop")
+    if loop:
+        lines += _loop_lines(loop)
+    elif key:
         mechanism, degraded = strategy_mod.resolve(ctx, key)
-        lines.append("mechanism=%s degraded=%s" % (mechanism, degraded.replace(" ", "_")))
+        lines.append("mechanism=%s degraded=%s" % (mechanism, "_".join(str(degraded).split())))
+    if step.get("id") == manifest.STRATEGY_STEP:
+        lines += strategy_mod.default_lines(ctx)
     lines.append("inputs=" + _expand_refs(ctx, step.get("inputs")))
-    lines.append("outputs=" + _expand_refs(ctx, step.get("outputs")))
-    lines.append("done_when=" + json.dumps("; ".join(checks.describe(spec, ctx.state)
-                                                     for spec in step.get("done_when") or []),
-                                           ensure_ascii=False))
+    if loop and loop.get("write_rel"):
+        lines.append("outputs=" + loop["write_rel"])
+        done = ("valid critic JSON at the write path" if loop["role"] == "critic"
+                else "the write path holds the %s draft" % loop["role"])
+    elif loop and loop.get("launch"):
+        lines.append("outputs=" + _expand_refs(ctx, step.get("outputs")))
+        done = "the engine finishes with `sdlc ingest-draft --assemble`; then run the then command"
+    else:
+        lines.append("outputs=" + _expand_refs(ctx, step.get("outputs")))
+        done = "; ".join(checks.describe(spec, ctx.state) for spec in step.get("done_when") or [])
+    lines.append("done_when=" + json.dumps(done, ensure_ascii=False))
     failing = []
     for name, result in extra.get("results") or []:
         if not result.ok and name not in failing:

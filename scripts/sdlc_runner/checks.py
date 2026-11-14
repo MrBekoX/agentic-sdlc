@@ -231,11 +231,46 @@ def gated_artifacts(ctx, step) -> list:
     return found
 
 
+def _appended_under_preapproval(ctx, step, record):
+    """The task blocks appended to the plan since a pre-approval, or None when anything else changed.
+
+    Design §5.10 (D10): under an original-request approval, task blocks appended after the last
+    approved task continue under that approval while every approved task, the plan's text before
+    its first task and every other gated body stay byte-equal.
+    """
+    from . import gates
+
+    if record.get("source") != "original-request" or not isinstance(record.get("bodies"), dict):
+        return None
+    plan_rel = gates._plan_rel(ctx, step)
+    if plan_rel is None:
+        return None
+    current = gates.bodies(ctx, step)
+    for rel, body in current.items():
+        if rel != plan_rel and record["bodies"].get(rel) != body:
+            return None
+    head, tasks = gates.plan_tasks(Path(ctx.pkg).joinpath(*plan_rel.split("/")))
+    approved = list(record.get("task_hashes") or [])
+    if head != record.get("plan_head") or len(tasks) <= len(approved):
+        return None
+    if [h for _t, h in tasks[:len(approved)]] != approved:
+        return None
+    return [{"title": title, "hash": digest} for title, digest in tasks[len(approved):]]
+
+
 def check_approval(ctx, step, gate):
     current = gate_fingerprint(ctx, step)
-    for record in logs.read(Path(ctx.pkg) / APPROVALS_LOG):
-        if record.get("kind") == "approve" and record.get("gate") == gate and record.get("fingerprint") == current:
+    records = [r for r in logs.read(Path(ctx.pkg) / APPROVALS_LOG)
+               if r.get("kind") == "approve" and r.get("gate") == gate]
+    for record in records:
+        if record.get("fingerprint") == current:
             return CheckResult(True, "gate %s approved at %s" % (gate, current))
+    if records:
+        appended = _appended_under_preapproval(ctx, step, records[-1])
+        if appended:
+            ctx.state["appended_tasks"] = appended  # listed by the claim step (design §5.10)
+            return CheckResult(True, "gate %s pre-approved; %d task(s) appended after the approved ones"
+                               % (gate, len(appended)))
     return CheckResult(False, "gate %s is not approved at fingerprint %s" % (gate, current))
 
 

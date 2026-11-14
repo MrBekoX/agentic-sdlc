@@ -53,16 +53,15 @@ class TestCli(EngineCase):
                 self.assertEqual(len(errors), 1, text)
                 self.assertRegex(text.splitlines()[-1], CHAIN_LINE)
 
-    def test_stub_commands_report_not_built(self):
-        self.start()
-        for argv, name in ((["approve", "review", "--fingerprint", "0" * 16], "approve"),
-                           (["strategy", "confirm", "--capabilities", "workflow=no"], "strategy"),
-                           (["draft-check", "--round", "1"], "draft-check"),
-                           (["ingest-draft", "--assemble"], "ingest-draft")):
-            with self.subTest(command=name):
+    def test_loop_commands_refuse_on_a_flow_without_a_loop(self):
+        self.start()  # the fixture flow has no loop step
+        for argv in (["draft-check", "--round", "1"], ["ingest-draft", "--assemble"],
+                     ["loop-record", "--role", "critic", "--round", "1", "--text", "{}"]):
+            with self.subTest(command=argv[0]):
                 code, text = self.sdlc(*argv)
-                self.assertEqual(code, 2, text)
-                self.assertIn("error=not_built:" + name, text)
+                self.assertEqual(code, 4, text)
+                self.assertIn("error=no_loop_step:engine", text)
+                self.assertRegex(text.splitlines()[-1], CHAIN_LINE)
 
     def test_run_errors_print_and_signal_exits_propagate(self):
         self.start()

@@ -494,6 +494,25 @@ def advance(ctx, write: bool) -> Outcome:
     return _finish(ctx, original, "complete", None, {}, 0)
 
 
+def _reopened_after_start(ctx, step) -> list:
+    """The gated artifacts changed since the last approval of `step`'s gate when a later step has
+    already started (design §5.10: a gate reopened after implement started halts); else []."""
+    steps = ctx.flow["steps"]
+    later = steps[steps.index(step) + 1:]
+    if not any((ctx.state.get("steps") or {}).get(s["id"], {}).get("visits", 0) > 0 for s in later):
+        return []
+    records = [r for r in logs.read(ctx.pkg / checks.APPROVALS_LOG)
+               if r.get("kind") == "approve" and r.get("gate") == step.get("gate")]
+    if not records:
+        return []  # a gate added later (escalation) waits; gate_order records the order
+    approved = records[-1].get("bodies") if isinstance(records[-1].get("bodies"), dict) else {}
+    changed = []
+    for rel in checks.gated_artifacts(ctx, step):
+        if approved.get(rel) != fingerprint.body_fp(ctx.pkg.joinpath(*rel.split("/"))):
+            changed.append(rel)
+    return changed or checks.gated_artifacts(ctx, step)
+
+
 def _current(ctx, original, step, entry, results, caps) -> Outcome:
     """`step` is the first step that is not done: enter it, wait at it, or print its card.
 
@@ -526,6 +545,9 @@ def _current(ctx, original, step, entry, results, caps) -> Outcome:
         ctx.log({"kind": "enter", "step": sid, "visit": entry["visits"], "cause": cause})
     foreign = [name for name, result in results if name == "frontmatter" and not result.ok]
     if step.get("gate") and not foreign:
+        changed = _reopened_after_start(ctx, step)
+        if changed:
+            return halt(ctx, original, "reapproval needed: %s" % ",".join(changed), step)
         fingerprint_now = checks.gate_fingerprint(ctx, step)
         waiting = st.get("waiting") or {}
         if not (waiting.get("kind") == "gate" and waiting.get("id") == step["gate"]
@@ -555,9 +577,13 @@ def _current(ctx, original, step, entry, results, caps) -> Outcome:
                 if st["fix_rounds"] > st.get("fix_round_cap", caps.get("fix_rounds", 3)):
                     return halt(ctx, original, "fix-round cap reached: %s" % sid, step)
             entry["review_fp"] = review[0]
-    # loop delegation point: plan Task 8 makes loop.next_role print the role card of a loop step.
+    # loop delegation point: loop.next_role prints the role or launch card of a loop step (plan Task 8).
     if step.get("loop"):
+        ctx._original, ctx._results = original, results
         role = loop_mod.next_role(ctx, step, ctx.write)
+        if role is loop_mod.REEVALUATE:  # the loop stopped and its result was ingested: walk again
+            state_mod.save(ctx.pkg, ctx.state)
+            return advance(ctx, ctx.write)
         if role is not None:
             return role
     return _finish(ctx, original, "do", step, {"results": results, "entering": entering}, 0)

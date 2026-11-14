@@ -47,6 +47,7 @@ def _defaults() -> dict:
         "stamps": {},
         "imported": [],
         "gate_order": None,
+        "awaiting": None,
     }
 
 

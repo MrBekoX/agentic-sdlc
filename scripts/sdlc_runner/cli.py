@@ -4,14 +4,13 @@ Exit codes: 0 every normal state (the card says which with `state=`), 2 usage or
 halted, 4 refused; `run` returns its child's code. An error prints exactly one `error=<reason>`
 line. Every command's last line is `state=<state> chain=<12 hex>` (a card's last line adds
 ` then=<command>`), except `run`, whose last line is its `run_seq=... chain=...` summary.
-`status --json` prints its JSON object on the first line, then that last line. A parser that
-sets `accepts_extra=True` (the stub commands until plan Tasks 6-8) receives unknown arguments
-instead of a usage error.
+`status --json` and `next --json` print their JSON object on the first line, then that last line.
 
 Global options `--project <dir>` and `--slug <slug>` are accepted before or after the command.
-Handlers come in two kinds: a command whose parser sets `needs_ctx=True` (`run`, and the commands
-plan Tasks 6-8 build) is called as `handler(ctx, args, out=<stdout>, save_state=<red merger>)`
-with an engine.Context of the resolved package and must take the package lock itself; any other
+Handlers come in two kinds: a command whose parser sets `needs_ctx=True` (`run`, `strategy`, the
+gate, question and note commands, `draft-check`, `loop-record`, `ingest-draft`) is called as
+`handler(ctx, args, out=<stdout>, save_state=<red merger>)` with an engine.Context of the
+resolved package and must take the package lock itself; any other
 handler is called as `handler(args)` with `args.out`, `args.root` and `args.project` set. A
 `SystemExit` from a run that was signalled propagates; any other unexpected exception is one
 `error=internal:<class>:<message>` line and exit 2.
@@ -129,7 +128,15 @@ def _next(args) -> int:
     args._pkg = pkg
     with PackageLock(pkg / ".lock"):
         ctx = engine.load_context(args.project, args.root, slug)
+        if getattr(args, "engine", None):  # an engine driver names itself (ZCode: zcode-dwf)
+            if not isinstance(ctx.state.get("loop"), dict):
+                raise SdlcError(4, "no_loop:%s" % ctx.state["flow"])
+            ctx.state["loop"]["engine"] = args.engine
         outcome = engine.advance(ctx, write=True)
+    if getattr(args, "json", False):  # the machine card (contract §10), then the usual last line
+        args.out.write(json.dumps(loop.machine_card(ctx, outcome), ensure_ascii=False, sort_keys=True) + "\n")
+        args.out.write("state=%s chain=%s\n" % (outcome.state, _chain(args)))
+        return outcome.exit_code
     args.out.write(outcome.card)
     return outcome.exit_code
 
@@ -243,9 +250,7 @@ def main(argv=None, *, out=None, root=None) -> int:
         out = sys.stdout
     parser = build_parser()
     try:
-        args, extra = parser.parse_known_args(sys.argv[1:] if argv is None else list(argv))
-        if extra and not getattr(args, "accepts_extra", False):
-            parser.error("unrecognized arguments: %s" % " ".join(extra))
+        args = parser.parse_args(sys.argv[1:] if argv is None else list(argv))
     except _UsageError as exc:
         out.write("error=usage:%s\n" % _one_line(exc.message))
         out.write(exc.usage if exc.usage.endswith("\n") else exc.usage + "\n")
