@@ -2,7 +2,9 @@
 
 This is an identity resolver, not a content validator. `validate_artifacts.py`
 still checks the markdown body. This script answers which spec/plan pair
-`implementation-control` should audit and refuses ambiguous choices.
+`implementation-control` should audit and refuses ambiguous choices. A spec-less
+bugfix plan (`flow: bugfix` with `spec: none`) resolves alone and reports `spec=none`,
+unless its per-package directory holds a spec (`spec_none_with_spec`).
 
 Output is sorted `key=value` lines. Exit 1 on failed resolution.
 """
@@ -20,9 +22,19 @@ STATUSES = {"draft", "reviewed", "approved", "in_progress", "ready_for_audit", "
 PLAN_REQUIRED = ("work_id", "spec", "branch", "status")
 SPEC_REQUIRED = ("work_id", "status")
 
+# Spec-less bugfix plans (design §5.19): `spec: none` resolves only together with `flow: bugfix`,
+# and the resolution then has no spec (`spec=none`). A per-package plan whose package holds a spec
+# fails with `spec_none_with_spec`; flat plans are never paired by name, so flat specs do not count.
+# Mirrored in scripts/validate_artifacts.py, which reports the same codes (there: a --spec given for
+# such a plan); tests/test_validator_resolver_parity.py pins the agreement.
+SPEC_NONE = "none"
+BUGFIX_FLOW = "bugfix"
+
 # Per-package layout (BR1/BR2/BR11): docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md.
 # The slug rule is shared; tests/test_procedure_eval.py pins it in lock-step with the
-# flow-guard config (hooks/flow-requirements.json) and run_procedure_eval.py.
+# flow-guard config (hooks/flow-requirements.json) and run_procedure_eval.py. The pattern text
+# stays that shared string, so it is applied with `fullmatch`: in Python `$` also matches before
+# a final newline, and `.match` accepted `work-x\n`.
 RESERVED_SLUGS = {"specs", "plans", "evidence", "notes", "spec", "plan"}
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 PER_PACKAGE_ROLES = {"spec", "plan", "evidence"}
@@ -77,8 +89,11 @@ def _rel(repo, path):
 
 
 def is_valid_slug(seg):
-    """A <slug> segment is filesystem-safe kebab-case and not a reserved name (BR2/BR11)."""
-    return bool(SLUG_RE.match(seg)) and seg not in RESERVED_SLUGS
+    """A <slug> segment is filesystem-safe kebab-case and not a reserved name (BR2/BR11).
+
+    The whole segment must match: a trailing newline is not part of a slug.
+    """
+    return bool(SLUG_RE.fullmatch(seg)) and seg not in RESERVED_SLUGS
 
 
 def classify_artifact(repo, path):
@@ -166,31 +181,41 @@ def _malformed_offenders(repo, slug):
     return []
 
 
+def _package_specs(repo, slug):
+    """Every spec file of a per-package `<slug>/spec/` directory, sorted (none when it is absent)."""
+    spec_dir = Path(repo) / AGENTIC_ROOT / slug / "spec"
+    return sorted(spec_dir.glob("*.md")) if spec_dir.is_dir() else []
+
+
 def _parse_frontmatter(path):
+    """(meta, errors) for the leading `---` block, read line by line.
+
+    The delimiters are whole lines: `---` with nothing before it (trailing spaces aside). An
+    indented `---` or a `----` line is neither opener nor closer, so it is an invalid line inside
+    the block rather than an early end that a reader of the whole block would not see. Blank and
+    `#` lines are skipped; any other line without a `:` or with an empty key is
+    `invalid_frontmatter_line:<file line>`. scripts/validate_artifacts.py reads the block the same
+    way; tests/test_validator_resolver_parity.py runs both command lines on one fixture set.
+    """
     text = path.read_text(encoding="utf-8-sig")
-    if not text.startswith("---"):
+    lines = text.splitlines()
+    if not lines or lines[0].rstrip() != "---":
         return {}, ["missing_frontmatter"]
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}, ["missing_frontmatter_end"]
-    block = text[3:end]
     data = {}
     errors = []
-    for lineno, raw in enumerate(block.splitlines(), start=2):
+    for lineno, raw in enumerate(lines[1:], start=2):
+        if raw.rstrip() == "---":
+            return data, errors
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if ":" not in line:
-            errors.append(f"invalid_frontmatter_line:{lineno}")
-            continue
-        key, value = line.split(":", 1)
+        key, sep, value = line.partition(":")
         key = key.strip()
-        value = value.strip().strip("\"'")
-        if not key:
+        if not sep or not key:
             errors.append(f"invalid_frontmatter_line:{lineno}")
             continue
-        data[key] = value
-    return data, errors
+        data[key] = value.strip().strip("\"'")
+    return {}, ["missing_frontmatter_end"]
 
 
 def _validate_spec(repo, spec_path):
@@ -217,7 +242,7 @@ def _validate_spec(repo, spec_path):
 
 def _plan_spec_path(repo, plan_path, meta):
     raw = meta.get("spec", "")
-    if not raw:
+    if not raw or raw == SPEC_NONE:
         return None
     spec_path = Path(raw)
     if not spec_path.is_absolute():
@@ -266,6 +291,26 @@ def _validate_plan(repo, plan_path):
     # (the resolver never compares the flat basename — AC9).
     if layout == "per-package" and meta.get("work_id") and plan_class["basename"] != meta["work_id"]:
         errors.append("basename_work_id_mismatch")
+
+    if meta.get("spec") == SPEC_NONE:
+        # A spec-less bugfix plan: there is no spec to locate, pair or compare work_ids with. A
+        # per-package plan cannot opt out of a spec its own package holds by declaring none.
+        if meta.get("flow") != BUGFIX_FLOW:
+            errors.append("spec_none_requires_flow_bugfix")
+        package_specs = _package_specs(repo, slug) if layout == "per-package" else []
+        if package_specs:
+            errors.append("spec_none_with_spec")
+        return Resolution(
+            ok=not errors,
+            work_id=meta.get("work_id"),
+            spec=package_specs[0] if package_specs else None,
+            plan=plan_path,
+            branch=meta.get("branch"),
+            status=meta.get("status"),
+            errors=errors,
+            layout=layout,
+            slug=slug,
+        )
 
     spec_path = _plan_spec_path(repo, plan_path, meta)
     if spec_path is None:
@@ -518,7 +563,8 @@ def fields_for(result, repo):
                 f"layout={result.layout}",
                 f"plan={_rel(repo, result.plan)}",
                 f"resolution_source={result.source}",
-                f"spec={_rel(repo, result.spec)}",
+                # A spec-less bugfix plan resolves without a spec.
+                f"spec={SPEC_NONE if result.spec is None else _rel(repo, result.spec)}",
                 f"status={result.status}",
                 f"work_id={result.work_id}",
                 "work_package_resolution=passed",

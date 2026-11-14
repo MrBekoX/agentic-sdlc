@@ -37,7 +37,7 @@ Do **not** leak the HOW (files/methods) into the spec.
 ```md
 ---
 work_id: <work_id>
-spec: docs/agentic-sdlc/specs/<work_id>.md
+spec: ../specs/<work_id>.md
 branch: <work branch>
 status: reviewed
 ---

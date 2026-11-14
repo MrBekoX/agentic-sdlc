@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agentic-sdlc/loop-def@1",
+  "title": "Spec/plan loop definition (flows/loops/<id>.json)",
+  "description": "One definition for every loop engine (design §5.8, §5.9; contract §10): the roles with their role files, the role order of each mode, the caps, the stop reasons and the runner file names. (draft/loop.json, the record an engine writes, is a different file: agentic-sdlc/loop@1.) scripts/sdlc_runner/manifest.validate_loop adds: max_rounds <= hard_max_rounds, every role named by a mode exists, revise runs the first round's roles again, a mode's artifacts are what its first round writes, every writes and also_writes key is a files key, every files key other than the runner's own (brief, prompt, loop, result, engine) has a writer, and (with check_files) the role and schema files exist with their exact names.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "caps", "roles", "modes", "later_rounds", "final_critic", "drafts_read", "draft_check", "stop", "issue_key", "files", "result_schema", "finish"],
+  "properties": {
+    "$comment": {"type": "string"},
+    "schema": {"const": "agentic-sdlc/loop-def@1"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "caps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_rounds", "hard_max_rounds", "role_reentry"],
+      "properties": {
+        "max_rounds": {"type": "integer", "minimum": 1, "description": "Default critic rounds; a flow may lower it."},
+        "hard_max_rounds": {"type": "integer", "minimum": 1, "description": "Ceiling no flow or engine argument may pass."},
+        "role_reentry": {"type": "integer", "minimum": 1, "description": "Re-entries of one role in one round before the loop halts."}
+      }
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["agent", "role_file", "mechanism_key", "fresh", "writes"],
+        "properties": {
+          "$comment": {"type": "string"},
+          "agent": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "The agent role name (agents/<agent>.md, or the public package's references/roles/<agent>.md)."},
+          "role_file": {"type": "string", "pattern": "^agents/[a-z0-9][a-z0-9-]*\\.md$"},
+          "mechanism_key": {"enum": ["draft", "draft.critic"]},
+          "fresh": {"type": "boolean", "description": "True: a fresh context every time (the critic)."},
+          "writes": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$", "description": "A key of files: the output that makes the role done."},
+          "also_writes": {"type": "array", "description": "Keys of files the role may also write; optional outputs (an absent file means none, e.g. no decision points).", "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}},
+          "schema": {"type": "string", "pattern": "^flows/schemas/[a-z0-9][a-z0-9-]*\\.schema\\.json$"}
+        }
+      }
+    },
+    "modes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spec+plan", "spec", "plan", "bugfix-plan"],
+      "properties": {
+        "spec+plan": {"type": "object", "additionalProperties": false, "required": ["artifacts", "first_round", "revise"], "properties": {"$comment": {"type": "string"}, "artifacts": {"type": "array", "items": {"enum": ["spec", "plan"]}}, "first_round": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["role", "author_mode"], "properties": {"role": {"type": "string"}, "author_mode": {"enum": ["spec", "plan", "bugfix-plan", "revise"]}}}}, "revise": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["role", "author_mode"], "properties": {"role": {"type": "string"}, "author_mode": {"enum": ["spec", "plan", "bugfix-plan", "revise"]}}}}}},
+        "spec": {"type": "object", "additionalProperties": false, "required": ["artifacts", "first_round", "revise"], "properties": {"$comment": {"type": "string"}, "artifacts": {"type": "array", "items": {"enum": ["spec", "plan"]}}, "first_round": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["role", "author_mode"], "properties": {"role": {"type": "string"}, "author_mode": {"enum": ["spec", "plan", "bugfix-plan", "revise"]}}}}, "revise": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["role", "author_mode"], "properties": {"role": {"type": "string"}, "author_mode": {"enum": ["spec", "plan", "bugfix-plan", "revise"]}}}}}},
+        "plan": {"type": "object", "additionalProperties": false, "required": ["artifacts", "first_round", "revise"], "properties": {"$comment": {"type": "string"}, "artifacts": {"type": "array", "items": {"enum": ["spec", "plan"]}}, "first_round": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["role", "author_mode"], "properties": {"role": {"type": "string"}, "author_mode": {"enum": ["spec", "plan", "bugfix-plan", "revise"]}}}}, "revise": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["role", "author_mode"], "properties": {"role": {"type": "string"}, "author_mode": {"enum": ["spec", "plan", "bugfix-plan", "revise"]}}}}}},
+        "bugfix-plan": {"type": "object", "additionalProperties": false, "required": ["artifacts", "first_round", "revise"], "properties": {"$comment": {"type": "string"}, "artifacts": {"type": "array", "items": {"enum": ["spec", "plan"]}}, "first_round": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["role", "author_mode"], "properties": {"role": {"type": "string"}, "author_mode": {"enum": ["spec", "plan", "bugfix-plan", "revise"]}}}}, "revise": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["role", "author_mode"], "properties": {"role": {"type": "string"}, "author_mode": {"enum": ["spec", "plan", "bugfix-plan", "revise"]}}}}}}
+      }
+    },
+    "later_rounds": {"type": "array", "description": "Order inside every round after round 0.", "items": {"enum": ["critic", "revise"]}},
+    "final_critic": {"type": "boolean", "description": "True: when round == max_rounds, a critic runs after the last revision and its open issues become residual notes."},
+    "drafts_read": {"const": "previous-round", "description": "Round N >= 1 works on the drafts of round N-1: draft-check --round N reads spec.r{N-1}.md / plan.r{N-1}.md and writes validator.rN.json; the critic reads those drafts with validator.rN.json and writes critic.rN.json; the revise authors write spec.rN.md / plan.rN.md. {round} in files is the round a file is written in (design §5.9.1: critic round 1 reads plan.r0.md and validator.r1)."},
+    "draft_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "before", "writes"],
+      "properties": {
+        "command": {"const": "draft-check --round {round}"},
+        "before": {"const": "critic"},
+        "writes": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}
+      }
+    },
+    "stop": {
+      "type": "object",
+      "description": "Stop reason -> when it fires; the keys are draft-result stopReason values.",
+      "additionalProperties": false,
+      "required": ["clean", "no-progress", "max-rounds"],
+      "properties": {
+        "clean": {"type": "string", "minLength": 1},
+        "no-progress": {"type": "string", "minLength": 1},
+        "max-rounds": {"type": "string", "minLength": 1}
+      }
+    },
+    "issue_key": {"type": "array", "description": "Critic issue fields that make the no-progress key (normalised: case-folded, whitespace collapsed).", "items": {"enum": ["target", "category", "where"]}},
+    "files": {
+      "type": "object",
+      "description": "Runner file names inside the package; {round} and {role} expand.",
+      "additionalProperties": {"type": "string", "pattern": "^draft/[A-Za-z0-9_.{}/-]+$"}
+    },
+    "result_schema": {"type": "string", "pattern": "^flows/schemas/[a-z0-9][a-z0-9-]*\\.schema\\.json$"},
+    "finish": {"const": "ingest-draft --assemble"}
+  }
+}

@@ -108,6 +108,45 @@ class TestTemplatesCarryFrontmatter(unittest.TestCase):
                 self.assertEqual(meta.get("status"), "reviewed")
 
 
+def load_resolver():
+    spec = importlib.util.spec_from_file_location("resolve_work_package",
+                                                  REPO / "scripts" / "resolve_work_package.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestPlanTemplateResolves(unittest.TestCase):
+    """A plan saved from the template resolves its spec.
+
+    The resolver reads the plan's `spec:` relative to the plan's own folder, so a repo-relative value
+    (`docs/agentic-sdlc/specs/<work_id>.md`) pointed at `plans/docs/agentic-sdlc/specs/...` and failed
+    with `spec_outside_root`; implementation-control then stopped on every package saved from the template.
+    """
+
+    def test_saved_template_pair_resolves(self):
+        import tempfile
+        resolver = load_resolver()
+        text = read(TEMPLATES)
+        filled = {}
+        for mode, heading, rel in (("spec", "## Spec (step 4", "docs/agentic-sdlc/specs/w1.md"),
+                                   ("plan", "## Plan (step 5", "docs/agentic-sdlc/plans/w1.md")):
+            block = fenced_block_after(text, heading)
+            self.assertIsNotNone(block, f"{TEMPLATES}: no fenced template after `{heading}`")
+            self.assertIn(f"`{rel.replace('w1', '<work_id>')}`", text, f"{TEMPLATES} no longer saves {mode} there")
+            filled[rel] = block.replace("<work_id>", "w1").replace("<work branch>", "feat/w1")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel, body in filled.items():
+                path = root / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(body.encode("utf-8"))
+            result = resolver.resolve(root.resolve(), plan_path=str(root / "docs/agentic-sdlc/plans/w1.md"),
+                                      branch="feat/w1")
+            self.assertEqual(result.errors, [], f"template pair does not resolve: {result.errors}")
+            self.assertEqual(result.spec, (root / "docs/agentic-sdlc/specs/w1.md").resolve())
+
+
 SAVE_OPENER = "**Saving the spec and plan.**"
 SAVE_RULES = (
     "the workflow and the author return only the body",

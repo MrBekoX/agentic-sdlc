@@ -1,0 +1,61 @@
+{
+  "$comment": "The spec/plan loop (design §5.8, §5.9; contract §10): one definition for the runner-driven loop and every native engine (Claude workflow, Grok Rhai, ZCode driver). Round 0 runs the mode's authors; every later round N runs draft-check, the critic and, unless a stop rule fires, the revise authors, all on the drafts of round N-1 (drafts_read). Each author writes its draft and, optionally, its own decision points (decisions.<role>.rN.json, items as draft-result decisionPoints; an absent file means none). Engines are pinned to this file by the engine parity test.",
+  "schema": "agentic-sdlc/loop-def@1",
+  "id": "spec-plan",
+  "caps": {"max_rounds": 3, "hard_max_rounds": 5, "role_reentry": 2},
+  "roles": {
+    "author-spec": {"agent": "spec-plan-author", "role_file": "agents/spec-plan-author.md", "mechanism_key": "draft", "fresh": false, "writes": "spec", "also_writes": ["decisions"]},
+    "author-plan": {"agent": "spec-plan-author", "role_file": "agents/spec-plan-author.md", "mechanism_key": "draft", "fresh": false, "writes": "plan", "also_writes": ["decisions"]},
+    "critic": {"agent": "spec-plan-critic", "role_file": "agents/spec-plan-critic.md", "mechanism_key": "draft.critic", "fresh": true, "writes": "critic", "schema": "flows/schemas/critic.schema.json"}
+  },
+  "modes": {
+    "spec+plan": {
+      "$comment": "feature and full: the spec from the request, then the plan derived from that spec; the critic checks both and the fit between them.",
+      "artifacts": ["spec", "plan"],
+      "first_round": [{"role": "author-spec", "author_mode": "spec"}, {"role": "author-plan", "author_mode": "plan"}],
+      "revise": [{"role": "author-spec", "author_mode": "revise"}, {"role": "author-plan", "author_mode": "revise"}]
+    },
+    "spec": {
+      "$comment": "The spec flow.",
+      "artifacts": ["spec"],
+      "first_round": [{"role": "author-spec", "author_mode": "spec"}],
+      "revise": [{"role": "author-spec", "author_mode": "revise"}]
+    },
+    "plan": {
+      "$comment": "The plan flow, from an existing approved spec.",
+      "artifacts": ["plan"],
+      "first_round": [{"role": "author-plan", "author_mode": "plan"}],
+      "revise": [{"role": "author-plan", "author_mode": "revise"}]
+    },
+    "bugfix-plan": {
+      "$comment": "bugfix: no spec; the plan carries ## Bug and ## Acceptance Criteria before its first task (design §5.19).",
+      "artifacts": ["plan"],
+      "first_round": [{"role": "author-plan", "author_mode": "bugfix-plan"}],
+      "revise": [{"role": "author-plan", "author_mode": "revise"}]
+    }
+  },
+  "later_rounds": ["critic", "revise"],
+  "final_critic": true,
+  "drafts_read": "previous-round",
+  "draft_check": {"command": "draft-check --round {round}", "before": "critic", "writes": "validator"},
+  "stop": {
+    "clean": "The critic says clean and the round's validator file has no errors and no strict-mode warnings.",
+    "no-progress": "The critic returns the same issue keys as the previous round; those issues become residual notes.",
+    "max-rounds": "round == max_rounds: after the last revision a final critic runs and its open issues become residual notes."
+  },
+  "issue_key": ["target", "category", "where"],
+  "files": {
+    "brief": "draft/brief.md",
+    "prompt": "draft/prompts/{role}.r{round}.md",
+    "spec": "draft/spec.r{round}.md",
+    "plan": "draft/plan.r{round}.md",
+    "decisions": "draft/decisions.{role}.r{round}.json",
+    "validator": "draft/validator.r{round}.json",
+    "critic": "draft/critic.r{round}.json",
+    "loop": "draft/loop.json",
+    "result": "draft/result.json",
+    "engine": "draft/engine/"
+  },
+  "result_schema": "flows/schemas/draft-result.schema.json",
+  "finish": "ingest-draft --assemble"
+}

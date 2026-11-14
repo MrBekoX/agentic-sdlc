@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agentic-sdlc/draft-result@1",
+  "title": "Spec/plan loop result (draft/result.json)",
+  "description": "The one result every loop engine produces (design §5.8): the runner-driven loop assembles it, a native engine's files are assembled by `sdlc ingest-draft --assemble`, and `ingest-draft` validates it before writing spec/<id>.md, plan/<id>.md and their review sidecars. spec is null in plan and bugfix-plan mode, plan is null in spec mode (ingest-draft checks the pairing). A decision point may carry an empty recommendation; pre-approval refuses it later.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "mode", "engine", "spec", "plan", "decisionPoints", "residualCriticNotes", "rounds", "finalVerdict", "stopReason", "critic"],
+  "properties": {
+    "schema": {"const": "agentic-sdlc/draft-result@1"},
+    "mode": {"enum": ["spec+plan", "spec", "plan", "bugfix-plan"]},
+    "engine": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$", "description": "The engine that ran the loop (state.loop.engine), e.g. runner-loop."},
+    "spec": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["markdown"],
+      "properties": {"markdown": {"type": "string", "minLength": 1, "description": "The body only; the runner writes the frontmatter."}}
+    },
+    "plan": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["markdown"],
+      "properties": {"markdown": {"type": "string", "minLength": 1, "description": "The body only; the runner writes the frontmatter."}}
+    },
+    "decisionPoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "options", "recommendation"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "question": {"type": "string", "minLength": 1},
+          "options": {"type": "array", "items": {"type": "string"}},
+          "recommendation": {"type": "string"}
+        }
+      }
+    },
+    "residualCriticNotes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target", "category", "severity", "kind", "whatsMissing", "where", "fix"],
+        "properties": {
+          "target": {"enum": ["spec", "plan"]},
+          "category": {"type": "string", "minLength": 1},
+          "severity": {"enum": ["critical", "high", "medium", "low"]},
+          "kind": {"enum": ["gap", "contradiction", "blocker", "style"]},
+          "whatsMissing": {"type": "string", "minLength": 1},
+          "where": {"type": "string"},
+          "fix": {"type": "string"}
+        }
+      }
+    },
+    "rounds": {"type": "integer", "minimum": 0},
+    "finalVerdict": {"enum": ["clean", "issues"]},
+    "stopReason": {"enum": ["clean", "max-rounds", "no-progress"]},
+    "critic": {"enum": ["fresh", "degraded"]}
+  }
+}

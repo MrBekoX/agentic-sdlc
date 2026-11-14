@@ -27,6 +27,21 @@ USER_FACING = (
     "scripts/check_cursor_plugin.py",
     "scripts/install_cursor_plugin.py",
     "skills/skill-authoring/scripts/resolve_skill_creator.py",
+    # The sdlc runner (python3 <root>/scripts/sdlc.py) runs in the user's project.
+    "scripts/sdlc.py",
+    "scripts/sdlc_runner/__init__.py",
+    "scripts/sdlc_runner/textio.py",
+    "scripts/sdlc_runner/paths.py",
+    "scripts/sdlc_runner/lock.py",
+    "scripts/sdlc_runner/logs.py",
+    "scripts/sdlc_runner/frontmatter.py",
+    "scripts/sdlc_runner/schema.py",
+    "scripts/sdlc_runner/mask.py",
+    "scripts/sdlc_runner/gitinfo.py",
+    "scripts/sdlc_runner/fingerprint.py",
+    "scripts/sdlc_runner/probes.py",
+    "scripts/sdlc_runner/manifest.py",
+    "scripts/sdlc_runner/runexec.py",
 )
 
 

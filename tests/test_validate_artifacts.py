@@ -706,6 +706,571 @@ class TestAcIdObligations(unittest.TestCase):
             self.assertIn("plan_ac_covered=2", out)
 
 
+# ---- spec-less bugfix plans (design §5.19) --------------------------------------------
+# A bugfix plan has no spec: its frontmatter carries `flow: bugfix` together with `spec: none`,
+# and its acceptance criteria live in its own `## Acceptance Criteria` section, before the first
+# task. DP-2 (ids come from the spec only) is relaxed for that plan and for no other.
+BUGFIX_PLAN = """\
+---
+work_id: fix-refund
+spec: none
+flow: bugfix
+branch: fix/refund
+status: draft
+---
+
+# Bugfix plan: refunds counted twice
+
+## Bug
+Expected: a refund reduces the daily total once. Actual: the total is reduced twice when the
+refund event is replayed. Reproduction: replay one refund event, then run the job.
+
+## Acceptance Criteria
+- AC1: Given a replayed refund event, when the job runs, then the total is reduced once.
+- AC2: Given a single refund event, when the job runs, then the total is reduced once as today.
+
+## Task 1 — Regression test for the replay (AC1)
+Modify `tests/test_ledger.py`. TDD: add the failing replay test (RED) first.
+Run: pytest tests/test_ledger.py
+
+## Task 2 — Deduplicate refund events (AC1, AC2)
+Modify `src/ledger.py`. TDD: the RED test from Task 1 turns GREEN; the single-event test stays green.
+Run: pytest tests/test_ledger.py
+"""
+
+BUGFIX_AC_SECTION = """\
+## Acceptance Criteria
+- AC1: Given a replayed refund event, when the job runs, then the total is reduced once.
+- AC2: Given a single refund event, when the job runs, then the total is reduced once as today.
+
+"""
+
+BUGFIX_BUG_SECTION = """\
+## Bug
+Expected: a refund reduces the daily total once. Actual: the total is reduced twice when the
+refund event is replayed. Reproduction: replay one refund event, then run the job.
+
+"""
+
+
+def _bugfix_ac_after_tasks(plan=BUGFIX_PLAN):
+    """The same plan with its criteria section moved below the last task."""
+    assert BUGFIX_AC_SECTION in plan
+    return plan.replace(BUGFIX_AC_SECTION, "") + "\n" + BUGFIX_AC_SECTION
+
+
+class TestBugfixPlans(unittest.TestCase):
+    def _write(self, tmp, text, name="plan.md"):
+        p = Path(tmp) / name
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def test_bugfix_plan_ac_from_own_section_before_first_task(self):
+        result = va.check_plan(BUGFIX_PLAN, None, bugfix=True)
+        self.assertEqual(result["errors"], [], result)
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 2, result)
+        self.assertNotIn("ac_source_missing", result["warnings"])
+        self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]), [])
+        # AC2 is named only by the criteria section, so dropping it from Task 2 uncovers it:
+        # the obligations come from that section, not from the task blocks.
+        partial = BUGFIX_PLAN.replace("(AC1, AC2)", "(AC1)")
+        result = va.check_plan(partial, None, bugfix=True)
+        self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]), ["ac_not_covered:AC2"])
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 1, result)
+        # An id outside that section (here in the bug report) is not an obligation.
+        cited_elsewhere = BUGFIX_PLAN.replace(
+            "then run the job.\n", "then run the job. The old spec called it AC9.\n", 1)
+        result = va.check_plan(cited_elsewhere, None, bugfix=True)
+        self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]), [])
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 2, result)
+        # The CLI decides the kind from the frontmatter: no --spec, no ac_source_missing.
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, BUGFIX_PLAN)))
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn("plan_ac_covered=2", out)
+            self.assertNotIn("ac_source_missing", out)
+            self.assertIn("artifacts_validation=passed", out)
+
+    def test_bugfix_ac_section_keeps_its_subheadings(self):
+        # A criterion written as its own sub-heading stays inside the section.
+        plan = BUGFIX_PLAN.replace(BUGFIX_AC_SECTION, (
+            "## Acceptance Criteria\n"
+            "### AC1 — replay\nGiven a replayed refund event, then the total is reduced once.\n"
+            "### AC2 — single event\nGiven a single refund event, then the total is reduced once.\n\n"))
+        result = va.check_plan(plan, None, bugfix=True)
+        self.assertEqual(result["errors"], [], result)
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 2, result)
+
+    def test_bugfix_plan_ac_section_after_first_task_fails(self):
+        # A section inside a task block would be "covered" by the block that holds it.
+        t_marker_plan = BUGFIX_PLAN.replace(
+            "## Task 1 — Regression test for the replay (AC1)", "- **T1 — Regression test for the replay (AC1)**"
+        ).replace("## Task 2 — Deduplicate refund events (AC1, AC2)", "- **T2 — Deduplicate refund events (AC1, AC2)**")
+        for name, plan in (("task headings", BUGFIX_PLAN), ("T-id markers", t_marker_plan)):
+            with self.subTest(form=name):
+                self.assertEqual(va.check_plan(plan, None, bugfix=True)["errors"], [])
+                result = va.check_plan(_bugfix_ac_after_tasks(plan), None, bugfix=True)
+                self.assertIn("bugfix_ac_section_after_tasks", result["errors"], result)
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = run_cli(
+                "--mode", "plan", "--file", str(self._write(tmp, _bugfix_ac_after_tasks())))
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=bugfix_ac_section_after_tasks", out)
+            self.assertIn("artifacts_validation=failed", out)
+
+    def test_bugfix_plan_requires_bug_section(self):
+        no_bug = BUGFIX_PLAN.replace(BUGFIX_BUG_SECTION, "")
+        # A task heading that mentions the bug is a task, not the bug report.
+        bug_in_task_only = no_bug.replace("Deduplicate refund events", "Fix the bug")
+        for name, plan in (("no section", no_bug), ("named only by a task", bug_in_task_only)):
+            with self.subTest(case=name):
+                result = va.check_plan(plan, None, bugfix=True)
+                self.assertIn("missing_section:bug", result["errors"], result)
+        self.assertNotIn("missing_section:bug", va.check_plan(BUGFIX_PLAN, None, bugfix=True)["errors"])
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, no_bug)))
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=missing_section:bug", out)
+
+    def test_bug_section_sits_below_the_title_and_before_the_tasks(self):
+        # Only a level-2-or-deeper heading outside a code fence and before the first task is the
+        # bug report. The document title, a sub-heading inside a task, a `#` comment in a fenced
+        # snippet and a section after the last task each stood in for it.
+        no_bug = BUGFIX_PLAN.replace(BUGFIX_BUG_SECTION, "")
+        end_of_task_1 = "Run: pytest tests/test_ledger.py\n\n## Task 2"
+        self.assertIn(end_of_task_1, no_bug)
+        cases = (
+            ("document title", no_bug.replace("# Bugfix plan: refunds counted twice",
+                                              "# Bug fix plan: refunds counted twice")),
+            ("sub-heading inside a task", no_bug.replace(end_of_task_1, (
+                "### Bug repro steps\nReplay one refund event, then run the job twice.\n\n" + end_of_task_1))),
+            ("fenced comment inside a task", no_bug.replace(end_of_task_1, (
+                "```bash\n# bug: the replay is counted twice\n./replay.sh\n```\n\n" + end_of_task_1))),
+            ("section after the tasks", no_bug + "\n" + BUGFIX_BUG_SECTION),
+        )
+        for name, plan in cases:
+            with self.subTest(case=name):
+                result = va.check_plan(plan, None, bugfix=True)
+                self.assertIn("missing_section:bug", result["errors"], result)
+                with tempfile.TemporaryDirectory() as tmp:
+                    rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, plan)), "--strict")
+                    self.assertEqual(rc, 1, out + err)
+                    self.assertIn("error=missing_section:bug", out.splitlines())
+        # A deeper heading before the tasks is still the bug report.
+        nested = BUGFIX_PLAN.replace("## Bug\n", "## Context\n### Bug\n")
+        self.assertEqual(va.check_plan(nested, None, bugfix=True)["errors"], [])
+
+    def test_thin_bug_section_warns(self):
+        # Design §5.19: the bug report carries expected, actual and reproduction. An empty or
+        # one-line section is thin, as a thin spec section is, and --strict gates it.
+        self.assertNotIn("thin_section:bug", va.check_plan(BUGFIX_PLAN, None, bugfix=True)["warnings"])
+        for name, body in (("empty", ""), ("one line", "Refunds are wrong.\n")):
+            plan = BUGFIX_PLAN.replace(BUGFIX_BUG_SECTION, "## Bug\n" + body + "\n")
+            with self.subTest(case=name):
+                result = va.check_plan(plan, None, bugfix=True)
+                self.assertNotIn("missing_section:bug", result["errors"], result)
+                self.assertIn("thin_section:bug", result["warnings"], result)
+                with tempfile.TemporaryDirectory() as tmp:
+                    rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, plan)), "--strict")
+                    self.assertEqual(rc, 1, out + err)
+                    self.assertIn("error=thin_section:bug", out.splitlines())
+
+    def test_fenced_lines_do_not_end_the_ac_section(self):
+        # A `#` comment or a `T<n>` line inside a code fence is code, not a heading or a task. It
+        # ended the criteria section, so every id after the fence stopped being an obligation.
+        partial = BUGFIX_PLAN.replace("(AC1, AC2)", "(AC1)")
+        ac2 = "- AC2: Given a single refund event"
+        self.assertIn(ac2, partial)
+        snippets = (
+            ("indented bash comment", "  ```bash\n  # replay the refund event twice\n  ./replay.sh\n  ```\n"),
+            ("column-0 bash comment", "```bash\n# replay the refund event twice\n./replay.sh\n```\n"),
+            ("tilde fence", "~~~sh\n# replay the refund event twice\n~~~\n"),
+            ("task-id line", "```text\nT1 replays the event; T2 runs the job\n```\n"),
+        )
+        for name, snippet in snippets:
+            plan = partial.replace(ac2, snippet + ac2)
+            with self.subTest(case=name):
+                result = va.check_plan(plan, None, bugfix=True)
+                self.assertEqual(result["errors"], [], result)
+                self.assertIn("ac_not_covered:AC2", result["warnings"], result)
+                self.assertEqual(result["metrics"]["plan_tasks"], 2, result)
+                with tempfile.TemporaryDirectory() as tmp:
+                    rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, plan)), "--strict")
+                    self.assertEqual(rc, 1, out + err)
+                    self.assertIn("error=ac_not_covered:AC2", out.splitlines())
+
+    def test_fenced_task_lines_are_not_task_blocks(self):
+        # A task shown inside a code fence (an example, a template) is not a task: it neither
+        # counts toward plan_tasks nor covers an id. Feature plans share the task detector.
+        example = "```markdown\n## Task 9 — Example task (AC1, AC2)\nModify `x.py`. TDD: RED first.\n```\n\n"
+        plan = PLAN_UNCOVERED.replace("## Task 1", example + "## Task 1", 1)
+        result = va.check_plan(plan, PLAN_SPEC)
+        self.assertEqual(result["metrics"]["plan_tasks"], 1, result)
+        self.assertIn("ac_not_covered:AC2", result["warnings"], result)
+        self.assertNotIn("tasks_unordered", result["warnings"], result)
+
+    def test_bugfix_unlabelled_criterion_is_reported(self):
+        # The plan's own section is a bugfix plan's only criteria source and no spec check runs on
+        # it, so a criterion without an id is reported here (`ac_missing_id:<n>`, the spec check's
+        # code) instead of dropping out of the coverage gate in silence.
+        chargeback = ("- Given a chargeback event, when the job runs, then the total is never "
+                      "reduced below zero.\n")
+        plan = BUGFIX_PLAN.replace("as today.\n", "as today.\n" + chargeback, 1)
+        result = va.check_plan(plan, None, bugfix=True)
+        self.assertEqual(_warnings_with("ac_missing_id:", result["warnings"]), ["ac_missing_id:3"], result)
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, plan)), "--strict")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=ac_missing_id:3", out.splitlines())
+        # A nested detail bullet and a bullet inside a fence are not criteria of their own.
+        detail = BUGFIX_PLAN.replace("as today.\n", (
+            "as today.\n  - Guard: when the event id repeats, then skip it.\n"
+            "```text\n- when replayed, then once\n```\n"), 1)
+        for name, text in (("plain", BUGFIX_PLAN), ("detail and fenced bullets", detail)):
+            with self.subTest(case=name):
+                warnings = va.check_plan(text, None, bugfix=True)["warnings"]
+                self.assertEqual(_warnings_with("ac_missing_id:", warnings), [], warnings)
+
+    def test_bugfix_plan_requires_ac_section(self):
+        no_ac = BUGFIX_PLAN.replace(BUGFIX_AC_SECTION, "")
+        result = va.check_plan(no_ac, None, bugfix=True)
+        self.assertIn("missing_section:acceptance-criteria", result["errors"], result)
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 0)
+
+    def test_bugfix_plan_strict_passes_when_covered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, BUGFIX_PLAN)), "--strict")
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn("artifacts_validation=passed", out)
+            self.assertIn("plan_ac_covered=2", out)
+            self.assertIn("plan_tasks=2", out)
+            partial = self._write(tmp, BUGFIX_PLAN.replace("(AC1, AC2)", "(AC1)"), "partial.md")
+            rc, out, err = run_cli("--mode", "plan", "--file", str(partial), "--strict")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=ac_not_covered:AC2", out)
+
+    def test_bugfix_plan_given_a_spec_fails_closed(self):
+        # The caller passed a spec but the plan declares none. The plan under test must not decide
+        # whether the caller's spec is checked, so the disagreement fails the gate (present or
+        # absent spec alike). The runner passes no spec for a bugfix plan (contract §7).
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self._write(tmp, BUGFIX_PLAN)
+            spec = self._write(tmp, PLAN_SPEC + "- AC3: given a third case, then it returns 0.\n", "spec.md")
+            for spec_arg in (spec, Path(tmp) / "absent.md"):
+                with self.subTest(spec=spec_arg.name):
+                    rc, out, err = run_cli("--mode", "plan", "--file", str(plan), "--spec", str(spec_arg),
+                                           "--strict")
+                    self.assertEqual(rc, 1, out + err)
+                    self.assertIn("error=spec_none_with_spec", out.splitlines())
+                    self.assertIn("artifacts_validation=failed", out.splitlines())
+                    self.assertEqual(err, "")
+            code, fields = va.run("plan", str(plan), None, True)
+            self.assertEqual(code, 0, fields)
+
+    def test_invalid_status_value_is_masked_when_secret_shaped(self):
+        # `invalid_status:<value>` echoed the raw frontmatter value, next to the masked
+        # `possible_secret` report for the same line.
+        secret_val = "AKIA" + "IOSFODNN7EXAMPLE"
+        plan = BUGFIX_PLAN.replace("status: draft", "status: " + secret_val)
+        errors = va.check_frontmatter(plan, "plan")
+        self.assertIn("invalid_status:***MASKED***", errors)
+        self.assertNotIn(secret_val, " ".join(errors))
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, plan)))
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=invalid_status:***MASKED***", out.splitlines())
+            self.assertNotIn(secret_val, out + err)
+        # A plain wrong word is still named, so the author sees what to fix; anything that is not
+        # a short word is masked.
+        self.assertIn("invalid_status:wip", va.check_frontmatter(BUGFIX_PLAN.replace("status: draft", "status: wip"), "plan"))
+        # A lowercase word in any script is still a word (tests/test_helper_encoding_portability.py
+        # prints `hazır` on a cp1252 console); uppercase, digits and spaces are not.
+        self.assertIn("invalid_status:hazır",
+                      va.check_frontmatter(BUGFIX_PLAN.replace("status: draft", "status: hazır"), "plan"))
+        for value in ("Hazır", "hazır1", "ab12cd"):
+            with self.subTest(value=value):
+                self.assertIn("invalid_status:***MASKED***",
+                              va.check_frontmatter(BUGFIX_PLAN.replace("status: draft", "status: " + value), "plan"))
+        self.assertIn("invalid_status:***MASKED***",
+                      va.check_frontmatter(BUGFIX_PLAN.replace("status: draft", "status: in review"), "plan"))
+
+    def test_frontmatter_delimiters_are_whole_lines(self):
+        # Read the way the resolver reads it (tests/test_validator_resolver_parity.py runs both
+        # command lines): `---` on a line of its own opens and closes the block, trailing spaces
+        # aside; an indented `---` is not a delimiter.
+        base = "---\nwork_id: w\nstatus: draft\n---\n# Body\n"
+        self.assertEqual(va.parse_frontmatter(base), {"work_id": "w", "status": "draft"})
+        self.assertEqual(va.parse_frontmatter("--- \nwork_id: w\n--- \n"), {"work_id": "w"})
+        self.assertEqual(va.parse_frontmatter("  " + base), {}, "indented opener")
+        self.assertEqual(va.parse_frontmatter(base.replace("\n---\n#", "\n  ---\n#")), {}, "indented closer")
+        # A line that is neither `key: value` nor a `#` comment is an error naming its file line.
+        cases = (
+            ("colon-less line", base.replace("status: draft\n", "status: draft\nnotes\n"), 4),
+            ("---- line inside the block", base.replace("status: draft\n", "status: draft\n----\nspec: none\n"), 4),
+            ("empty key", base.replace("status: draft\n", ": x\nstatus: draft\n"), 3),
+        )
+        for name, text, lineno in cases:
+            with self.subTest(case=name):
+                self.assertIn(f"invalid_frontmatter_line:{lineno}", va.check_frontmatter(text, "spec"))
+        comment = base.replace("status: draft\n", "# owner: payments\nstatus: draft\n")
+        self.assertEqual(va.check_frontmatter(comment, "spec"), [])
+
+    def test_non_bugfix_plan_keeps_dp2(self):
+        # An acceptance-criteria section in a feature plan is not an id source (DP-2).
+        own_section = "## Acceptance Criteria\n- AC3: Given a third case, when it runs, then it returns 0.\n\n"
+        feature = PLAN_FULL.replace("## Task 1", own_section + "## Task 1", 1)
+        result = va.check_plan(feature, PLAN_SPEC)
+        self.assertEqual(result["errors"], [], result)
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 2, result)
+        self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]), [])
+        result = va.check_plan(feature, None)
+        self.assertIn("ac_source_missing", result["warnings"])
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 0)
+        self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]), [])
+        # `flow: bugfix` with a real spec path is not a spec-less plan: the spec stays the source
+        # and no bug section is asked for.
+        flow_only = feature.replace("status: draft\n", "status: draft\nflow: bugfix\n", 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self._write(tmp, flow_only)
+            spec = self._write(tmp, PLAN_SPEC, "spec.md")
+            rc, out, err = run_cli("--mode", "plan", "--file", str(plan), "--spec", str(spec), "--strict")
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn("plan_ac_covered=2", out)
+            self.assertNotIn("AC3", out)
+            self.assertNotIn("missing_section:bug", out)
+            rc, out, err = run_cli("--mode", "plan", "--file", str(plan))
+            self.assertIn("warning=ac_source_missing", out)
+
+    def test_quoted_frontmatter_values_are_read_like_the_resolver(self):
+        # The resolver drops surrounding quotes; the gate must not fail what it accepts.
+        meta = va.parse_frontmatter('---\nstatus: "approved"\nspec: \'none\'\nflow: "bugfix"\n---\n')
+        self.assertEqual(meta, {"status": "approved", "spec": "none", "flow": "bugfix"})
+        with tempfile.TemporaryDirectory() as tmp:
+            quoted = BUGFIX_PLAN.replace("status: draft", 'status: "approved"').replace(
+                "spec: none", 'spec: "none"')
+            rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, quoted)), "--strict")
+            self.assertEqual(rc, 0, out + err)
+            self.assertNotIn("invalid_status", out)
+
+
+# ---- the frontmatter block is not body ------------------------------------------------
+# Headings, sections, tasks and AC ids are read from the body after the leading block only (the
+# block `_frontmatter_block` reads: it opens on the first line and closes on a whole `---` line).
+# Inside the block a `#` line is a comment and `- AC1: ...` is a `key: value` line, so the block
+# parser accepts both; the scans used to read them as headings, tasks and ids anyway. The runner's
+# body fingerprint (contract §5) ignores the block, so an edit confined to it must never change a
+# body verdict. The placeholder and secret scan still reads every line.
+
+SPEC_HEADINGS_IN_BLOCK = (
+    "---\nwork_id: w1\nstatus: draft\n"
+    "## Problem\n## Business rules\n## Acceptance criteria\n- AC1: Given x, when y, then z\n"
+    "## Edge cases\n## Definition of done\n## Must-not-change\n"
+    "---\n# Body\nOnly prose here: the sections above sit inside the frontmatter block.\n"
+)
+
+# Lines that are valid inside the block (comments or `key: value`) and look like body structure.
+BODY_LOOKALIKES = (
+    "## Problem\n## Acceptance Criteria\n- AC7: Given a, when b, then c\n"
+    "## Bug\nExpected: once. Actual: twice. Reproduction: replay it.\n"
+    "## Task 9 — Extra work (AC1, AC2, AC7)\n# T8 — another task (AC9)\n# AC9 dropped\n"
+    "## Security\n# no untrusted input\n"
+)
+
+
+def _into_block(text, lines):
+    """`text` with `lines` added at the end of its leading frontmatter block."""
+    assert text.startswith("---\n"), text[:20]
+    head, closer, rest = text.partition("\n---\n")
+    assert closer, "no frontmatter closer"
+    return head + "\n" + lines.rstrip("\n") + closer + rest
+
+
+class TestFrontmatterIsNotBody(unittest.TestCase):
+    def _write(self, tmp, text, name):
+        p = Path(tmp) / name
+        p.write_bytes(text.encode("utf-8"))
+        return p
+
+    def test_spec_sections_inside_the_block_are_not_sections(self):
+        self.assertEqual(va.check_frontmatter(SPEC_HEADINGS_IN_BLOCK, "spec"), [])
+        missing = ["missing_section:" + slug for slug in va.REQUIRED_SPEC_SECTIONS]
+        self.assertEqual(va.check_spec(SPEC_HEADINGS_IN_BLOCK)["errors"], missing)
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = run_cli("--mode", "spec", "--file", str(self._write(tmp, SPEC_HEADINGS_IN_BLOCK, "s.md")))
+            self.assertEqual(rc, 1, out + err)
+            for error in missing:
+                self.assertIn("error=" + error, out.splitlines())
+
+    def test_plan_tasks_inside_the_block_are_not_tasks(self):
+        for name, line in (("task heading", "## Task 1 — Reduce total once (AC1, AC2) Modify x.py TDD RED"),
+                           ("task id", "# T1 — Reduce total once (AC1, AC2) Modify x.py TDD RED")):
+            plan = _into_block(_with_frontmatter(
+                "\n# Mini Plan\nNo task block in the body.\n", work_id="mini", spec="../specs/mini.md",
+                branch="feat/mini", status="draft"), line)
+            with self.subTest(form=name):
+                self.assertEqual(va.check_frontmatter(plan, "plan"), [])
+                result = va.check_plan(plan, PLAN_SPEC)
+                self.assertEqual(result["metrics"], {"plan_tasks": 0, "plan_ac_covered": 0}, result)
+                self.assertIn("plan_no_tasks", result["warnings"], result)
+                with tempfile.TemporaryDirectory() as tmp:
+                    rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, plan, "p.md")),
+                                           "--spec", str(self._write(tmp, PLAN_SPEC, "s.md")), "--strict")
+                    self.assertEqual(rc, 1, out + err)
+                    self.assertIn("error=plan_no_tasks", out.splitlines())
+                    self.assertIn("error=ac_not_covered:AC1", out.splitlines())
+
+    def test_spec_ids_inside_the_block_are_not_obligations(self):
+        # An id only in the spec's block is no obligation, and a spec whose ids all sit there has none.
+        dropped = _into_block(PLAN_SPEC, "# AC9 was dropped from scope")
+        result = va.check_plan(PLAN_FULL, dropped)
+        self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]), [], result)
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 2, result)
+        idless = PLAN_SPEC.replace("- AC1: ", "- ").replace("- AC2: ", "- ")
+        ids_in_block_only = _into_block(idless, "# AC1\n- AC2: Given a duplicate, then exit 0")
+        result = va.check_plan(PLAN_FULL, ids_in_block_only)
+        self.assertIn("ac_source_empty", result["warnings"], result)
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 0, result)
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, PLAN_FULL, "p.md")),
+                                   "--spec", str(self._write(tmp, ids_in_block_only, "s.md")), "--strict")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=ac_source_empty", out.splitlines())
+
+    def test_bugfix_sections_inside_the_block_do_not_count(self):
+        body = BUGFIX_PLAN.replace(BUGFIX_BUG_SECTION, "").replace(BUGFIX_AC_SECTION, "")
+        plan = _into_block(body, (
+            "## Bug\nExpected: once. Actual: twice. Reproduction: replay one refund event, then run the job.\n"
+            "## Acceptance Criteria\n- AC1: Given a replay, when the job runs, then once\n"
+            "- AC2: Given one event, when the job runs, then once"))
+        self.assertEqual(va.check_frontmatter(plan, "plan"), [])
+        self.assertTrue(va.is_bugfix_plan(va.parse_frontmatter(plan)))
+        result = va.check_plan(plan, None, bugfix=True)
+        self.assertIn("missing_section:bug", result["errors"], result)
+        self.assertIn("missing_section:acceptance-criteria", result["errors"], result)
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = run_cli("--mode", "plan", "--file", str(self._write(tmp, plan, "p.md")))
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=missing_section:bug", out.splitlines())
+            self.assertIn("error=missing_section:acceptance-criteria", out.splitlines())
+
+    def test_a_block_only_edit_never_changes_a_body_verdict(self):
+        cases = (
+            ("spec", COMPLETE_SPEC, lambda text: va.check_spec(text)),
+            ("spec with a security section", COMPLETE_SPEC + "\n## Security\nNo untrusted input.\n",
+             lambda text: va.check_spec(text)),
+            ("feature plan", PLAN_FULL, lambda text: va.check_plan(text, PLAN_SPEC)),
+            ("feature plan, the spec's block edited", PLAN_SPEC, lambda text: va.check_plan(PLAN_FULL, text)),
+            ("uncovered feature plan", PLAN_UNCOVERED, lambda text: va.check_plan(text, PLAN_SPEC)),
+            ("bugfix plan", BUGFIX_PLAN, lambda text: va.check_plan(text, None, bugfix=True)),
+            ("bugfix plan without sections",
+             BUGFIX_PLAN.replace(BUGFIX_BUG_SECTION, "").replace(BUGFIX_AC_SECTION, ""),
+             lambda text: va.check_plan(text, None, bugfix=True)),
+        )
+        for name, text, check in cases:
+            edited = _into_block(text, BODY_LOOKALIKES)
+            with self.subTest(case=name):
+                self.assertEqual(va.parse_frontmatter(edited).get("status"), va.parse_frontmatter(text)["status"])
+                self.assertEqual(check(edited), check(text))
+
+    def test_the_body_is_the_runner_body(self):
+        # The runner fingerprints `frontmatter.split(text)[1]` (contract §5); the validator's body
+        # checks read `_body(text)`. They must be the same text, or a body edit could slip past the
+        # fingerprint, or a fingerprinted change past the checks.
+        scripts = str(SCRIPT.parent)
+        sys.path.insert(0, scripts)
+        try:
+            from sdlc_runner import frontmatter
+        finally:
+            sys.path.remove(scripts)
+        shapes = (
+            ("plain", "---\nwork_id: w\n---\n# Body\n"),
+            ("trailing spaces on the delimiters", "--- \nwork_id: w\n---  \n# Body\n"),
+            ("no closer", "---\nwork_id: w\n# Body\n"),
+            ("indented closer", "---\nwork_id: w\n  ---\n# Body\n---\nmore\n"),
+            ("---- line", "---\nwork_id: w\n----\n---\n# Body\n"),
+            ("invalid line in the block", "---\nnotes\n---\n# Body\n"),
+            ("empty body", "---\nwork_id: w\n---\n"),
+            ("closer is the last line, no newline", "---\nwork_id: w\n---"),
+            ("a second block in the body", "---\na: 1\n---\n---\nb: 2\n---\n# Body\n"),
+            ("not first", "\n---\na: 1\n---\n# Body\n"),
+            ("line separator U+2028", "--- work_id: w --- # Body\n"),
+            ("lone carriage returns", "---\rwork_id: w\r---\r# Body\r"),
+        )
+        for name, text in shapes + tuple((n, _into_block(t, BODY_LOOKALIKES)) for n, t in (
+                ("spec", COMPLETE_SPEC), ("plan", PLAN_FULL), ("bugfix plan", BUGFIX_PLAN))):
+            with self.subTest(shape=name):
+                self.assertEqual(va._body(text), frontmatter.split(text)[1])
+
+    def test_an_unterminated_block_is_body(self):
+        # No closer: there is no block, so every line is body, as before.
+        text = "---\n" + _body_only(COMPLETE_SPEC)
+        self.assertEqual(va.parse_frontmatter(text), {})
+        self.assertEqual(va.check_spec(text)["errors"], [])
+
+    def test_the_block_is_still_scanned_for_placeholders_and_secrets(self):
+        # The scan reads every line, and reports the file's own line numbers.
+        secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        text = _into_block(COMPLETE_SPEC, "# TODO: owner\naws: " + secret)
+        lines = text.splitlines()
+        todo_line = lines.index("# TODO: owner") + 1
+        secret_line = lines.index("aws: " + secret) + 1
+        scan = va.scan_placeholders_and_secrets(text)
+        self.assertIn("placeholder:%d" % todo_line, scan["warnings"])
+        self.assertIn("possible_secret:%d=***MASKED***" % secret_line, scan["errors"])
+        body_todo = text.replace("No change to the nightly schedule.", "No change to the nightly schedule. TBD")
+        line = body_todo.splitlines().index("No change to the nightly schedule. TBD") + 1
+        self.assertIn("placeholder:%d" % line, va.scan_placeholders_and_secrets(body_todo)["warnings"])
+
+
+class TestRunInterface(unittest.TestCase):
+    """`run(mode, file, spec, strict)` is imported, not spawned (scripts/run_procedure_eval.py, the
+    runner's `validator` check). It returns `(exit_code, fields)`, and an artifact it cannot read is
+    a failed gate with a named reason, never an exception out of the caller."""
+
+    def test_run_returns_exit_code_and_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = Path(tmp) / "plan.md"
+            plan.write_bytes(BUGFIX_PLAN.encode("utf-8"))
+            result = va.run("plan", str(plan), None, True)
+            self.assertIsInstance(result, tuple)
+            code, fields = result
+            self.assertEqual(code, 0, fields)
+            self.assertEqual(fields["artifacts_validation"], "passed")
+
+    def test_unreadable_artifact_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            undecodable = Path(tmp) / "bad.md"
+            undecodable.write_bytes(b"---\nwork_id: \xff\n---\n")
+            cases = (
+                ("missing", Path(tmp) / "absent.md", "file_unreadable:missing"),
+                ("not utf-8", undecodable, "file_unreadable:not_utf8"),
+                ("a directory", Path(tmp), "file_unreadable:error"),
+            )
+            for name, path, error in cases:
+                with self.subTest(case=name):
+                    code, fields = va.run("plan", str(path), None, True)
+                    self.assertEqual(code, 1, fields)
+                    self.assertIn("error=" + error, fields)
+                    self.assertEqual(fields["artifacts_validation"], "failed")
+                    rc, out, err = run_cli("--mode", "plan", "--file", str(path), "--strict")
+                    self.assertEqual(rc, 1, out + err)
+                    self.assertIn("error=" + error, out.splitlines())
+                    self.assertEqual(err, "", "a traceback instead of a failed gate")
+
+    def test_unreadable_spec_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = Path(tmp) / "plan.md"
+            plan.write_bytes(PLAN_FULL.encode("utf-8"))
+            absent = Path(tmp) / "absent.md"
+            code, fields = va.run("plan", str(plan), str(absent), True)
+            self.assertEqual(code, 1, fields)
+            self.assertIn("error=spec_unreadable:missing", fields)
+            rc, out, err = run_cli("--mode", "plan", "--file", str(plan), "--spec", str(absent), "--strict")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=spec_unreadable:missing", out.splitlines())
+            self.assertEqual(err, "", "a traceback instead of a failed gate")
+
+
 class TestModeAll(unittest.TestCase):
     def _write(self, tmp, text, name):
         p = Path(tmp) / name
