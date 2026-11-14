@@ -333,7 +333,7 @@ workflows/             Claude Code dynamic workflow scripts; workflows/zcode/ ho
 hooks/                 Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/      Durable behavior contracts
 commands/              Manual slash-command definitions
-scripts/               25 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check, native lifecycle check, Cursor package check and install
+scripts/               26 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check, native lifecycle check, Cursor package check and install, the middleware-chain runner entry
 tests/                 Unit tests, harness, fixtures, golden refs, eval seeds
 docs/                  Component reference, boundaries, testing, release notes
 ```

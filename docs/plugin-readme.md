@@ -156,7 +156,7 @@ The experimental adapters wire a subset of the same scripts. Kimi Code (inline h
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
-## Deterministic scripts (25)
+## Deterministic scripts (26)
 
 | Script | Purpose |
 |---|---|
@@ -174,6 +174,7 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | `install_cursor_plugin.py` | Copy, update or uninstall the package in Cursor's local plugin directory. Update and uninstall keep files the installer did not write. |
 | `prepare_marketplace_release.py` | Export validated committed source and deterministic Grok/ZCode catalog packets to a new local destination, with separate producer/source provenance and byte verification; no publication or original Git mutation. |
 | `detect_context.py` | Workspace/dependency/toolchain classification. |
+| `sdlc.py` | Entry point of the middleware-chain runner (`scripts/sdlc_runner/`): starts a flow, prints one step card at a time, records runs and transitions in the work package. Under construction; no skill calls it yet. |
 | `run_trigger_eval.py` | Claude Code trigger eval runner. |
 | `run_codex_trigger_eval.py` | Codex route-classifier trigger runner. |
 | `run_all_trigger_evals.py` | Batch trigger eval runner. |

@@ -42,6 +42,15 @@ USER_FACING = (
     "scripts/sdlc_runner/probes.py",
     "scripts/sdlc_runner/manifest.py",
     "scripts/sdlc_runner/runexec.py",
+    "scripts/sdlc_runner/state.py",
+    "scripts/sdlc_runner/checks.py",
+    "scripts/sdlc_runner/engine.py",
+    "scripts/sdlc_runner/card.py",
+    "scripts/sdlc_runner/cli.py",
+    "scripts/sdlc_runner/flowops.py",
+    "scripts/sdlc_runner/strategy.py",
+    "scripts/sdlc_runner/gates.py",
+    "scripts/sdlc_runner/loop.py",
 )
 
 
