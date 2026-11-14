@@ -336,7 +336,7 @@ def run_streaming(cmd, project_root, env, timeout, detector, transcript_path=Non
         kill_process_tree(proc)
 
 
-def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_budget_usd, plugin_dir, transcript_dir, bare, command_shim):
+def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_budget_usd, plugin_dir, transcript_dir, bare, command_shim, effort=None):
     uid = uuid.uuid4().hex[:8]
     clean = f"{skill_name}-skill-{uid}" if command_shim else f"{skill_name}-live-{uid}"
     cf = None
@@ -365,6 +365,8 @@ def run_once(query, skill_name, skill_desc, project_root, timeout, model, max_bu
             cmd += ["--bare"]
         if model:
             cmd += ["--model", model]
+        if effort:
+            cmd += ["--effort", effort]
         if max_budget_usd:
             cmd += ["--max-budget-usd", str(max_budget_usd)]
         if plugin_dir:
@@ -392,6 +394,12 @@ def main(argv=None):
     p.add_argument("--threshold", type=float, default=0.5)
     p.add_argument("--timeout", type=int, default=180)
     p.add_argument("--model", default=None)
+    p.add_argument(
+        "--effort",
+        default=None,
+        help="Claude Code --effort level (low|medium|high|xhigh|max). Unset, the profile's settings.json "
+        "effortLevel decides and the output says effort=profile-default.",
+    )
     p.add_argument("--max-budget-usd", default=None)
     p.add_argument("--query-limit", type=int, default=0)
     p.add_argument("--smoke", action="store_true", help="Run one query once with safe cleanup.")
@@ -424,7 +432,7 @@ def main(argv=None):
     if args.query_limit:
         queries = queries[:args.query_limit]
 
-    errors, fields = [], {"skill": skill_name, "runs_per_query": args.runs}
+    errors, fields = [], {"skill": skill_name, "runs_per_query": args.runs, "effort": args.effort or "profile-default"}
     use_shim = not args.no_command_shim and not args.plugin_dir
     if args.plugin_dir:
         fields["command_shim"] = "disabled:plugin-dir"
@@ -438,7 +446,7 @@ def main(argv=None):
             reasons = []
             for _ in range(args.runs):
                 try:
-                    triggers += bool(run_once(q["query"], skill_name, skill_desc, project_root, args.timeout, args.model, args.max_budget_usd, args.plugin_dir, args.transcript_dir, False, use_shim))
+                    triggers += bool(run_once(q["query"], skill_name, skill_desc, project_root, args.timeout, args.model, args.max_budget_usd, args.plugin_dir, args.transcript_dir, False, use_shim, effort=args.effort))
                 except UnmeasuredRun as exc:
                     reasons.append(exc.reason)
             should = str(q["should_trigger"]).lower()

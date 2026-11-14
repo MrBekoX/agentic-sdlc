@@ -2785,6 +2785,16 @@ class TestLiveAgentCliSpawn(unittest.TestCase):
         self.assertTrue(os.path.isabs(argv[0]), argv[0])
         self.assertEqual(argv[0], str(self.cli))
 
+    def test_requested_effort_reaches_the_claude_argv(self):
+        # Mutation: dropping it lets the profile's settings.json effortLevel decide the measured run.
+        argv = self._spawn_argv(self._args(effort="low"), resolved=str(self.cli))
+        self.assertEqual(argv[argv.index("--effort") + 1], "low")
+
+    def test_no_effort_flag_when_none_is_requested(self):
+        # Mutation: always appending `--effort` would send `--effort None` to the CLI.
+        argv = self._spawn_argv(self._args(), resolved=str(self.cli))
+        self.assertNotIn("--effort", argv)
+
     def test_unresolvable_cli_still_raises_the_named_runtime_error(self):
         # CONTROL: the existing gate must stay; a missing CLI is an error, never a bare-name spawn.
         def refuse(cmd, **kwargs):

@@ -2802,6 +2802,9 @@ def run_live_case(case: dict[str, Any], args: argparse.Namespace, tmp_root: Path
     ]
     if args.model:
         cmd += ["--model", args.model]
+    effort = getattr(args, "effort", None)
+    if effort:
+        cmd += ["--effort", effort]
     if args.permission_mode:
         cmd += ["--permission-mode", args.permission_mode]
     env = {key: value for key, value in os.environ.items() if key != "CLAUDE_CODE_SIMPLE"}
@@ -3516,6 +3519,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--transcript-dir", type=Path)
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--model")
+    parser.add_argument(
+        "--effort",
+        help="Claude Code --effort level for --live (low|medium|high|xhigh|max). Unset, the profile's "
+        "settings.json effortLevel decides; the stream does not record effort, so name it here.",
+    )
     parser.add_argument("--permission-mode", default="auto")
     parser.add_argument(
         "--claude",

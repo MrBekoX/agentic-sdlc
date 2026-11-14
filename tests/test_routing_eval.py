@@ -1,8 +1,10 @@
+import io
 import json
 import os
 import tempfile
 import unittest
 from argparse import Namespace
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -200,6 +202,66 @@ class TestRoutingEval(unittest.TestCase):
             command = popen.call_args.args[0]
             self.assertEqual(command[command.index("--plugin-dir") + 1], str(source))
             self.assertEqual(popen.call_args.kwargs["cwd"], Path(td))
+
+    def test_claude_command_passes_the_reasoning_effort(self):
+        # The profile's settings.json effortLevel must not silently decide the measured effort.
+        with tempfile.TemporaryDirectory() as td:
+            args = Namespace(
+                project_root=Path(td),
+                plugin_dir=REPO,
+                model="haiku",
+                reasoning_effort="low",
+                max_turns=1,
+                max_budget_usd="0.01",
+                timeout=1,
+            )
+            with mock.patch.object(runner.subprocess, "Popen", side_effect=FileNotFoundError) as popen:
+                runner.run_claude("route", args, None)
+            command = popen.call_args.args[0]
+            self.assertEqual(command[command.index("--effort") + 1], "low")
+
+
+def _no_real_process(*_args, **_kwargs):
+    raise AssertionError("a test must not start a real claude/codex process")
+
+
+class TestRoutingReport(unittest.TestCase):
+    def _run(self, scenarios, extra):
+        with tempfile.TemporaryDirectory() as td:
+            eval_set = Path(td) / "routing.json"
+            eval_set.write_text(json.dumps({"scenarios": scenarios}), encoding="utf-8")
+
+            def route(scenario, skills, args, run_index, scenario_index):
+                return [scenario["expected"]], {}, None
+
+            out = io.StringIO()
+            with mock.patch.object(runner.subprocess, "Popen", _no_real_process), \
+                    mock.patch.object(runner, "route_once", side_effect=route), \
+                    redirect_stdout(out):
+                code = runner.main(["--eval-set", str(eval_set), "--runtime", "claude", *extra])
+        return code, out.getvalue().splitlines()
+
+    SCENARIOS = [
+        {"prompt": "fix the crash", "expected": "root-cause-fix", "escalation": False},
+        {"prompt": "write the tests", "expected": "test-authoring", "escalation": False},
+        {"prompt": "refactor order.py", "expected": "safe-refactor", "escalation": False},
+    ]
+
+    def test_smoke_says_it_ran_one_of_all_scenarios(self):
+        code, lines = self._run(self.SCENARIOS, ["--smoke"])
+        self.assertEqual(code, 0, lines)
+        self.assertIn("scenarios_passed=1/1", lines)
+        self.assertIn("scenarios_run=1/3", lines)
+
+    def test_a_full_sweep_says_it_ran_every_scenario(self):
+        code, lines = self._run(self.SCENARIOS, ["--runs", "1"])
+        self.assertEqual(code, 0, lines)
+        self.assertIn("scenarios_run=3/3", lines)
+
+    def test_a_claude_run_reports_its_reasoning_effort(self):
+        code, lines = self._run(self.SCENARIOS, ["--smoke", "--reasoning-effort", "low"])
+        self.assertEqual(code, 0, lines)
+        self.assertIn("reasoning_effort=low", lines)
 
 
 class TestSubagentRoutes(unittest.TestCase):

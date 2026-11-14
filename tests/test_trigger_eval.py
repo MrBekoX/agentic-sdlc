@@ -376,5 +376,78 @@ class TestUnmeasuredRuns(unittest.TestCase):
         self.assertIn("trigger_matrix=failed", out)
 
 
+def _no_real_process(*_args, **_kwargs):
+    raise AssertionError("a test must not start a real claude/codex process")
+
+
+class TestClaudeEffort(unittest.TestCase):
+    """The profile's settings.json effortLevel must not silently decide the measured effort."""
+
+    def test_run_once_passes_the_requested_effort_to_claude(self):
+        seen = {}
+
+        def fake_streaming(cmd, project_root, env, timeout, detector, transcript_path=None):
+            seen["cmd"] = cmd
+            return False
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(runner.subprocess, "Popen", _no_real_process), \
+                mock.patch.object(runner, "run_streaming", fake_streaming):
+            runner.run_once("query", "spec-authoring", "desc", Path(td), 1, "haiku", None, None, None, False, False,
+                            effort="low")
+        cmd = seen["cmd"]
+        self.assertEqual(cmd[cmd.index("--effort") + 1], "low")
+
+    def test_run_once_without_effort_adds_no_effort_flag(self):
+        seen = {}
+
+        def fake_streaming(cmd, project_root, env, timeout, detector, transcript_path=None):
+            seen["cmd"] = cmd
+            return False
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(runner.subprocess, "Popen", _no_real_process), \
+                mock.patch.object(runner, "run_streaming", fake_streaming):
+            runner.run_once("query", "spec-authoring", "desc", Path(td), 1, "haiku", None, None, None, False, False)
+        self.assertNotIn("--effort", seen["cmd"])
+
+    def _main(self, extra):
+        out = io.StringIO()
+        with mock.patch.object(runner.subprocess, "Popen", _no_real_process), \
+                mock.patch.object(runner, "run_once", return_value=True) as run_once, \
+                redirect_stdout(out):
+            code = runner.main([
+                "--skill-path", str(SKILL_PATH),
+                "--eval-set", str(EVAL_SET),
+                "--plugin-dir", str(REPO),
+                "--smoke",
+                *extra,
+            ])
+        return code, out.getvalue(), run_once
+
+    def test_main_forwards_and_reports_the_requested_effort(self):
+        code, out, run_once = self._main(["--effort", "low"])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(run_once.call_args.kwargs["effort"], "low")
+        self.assertIn("effort=low", out.splitlines())
+
+    def test_main_without_effort_reports_that_the_profile_decides(self):
+        code, out, run_once = self._main([])
+        self.assertEqual(code, 0, out)
+        self.assertIsNone(run_once.call_args.kwargs["effort"])
+        self.assertIn("effort=profile-default", out.splitlines())
+
+    def test_the_batch_wrapper_gives_claude_rows_the_reasoning_effort(self):
+        from scripts import run_all_trigger_evals as batch
+
+        def claude_effort(argv):
+            args = batch.create_parser().parse_args(argv)
+            cmd = batch.build_claude_cmd(args, SKILL_PATH, EVAL_SET, "spec-authoring")
+            return cmd[cmd.index("--effort") + 1]
+
+        self.assertEqual(claude_effort([]), "low")
+        self.assertEqual(claude_effort(["--reasoning-effort", "high"]), "high")
+
+
 if __name__ == "__main__":
     unittest.main()
