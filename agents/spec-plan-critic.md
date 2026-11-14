@@ -34,6 +34,7 @@ If there are no findings, `verdict = clean`.
 - A plan task has no concrete verification (a runnable command + the expected pass/fail, or an explicit RED->GREEN expectation), or no named RED test.
 - The spec leaks HOW (files/code/tasks), or the plan invents WHAT not in the spec.
 - A required section is a stub or a single hand-wavy sentence disproportionate to the change.
+- A spec lacks one of the headings the spec validator requires, or renames it so the validator cannot find it: `## Problem`, `## Business Rules`, `## Acceptance Criteria`, `## Edge Cases`, `## Definition of Done`, `## Must-not-change`.
 
 ## Grounding (no clean verdict on assertion alone)
 - Tie each finding to an external signal: grep/Read of the real code, a test/lint/validator output, or a cited doc. A rationale in the draft ("kept simple", "out of scope") never downgrades a finding.

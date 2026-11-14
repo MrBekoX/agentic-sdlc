@@ -217,7 +217,7 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 - Live routing is model-dependent and must be evidenced per runtime, model, and run.
 - Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters. Local CLI install does not require a public directory listing.
 - Bounded native hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. Their source identities and the separate parser replay are recorded in [runtime evidence](runtime-adapter.md#current-binary-and-historical-hook-evidence); `transcript_path` remains unstable. The [0.4.3 release ledger](release-evidence-0.4.3.md) distinguishes this proof from the standalone routing and pipeline publication gates.
-- No live pipeline run has measured 0.6.0 yet; the zero-delegation rule is stated in the skill text, checked by the Claude Code flow hooks (warn by default) and graded offline by the strict procedure eval. Codex test runs wrapped in `/bin/bash -lc` or `powershell -Command` are not attributed, so strict RED/GREEN cannot pass on real Codex transcripts. See the [current release ledger](release-evidence-0.6.0.md).
+- One live pipeline run measured 0.6.0 (52a2ad1, 2026-10-22) and none of its six procedure rows passed; the fixes it led to have no live run yet. The zero-delegation rule is stated in the skill text, checked by the Claude Code flow hooks (warn by default) and graded offline by the strict procedure eval. Codex test runs wrapped in `/bin/bash -lc` or `powershell -Command` are not attributed, so strict RED/GREEN cannot pass on real Codex transcripts. See the [current release ledger](release-evidence-0.6.0.md).
 
 ## Artifact Layouts And Per-Package Evidence
 

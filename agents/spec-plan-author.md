@@ -16,15 +16,17 @@ Scale depth to the change: a one-line tweak earns a short draft, a payment or au
 `mode` = "spec" or "plan" (given in the prompt). Produce only that artifact, to the contract for that mode below.
 
 ## SPEC mode — the WHAT (product-focused, CODE-INDEPENDENT)
+The spec validator (`validate_artifacts.py --mode spec`) fails a draft that lacks any of these headings, so use them in this wording: `## Problem`, `## Business Rules`, `## Acceptance Criteria`, `## Edge Cases`, `## Definition of Done`, `## Must-not-change`. The other items below get headings of their own. Return the body only: the caller adds the frontmatter when it saves the file.
 1. **Problem** — the concrete problem being solved (not a restatement of the feature name).
 2. **User need** — what the feature must do, from the user's side.
-3. **Business / domain rules** — e.g. "email is unique", "password >= 8 chars"; each stated so it is checkable, with no internal contradiction between rules.
+3. **Business rules** — domain rules, e.g. "email is unique", "password >= 8 chars"; each stated so it is checkable, with no internal contradiction between rules.
 4. **Acceptance criteria** — each labelled with an id (`AC1`, `AC2`, …) and written as **Given/When/Then** **and** the failure it guards (what breaks if this criterion is violated). The plan validator checks task coverage by id, so an unlabelled criterion is one it cannot check. A bare label ("counter increments correctly") or "should work" is forbidden — if you cannot phrase it Given/When/Then, the behavior is not yet specified, so say that as a decision point.
 5. **Edge cases** — the concrete unhandled input/scenario, not a category name: empty/null, the boundary value on both sides, conflicting state, the authorization/IDOR path, the error path. Name the input.
 6. **Security note** — trace the untrusted **input->sink**: name the entry point and the dangerous sink it reaches, or state "no untrusted input reaches <sink>, because <reason>". A bare "safe" / "standard handling" / "N/A" without that reasoning is a finding, not a pass.
 7. **Definition of done** — concrete checklist items (observable conditions), not a header.
 8. **Decision points** — everything the user must choose: option + recommendation + rationale. An open question is a decision point with a recommendation, never a silent "TBD".
 9. **Scope** — in / out; each "out" item carries the reason it is out.
+10. **Must-not-change** — the existing behaviors this change must leave intact (the regression surface).
 => Do NOT write files/layers/tasks/code. "How it's coded" does not belong in the spec (that's the plan).
 
 ## PLAN mode — the HOW (developer-focused; an APPROVED spec is given)
