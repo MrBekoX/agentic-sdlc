@@ -28,7 +28,7 @@ DEFAULT_TIMEOUT = 90
 DEFAULT_QUERY_LIMIT = 0
 DEFAULT_CLAUDE_MODEL = "haiku"
 DEFAULT_MAX_BUDGET_USD = "0.10"
-DEFAULT_CODEX_MODEL = "gpt-5.4-mini"
+DEFAULT_CODEX_MODEL = "gpt-5.6-luna"
 DEFAULT_REASONING_EFFORT = "low"
 
 # Exit code scripts/run_trigger_eval.py uses when a run produced no measurement (see its docstring).
@@ -104,6 +104,8 @@ def build_claude_cmd(args: argparse.Namespace, skill_path: Path, eval_path: Path
     ]
     if args.claude_model:
         cmd += ["--model", args.claude_model]
+    if args.reasoning_effort:
+        cmd += ["--effort", args.reasoning_effort]
     if args.max_budget_usd:
         cmd += ["--max-budget-usd", str(args.max_budget_usd)]
     if args.query_limit:
@@ -203,7 +205,9 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL)
     parser.add_argument("--max-budget-usd", default=DEFAULT_MAX_BUDGET_USD)
     parser.add_argument("--codex-model", default=DEFAULT_CODEX_MODEL)
-    parser.add_argument("--reasoning-effort", default=DEFAULT_REASONING_EFFORT)
+    parser.add_argument("--reasoning-effort", default=DEFAULT_REASONING_EFFORT,
+                        help="Effort for both runtimes: Claude Code --effort and Codex model_reasoning_effort. "
+                             "Passed explicitly so the profile's own default never decides the measurement.")
     return parser
 
 

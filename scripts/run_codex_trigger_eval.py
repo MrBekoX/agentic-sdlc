@@ -230,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Explicitly authorize exposing --project-root to the live Codex classifier; Codex still runs read-only.",
     )
-    parser.add_argument("--model", default="gpt-5.4-mini")
+    parser.add_argument("--model", default="gpt-5.6-luna")
     parser.add_argument("--reasoning-effort", default="low")
     parser.add_argument("--runs", type=int, default=3, help="Runs per query for majority voting (rate = matches/runs vs --threshold). Default 3 so run-to-run flakiness is measured, not masked; --smoke forces 1.")
     parser.add_argument("--threshold", type=float, default=0.5)

@@ -239,6 +239,8 @@ python3 scripts/run_routing_eval.py \
   --runs 3
 ```
 
+`--reasoning-effort` (default `high`) goes to both runtimes: Codex `model_reasoning_effort` and Claude Code `--effort`, so the profile's own `effortLevel` never decides the measurement; the output prints it as `reasoning_effort=`. `--smoke` runs only the first scenario, so read `scenarios_run=<ran>/<total>` next to `scenarios_passed`: a smoke run reports `scenarios_run=1/15`, not a full sweep.
+
 The fixture format is:
 
 ```json
@@ -286,6 +288,8 @@ python3 scripts/run_trigger_eval.py \
 
 `--bare` is rejected with exit 2 and does not start `claude`. Use real plugin skills only (no command shim): `--no-command-shim`, or pass `--plugin-dir` so the shim stays off.
 
+`--effort <level>` passes Claude Code `--effort`. Without it the profile's `settings.json` `effortLevel` decides, and the output says `effort=profile-default` so such a run is not mistaken for a pinned one.
+
 **Exit codes and the unmeasured outcome.** `0` every query met its expectation; `1` a measured query missed it (`trigger_eval=failed`); `2` `--bare` was rejected; `3` at least one run produced no measurement and no measured query failed (`trigger_eval=unmeasured`). "The skill did not trigger" is a measurement: the model answered, or took another action first. A missing or failing `claude`, a non-zero exit, a stream that ends without a verdict, an `is_error` result or a timeout is not, so such a run is never counted as "did not trigger" and a negative query can no longer pass on it. The output names the query and the reason (`error=q0_unmeasured:runs=2,reason=exit_1`). When a measured query also missed its expectation, `failed` and exit 1 win. The batch wrapper `run_all_trigger_evals.py` labels such a skill `status=unmeasured`, prints `trigger_matrix=unmeasured` when nothing worse happened, and exits 3.
 
 The Claude trigger runner uses a fresh temporary project by default. Running against a real writable
@@ -301,7 +305,7 @@ python3 scripts/run_codex_trigger_eval.py \
   --skill-path skills/spec-authoring \
   --eval-set tests/skills/evals/spec-authoring.json \
   --smoke \
-  --model gpt-5.4-mini \
+  --model gpt-5.6-luna \
   --reasoning-effort low \
   --transcript-dir tests/artifacts/codex-trigger
 ```
@@ -320,6 +324,8 @@ python3 scripts/run_all_trigger_evals.py --runtime claude --smoke          # all
 python3 scripts/run_all_trigger_evals.py --runtime both   --smoke          # both runtimes
 python3 scripts/run_all_trigger_evals.py --runtime both --skill spec-authoring --smoke  # single skill
 ```
+
+The batch pins model and effort for every row: Claude `--claude-model` (default `haiku`), Codex `--codex-model` (default `gpt-5.6-luna`), and `--reasoning-effort` (default `low`), which goes to Claude Code as `--effort` and to Codex as `model_reasoning_effort`.
 
 #### Runs and majority voting
 
@@ -363,6 +369,8 @@ Run live when the Claude CLI/runtime is available:
 python3 scripts/run_behavior_eval.py --eval-set tests/skills/behavior/completion-claim-gate.json
 ```
 
+`--model` and `--effort` pin the Claude Code model and `--effort` level. Without `--effort` the profile's `settings.json` `effortLevel` decides, and the output says `effort=profile-default`.
+
 If `claude` is missing, allow the eval to skip instead of fail:
 
 ```bash
@@ -399,6 +407,8 @@ Behavior evals should move toward **transcript JSONL** checks for evidence such 
 | Dry-run / schema | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --dry-run` | Validate the eval fixture without running a model. |
 | Transcript | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --transcript tests/fixtures/transcripts/agentic-sdlc-pipeline-procedure-pass.jsonl` | Evaluate a captured transcript deterministically. |
 | Live | `python3 scripts/run_procedure_eval.py --eval-set tests/skills/procedure/agentic-sdlc-pipeline.json --live --allow-fixture-commit --max-budget-usd 5.00` | Run the prompt through Claude Code in an isolated copied fixture and evaluate the resulting transcript. |
+
+Live mode passes `--effort <level>` to Claude Code when given; without it the profile's `settings.json` `effortLevel` decides. The Claude stream does not record effort, so the evidence packet's `effort` stays `unrecorded` either way: name the level on the command line and in the ledger row.
 
 Live mode defaults to `--permission-mode auto` so safe headless commands can run without an interactive prompt. Override it only when intentionally auditing permission behavior. In `-p`, that mode still launches subagents in the background ([sub-agents](https://code.claude.com/docs/en/sub-agents), fetched 2026-10-07). Since 2.1.271 the strict grader reads an implementation-auditor verdict from a parsed `SubagentHandback` whose parent is that auditor, not from the main loop's later text ([tools-reference](https://code.claude.com/docs/en/tools-reference), fetched 2026-10-07). A launch receipt is not a verdict; with none, the grader reports `strict_auditor_verdict_unobservable`. A `Skill`, test run, or spec write that carries `parent_tool_use_id` does not satisfy a main-loop requirement. The runner drops `CLAUDE_CODE_SIMPLE` from the Claude child environment. `python3 scripts/run_procedure_eval.py --live` now requires `--allow-fixture-commit`, the consent for the baseline commit the harness creates inside the isolated fixture copy; without it the eval exits 2 before creating a temporary directory, running Git or starting a model.
 

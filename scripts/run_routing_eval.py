@@ -254,6 +254,9 @@ def run_claude(
     ]
     if args.model:
         cmd += ["--model", args.model]
+    effort = getattr(args, "reasoning_effort", None)
+    if effort:
+        cmd += ["--effort", effort]
     if args.max_turns:
         cmd += ["--max-turns", str(args.max_turns)]
     if args.max_budget_usd:
@@ -549,9 +552,10 @@ def run_loaded_eval(
         "router": ROUTER,
         "runs_per_scenario": args.runs,
         "semantics": "route-classifier" if args.runtime == "codex" else "live Skill routing",
+        "reasoning_effort": getattr(args, "reasoning_effort", None),
+        # --smoke and --scenario-limit run a prefix; scenarios_passed alone would read 1/1 as "all".
+        "scenarios_run": f"{len(scenarios)}/{getattr(args, 'scenarios_total', len(scenarios))}",
     }
-    if args.runtime == "codex":
-        fields["reasoning_effort"] = args.reasoning_effort
 
     errors: list[str] = []
     passed = 0
@@ -618,7 +622,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-set", required=True, type=Path)
     parser.add_argument("--runtime", choices=("codex", "claude"), default="codex")
     parser.add_argument("--model")
-    parser.add_argument("--reasoning-effort", default="high")
+    parser.add_argument(
+        "--reasoning-effort",
+        default="high",
+        help="Codex model_reasoning_effort, and Claude Code --effort on --runtime claude, so the profile's "
+        "own default never decides the measurement.",
+    )
     parser.add_argument(
         "--runs",
         type=int,
@@ -678,6 +687,7 @@ def main(argv: list[str] | None = None) -> int:
         args.transcript_dir = args.transcript_dir.resolve()
 
     try:
+        args.scenarios_total = len(load_scenarios(args.eval_set))
         scenarios = load_scenarios(args.eval_set, args.scenario_limit, args.scenario_index)
         skills = load_skills(args.skills_dir)
     except (OSError, ValueError, json.JSONDecodeError) as exc:

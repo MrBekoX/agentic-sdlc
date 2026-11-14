@@ -54,10 +54,12 @@ def load_eval(path: Path) -> list[dict]:
     return cases
 
 
-def run_claude(prompt: str, cwd: Path, timeout: int, model: str | None) -> str:
+def run_claude(prompt: str, cwd: Path, timeout: int, model: str | None, effort: str | None = None) -> str:
     cmd = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose"]
     if model:
         cmd += ["--model", model]
+    if effort:
+        cmd += ["--effort", effort]
     env = {key: value for key, value in os.environ.items() if key != "CLAUDE_CODE_SIMPLE"}
     proc = subprocess.run(
         cmd,
@@ -116,6 +118,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-writable-project", action="store_true")
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--model")
+    parser.add_argument(
+        "--effort",
+        help="Claude Code --effort level (low|medium|high|xhigh|max). Unset, the profile's settings.json "
+        "effortLevel decides and the output says effort=profile-default.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--allow-missing-claude", action="store_true")
     args = parser.parse_args(argv)
@@ -144,10 +151,11 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="agentic-sdlc-behavior-") as td:
         project_root = args.project_root.resolve() if args.project_root else Path(td)
         for case in cases:
-            transcript = run_claude(case["prompt"], project_root, args.timeout, args.model)
+            transcript = run_claude(case["prompt"], project_root, args.timeout, args.model, effort=args.effort)
             errors.extend(check_case(case, transcript))
     for err in errors:
         print(f"error={err}")
+    print(f"effort={args.effort or 'profile-default'}")
     print(f"cases={len(cases)}")
     print("behavior_eval=failed" if errors else "behavior_eval=passed")
     return 1 if errors else 0
