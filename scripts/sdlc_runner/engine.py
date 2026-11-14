@@ -422,6 +422,9 @@ def _preview_changed(original: dict, now: dict) -> bool:
 
 def _finish(ctx, original, kind, step, extra, code) -> Outcome:
     if ctx.write:
+        # Stamped before the walk (so the validators see a runner status) and again after it, so
+        # each lifecycle status reaches the files in the call that reaches it (`approved` included).
+        stamp(ctx)
         if ctx.state != original:
             state_mod.save(ctx.pkg, ctx.state)
     else:

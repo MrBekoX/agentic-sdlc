@@ -294,8 +294,10 @@ def render(ctx, outcome_kind, step, extra=None) -> str:
     room = CARD_BUDGET - fixed - 2  # the two line breaks around the body
     body = _cut(body, max(room, 0), cut_path or os.path.join(str(ctx.pkg), "state.json"))
     text = "\n".join(head + [opener, body, closer] + tail + [final]) + "\n"
-    if _size(text) > CARD_BUDGET:  # a header that alone overflows: keep the frame
-        text = "\n".join(head[:6] + [opener, "[cut]", closer, final]) + "\n"
+    if _size(text) > CARD_BUDGET:  # a header that alone overflows: keep the fixed lines and say where to read
+        where = cut_path or str(ctx.pkg)
+        notice = '[cut: the card header alone is over the budget; read the step at "%s"]' % where
+        text = "\n".join(head[:5] + [opener, notice, closer, final]) + "\n"
     return text
 
 

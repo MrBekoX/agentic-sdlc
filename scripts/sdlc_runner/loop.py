@@ -494,16 +494,28 @@ def _reset_progress(ctx, step) -> None:
     ctx.state["no_progress"] = {"step": step["id"], "world": engine.world_fp(ctx, step), "count": 1}
 
 
-def _archive(ctx, visit) -> None:
-    """Move the loop files of an earlier visit to draft/visit-<n>/ (inside the package)."""
+def _draft_folder(ctx, *parts) -> Path:
+    """`draft/` (or a folder below it) of the package, refused when it or a folder on the way is a
+    symlink or a junction: a rename there would move a file outside the package."""
     from .textio import is_link_like
 
-    draft = Path(ctx.pkg) / "draft"
-    if is_link_like(draft):
-        raise SdlcError(2, "linked_path:draft")
+    current = Path(ctx.pkg) / "draft"
+    names = ["draft"]
+    for part in ("",) + parts:
+        if part:
+            current = current / part
+            names.append(part)
+        if is_link_like(current):
+            raise SdlcError(2, "linked_path:%s" % "/".join(names))
+    return current
+
+
+def _archive(ctx, visit) -> None:
+    """Move the loop files of an earlier visit to draft/visit-<n>/ (inside the package)."""
+    draft = _draft_folder(ctx)
     if not draft.is_dir():
         return
-    target = draft / ("visit-%s" % visit)
+    target = _draft_folder(ctx, "visit-%s" % visit)
     for entry in sorted(draft.iterdir()):
         if entry.name.startswith("visit-"):
             continue
@@ -564,6 +576,7 @@ def next_role(ctx, step, write: bool):
     if found[0] == "invalid":
         round_no = found[1]
         if write:
+            _draft_folder(ctx)
             path = _abs(ctx, _file(definition, "critic", "critic", round_no))
             aside = path.with_name("critic.r%d.rejected-%d.json" % (round_no, int(loop.get("role_visits") or 0) + 1))
             try:

@@ -120,6 +120,19 @@ class TestApprove(GateCase):
         self.assertEqual((record["source"], record["gate"]), ("original-request", "review"))
         self.assertEqual(record["critic"], "none")
 
+    def test_original_request_quote_needs_whole_words(self):
+        self.request.write_bytes(PREAPPROVAL.encode("utf-8"))
+        self.start()
+        text = self.gate()
+        for quote, needle in (("e", "error=quote_too_short"), ("ahead", "error=quote_too_short"),
+                              ("head without ask", "error=quote_not_in_request"),
+                              ("go ahead withou", "error=quote_not_in_request")):
+            with self.subTest(quote=quote):
+                code, out = self.approve(text, source="original-request", quote=quote, expect=4)
+                self.assertIn(needle, out)
+        self.assertEqual(self.approvals(), [])
+        self.approve(text, source="original-request", quote="Go ahead")
+
     def test_original_request_quote_nfc_casefold(self):
         request = unicodedata.normalize("NFD", "Raporu dışa aktar. ĞÜŞİ dosyasını onaylıyorum, devam et.\n")
         self.request.write_bytes(request.encode("utf-8"))

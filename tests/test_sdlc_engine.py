@@ -618,14 +618,13 @@ class TestEngine(EngineCase):
         self.assertEqual(card_fields(text)["state"], "wait-gate")  # the validator passed in this same next
         meta, body, had_block = frontmatter.split((self.pkg() / "spec" / "demo.md").read_text(encoding="utf-8"))
         self.assertTrue(had_block)
-        self.assertEqual(meta, {"work_id": "demo", "status": "draft"})
+        # Stamped `draft` before the validator ran, then `reviewed` once this call marked the draft done.
+        self.assertEqual(meta, {"work_id": "demo", "status": "reviewed"})
         self.assertEqual(body, SPEC_BODY)
         plan_meta = frontmatter.split((self.pkg() / "plan" / "demo.md").read_text(encoding="utf-8"))[0]
         self.assertEqual(plan_meta, {"work_id": "demo", "spec": "../spec/demo.md", "branch": "main",
-                                     "flow": "engine", "status": "draft"})
-        self.next()
-        meta = frontmatter.split((self.pkg() / "spec" / "demo.md").read_text(encoding="utf-8"))[0]
-        self.assertEqual(meta["status"], "reviewed")
+                                     "flow": "engine", "status": "reviewed"})
+        self.assertEqual(self.state()["stamps"], {"spec/demo.md": "reviewed", "plan/demo.md": "reviewed"})
 
     def test_foreign_status_fails_check(self):
         self.start()
@@ -699,6 +698,13 @@ class TestEngine(EngineCase):
         self.put(report, "# Security review\n\nFinding 5: still there.\nVerdict: fail\n")
         code, text = self.next(expect=3)
         self.assertIn("fix-round cap reached: security", text)
+        # The cap is the package's own copy of _shared.caps.fix_rounds; only the user's quote raises it.
+        code, text = self.sdlc("resume", "--raise-cap", "fix-rounds", "--quote", "Three more rounds.")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.state()["fix_round_cap"], 6)
+        self.put(report, "# Security review\n\nFinding 6.\nVerdict: fail\n")
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "security")
 
     def test_external_records_another_process_for_draft(self):
         self.start()

@@ -252,6 +252,15 @@ class TestStopRules(LoopCase):
         self.assertEqual(textio.read_json(self.draft("loop.json"))["critic"], ["fresh"])
         self.assertEqual(self.state()["loop"]["stop_reason"], "clean")
         self.assertEqual(self.records("round")[-1]["stop"], "clean")
+        # Each status of the lifecycle reaches the file in the call that reaches it.
+        self.assertEqual(frontmatter.split((self.pkg() / "spec" / "demo.md").read_text(encoding="utf-8"))[0]["status"],
+                         "reviewed")
+        self.approve(text)
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "branch")
+        for name in ("spec", "plan"):
+            meta = frontmatter.split((self.pkg() / name / "demo.md").read_text(encoding="utf-8"))[0]
+            self.assertEqual(meta["status"], "approved", name)
 
     def test_clean_critic_but_validator_errors_continues(self):
         self.to_draft()
@@ -429,6 +438,19 @@ class TestIngest(LoopCase):
                          ("claude-workflow", "clean", SPEC_BODY))
         code, text = self.next()
         self.assertEqual(card_fields(text)["state"], "wait-gate", text)
+
+    @unittest.skipIf(sys.platform == "win32", "symlinks need extra rights on Windows")
+    def test_linked_draft_folder_is_refused(self):
+        self.to_draft()
+        self.authors(0)
+        outside = self.tmp / "outside-draft"
+        self.draft("").rename(outside)
+        self.draft("").symlink_to(outside, target_is_directory=True)
+        (outside / "critic.r1.json").write_bytes(b"not JSON\n")
+        code, out = self.next(expect=2)  # setting the malformed critic aside would move a file outside the package
+        self.assertIn("error=linked_path:draft", out)
+        self.assertTrue((outside / "critic.r1.json").is_file())
+        self.assertEqual(list(outside.glob("critic.r1.rejected-*.json")), [])
 
     def test_reject_feedback_starts_new_loop_visit(self):
         self.to_draft()

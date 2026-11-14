@@ -48,6 +48,23 @@ def normalise_quote(text) -> str:
     return " ".join(unicodedata.normalize("NFC", str(text or "")).split()).casefold()
 
 
+MIN_PREAPPROVAL_CHARS = 8
+_WORD = r"[^\W_]"
+
+
+def quote_in_request(quote, request) -> bool:
+    """True when the normalised quote occurs in the normalised request as whole words.
+
+    SdlcError(4, "quote_too_short") under MIN_PREAPPROVAL_CHARS characters: a letter or a lone word
+    such as "ok" occurs in almost any request and would pre-approve anything.
+    """
+    wanted = normalise_quote(quote)
+    if len(wanted) < MIN_PREAPPROVAL_CHARS:
+        raise SdlcError(4, "quote_too_short (at least %d characters of the request)" % MIN_PREAPPROVAL_CHARS)
+    pattern = r"(?<!%s)%s(?!%s)" % (_WORD, re.escape(wanted), _WORD)
+    return re.search(pattern, normalise_quote(request)) is not None
+
+
 def _quote(args) -> str:
     """The masked quote from --quote or --quote-file (UTF-8; SdlcError(2, not_utf8:...))."""
     if getattr(args, "quote_file", None):
@@ -196,8 +213,8 @@ def approve(ctx, gate, fingerprint, quote, source, out=None) -> int:
             request = read_text(Path(ctx.pkg) / "request.md")
         except (OSError, SdlcError):
             raise SdlcError(2, "request_unreadable") from None
-        if normalise_quote(quote) not in normalise_quote(request):
-            raise SdlcError(4, "quote_not_in_request")
+        if not quote_in_request(quote, request):
+            raise SdlcError(4, "quote_not_in_request (whole words of the stored request)")
         problem = _preapproval_problem(sidecars)
         if problem:
             raise SdlcError(4, problem)

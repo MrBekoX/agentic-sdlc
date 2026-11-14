@@ -138,6 +138,27 @@ class TestCli(EngineCase):
         self.assertRegex(text.splitlines()[-1], CHAIN_LINE)
         self.assertIn(" then=", text.splitlines()[-1])
 
+    def test_card_header_over_budget_keeps_the_frame(self):
+        from types import SimpleNamespace
+
+        from sdlc_runner import card
+
+        step = {"id": "context", "file": "skills/fixture/steps/context.md", "inputs": [],
+                "outputs": ["evidence/%s%03d.md" % ("x" * 60, n) for n in range(200)],
+                "done_when": [{"check": "exists", "path": "context.md"}]}
+        state = {"slug": "demo", "work_id": "demo", "flow": "engine", "form": "gated", "risk": "normal",
+                 "work_type": "feature", "transitions": 1, "transition_cap": 60,
+                 "steps": {"context": {"visits": 1, "max_visits": 3}}}
+        ctx = SimpleNamespace(root=self.root, pkg=self.pkg(), project=self.project, state=state,
+                              flow={"steps": [step]}, shared={})
+        text = card.render(ctx, "do", step, {})
+        self.assertLessEqual(len(text.encode("utf-8")), CARD_BUDGET)
+        self.assertIn('[cut: the card header alone is over the budget; read the step at "%s"]'
+                      % (self.root / "skills" / "fixture" / "steps" / "context.md"), text)
+        self.assertEqual(card_fields(text)["step"], "context")
+        self.assertRegex(text.splitlines()[-1], CHAIN_LINE)
+        self.assertIn(" then=", text.splitlines()[-1])
+
     def test_card_untrusted_text_after_data_line(self):
         self.start()
         self.advance_to("review")
