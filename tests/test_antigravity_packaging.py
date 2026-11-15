@@ -80,7 +80,7 @@ class TestAntigravityPackaging(unittest.TestCase):
             plugin_root.mkdir(parents=True)
 
             shutil.copy2(self.manifest_path, plugin_root / "plugin.json")
-            for dirname in ("skills", "contracts", "scripts", "assets", "commands", "workflows"):
+            for dirname in ("skills", "contracts", "scripts", "flows", "assets", "commands", "workflows"):
                 shutil.copytree(REPO / dirname, plugin_root / dirname)
             (plugin_root / "docs").mkdir(parents=True, exist_ok=True)
             for doc_name in ("runtime-adapter.md", "zcode-runtime-adapter.md"):
@@ -123,6 +123,9 @@ class TestAntigravityPackaging(unittest.TestCase):
             "October 19, 2026",
             "Not a supported release target",
             "hooks.json",
+            # The staging commands copy the runner's flows/ next to scripts/, as the staged-plugin test does.
+            'cp -R skills contracts scripts flows assets commands LICENSE "$TARGET/"',
+            '@("skills", "contracts", "scripts", "flows", "assets", "commands", "LICENSE")',
         ):
             with self.subTest(readme_required=required):
                 self.assertIn(required, self.readme)

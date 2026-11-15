@@ -784,7 +784,7 @@ class TestDeterministicLayout(ScratchTestCase):
         self.assertEqual(hashlib.sha256(out.read_bytes()).hexdigest(), GOLDEN_ARCHIVE_SHA256)
 
 
-BR24_ROOTS = (".codex-plugin/", "skills/", "contracts/skills/", "scripts/", "assets/")
+BR24_ROOTS = (".codex-plugin/", "skills/", "contracts/skills/", "scripts/", "assets/", "flows/")
 FORBIDDEN_SKILLS_ONLY_ROOTS = ("hooks", "commands", "agents", "workflows", ".claude-plugin", "docs", "tests")
 
 
@@ -797,6 +797,7 @@ class TestSkillsOnlyBuild(ScratchTestCase):
             "contracts/skills/00-global.md": b"# contract\n",
             "scripts/tool.py": b"print('tool')\n",
             "assets/logo.png": b"\x89PNG\r\n",
+            "flows/x.json": b"{}\n",
             "LICENSE": b"MIT\n",
         }
 
@@ -888,9 +889,11 @@ class TestSkillsOnlyBuild(ScratchTestCase):
         self.assertEqual([n for n in names if n.rsplit("/", 1)[-1] == ".mcp.json"], [])
         committed = _git_bytes(REPO, "ls-tree", "-r", "-z", "--name-only", "--full-tree", "HEAD").decode("utf-8")
         base = {p for p in committed.split("\0") if p and (
-            p == "LICENSE" or p.startswith(("skills/", "contracts/skills/", "assets/"))
+            p == "LICENSE" or p.startswith(("skills/", "contracts/skills/", "assets/", "flows/", "scripts/sdlc_runner/"))
             or p in {".codex-plugin/plugin.json", "scripts/detect_context.py",
-                     "scripts/validate_artifacts.py", "scripts/resolve_work_package.py"})}
+                     "scripts/validate_artifacts.py", "scripts/resolve_work_package.py", "scripts/sdlc.py"})}
+        self.assertIn("flows/loops/spec-plan.json", base)
+        self.assertIn("scripts/sdlc_runner/cli.py", base)
         references = "skills/using-agentic-sdlc/references"
         expected = base | {f"{references}/roles/{role}.md" for role in (
             "code-reviewer", "context-analyst", "debugger", "implementation-auditor", "security-reviewer",

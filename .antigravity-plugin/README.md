@@ -28,7 +28,7 @@ Antigravity discovers plugins from:
 
 ### Stage an isolated Antigravity plugin directory
 
-From the repository root, stage the single-source skills, contracts, runtime helpers, assets, and commands alongside `.antigravity-plugin/plugin.json` as `<plugin-root>/plugin.json`:
+From the repository root, stage the single-source skills, contracts, runtime helpers (the flow runner `scripts/sdlc.py` included), the runner's `flows/` manifests, assets, and commands alongside `.antigravity-plugin/plugin.json` as `<plugin-root>/plugin.json`:
 
 ```bash
 # Example target: <workspace>/.agents/plugins/agentic-sdlc
@@ -36,7 +36,7 @@ From the repository root, stage the single-source skills, contracts, runtime hel
 TARGET="<workspace>/.agents/plugins/agentic-sdlc"
 mkdir -p "$TARGET"
 cp .antigravity-plugin/plugin.json "$TARGET/plugin.json"
-cp -R skills contracts scripts assets commands LICENSE "$TARGET/"
+cp -R skills contracts scripts flows assets commands LICENSE "$TARGET/"
 ```
 
 ```powershell
@@ -44,7 +44,7 @@ cp -R skills contracts scripts assets commands LICENSE "$TARGET/"
 $Target = "<workspace>\.agents\plugins\agentic-sdlc"
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
 Copy-Item ".antigravity-plugin\plugin.json" (Join-Path $Target "plugin.json") -Force
-foreach ($item in @("skills", "contracts", "scripts", "assets", "commands", "LICENSE")) {
+foreach ($item in @("skills", "contracts", "scripts", "flows", "assets", "commands", "LICENSE")) {
     Copy-Item $item $Target -Recurse -Force
 }
 ```

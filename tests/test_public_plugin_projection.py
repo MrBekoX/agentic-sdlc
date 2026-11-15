@@ -19,7 +19,15 @@ RUNTIME_HELPERS = {
     "scripts/detect_context.py",
     "scripts/validate_artifacts.py",
     "scripts/resolve_work_package.py",
+    "scripts/sdlc.py",
 }
+# The flow runner's package ships whole next to `scripts/sdlc.py` (runner contract §1). A new
+# runner module joins this list in the change that adds it.
+RUNNER_MODULES = {f"scripts/sdlc_runner/{name}.py" for name in (
+    "__init__", "textio", "paths", "lock", "logs", "frontmatter", "gitinfo", "fingerprint", "mask",
+    "schema", "manifest", "state", "probes", "checks", "engine", "card", "strategy", "loop",
+    "runexec", "gates", "flowops", "cli",
+)}
 
 
 class TestPublicPluginProjection(unittest.TestCase):
@@ -107,7 +115,7 @@ class TestPublicPluginProjection(unittest.TestCase):
 
     def test_public_runtime_helpers_have_no_missing_imports(self):
         members = self.projected()
-        self.assertEqual({p for p in members if p.startswith("scripts/")}, RUNTIME_HELPERS)
+        self.assertEqual({p for p in members if p.startswith("scripts/")}, RUNTIME_HELPERS | RUNNER_MODULES)
         self.assertNotIn("scripts/build_release.py", members)
         self.assertNotIn("scripts/check_all.py", members)
         with tempfile.TemporaryDirectory() as directory:
@@ -146,6 +154,43 @@ class TestPublicPluginProjection(unittest.TestCase):
         with self.assertRaises(build_release.ReleaseError) as raised:
             self.projected(source)
         self.assertIn("error=public_dependency_missing:agents/spec-plan-critic.md", raised.exception.lines)
+
+    def test_loop_role_without_public_role_file_fails_closed(self):
+        # The runner reads loop roles from the public role folder when agents/ is absent, so a loop
+        # role that the projection does not copy there must stop the build, not ship a broken loop.
+        source = copy.deepcopy(self.source)
+        path = "flows/loops/spec-plan.json"
+        definition = json.loads(source[path][1])
+        definition["roles"]["critic"]["agent"] = "unlisted-critic"
+        source[path] = ("100644", json.dumps(definition).encode("utf-8"))
+        source["agents/unlisted-critic.md"] = ("100644", b"---\nname: unlisted-critic\n---\nYou are a critic.\n")
+        with self.assertRaises(build_release.ReleaseError) as raised:
+            self.projected(source)
+        self.assertIn("error=public_role_missing:unlisted-critic", raised.exception.lines)
+        source[path] = ("100644", b"{not json")
+        with self.assertRaises(build_release.ReleaseError) as raised:
+            self.projected(source)
+        self.assertIn(f"error=public_dependency_unreadable:{path}", raised.exception.lines)
+
+    def test_malformed_loop_definition_fails_closed(self):
+        # A loop whose roles cannot be read cannot be checked against the public role files, so the
+        # build stops instead of shipping a loop the runner would refuse at load time.
+        path = "flows/loops/spec-plan.json"
+        good = json.loads(self.source[path][1])
+        broken = {
+            "not an object": [],
+            "roles not an object": dict(good, roles=["critic"]),
+            "role not an object": dict(good, roles=dict(good["roles"], critic="spec-plan-critic")),
+            "agent missing": dict(good, roles=dict(good["roles"], critic={"inline": True})),
+            "agent not a string": dict(good, roles=dict(good["roles"], critic={"agent": 7})),
+        }
+        for label, definition in broken.items():
+            with self.subTest(label):
+                source = copy.deepcopy(self.source)
+                source[path] = ("100644", json.dumps(definition).encode("utf-8"))
+                with self.assertRaises(build_release.ReleaseError) as raised:
+                    self.projected(source)
+                self.assertIn(f"error=public_loop_invalid:{path}", raised.exception.lines)
 
     def test_generated_reference_collision_fails_closed(self):
         for path in (f"{REFERENCE_ROOT}/public-runtime.md", f"{REFERENCE_ROOT}/roles/spec-plan-critic.md"):

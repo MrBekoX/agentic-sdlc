@@ -143,8 +143,9 @@ def portability_errors(members: dict[str, bytes]) -> list[str]:
 
 
 def runtime_members(root: Path) -> dict[str, bytes]:
+    # `flows/` is the flow runner's (scripts/sdlc.py) manifests, read from the plugin root at run time.
     result = {}
-    for directory in ('hooks', 'scripts', 'skills', 'contracts', 'agents', 'commands', 'assets',
+    for directory in ('hooks', 'scripts', 'skills', 'contracts', 'agents', 'commands', 'assets', 'flows',
                       *(path.split('/')[0] for path in MANIFESTS)):
         for path in (root / directory).rglob('*'):
             if path.is_file() and '__pycache__' not in path.parts:

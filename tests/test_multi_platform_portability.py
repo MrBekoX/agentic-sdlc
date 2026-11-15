@@ -26,7 +26,7 @@ def package_bytes(root):
     # Only runtime payload, no .git, maintainer settings or historical transcripts.
     result = {}
     for directory in ('hooks', 'scripts', 'skills', 'contracts', 'agents', 'commands',
-                      'assets', *('.' + name + '-plugin' for name in MANIFESTS)):
+                      'assets', 'flows', *('.' + name + '-plugin' for name in MANIFESTS)):
         for path in (root / directory).rglob('*'):
             if path.is_file() and '__pycache__' not in path.parts:
                 result[path.relative_to(root).as_posix()] = path.read_bytes()
@@ -50,6 +50,17 @@ class TestPortablePackage(unittest.TestCase):
 
     def test_runtime_dependency_closure(self):
         self.assertEqual(load_checker().portability_errors(package_bytes(REPO)), [])
+
+    def test_runtime_members_carry_the_runner_and_flows(self):
+        # The source harness and the native lifecycle copy read the package through runtime_members;
+        # the runner reads flows/ from its own root, so a package view without flows/ is not the package.
+        members = load_checker().runtime_members(REPO)
+        flows = {p.relative_to(REPO).as_posix() for p in (REPO / 'flows').rglob('*') if p.is_file()}
+        self.assertIn('flows/loops/spec-plan.json', flows)
+        self.assertEqual({p for p in members if p.startswith('flows/')}, flows)
+        for path in ('scripts/sdlc.py', 'scripts/sdlc_runner/cli.py', 'scripts/sdlc_runner/loop.py'):
+            with self.subTest(path=path):
+                self.assertIn(path, members)
 
     def test_missing_handler_is_detected(self):
         data = package_bytes(REPO)

@@ -67,6 +67,7 @@ These variables are set only in hook processes. None reaches the model's Bash or
 | `hooks/` | Deterministic guard scripts, active-flow evidence rules, and runtime hook wiring. |
 | `commands/` | Manual slash-command definitions such as `/agentic-sdlc:git-safety-check`. |
 | `scripts/` | Deterministic probes, validators, eval runners, version helpers, and review-package helpers. |
+| `flows/` | The middleware-chain runner's JSON flows, its spec/plan loop definition (`flows/loops/`) and schemas (`flows/schemas/`). `scripts/sdlc.py` reads them from the plugin root. |
 | `tests/` | Unit tests, harness, fixtures, golden references, and eval seeds. |
 | `.claude-plugin/` / `.codex-plugin/` / `.kimi-plugin/` / `.zcode-plugin/` / `.grok-plugin/` | Runtime manifests and runtime README files. The root `marketplace.json` (ZCode) and `marketplace-kimi.json` (Kimi Code) are the other catalogs. |
 
@@ -174,7 +175,7 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | `install_cursor_plugin.py` | Copy, update or uninstall the package in Cursor's local plugin directory. Update and uninstall keep files the installer did not write. |
 | `prepare_marketplace_release.py` | Export validated committed source and deterministic Grok/ZCode catalog packets to a new local destination, with separate producer/source provenance and byte verification; no publication or original Git mutation. |
 | `detect_context.py` | Workspace/dependency/toolchain classification. |
-| `sdlc.py` | Entry point of the middleware-chain runner (`scripts/sdlc_runner/`): starts a flow, prints one step card at a time, records runs and transitions in the work package. Under construction; no skill calls it yet. |
+| `sdlc.py` | Entry point of the middleware-chain runner (`scripts/sdlc_runner/`): starts a flow from the JSON manifests in `flows/`, prints one step card at a time, records runs and transitions in the work package. Every package ships it with `scripts/sdlc_runner/` and `flows/`, the public skills-only package included; there it reads its role files from `skills/using-agentic-sdlc/references/roles/`, because that package has no `agents/`. The staged Antigravity folder has no role files yet, so there the runner stops at its first draft card with `role_file_missing`. Under construction; no skill calls it yet. |
 | `run_trigger_eval.py` | Claude Code trigger eval runner. |
 | `run_codex_trigger_eval.py` | Codex route-classifier trigger runner. |
 | `run_all_trigger_evals.py` | Batch trigger eval runner. |
