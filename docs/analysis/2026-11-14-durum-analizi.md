@@ -171,7 +171,7 @@ Döngüler tasarımda yapısal olarak sınırlı: adım başına en fazla 3 ziya
 
 Routing'deki q3 çelişkisi (dışa aktarma endpoint'i, beklenen `feature-build`) de burada çözülüyor. Tasarımın D8 kararına göre risk akışı değil biçimi değiştiriyor: riskli yüzeyler her zaman onaylı biçimle koşuyor. Yani beklenti "`feature` akışı, onaylı biçim"; çelişki bugünkü router metninde ve Görev 17'de router yeniden yazılırken giderilecek.
 
-**Plana eklenecek maddeler.** Plan notu git'e girmiyor ve bu maddeler ona henüz eklenmedi; şimdilik burada duruyor:
+**Plana eklenen maddeler.** Bu maddeler plan notuna eklendi: Görev 17'nin kabul ölçütlerine ve yeni P6 / Görev 23 olarak. Plan notu git'e girmediği için burada da duruyor:
 
 - Görev 17 (giriş noktaları, router, `dispatch-strategy`) kabul ölçütleri:
   - Hiçbir description "This skill should be used first" ile başlamıyor; ayırt edici fiil başta; en fazla iki "Not for …" maddesi.
@@ -185,7 +185,22 @@ Routing'deki q3 çelişkisi (dışa aktarma endpoint'i, beklenen `feature-build`
   - Rapor formatı: bare komut, exit code, çıktı kuyruğu. "No coordinator agent" kuralı kalıyor; `phase-lead` yok.
   - Testler: sub-agent'ı olmayan runtime'da `delegated` reddediliyor ya da degraded kaydediliyor; delegated agent'ın başlattığı `sdlc run` `run_recorded`'ı karşılıyor, `sdlc run` dışındaki test koşusu karşılamıyor. Canlı: delegated prosedür vakası Claude Code'da geçiyor (bakımcı onayıyla).
 
-**Durum (14 Kasım).** P1'in Görev 1–4 ve 8a'sı `feat/middleware-chain` üzerinde iki yerel commit: `5b21df4` (0.6 düzeltme turu) ve `cdd0799` (runner WIP). Push edilmedi. `cdd0799`'un temiz bir WSL klonunda hızlı gate: `bump_version`, `check_all` ve `harness` exit 0; unittest 2.455 test, 1 FAIL, 20 skip. FAIL eden `test_documented_script_count_matches_repo`: yeni `scripts/sdlc.py` README ve plugin README'nin script listesinde yok. Görev 5–22 başlamadı; sıradaki iş Görev 5 (durum, motor ve CLI çekirdeği).
+**Durum (15 Kasım).** P1'in Görev 1–8 ve 8a'sı public `main`'de. PR #14 15 Kasım'da birleşti (merge commit `09db76a`) ve şu commit'leri getirdi:
+
+- `5b21df4`: 0.6 düzeltme turu.
+- `cdd0799`: runner WIP (Görev 1–4 ve 8a).
+- `30f98cd`: Görev 5 (durum, kontroller, motor, kart ve CLI çekirdeği).
+- `393509e`: Görev 6–8 (strateji, gate'ler, spec/plan döngüsü).
+- `b4da09b`: C ve D dalgalarının açık review bulguları.
+- `5a59b40` ve `5eba8a3`: iki Windows test düzeltmesi.
+
+PR'ın son commit'inde CI Ubuntu, Windows ve macOS'ta yeşil. `09db76a`'nın temiz bir WSL klonunda tam gate: `bump_version`, `check_all` ve `harness` exit 0; unittest 2.563 test, OK, 20 skip. 14 Kasım'daki FAIL (`test_documented_script_count_matches_repo`) kapandı.
+
+Açık kalanlar:
+
+- Döngü sınırları (ziyaret, geçiş, ilerlemesiz tekrar, spec/plan turu, düzeltme turu) runner'da uygulandı ve birim testleriyle sınandı. Uçtan uca akış testleri Görev 9'da; canlı koşu yok.
+- `tests/test_zcode_packaging.py`, kaynağı olmayan ZCode workflow API adını takip edilen dosyalarda yasaklıyor. Runner'ın ZCode başlatma kartı bu adı yazdığı için tarama `scripts/sdlc_runner/loop.py` ve `tests/test_sdlc_loop.py`'yi geçici olarak muaf tutuyor; Görev 13 bu taramayı resmi adı sabitleyen testlerle değiştirecek.
+- Sıradaki iş Görev 9 (E dalgası: uçtan uca akışlar, paketleme ve P1 gate'i). Görev 10–23 başlamadı.
 
 ## Claude Code uygulama planı
 
