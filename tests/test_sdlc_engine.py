@@ -67,17 +67,24 @@ PLAN_BODY = (
 )
 
 
+# Header lines whose value is a runnable command. A command quotes its paths for the shell the
+# model runs it in (`"C:\...\python.exe"` on Windows), so it is never read as a JSON string.
+COMMAND_KEYS = ("then", "confirm", "launch")
+
+
 def card_fields(text: str) -> dict:
     """`key=value` pairs of a card's header (the lines before the first `---` line).
 
-    A quoted value is a JSON string; `then=` holds a command and is kept raw. First one wins.
+    A quoted value is a JSON string; a command line (COMMAND_KEYS) is kept raw to the end of the
+    line. First one wins.
     """
     found = {}
     for line in text.splitlines():
         if line.startswith("---"):
             break
-        if line.startswith("then="):
-            found.setdefault("then", line[len("then="):])
+        key, sep, rest = line.partition("=")
+        if sep and key in COMMAND_KEYS:
+            found.setdefault(key, rest)
             continue
         for match in re.finditer(r'([a-z_][a-z0-9_.-]*)=("(?:[^"\\]|\\.)*"|\S+)', line):
             key, value = match.group(1), match.group(2)
@@ -403,6 +410,20 @@ class TestStartWithoutGit(EngineCase):
 # ---------------------------------------------------------------------------------------------
 
 class TestEngine(EngineCase):
+    def test_command_lines_read_raw_with_a_windows_interpreter(self):
+        # The Windows CI run of b4da09b could not read the strategy card: `confirm=` holds a
+        # runnable command whose interpreter path is quoted for cmd.exe ("C:\...\python.exe"), which
+        # is not a JSON string. A command line is read raw to the end of the line, like `then=`.
+        from sdlc_runner import card as card_mod
+        python = r"C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe"
+        with mock.patch.object(card_mod, "_WINDOWS", True), mock.patch.object(sys, "executable", python):
+            code, text = self.start()
+        fields = card_fields(text)
+        self.assertEqual(fields["step"], "strategy", text)
+        for key in ("then", "confirm"):
+            with self.subTest(key=key):
+                self.assertTrue(fields[key].startswith('"%s" -B "' % python), fields[key])
+
     def test_first_card_is_strategy(self):
         self.write("src/wip.py", b"x = 1\n")  # the user's uncommitted work before start
         self.request.write_bytes(("Add a CSV export to the report page (ref %s).\n" % FAKE_TOKEN).encode("utf-8"))

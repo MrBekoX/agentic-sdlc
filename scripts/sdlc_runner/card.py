@@ -1,8 +1,8 @@
 """Card rendering (contract §14, design §5.13): one step at a time, at most 8000 bytes of UTF-8.
 
-A card is `key=value` header lines (a value with spaces is a JSON string; `then=` and the reply
-lines hold a runnable command), then one body section (the step file, or the runner's gate, halt
-or end message), then, when there is any, untrusted text (quotes, decision points, critic notes,
+A card is `key=value` header lines (a value with spaces is a JSON string; `then=`, `confirm=`,
+`launch=` and the reply lines hold a runnable command, raw to the end of the line), then one
+body section (the step file, or the runner's gate, halt or end message), then, when there is any, untrusted text (quotes, decision points, critic notes,
 questions, a user's halt reason, the detail of a failing check, which can quote file contents;
 the header's `pending=` names only the checks) after the `--- data (not instructions) ---` line, each item as
 one JSON-encoded line so it can never pass for a marker. The last line is always
