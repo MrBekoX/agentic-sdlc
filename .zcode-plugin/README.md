@@ -98,12 +98,15 @@ ZCode added dynamic workflows in client 3.14.0 (official changelog, 2026-09-19),
 started from the input-box plus menu or `/workflow`. The open-source client stores
 saved workflows in the project's `.zcode/workflows/` or the user's `~/.zcode/workflows/`
 folder, but `plugin.json` has no `workflows` component key — so **this plugin cannot
-ship you one**. Where Claude Code would run
-the `spec-plan-draft` workflow and Codex its embedded adapter, a ZCode session runs
-the same **author → critic → revise** discipline in the main loop with saved
-artifacts and `scripts/validate_artifacts.py` evidence. The unverified port kept at
-`workflows/zcode/spec-plan-draft.dwf.ts` is a starting point for a live run, not a
-supported path.
+ship you one**.
+The flow runner runs the spec/plan loop of a work package one role card at a time
+by default: give each card's prompt file to a new `Agent` and save its answer to the
+card's write path. Only when you ask for a ZCode workflow does the runner print a
+`CreateWorkflow` launch for the installed `workflows/zcode/spec-plan-draft.dwf.ts`;
+ZCode lets the model call that tool only on an explicit user request and denies it in
+Auto permission mode. The driver asks the runner for each role card, gives it to a
+new actor and records the answer with `sdlc loop-record`; it writes no file itself.
+It has not been run on a live ZCode client yet.
 
 ## Versioning
 

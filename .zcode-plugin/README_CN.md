@@ -83,11 +83,13 @@ Claude 与 Codex 的 Hook 文件（`hooks-claude.json`、`hooks-codex.json`）�
 ZCode 在客户端 3.14.0 中新增了动态工作流（官方更新日志，2026-09-19），可从输入框加号
 菜单或 `/workflow` 启动。开源客户端把已保存的工作流存放在项目的 `.zcode/workflows/` 或用户的
 `~/.zcode/workflows/` 目录中，但 `plugin.json` 没有 `workflows` 组件键——因此**本插件无法为你
-分发工作流**。Claude Code 会运行
-`spec-plan-draft` 工作流、Codex 使用其内嵌适配器的地方，ZCode 会话在主循环中以相同的
-**作者 → 评审 → 修订**纪律运行，并保存工件和 `scripts/validate_artifacts.py` 证据。
-保留在 `workflows/zcode/spec-plan-draft.dwf.ts` 的移植版尚未验证，仅作为实机运行的起点，
-不是受支持的路径。
+分发工作流**。
+流程运行器默认逐张打印角色卡来运行工作包的 spec/plan 循环：把每张卡的提示文件交给一个新的
+`Agent`，并把它的回答保存到卡片的 write 路径。只有当你明确要求使用 ZCode 工作流时，运行器才会
+为已安装的 `workflows/zcode/spec-plan-draft.dwf.ts` 打印 `CreateWorkflow` 启动指令；ZCode
+只允许模型在用户明确要求时调用该工具，并在 Auto 权限模式下拒绝它。该驱动脚本向运行器逐张索取
+角色卡，交给新的执行者（actor），并用 `sdlc loop-record` 记录回答；它自己不写任何文件。
+它尚未在真实的 ZCode 客户端上运行过。
 
 ## 版本
 
