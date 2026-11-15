@@ -387,6 +387,32 @@ class TestGrokRunnerEngine(unittest.TestCase):
         self.assertIn("if ingest.report.exitCode == 0 {", self.code)
         self.assertNotIn('index_of("ingested=")', self.code)
 
+    def test_parity_fixes_from_the_rhai_review(self):
+        # Found by running this script under Rhai 1.27 beside the Claude engine (2026-11-16):
+        # a null coverageCheck is refused like JS refuses it, a critic answer that is not a map is
+        # asked again rather than ending the run, a refused scribe call reports its output when it
+        # gives no reason, the round number on draft-check's line is whole (round=1 is not
+        # round=12), one trailing separator on packageDir is allowed, and the round log names the stop.
+        problem = self.code.split("fn critic_problem(c) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('if "coverageCheck" in c && type_of(c.coverageCheck) != "string" {', problem)
+        self.assertIn('if type_of(answer) != "map" || answer.success != true {', self.code)
+        self.assertNotIn("type_of(answer.output)", self.code)
+        self.assertEqual(self.code.count("short(reason_of(r.report))"), 2)
+        self.assertEqual(self.code.count("has_round_line(check.report.output,"), 2)
+        line = self.code.split("fn has_round_line(output, prefix, n) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('"0123456789".index_of(output.sub_string(next, 1)) < 0', line)
+        self.assertIn("let project = project_of(pkg_one, slug);", self.code)
+        self.assertIn('stopped = ", stop " + stop_reason;', self.code)
+
+    def test_complete_is_called_only_at_the_top_level(self):
+        # complete() inside a function ends the script only on some host models; at the top level
+        # it ends it on every one, so helpers return the result map instead.
+        for name, body in re.findall(r"^fn (\w+)\([^)]*\) \{\n(.*?)^\}", self.code, re.M | re.S):
+            with self.subTest(fn=name):
+                self.assertNotIn("complete(", body)
+        self.assertIn("fn failure(message) {", self.code)
+        self.assertGreater(self.code.count("complete(failure("), 15)
+
 
 if __name__ == "__main__":
     unittest.main()

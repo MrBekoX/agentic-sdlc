@@ -16,8 +16,10 @@ let meta = #{
 // `ingest-draft --assemble` ends it; the runner believes only what the round files back.
 // Rhai functions see no outer variables, so every helper takes what it needs as arguments.
 
-fn fail(message) {
-    complete(#{ ingested: false, stopReason: "", rounds: 0, error: message });
+// complete() is called only at the top level, which ends the script on every host model; a
+// helper builds the failed result instead.
+fn failure(message) {
+    #{ ingested: false, stopReason: "", rounds: 0, error: message }
 }
 
 fn short(text) {
@@ -272,7 +274,8 @@ fn critic_problem(c) {
     if type_of(c.issues) != "array" {
         return "issues";
     }
-    if type_of(c.coverageCheck) != "()" && type_of(c.coverageCheck) != "string" {
+    // A JSON null reads as () like a missing key, so the key decides: present means a string.
+    if "coverageCheck" in c && type_of(c.coverageCheck) != "string" {
         return "coverageCheck";
     }
     for issue in c.issues {
@@ -443,6 +446,28 @@ fn role_prompt(pkg, role, n) {
         + "\" and follow it: it is your complete instruction for this card (the files to read, what to return and the mode rules).\n"
 }
 
+// Why the scribe did not do it: its reason, else its output.
+fn reason_of(report) {
+    if type_of(report.reason) == "string" && report.reason != "" {
+        return report.reason;
+    }
+    report.output
+}
+
+// Whether the runner's output carries `<prefix><n>` as a whole number (round=1 is not round=12).
+fn has_round_line(output, prefix, n) {
+    if type_of(output) != "string" {
+        return false;
+    }
+    let needle = prefix + n.to_string();
+    let at = output.index_of(needle);
+    if at < 0 {
+        return false;
+    }
+    let next = at + needle.len();
+    next >= output.len() || "0123456789".index_of(output.sub_string(next, 1)) < 0
+}
+
 fn run_scribe(prompt, label) {
     let r = agent(prompt, #{
         label: label,
@@ -469,7 +494,7 @@ fn write_file(pkg, context, rel, text) {
         return r;
     }
     if r.report.action != "write" {
-        return #{ ok: false, error: "spec-plan-draft: the scribe did not write " + rel + ": " + short(r.report.reason) };
+        return #{ ok: false, error: "spec-plan-draft: the scribe did not write " + rel + ": " + short(reason_of(r.report)) };
     }
     #{ ok: true }
 }
@@ -489,7 +514,7 @@ fn run_command(run, subcommand, extra, label) {
         return r;
     }
     if r.report.action != "command" {
-        return #{ ok: false, error: "spec-plan-draft: the scribe did not run " + subcommand + ": " + short(r.report.reason) };
+        return #{ ok: false, error: "spec-plan-draft: the scribe did not run " + subcommand + ": " + short(reason_of(r.report)) };
     }
     #{ ok: true, report: r.report }
 }
@@ -535,49 +560,54 @@ if type_of(a) == "string" {
     try {
         a = parse_json(a);
     } catch (err) {
-        fail("spec-plan-draft: args is a non-JSON string");
+        complete(failure("spec-plan-draft: args is a non-JSON string"));
     }
 }
 if type_of(a) != "map" {
-    fail("spec-plan-draft: args must be a map with the runner's launch keys");
+    complete(failure("spec-plan-draft: args must be a map with the runner's launch keys"));
 }
 let slug = a.slug;
 if !is_slug(slug) {
-    fail("spec-plan-draft: invalid runner args: slug");
+    complete(failure("spec-plan-draft: invalid runner args: slug"));
 }
 if !is_work_id(a.workId) {
-    fail("spec-plan-draft: invalid runner args: workId");
+    complete(failure("spec-plan-draft: invalid runner args: workId"));
 }
 let mode = a.mode;
 if type_of(mode) != "string" || !(mode == "spec+plan" || mode == "spec" || mode == "plan" || mode == "bugfix-plan") {
-    fail("spec-plan-draft: invalid runner args: mode");
+    complete(failure("spec-plan-draft: invalid runner args: mode"));
 }
 let max_rounds = 3;
 let hard_max_rounds = 5;
 if type_of(a.maxRounds) == "i64" {
     if a.maxRounds < 1 || a.maxRounds > hard_max_rounds {
-        fail("spec-plan-draft: invalid runner args: maxRounds (1..5)");
+        complete(failure("spec-plan-draft: invalid runner args: maxRounds (1..5)"));
     }
     max_rounds = a.maxRounds;
 } else if type_of(a.maxRounds) != "()" {
-    fail("spec-plan-draft: invalid runner args: maxRounds (1..5)");
+    complete(failure("spec-plan-draft: invalid runner args: maxRounds (1..5)"));
 }
 let plugin_root = runner_path(a.pluginRoot);
 if plugin_root == "" {
-    fail("spec-plan-draft: invalid runner args: pluginRoot");
+    complete(failure("spec-plan-draft: invalid runner args: pluginRoot"));
 }
 let python = runner_path(a.python);
 if python == "" {
-    fail("spec-plan-draft: invalid runner args: python");
+    complete(failure("spec-plan-draft: invalid runner args: python"));
 }
 let pkg_arg = runner_path(a.packageDir);
 if pkg_arg == "" {
-    fail("spec-plan-draft: invalid runner args: packageDir");
+    complete(failure("spec-plan-draft: invalid runner args: packageDir"));
+}
+// The package path may end with one separator, as the JS engine allows.
+let pkg_one = pkg_arg;
+if is_sep(pkg_one.sub_string(pkg_one.len() - 1, 1)) {
+    pkg_one = pkg_one.sub_string(0, pkg_one.len() - 1);
 }
 let pkg = strip_seps(pkg_arg);
-let project = project_of(pkg, slug);
+let project = project_of(pkg_one, slug);
 if project == "" {
-    fail("spec-plan-draft: invalid runner args: packageDir (not docs/agentic-sdlc/" + slug + ")");
+    complete(failure("spec-plan-draft: invalid runner args: packageDir (not docs/agentic-sdlc/" + slug + ")"));
 }
 let run = #{
     slug: slug,
@@ -597,7 +627,7 @@ let points = #{};
 for pair in spec.first {
     let r = run_author(run, pair[0], 0, pair[1]);
     if !r.ok {
-        fail(r.error);
+        complete(failure(r.error));
     }
     points["r0:" + pair[0]] = r.points;
 }
@@ -611,22 +641,20 @@ let n = 1;
 while n <= max_rounds {
     let check = run_command(run, "draft-check", ["--round", n.to_string()], "scribe:draft-check:r" + n.to_string());
     if !check.ok {
-        fail(check.error);
+        complete(failure(check.error));
     }
     if check.report.exitCode != 0 {
-        fail("spec-plan-draft: draft-check --round " + n.to_string() + " exited " + check.report.exitCode.to_string()
-            + ": " + short(check.report.output));
+        complete(failure("spec-plan-draft: draft-check --round " + n.to_string() + " exited " + check.report.exitCode.to_string()
+            + ": " + short(check.report.output)));
     }
     let validator = "";
-    if type_of(check.report.output) == "string" {
-        if check.report.output.index_of("draft_check=clean round=" + n.to_string()) >= 0 {
-            validator = "clean";
-        } else if check.report.output.index_of("draft_check=blocking round=" + n.to_string()) >= 0 {
-            validator = "blocking";
-        }
+    if has_round_line(check.report.output, "draft_check=clean round=", n) {
+        validator = "clean";
+    } else if has_round_line(check.report.output, "draft_check=blocking round=", n) {
+        validator = "blocking";
     }
     if validator == "" {
-        fail("spec-plan-draft: draft-check --round " + n.to_string() + " printed no result line: " + short(check.report.output));
+        complete(failure("spec-plan-draft: draft-check --round " + n.to_string() + " printed no result line: " + short(check.report.output)));
     }
 
     let label = "critic:" + mode + ":r" + n.to_string();
@@ -653,8 +681,9 @@ while n <= max_rounds {
             output_schema: critic_schema(),
             agent_type: "agentic-sdlc:spec-plan-critic",
         });
-        if type_of(answer) != "map" || answer.success != true || type_of(answer.output) != "map" {
-            fail("spec-plan-draft: the critic failed for " + call_label);
+        // A child failure ends the run; an answer that is not a valid critic object is asked again.
+        if type_of(answer) != "map" || answer.success != true {
+            complete(failure("spec-plan-draft: the critic failed for " + call_label));
         }
         problem = critic_problem(answer.output);
         if problem == "" {
@@ -664,11 +693,11 @@ while n <= max_rounds {
         attempt += 1;
     }
     if !have_critique {
-        fail("spec-plan-draft: " + label + " returned no valid critic object (" + problem + ")");
+        complete(failure("spec-plan-draft: " + label + " returned no valid critic object (" + problem + ")"));
     }
     let w = write_file(run.pkg, run.context, "draft/critic.r" + n.to_string() + ".json", json_encode(critique));
     if !w.ok {
-        fail(w.error);
+        complete(failure(w.error));
     }
     marks.push("fresh");
 
@@ -688,7 +717,11 @@ while n <= max_rounds {
         stop_reason = "max-rounds";
     }
     rounds = n;
-    log("round " + n.to_string() + ": critic " + critique.verdict + ", validator " + validator);
+    let stopped = "";
+    if stop_reason != "" {
+        stopped = ", stop " + stop_reason;
+    }
+    log("round " + n.to_string() + ": critic " + critique.verdict + ", validator " + validator + stopped);
     if stop_reason != "" {
         break;
     }
@@ -697,7 +730,7 @@ while n <= max_rounds {
     for pair in spec.revise {
         let r = run_author(run, pair[0], n, pair[1]);
         if !r.ok {
-            fail(r.error);
+            complete(failure(r.error));
         }
         points["r" + n.to_string() + ":" + pair[0]] = r.points;
     }
@@ -729,11 +762,11 @@ let loop_json = json_encode(#{
 });
 let w = write_file(run.pkg, run.context, "draft/loop.json", loop_json);
 if !w.ok {
-    fail(w.error);
+    complete(failure(w.error));
 }
 let ingest = run_command(run, "ingest-draft", ["--assemble"], "scribe:ingest-draft");
 if !ingest.ok {
-    fail(ingest.error);
+    complete(failure(ingest.error));
 }
 // The exit code decides: a success prints `ingested=` and then the next step's card, which can be
 // longer than the tail the scribe reports.
