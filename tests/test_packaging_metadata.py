@@ -496,7 +496,9 @@ class TestPackagingMetadata(unittest.TestCase):
             "agents",
             "commands",
             "contracts",
+            "flows",
             "hooks",
+            "scripts/sdlc_runner",
             "skills",
             "workflows",
         ]
@@ -523,7 +525,9 @@ class TestPackagingMetadata(unittest.TestCase):
             "agents",
             "commands",
             "contracts",
+            "flows",
             "hooks",
+            "scripts/sdlc_runner",
             "skills",
             "workflows",
         ]

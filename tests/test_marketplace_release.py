@@ -168,8 +168,10 @@ class TestMarketplacePreparation(unittest.TestCase):
                 self.assertIn(signal, text, (name, signal))
             self.assertNotIn("../docs/", text)
         self.assertEqual((zp / "LICENSE").read_bytes(), self.source["LICENSE"][1])
+        self.assertIn("flows/loops/spec-plan.json", self.source)
         for path, (_mode, blob) in self.source.items():
-            if path.startswith(("skills/", "hooks/", "agents/", "commands/", "contracts/")):
+            if path.startswith(("skills/", "hooks/", "agents/", "commands/", "contracts/",
+                                "flows/", "scripts/sdlc.py", "scripts/sdlc_runner/")):
                 self.assertEqual((gp / path).read_bytes(), blob, path)
                 self.assertEqual((zp / path).read_bytes(), blob, path)
 

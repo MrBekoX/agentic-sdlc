@@ -263,7 +263,7 @@ State: native lifecycle passed on Grok CLI 1.0.50 on Windows, Linux and macOS (E
 
 **Prerequisites.** Maintainer-verified identity and Apps Management Write (`api.apps.write`).
 
-**Steps.** Build the deterministic skills-only projection (Codex manifest, skills and merged references, three required stdlib helpers, contracts, assets and `LICENSE`; lifecycle hooks are excluded) with `python3 scripts/build_release.py --output <zip> --skills-only`, check it with `python3 scripts/build_release.py --verify <zip>`, then upload it through the OpenAI portal. The prepared packet is [`docs/publication/openai-skills-only.md`](docs/publication/openai-skills-only.md).
+**Steps.** Build the deterministic skills-only projection (Codex manifest, skills and merged references, three required stdlib helpers, the flow runner `scripts/sdlc.py` with `scripts/sdlc_runner/` and `flows/`, contracts, assets and `LICENSE`; lifecycle hooks are excluded) with `python3 scripts/build_release.py --output <zip> --skills-only`, check it with `python3 scripts/build_release.py --verify <zip>`, then upload it through the OpenAI portal. The prepared packet is [`docs/publication/openai-skills-only.md`](docs/publication/openai-skills-only.md).
 
 **Go condition.** The skills-only archive verifies as `archive_kind=skills-only`, the maintainer identity and `api.apps.write` are verified, and submission, acceptance and publication are treated as three separate stages. After publication, the listing changes only through a newly reviewed version ([app review](https://developers.openai.com/plugins/deploy/app-review)).
 
@@ -333,6 +333,7 @@ workflows/             Claude Code dynamic workflow scripts; workflows/zcode/ ho
 hooks/                 Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/      Durable behavior contracts
 commands/              Manual slash-command definitions
+flows/                 The flow runner's JSON flows, loop definition and schemas (read by scripts/sdlc.py)
 scripts/               26 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check, native lifecycle check, Cursor package check and install, the middleware-chain runner entry
 tests/                 Unit tests, harness, fixtures, golden refs, eval seeds
 docs/                  Component reference, boundaries, testing, release notes

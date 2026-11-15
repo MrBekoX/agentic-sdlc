@@ -185,12 +185,19 @@ ARCHIVE_COMMENT_PREFIX = b"agentic-sdlc-archive source_commit="
 _RELEASE_VERSION = (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8").strip()
 RUNTIME_PAYLOAD_EXCLUDE = frozenset({f"docs/release-evidence-{_RELEASE_VERSION}.md", "docs/release-readiness.md"})
 # BR24 input roots; public output is a deterministic projection, never the local hook payload.
-SKILLS_ONLY_ROOTS = (".codex-plugin/", "skills/", "hooks/", "contracts/skills/", "scripts/", "assets/")
+# `flows/` holds the flow runner's manifests, which it reads from its own root. `agents/` never ships:
+# its role bodies are projected into the public role folder below.
+SKILLS_ONLY_ROOTS = (".codex-plugin/", "skills/", "hooks/", "contracts/skills/", "scripts/", "assets/", "flows/")
 CODEX_MANIFEST = ".codex-plugin/plugin.json"
 PUBLIC_REFERENCE_ROOT = "skills/using-agentic-sdlc/references"
 PUBLIC_RUNTIME_HELPERS = frozenset({
     "scripts/detect_context.py", "scripts/validate_artifacts.py", "scripts/resolve_work_package.py",
+    "scripts/sdlc.py",
 })
+# The flow runner's package ships whole next to its entry `scripts/sdlc.py`, which imports from it.
+PUBLIC_RUNTIME_PACKAGES = ("scripts/sdlc_runner/",)
+# Every role a runner loop definition (flows/loops/*.json) dispatches must be listed here: in the public
+# package the runner finds role files only under `<PUBLIC_REFERENCE_ROOT>/roles/`.
 PUBLIC_ROLES = (
     "code-reviewer", "context-analyst", "debugger", "implementation-auditor",
     "security-reviewer", "software-architect", "spec-plan-author", "spec-plan-critic", "test-engineer",
@@ -412,6 +419,28 @@ def _without_frontmatter(text: str) -> str:
     return re.sub(r"\A---\r?\n.*?\r?\n---(?:\r?\n)?", "", text, count=1, flags=re.DOTALL)
 
 
+def _loop_agents(members: dict) -> set:
+    """The agents named by the runner's loop definitions (`flows/loops/<id>.json` `roles.*.agent`).
+
+    A definition whose roles cannot be read fails the build: its roles cannot be checked against the
+    public role files, and the runner would refuse that definition at load time anyway."""
+    agents = set()
+    for path in _utf8_order(members):
+        if not (path.startswith("flows/loops/") and path.endswith(".json")):
+            continue
+        try:
+            definition = json.loads(members[path][1].decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            raise ReleaseError([f"error=public_dependency_unreadable:{path}"]) from None
+        roles = definition.get("roles") if isinstance(definition, dict) else None
+        named = [role.get("agent") for role in roles.values() if isinstance(role, dict)] \
+            if isinstance(roles, dict) else []
+        if not named or len(named) != len(roles) or not all(isinstance(agent, str) and agent for agent in named):
+            raise ReleaseError([f"error=public_loop_invalid:{path}"])
+        agents.update(named)
+    return agents
+
+
 def _public_house_payload(members: dict, selected: dict) -> dict:
     """Merge reusable house procedures into skill references without modifying their source."""
     mapping = {f"agents/{name}.md": f"{PUBLIC_REFERENCE_ROOT}/roles/{name}.md" for name in PUBLIC_ROLES}
@@ -421,13 +450,17 @@ def _public_house_payload(members: dict, selected: dict) -> dict:
     missing = sorted(required - set(members))
     if missing:
         raise ReleaseError([f"error=public_dependency_missing:{path}" for path in missing])
+    unlisted = sorted(_loop_agents(members) - set(PUBLIC_ROLES))
+    if unlisted:
+        raise ReleaseError([f"error=public_role_missing:{agent}" for agent in unlisted])
     guide_path = f"{PUBLIC_REFERENCE_ROOT}/public-runtime.md"
     generated = set(mapping.values()) | {guide_path}
     collisions = [f"error=public_projection_collision:{path}" for path in sorted(generated & set(members))]
     collisions += _collisions(set(members) | generated)
     if collisions:
         raise ReleaseError(collisions)
-    selected = {p: v for p, v in selected.items() if not p.startswith("scripts/") or p in PUBLIC_RUNTIME_HELPERS}
+    selected = {p: v for p, v in selected.items() if not p.startswith("scripts/") or p in PUBLIC_RUNTIME_HELPERS
+                or p.startswith(PUBLIC_RUNTIME_PACKAGES)}
     for source, destination in mapping.items():
         mode, data = members[source]
         try:
@@ -482,6 +515,10 @@ def _public_house_payload(members: dict, selected: dict) -> dict:
         "procedure, not an installed slash command. Never commit, push or merge without user authorization.\n\n"
         "Required runtime helpers are `scripts/detect_context.py`, `scripts/validate_artifacts.py`,\n"
         "and `scripts/resolve_work_package.py` (Python 3 standard library; Git for work-package matching).\n"
+        "The flow runner `scripts/sdlc.py` ships with its package `scripts/sdlc_runner/` and its flow\n"
+        "manifests in `flows/` (Python 3 standard library; Git for change tracking, a file walk without\n"
+        "it). It reads the role files above when it stages a role prompt, and its `run` command starts\n"
+        "only the project's allowlisted test commands. No skill calls it yet.\n"
         "The optional `scripts/check_all.py` and companion eval runners belong to a source checkout\n"
         "with tests and are not included here. Run those only when that source tooling is present.\n"
         "Skill authoring discovers an external toolkit and records missing capabilities explicitly.\n\n"
