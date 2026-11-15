@@ -152,5 +152,59 @@ class CursorInstallAndHookTests(unittest.TestCase):
         self.assertNotIn(secret, scanned.stdout)
 
 
+class CursorRoleFileTests(unittest.TestCase):
+    """Cursor reads plugin roles from cursor/agents/: the shared role bodies with Cursor frontmatter
+    (plan Task 14). Read-only roles carry `readonly: true` (the documented key for .cursor/agents)
+    and `permissionMode: readonly` (the key Cursor's plugin loader reads, per its 2026-10-16 forum
+    reply); a role with a writing or shell tool carries neither."""
+
+    WRITING = {"Write", "Edit", "Bash", "PowerShell", "NotebookEdit"}
+
+    @staticmethod
+    def _split(path):
+        text = path.read_text(encoding="utf-8")
+        head, body = text[4:].split("\n---\n", 1)
+        fields = {}
+        for line in head.splitlines():
+            key, value = line.split(":", 1)
+            fields[key.strip()] = value.strip()
+        return fields, body
+
+    def test_the_manifest_points_at_the_cursor_role_files(self):
+        manifest = json.loads((REPO / ".cursor-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["agents"], "./cursor/agents/")
+
+    def test_every_shared_role_has_a_cursor_mirror_and_no_other(self):
+        shared = sorted(p.name for p in (REPO / "agents").glob("*.md"))
+        mirrors = sorted(p.name for p in (REPO / "cursor" / "agents").glob("*.md"))
+        self.assertEqual(mirrors, shared)
+
+    def test_each_mirror_keeps_the_body_name_and_description(self):
+        for source in sorted((REPO / "agents").glob("*.md")):
+            with self.subTest(role=source.stem):
+                fields, body = self._split(source)
+                cursor_fields, cursor_body = self._split(REPO / "cursor" / "agents" / source.name)
+                self.assertEqual(cursor_body, body)
+                self.assertEqual((cursor_fields["name"], cursor_fields["description"]),
+                                 (fields["name"], fields["description"]))
+                self.assertEqual(cursor_fields["model"], "inherit")
+                tools = {t.strip() for t in fields.get("tools", "").split(",") if t.strip()}
+                expected = {"name", "description", "model"}
+                if not tools & self.WRITING:
+                    expected |= {"readonly", "permissionMode"}
+                    self.assertEqual((cursor_fields["readonly"], cursor_fields["permissionMode"]),
+                                     ("true", "readonly"))
+                self.assertEqual(set(cursor_fields), expected)
+
+    def test_the_loop_roles_are_read_only_and_the_scribe_is_not(self):
+        for role, read_only in (("spec-plan-author", True), ("spec-plan-critic", True), ("draft-scribe", False)):
+            with self.subTest(role=role):
+                fields, _body = self._split(REPO / "cursor" / "agents" / (role + ".md"))
+                self.assertEqual(fields.get("readonly") == "true", read_only)
+
+    def test_the_cursor_checker_accepts_the_mirrors(self):
+        self.assertEqual([e for e in check_cursor_plugin.validate(REPO) if "agent" in e], [])
+
+
 if __name__ == "__main__":
     unittest.main()

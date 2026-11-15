@@ -1,6 +1,6 @@
 # AGENTIC-SDLC for Cursor
 
-Cursor loads this package from [`.cursor-plugin/plugin.json`](plugin.json). Skills, agents and the `git-safety-check` command are the shared files at the repository root. Cursor-only pieces are `rules/agentic-sdlc.mdc` and `hooks/hooks-cursor.json`. `hooks/hooks.json` is intentionally absent so Claude Code, ZCode and Grok do not auto-load a Cursor wire.
+Cursor loads this package from [`.cursor-plugin/plugin.json`](plugin.json). Skills and the `git-safety-check` command are the shared files at the repository root. Cursor-only pieces are `rules/agentic-sdlc.mdc`, `hooks/hooks-cursor.json` and the role files in `cursor/agents/`, which carry the shared `agents/*.md` bodies under Cursor frontmatter. `hooks/hooks.json` is intentionally absent so Claude Code, ZCode and Grok do not auto-load a Cursor wire.
 
 The manifest and component layout follow the Cursor plugin reference fetched on 2026-10-14 from [cursor.com/docs/reference/plugins](https://cursor.com/docs/reference/plugins). Hook fields follow [cursor.com/docs/hooks](https://cursor.com/docs/hooks) from the same day. This environment had no `cursor` or `cursor-agent` binary, so the steps below were checked as a file copy plus hook replay, not as a live IDE session.
 
@@ -65,14 +65,14 @@ The read-only review command is:
 /git-safety-check
 ```
 
-Cursor has no Claude Workflow tool. Spec and plan drafting uses the author, then a fresh-context critic from `agents/`, then a revision. The sessionStart hook adds the installed plugin root to the conversation so helper commands can quote that path.
+Cursor has no Claude Workflow tool. Spec and plan drafting uses the author, then a fresh-context critic, then a revision. When a work package's runner card prints a role card, give its prompt file to the plugin subagent it names through the Task tool, save the final message to the card's write path (and an author's decision points to its decisions path), then run the card's `then=` command. The read-only roles carry `readonly: true` and `permissionMode: readonly`: Cursor documents the first for `.cursor/agents/`, and a Cursor forum reply of 2026-10-16 says plugin subagents read the second. Neither has been checked on a live Cursor client here. The sessionStart hook adds the installed plugin root to the conversation so helper commands can quote that path.
 
 ## What is wired
 
 | Cursor component | Source | Behavior |
 |---|---|---|
 | Skills | `skills/*/SKILL.md` | The shared 16 skills, invoked as `/<skill-name>` or by reading `SKILL.md` |
-| Agents | `agents/*.md` | Shared review and drafting roles |
+| Agents | `cursor/agents/*.md` | The shared review and drafting roles with Cursor frontmatter |
 | Commands | `commands/git-safety-check.md` | Read-only git safety check |
 | Rules | `rules/agentic-sdlc.mdc` | Always-on pointer at the skills and contracts |
 | Hooks | `hooks/hooks-cursor.json` | Command guards, write scan, flow-order, startup context, opt-in worktree scan |

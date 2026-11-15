@@ -114,6 +114,18 @@ class TestKimiManifest(unittest.TestCase):
         self.assertIsInstance(instructions, str)
         self.assertTrue(instructions.strip(), "skillInstructions must not be empty")
 
+    def test_skill_instructions_name_qualified_skills_and_the_runner_cards(self):
+        # Kimi Code 2.3.0 names plugin skills agentic-sdlc:<skill>; plugin agents keep their bare role
+        # name. A runner role card goes to a NEW Agent, never a resumed or forked one, and the
+        # caller keeps an author's decision points (design §5.9.2, plan Task 14).
+        instructions = self.manifest["skillInstructions"]
+        for fact in ("Kimi Code 2.3.0", "agentic-sdlc:<skill>", "agentic-sdlc:using-agentic-sdlc",
+                     'Agent(subagent_type="spec-plan-critic")', "NEW Agent", "never resume or fork",
+                     "write path", "decisions path", "then= command"):
+            with self.subTest(fact=fact):
+                self.assertIn(fact, instructions)
+        self.assertNotIn('subagent_type="agentic-sdlc:', instructions)
+
     def test_interface_display_name_present(self):
         self.assertTrue(self.manifest["interface"]["displayName"])
 
