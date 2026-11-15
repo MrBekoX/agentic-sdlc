@@ -3,8 +3,8 @@ cards of the native engines, staging, draft-check, loop-record, assemble and ing
 
 One definition (`flows/loops/spec-plan.json`) for every engine. Round 0: the mode's authors write
 `draft/spec.r0.md` and/or `draft/plan.r0.md`. Round N >= 1: `draft-check --round N` checks the
-round N-1 drafts (`validator.rN.json`), the critic reads those drafts and that file and writes
-`critic.rN.json`, and unless a stop rule fires the reviser roles write `spec.rN`/`plan.rN`. The
+round N-1 drafts (`validator.rN.json`), the critic reads the brief, those drafts and that file and
+writes `critic.rN.json`, and unless a stop rule fires the reviser roles write `spec.rN`/`plan.rN`. The
 loop stops at round N with `clean` (a clean critic and no validator error or strict-mode
 warning), `no-progress` (the same issue keys as round N-1) or `max-rounds` (N = max_rounds, after
 that final critic); the round N-1 drafts become the artifacts, so nothing is ingested without a
@@ -365,7 +365,9 @@ def _reads(ctx, definition, role, round_no) -> list:
     artifacts = _mode(ctx, definition)["artifacts"]
     brief = _file(definition, "brief")
     if role == "critic":
-        rels = [_file(definition, kind, None, round_no - 1) for kind in artifacts]
+        # The brief carries the request, the gate feedback and, in plan mode, the approved spec the plan
+        # is checked against; never the authors' notes.
+        rels = [brief] + [_file(definition, kind, None, round_no - 1) for kind in artifacts]
         rels.append(_file(definition, "validator", None, round_no))
     elif round_no == 0:
         rels = [brief]

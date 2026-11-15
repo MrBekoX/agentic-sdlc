@@ -62,7 +62,7 @@ These variables are set only in hook processes. None reaches the model's Bash or
 |---|---|
 | `skills/` | Runnable procedures: `SKILL.md` plus optional `scripts/`, `references/`, and `assets/`. |
 | `contracts/skills/` | Durable behavior rules: context-first, spec, plan, testing, security, git safety, documentation, collaboration. |
-| `agents/` | Bounded role contracts used for fresh-context analysis, review, audit, and author/critic passes; diagnostic roles may run tests, while reviewer/auditor roles omit shell tools. |
+| `agents/` | Bounded role contracts used for fresh-context analysis, review, audit, and author/critic passes; diagnostic roles may run tests, while reviewer/auditor roles omit shell tools. The author and critic are read-only; `draft-scribe` writes their outputs into the work package and runs the runner's loop commands for a native loop engine. |
 | `workflows/` | Claude Code dynamic workflow scripts. Codex does not run these directly. Grok CLI uses the separate project catalog `.grok/workflows/*.rhai` (not a plugin component). |
 | `hooks/` | Deterministic guard scripts, active-flow evidence rules, and runtime hook wiring. |
 | `commands/` | Manual slash-command definitions such as `/agentic-sdlc:git-safety-check`. |

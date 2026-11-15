@@ -103,7 +103,7 @@ class TestAgentStructure(unittest.TestCase):
 
     def test_expected_agents_present(self):
         expected = {
-            "code-reviewer", "context-analyst", "debugger", "implementation-auditor",
+            "code-reviewer", "context-analyst", "debugger", "draft-scribe", "implementation-auditor",
             "security-reviewer", "software-architect", "spec-plan-author",
             "spec-plan-critic", "test-engineer",
         }

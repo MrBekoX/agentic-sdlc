@@ -479,8 +479,9 @@ DESCRIPTION_CLAUSE = "Not for steps inside an active agentic-sdlc-pipeline run."
 
 # --- C11 ---
 SPEC_PLAN_AUTHOR_DESCRIPTION = (
-    "Produces a deep spec OR plan DRAFT (no file writing; returns markdown + decision points). "
-    "Called by the spec-plan-draft workflow and the runtime author/critic adapters during the "
+    "Drafts and revises a spec, a plan or a spec-less bugfix plan for the spec/plan loop "
+    "(read-only; its last message is the draft). Called by the runner's role cards, the "
+    "spec-plan-draft workflow and the runtime author/critic adapters during the "
     "spec/plan steps of agentic-sdlc-pipeline, spec-authoring, plan-authoring, root-cause-fix and "
     "feature-build, and the standalone design flow of mind-spark. Technology-agnostic."
 )
@@ -530,6 +531,7 @@ SET_B_AGENT_FILES = (
     "agents/code-reviewer.md",
     "agents/context-analyst.md",
     "agents/debugger.md",
+    "agents/draft-scribe.md",
     "agents/implementation-auditor.md",
     "agents/security-reviewer.md",
     "agents/software-architect.md",

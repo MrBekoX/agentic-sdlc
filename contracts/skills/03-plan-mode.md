@@ -4,7 +4,9 @@
 Separate planning from implementation so you don't build the wrong thing. The plan is the **HOW**.
 
 ## When applied
-After an approved spec, for any change that is multi-file, architectural, or in unfamiliar code. Skip for changes you could describe as a one-sentence diff.
+For any change that is multi-file, architectural, or in unfamiliar code. Skip for changes you could describe as a one-sentence diff.
+
+The plan comes from the spec. In the joint loop (`spec+plan`), the plan is drafted from that round's spec draft, a fresh critic checks both artifacts and the fit between them, and both go to one review gate together (in the gated form; the light form has no review gate). A plan-only flow starts from an approved spec. A bugfix plan has no spec: its own `## Bug` and `## Acceptance Criteria` sections, before the first task, take the spec's place (contract 02, bugfix exception).
 
 ## Required
 - Use plan mode for non-trivial work; if it goes sideways, **stop and re-plan** instead of pushing.
@@ -12,7 +14,7 @@ After an approved spec, for any change that is multi-file, architectural, or in 
 - Tasks are small, single-purpose, independently compilable/testable, ordered by dependency.
 - Each task names concrete files (Create/Modify) and TDD points (which failing test first).
 - Mark risky steps, rollback approach, and where user approval is needed.
-- For deeper plans use `spec-plan-author` → `spec-plan-critic` (workflow `spec-plan-draft`).
+- For deeper plans the spec/plan loop drafts with `spec-plan-author` and checks with a fresh `spec-plan-critic` (workflow `spec-plan-draft`).
 - Optionally lock the plan with the built-in **`/goal`** so a fresh evaluator keeps you on the agreed end-state across turns.
 
 ## Forbidden

@@ -186,8 +186,10 @@ class TestCards(LoopCase):
         self.assertEqual(self.role(text), ("critic", "1/3"))
         fields = card_fields(text)
         reads = [json.loads(line[len("read="):]) for line in text.splitlines() if line.startswith("read=")]
-        self.assertEqual(reads, [str(self.draft("spec.r0.md")), str(self.draft("plan.r0.md")),
-                                 str(self.draft("validator.r1.json"))])
+        # The brief comes first: the critic checks the drafts against the request, the gate feedback and,
+        # in plan mode, the approved spec, which only the brief carries.
+        self.assertEqual(reads, [str(self.draft("brief.md")), str(self.draft("spec.r0.md")),
+                                 str(self.draft("plan.r0.md")), str(self.draft("validator.r1.json"))])
         self.assertTrue(self.draft("validator.r1.json").is_file())  # draft-check ran before the critic card
         self.assertEqual(fields["role_file"], str(self.root / "agents" / "spec-plan-critic.md"))
         self.assertEqual(fields["write"], "docs/agentic-sdlc/demo/draft/critic.r1.json")
