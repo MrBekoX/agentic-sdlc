@@ -295,6 +295,7 @@ class TestGrokFilesAreTracked(unittest.TestCase):
         ".grok/workflows/spec-plan-draft.rhai",
         ".grok/workflows/multi-lens-review.rhai",
         ".grok/workflows/skill-draft.rhai",
+        "workflows/grok/spec-plan-draft.rhai",
         "hooks/hooks-grok.json",
         ".grok-plugin/plugin.json",
         ".grok-plugin/marketplace.json",

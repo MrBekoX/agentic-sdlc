@@ -3,6 +3,7 @@
 Reads the shipped `.grok/workflows/*.rhai` files and the Grok invocation
 column in skill bodies. Does not re-implement the orchestrator.
 """
+import json
 import re
 import unittest
 from pathlib import Path
@@ -241,6 +242,150 @@ class TestGrokSkillInvocationColumn(unittest.TestCase):
         )
         self.assertNotIn("this plugin does not convert `workflows/*.js`", adapter)
         self.assertNotIn("no Rhai conversion of `workflows/*.js`", plugin)
+
+
+
+ENGINE = REPO / "workflows" / "grok" / "spec-plan-draft.rhai"
+LOOP = json.loads((REPO / "flows" / "loops" / "spec-plan.json").read_text(encoding="utf-8"))
+
+
+def _agent_calls(text):
+    """Each `agent(` call of a Rhai script, from the call to its closing `});`."""
+    calls, start = [], text.find("agent(")
+    while start >= 0:
+        end = text.find("});", start)
+        calls.append(text[start:end + 3])
+        start = text.find("agent(", end)
+    return calls
+
+
+class TestGrokRunnerEngine(unittest.TestCase):
+    """The Grok Build engine of the spec/plan loop (plan Task 12): workflows/grok/spec-plan-draft.rhai,
+    which the runner stages in the package and launches by path. Rhai cannot run here, so its
+    structure is pinned; the semantics it mirrors are the Claude engine's (test_spec_plan_draft_workflow)."""
+
+    def setUp(self):
+        self.text = _read(ENGINE)
+        self.code = "\n".join(line for line in self.text.splitlines() if not line.lstrip().startswith("//"))
+
+    def test_first_statement_is_meta_named_like_the_file(self):
+        self.assertTrue(self.text.startswith("let meta = #{"), self.text[:40])
+        name = re.search(r'let meta = #\{\s*name: "([^"]+)"', self.text).group(1)
+        self.assertEqual(name, ENGINE.stem)
+
+    def test_reads_every_launch_arg(self):
+        for key in ("slug", "workId", "mode", "maxRounds", "packageDir", "pluginRoot", "python"):
+            with self.subTest(arg=key):
+                self.assertIn("a.%s" % key, self.code)
+
+    def test_role_agents_are_read_only_and_the_scribe_executes(self):
+        calls = _agent_calls(self.code)
+        kinds = {}
+        for call in calls:
+            agent_type = re.search(r'agent_type: "([^"]+)"', call).group(1)
+            mode = re.search(r'capability_mode: "([^"]+)"', call).group(1)
+            kinds.setdefault(agent_type, set()).add(mode)
+            self.assertIn("output_schema:", call)
+            self.assertRegex(call, r"label: (?:call_)?label,")
+        self.assertEqual(kinds, {"agentic-sdlc:spec-plan-author": {"read-only"},
+                                 "agentic-sdlc:spec-plan-critic": {"read-only"},
+                                 "agentic-sdlc:draft-scribe": {"execute"}})
+
+    def test_every_agent_result_is_checked_for_success(self):
+        for var in ("r", "out", "answer"):
+            with self.subTest(result=var):
+                self.assertRegex(self.code, r"type_of\(%s\) != \"map\" \|\| %s\.success != true" % (var, var))
+        self.assertNotIn("== ()", self.code)
+        self.assertNotIn("!= ()", self.code)
+
+    def test_draft_check_runs_before_the_critic_and_assemble_ends_it(self):
+        loop_body = self.code.split("while n <= max_rounds {", 1)[1]
+        self.assertLess(loop_body.index('"draft-check", ["--round", n.to_string()]'),
+                        loop_body.index("agentic-sdlc:spec-plan-critic"))
+        self.assertIn('run_command(run, "ingest-draft", ["--assemble"], "scribe:ingest-draft")', self.code)
+        self.assertIn('let engine_id = "grok-workflow";', self.code)
+        caps = LOOP["caps"]
+        self.assertIn("let max_rounds = %d;" % caps["max_rounds"], self.code)
+        self.assertIn("let hard_max_rounds = %d;" % caps["hard_max_rounds"], self.code)
+
+    def test_stop_rules_follow_the_runner(self):
+        self.assertIn('critique.verdict == "clean" && !any_blocking && validator == "clean"', self.code)
+        self.assertIn('stop_reason = "no-progress"', self.code)
+        self.assertIn("else if n >= max_rounds {", self.code)
+        blocking = self.code.split("fn is_blocking(issue) {", 1)[1].split("\n}", 1)[0]
+        for value in ("critical", "high", "contradiction", "blocker"):
+            self.assertIn('"%s"' % value, blocking)
+        self.assertIn('norm_key(issue.target) + "|" + norm_key(issue.category) + "|" + norm_key(issue.where)',
+                      self.code)
+
+    def test_modes_table_matches_the_loop_definition(self):
+        def rhai(value):
+            return json.dumps(value, separators=(", ", ": "))
+        for name, mode in LOOP["modes"].items():
+            first = [[i["role"], i["author_mode"]] for i in mode["first_round"]]
+            revise = [[i["role"], i["author_mode"]] for i in mode["revise"]]
+            line = '"%s": #{ artifacts: %s, first: %s, revise: %s },' % (name, rhai(mode["artifacts"]), rhai(first),
+                                                                         rhai(revise))
+            with self.subTest(mode=name):
+                self.assertIn(line, self.code)
+
+    def test_file_names_and_labels(self):
+        for fragment in ('"draft/prompts/" + role + ".r" + n.to_string() + ".md"', '"draft/" + artifact + ".r"',
+                         '"draft/critic.r" + n.to_string() + ".json"', '"draft/loop.json"', '"author:"',
+                         '"author-revise:"', '"critic:" + mode + ":r"', 'label += ":final";'):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, self.code)
+
+    def test_result_is_small_and_names_the_stop(self):
+        self.assertIn("complete(#{ ingested: true, stopReason: stop_reason, rounds: rounds });", self.code)
+        self.assertIn("error: short(", self.code)
+        short = self.code.split("fn short(text) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("400", short)
+
+    def test_no_claude_js_tokens_and_no_replace(self):
+        for token in CLAUDE_JS:
+            self.assertNotIn(token, self.text)
+        # loop.json's own `schema:` key is data; an agent call takes `output_schema:`, never `schema:`.
+        for call in _agent_calls(self.code):
+            self.assertIsNone(re.search(r"(?<![A-Za-z_])schema:", call), call[:80])
+        self.assertIsNone(re.search(r"\.replace\s*\(", self.code))
+
+    def test_no_reserved_word_is_used_as_a_name(self):
+        # Rhai reserves these for future use; as a variable, parameter or property they fail to parse.
+        names = re.sub(r'"(?:[^"\\]|\\.)*"', '""', self.code)
+        for word in ("package", "module", "default", "exit", "match", "case", "static", "var", "new", "use",
+                     "with", "shared", "sync", "spawn", "thread", "go", "await", "async", "yield", "void",
+                     "null", "nil", "public", "protected", "super", "goto"):
+            with self.subTest(word=word):
+                self.assertIsNone(re.search(r"\b%s\b" % word, names))
+
+    def test_follows_the_runner_where_the_claude_engine_review_found_gaps(self):
+        # The same rules the Claude engine's tests run (test_spec_plan_draft_workflow): the resolver's
+        # slug rule, paths refused only for what ends or expands a double-quoted word, a drive root as
+        # `D:/`, Python's whitespace and casefold for issue keys, one more ask for a refused critic
+        # answer, and the ingest decided by its exit code.
+        slug = self.code.split("fn is_slug(s) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('s.sub_string(0, 1) == "-"', slug)
+        self.assertNotIn("s.len() - 1", slug)
+        path = self.code.split("fn runner_path(p) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('["\\r", "\\n", "\\"", "`", "$", "\\u0000", "\\u201C", "\\u201D", "\\u201E"]', path)
+        self.assertIn('project += "/";', self.code)
+        space = self.code.split("fn py_space(piece) {", 1)[1].split("\n}", 1)[0]
+        for escape in ("\\u001C", "\\u001F", "\\u0085", "\\u00A0", "\\u1680", "\\u2000", "\\u200A", "\\u2028",
+                       "\\u3000"):
+            self.assertIn(escape, space)
+        self.assertNotIn("\\uFEFF", space)
+        self.assertNotIn("to_upper", self.code)
+        fold = self.code.split("fn fold_char(piece) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('piece == "ß" || piece == "ẞ"', fold)
+        self.assertIn("piece.to_lower()", fold)
+        problem = self.code.split("fn critic_problem(c) {", 1)[1].split("\n}", 1)[0]
+        for field in ("target", "severity", "kind", "category", "whatsMissing", "where", "fix"):
+            self.assertIn('"issue %s"' % field, problem)
+        self.assertIn("while attempt <= 2 && !have_critique {", self.code)
+        self.assertIn('call_label += ":retry";', self.code)
+        self.assertIn("if ingest.report.exitCode == 0 {", self.code)
+        self.assertNotIn('index_of("ingested=")', self.code)
 
 
 if __name__ == "__main__":
