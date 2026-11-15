@@ -104,30 +104,9 @@ CONTRACT_MECHANISMS = ["main", "subagent", "workflow", "team", "runner-loop", "r
 CONTRACT_MECHANISM_KEYS = ["context", "draft", "draft.critic", "implement", "security", "quality-gates",
                            "quality-review", "audit", "docs-check"]
 LOOP_MODES = {"spec+plan", "spec", "plan", "bugfix-plan"}
-# Every step file the real manifests name. None exists in P1; Task 16 writes them and this list shrinks
-# to [], so a step file that is later deleted or misnamed shows up as a diff here.
-MISSING_STEP_FILES_P1 = [
-    "skills/agentic-sdlc-pipeline/steps/branch.md",
-    "skills/agentic-sdlc-pipeline/steps/context.md",
-    "skills/agentic-sdlc-pipeline/steps/diff-review.md",
-    "skills/agentic-sdlc-pipeline/steps/docs-check.md",
-    "skills/agentic-sdlc-pipeline/steps/quality-gates.md",
-    "skills/agentic-sdlc-pipeline/steps/review.md",
-    "skills/code-quality-review/steps/quality-review.md",
-    "skills/completion-claim-gate/steps/claim.md",
-    "skills/dispatch-strategy/steps/strategy.md",
-    "skills/feature-build/steps/implement.md",
-    "skills/feedback-triage/steps/feedback.md",
-    "skills/implementation-control/steps/audit.md",
-    "skills/mind-spark/steps/intent.md",
-    "skills/plan-authoring/steps/draft.md",
-    "skills/root-cause-fix/steps/implement.md",
-    "skills/safe-refactor/steps/characterize.md",
-    "skills/safe-refactor/steps/implement.md",
-    "skills/security-audit/steps/security.md",
-    "skills/spec-authoring/steps/draft.md",
-    "skills/test-authoring/steps/implement.md",
-]
+# Every step file the real manifests name exists since plan Task 16; a step file that is later
+# deleted or misnamed shows up here as a diff.
+MISSING_STEP_FILES_P1 = []
 # The report check of each step id (path, header), the same in every flow that has the step.
 REPORT_CHECKS = {
     "context": ("context.md", "## Scope Lock"),
