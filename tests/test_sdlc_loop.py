@@ -382,6 +382,40 @@ class TestIngest(LoopCase):
                 self.assertFalse((self.pkg() / "spec" / "demo.md").exists())
                 self.assertFalse((self.pkg() / "plan" / "demo.md").exists())
 
+    def test_ingest_refuses_a_fresh_claim_for_an_inline_critic(self):
+        # The runner knows how its critic ran: a hand-written result cannot relabel an inline critic.
+        self.to_draft(capabilities="workflow=no,subagent=no,team=no", overrides=NO_SUBAGENTS)
+        self.back_result()
+        textio.write_json_atomic(self.draft("result.json"), _result(engine="runner-loop-inline"))
+        code, out = self.sdlc("ingest-draft")
+        self.assertEqual(code, 4, out)
+        self.assertIn("error=result_critic:fresh (the loop's critic ran degraded)", out)
+        self.assertFalse((self.pkg() / "spec" / "demo.md").exists())
+        textio.write_json_atomic(self.draft("result.json"), _result(engine="runner-loop-inline", critic="degraded"))
+        code, out = self.sdlc("ingest-draft")
+        self.assertEqual(code, 0, out)
+        for name in ("spec", "plan"):
+            self.assertEqual(textio.read_json(self.pkg() / name / "demo.review.json")["critic"], "degraded", name)
+        self.assertEqual(self.state()["loop"]["critic"], ["degraded"])
+
+    def test_ingest_refuses_an_engine_the_loop_does_not_run(self):
+        self.to_draft()
+        self.back_result()
+        textio.write_json_atomic(self.draft("result.json"), _result(engine="claude-workflow"))
+        code, out = self.sdlc("ingest-draft")
+        self.assertEqual(code, 4, out)
+        self.assertIn("error=result_engine:claude-workflow (the loop runs runner-loop)", out)
+        self.assertFalse((self.pkg() / "spec" / "demo.md").exists())
+
+    def test_ingest_keeps_an_honest_degraded_critic(self):
+        self.to_draft()
+        self.back_result()
+        textio.write_json_atomic(self.draft("result.json"), _result(critic="degraded"))
+        code, out = self.sdlc("ingest-draft")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(textio.read_json(self.pkg() / "spec" / "demo.review.json")["critic"], "degraded")
+        self.assertEqual(self.state()["loop"]["critic"], ["fresh"])  # the runner's own record of the round
+
     def test_ingest_needs_the_loop_step_and_one_ingest_per_visit(self):
         self.to_draft()
         code, out = self.sdlc("ingest-draft")  # the loop has not stopped: nothing backs a result

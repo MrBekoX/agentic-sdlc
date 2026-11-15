@@ -720,7 +720,9 @@ def ingest(ctx, result_path) -> int:
 
     Once per visit, and only a result the round files back: the files must show a stop at the
     result's round with its stop reason, and the bodies must be that round's drafts
-    (`result_unbacked:<why>`), so a hand-written result cannot replace a reviewed draft.
+    (`result_unbacked:<why>`), so a hand-written result cannot replace a reviewed draft. Its engine
+    must be the one the loop runs (`result_engine:<engine>`), and it cannot call the critic fresh
+    when the runner recorded a degraded critic round (`result_critic:fresh`).
     """
     from . import engine
 
@@ -741,6 +743,13 @@ def ingest(ctx, result_path) -> int:
         raise SdlcError(4, "result_invalid:%s" % errors[0])
     if data["mode"] != loop["mode"]:
         raise SdlcError(4, "result_mode:%s (the loop runs %s)" % (data["mode"], loop["mode"]))
+    # The engine and the critic's freshness are the runner's own record, never the result's word: a
+    # result may report a degraded critic, but cannot call a critic fresh that ran degraded.
+    if loop.get("engine") and data["engine"] != loop["engine"]:
+        raise SdlcError(4, "result_engine:%s (the loop runs %s)" % (data["engine"], loop["engine"]))
+    _record_freshness(ctx, rounds)
+    if data["critic"] == "fresh" and "degraded" in loop["critic"]:
+        raise SdlcError(4, "result_critic:fresh (the loop's critic ran degraded)")
     artifacts = _mode(ctx, definition)["artifacts"]
     for kind in ("spec", "plan"):
         if (data[kind] is not None) != (kind in artifacts):
