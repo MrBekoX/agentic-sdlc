@@ -16,7 +16,8 @@ The draft step's mechanism (strategy.json) picks the engine:
   files on disk are the loop's truth, and when it stops the runner assembles `draft/result.json`
   and ingests it in the same `next`.
 - `workflow`: the card prints the runtime's launch (Claude `Workflow`, Grok `workflow` on a
-  script staged in `draft/engine/`, ZCode `CreateWorkflow`); the engine writes the round files and
+  script staged in `draft/engine/`, ZCode `CreateWorkflow`); for the Claude and Grok engines every
+  role prompt of the visit is staged with the brief; the engine writes the round files and
   `draft/loop.json` and finishes with `sdlc ingest-draft --assemble`. A ZCode driver asks for each
   role card with `sdlc next --engine zcode-dwf --json` and records the actor's text with
   `sdlc loop-record`.
@@ -41,6 +42,7 @@ from .textio import SdlcError, dumps_json, read_json, read_text, write_json_atom
 REEVALUATE = object()  # next_role: the loop stopped and its result was ingested; walk the flow again
 ENGINES = ("runner-loop", "runner-loop-inline", "claude-workflow", "grok-workflow", "zcode-workflow", "zcode-dwf")
 WORKFLOW_ENGINES = {"claude": "claude-workflow", "grok": "grok-workflow", "zcode": "zcode-workflow"}
+STAGED_PROMPT_ENGINES = ("claude-workflow", "grok-workflow")  # the ZCode driver asks for each role card
 LOOP_SCHEMA_ID = "agentic-sdlc/loop@1"
 RESULT_SCHEMA_ID = "agentic-sdlc/draft-result@1"
 SIDECAR_SCHEMA_ID = "agentic-sdlc/sidecar@1"
@@ -354,11 +356,34 @@ def _logs(path) -> list:
         return []
 
 
+def _native_cards(ctx, definition) -> list:
+    """Every (round, role, author_mode) a native engine may run in a visit: round 0's authors, then
+    per round N the critic and, below max_rounds, the revise authors."""
+    max_rounds = int(_loop_state(ctx)["max_rounds"])
+    cards = [(0, role, author_mode) for role, author_mode in _round_roles(ctx, definition, 0)]
+    for round_no in range(1, max_rounds + 1):
+        cards += [(round_no, role, author_mode) for role, author_mode in _round_roles(ctx, definition, round_no)
+                  if role == "critic" or round_no < max_rounds]
+    return cards
+
+
+def _stage_key(loop) -> str:
+    """What the staged files were written for. A new visit stages them again, and so do an escalation
+    that changes the loop mode within a visit, another engine and another round cap."""
+    return "%s|%s|%s|%s" % (loop.get("visit"), loop.get("mode"), loop.get("engine"), loop.get("max_rounds"))
+
+
 def stage(ctx) -> None:
-    """Write draft/brief.md for this visit (inside the package)."""
+    """Write draft/brief.md for this visit (inside the package). A native workflow engine asks the
+    runner for no cards, so for one every role prompt of the visit is written too."""
     definition = _definition(ctx)
+    loop = _loop_state(ctx)
     write_text_atomic(_abs(ctx, _file(definition, "brief")), _brief(ctx), within=ctx.pkg)
-    _loop_state(ctx)["staged"] = _loop_state(ctx).get("visit")
+    if loop.get("engine") in STAGED_PROMPT_ENGINES:
+        for round_no, role, author_mode in _native_cards(ctx, definition):
+            write_text_atomic(_abs(ctx, _file(definition, "prompt", role, round_no)),
+                              _prompt_text(ctx, definition, role, round_no, author_mode), within=ctx.pkg)
+    loop["staged"] = _stage_key(loop)
 
 
 def _reads(ctx, definition, role, round_no) -> list:
@@ -561,7 +586,7 @@ def next_role(ctx, step, write: bool):
     mechanism, _degraded = _mechanism(ctx, "draft")
     if not loop.get("engine") or (loop["engine"] != "zcode-dwf" and loop["engine"] != _engine_for(ctx, mechanism)):
         loop["engine"] = _engine_for(ctx, mechanism)
-    if write and loop.get("staged") != loop.get("visit"):
+    if write and loop.get("staged") != _stage_key(loop):
         stage(ctx)
     if mechanism == "workflow" and loop["engine"] != "zcode-dwf":
         card = _launch(ctx, definition)
