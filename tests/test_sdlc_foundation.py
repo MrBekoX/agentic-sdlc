@@ -129,6 +129,24 @@ class TempDirCase(unittest.TestCase):
         os.unlink(str(probe))
         self.skipTest("the folder still accepts new files (running as root?)")
 
+    def skip_unless_refuses_folders(self, directory):
+        """Skip when a folder that refuses new files (make_readonly) still accepts new folders.
+
+        On the Windows CI runner, the test process started from Git Bash created a folder through
+        the deny ACL that still refused it a file (probably the backup and restore privileges of an
+        elevated account); the same test started from PowerShell was refused both.
+        """
+        probe = Path(directory) / ".readonly-dir-check"
+        try:
+            os.mkdir(str(probe))
+        except OSError:
+            return
+        try:
+            os.rmdir(str(probe))
+        except OSError:
+            pass  # the temp folder goes away with the test
+        self.skipTest("the folder still accepts new folders (a backup or restore privilege?)")
+
     def symlink(self, target, link, directory=False):
         try:
             os.symlink(str(target), str(link), target_is_directory=directory)
@@ -673,17 +691,25 @@ class TestLock(TempDirCase):
         self.assertEqual(ctx.exception.message, "lock_unwritable:" + str(path))
         self.assertFalse(path.exists())
 
+    def _assert_lock_unwritable(self, path):
+        started = time.monotonic()
+        with self.assertRaises(textio.SdlcError) as ctx:
+            lock.PackageLock(path).acquire(timeout=10)
+        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertEqual((ctx.exception.code, ctx.exception.message), (2, "lock_unwritable:" + str(path)))
+
     def test_lock_in_a_folder_that_refuses_files(self):
         folder = self.tmp / "denied"
         folder.mkdir()
         self.make_readonly(folder)
-        for path in (folder / ".lock", folder / "newpkg" / ".lock"):
-            with self.subTest(path=path.name if path.parent == folder else "missing package folder"):
-                started = time.monotonic()
-                with self.assertRaises(textio.SdlcError) as ctx:
-                    lock.PackageLock(path).acquire(timeout=10)
-                self.assertLess(time.monotonic() - started, 5.0)
-                self.assertEqual((ctx.exception.code, ctx.exception.message), (2, "lock_unwritable:" + str(path)))
+        self._assert_lock_unwritable(folder / ".lock")
+
+    def test_lock_in_a_missing_package_folder_under_a_folder_that_refuses_folders(self):
+        folder = self.tmp / "denied"
+        folder.mkdir()
+        self.make_readonly(folder)
+        self.skip_unless_refuses_folders(folder)
+        self._assert_lock_unwritable(folder / "newpkg" / ".lock")
 
     def test_release_keeps_a_lock_that_is_no_longer_ours(self):
         path = self.tmp / ".lock"
