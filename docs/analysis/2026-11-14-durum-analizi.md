@@ -199,7 +199,7 @@ PR'ın son commit'inde CI Ubuntu, Windows ve macOS'ta yeşil. `09db76a`'nın tem
 Açık kalanlar:
 
 - Döngü sınırları (ziyaret, geçiş, ilerlemesiz tekrar, spec/plan turu, düzeltme turu) runner'da uygulandı ve birim testleriyle sınandı. Uçtan uca akış testleri Görev 9'da; canlı koşu yok.
-- `tests/test_zcode_packaging.py`'deki `CreateWorkflow` taraması `scripts/sdlc_runner/loop.py` ve `tests/test_sdlc_loop.py`'yi geçici olarak muaf tutuyor; Görev 13 bu taramayı resmi adı sabitleyen testlerle değiştirecek.
+- `tests/test_zcode_packaging.py`, kaynağı olmayan ZCode workflow API adını takip edilen dosyalarda yasaklıyor. Runner'ın ZCode başlatma kartı bu adı yazdığı için tarama `scripts/sdlc_runner/loop.py` ve `tests/test_sdlc_loop.py`'yi geçici olarak muaf tutuyor; Görev 13 bu taramayı resmi adı sabitleyen testlerle değiştirecek.
 - Sıradaki iş Görev 9 (E dalgası: uçtan uca akışlar, paketleme ve P1 gate'i). Görev 10–23 başlamadı.
 
 ## Claude Code uygulama planı
