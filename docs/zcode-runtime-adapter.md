@@ -38,7 +38,7 @@ Evidence sources, fetched in-session: `zcode.z.ai/en/docs/{plugin,skill,hooks}` 
 
 ## Validation status
 
-- Verified (static + gate): manifest/marketplace/hook-wire schema conformance, the ZCode-mode output schema of every wired hook script (`tests/test_zcode_hook_output.py`), 16 skill + 9 agent + 1 command discovery inputs, version binding — `tests/test_zcode_packaging.py`, full local gate green.
+- Verified (static + gate): manifest/marketplace/hook-wire schema conformance, the ZCode-mode output schema of every wired hook script (`tests/test_zcode_hook_output.py`), 16 skill + 10 agent + 1 command discovery inputs, version binding — `tests/test_zcode_packaging.py`, full local gate green.
 - Verified in-session (this client, build not recorded): subagent dispatch works, Skill tool resolves qualified ids from installed plugins. The workflow tier was observed but its API was not; treat that observation as unverified.
 - Verified natively (2026-10-12, `docs/publication/compatibility-matrix.md` E9 Windows, E15 Linux, E14 macOS): the signed ZCode desktop 3.14.5 bundle's agent CLI 0.16.9, run in isolated profiles, validated the package, added a marketplace catalog derived from the root `marketplace.json`, installed the plugin (enabled, 16 skills, 5 hook declarations), applied a version-bumped update and uninstalled it. No GUI, login or model turn was involved.
 - Pending live proof: the desktop GUI flow (Settings → Plugins) and its discovery view, hook firing on real events, live skill and model behavior, and whether the `.dwf.ts` port compiles at all under the unpublished runtime.
