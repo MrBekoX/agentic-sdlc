@@ -139,13 +139,24 @@ def workflow_names():
 
 
 def workflow_agent_types():
-    """Map workflow file -> set of agentType names it dispatches (integration target)."""
+    """Map workflow file -> set of agent role names it dispatches (integration target).
+
+    Claude JS workflows name roles with `agentType:'...'`; Grok Rhai engines (workflows/grok/ and
+    the project catalog .grok/workflows/) with `agent_type: "..."`. The ZCode driver gives each card
+    to a generic actor and names no role. Rhai files are keyed by their path under their folder.
+    """
     out = {}
-    if not WORKFLOWS_DIR.is_dir():
-        return out
-    for p in WORKFLOWS_DIR.glob("*.js"):
-        text = p.read_text(encoding="utf-8")
-        out[p.name] = set(re.findall(r"agentType:\s*'([^']+)'", text))
+    if WORKFLOWS_DIR.is_dir():
+        for p in WORKFLOWS_DIR.glob("*.js"):
+            text = p.read_text(encoding="utf-8")
+            out[p.name] = set(re.findall(r"agentType:\s*'([^']+)'", text))
+    for folder in (WORKFLOWS_DIR, REPO / ".grok" / "workflows"):
+        if not folder.is_dir():
+            continue
+        for p in sorted(folder.rglob("*.rhai")):
+            text = p.read_text(encoding="utf-8")
+            key = p.relative_to(folder).as_posix() if folder == WORKFLOWS_DIR else ".grok/workflows/" + p.name
+            out[key] = set(re.findall(r'agent_type:\s*"([^"]+)"', text))
     return out
 
 
