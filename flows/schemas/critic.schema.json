@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agentic-sdlc/critic@1",
+  "title": "Spec/plan critic output (draft/critic.r<N>.json)",
+  "description": "What the spec-plan-critic role returns each round (design §5.8, contract §10). Every issue names the artifact to fix (target), a severity and a kind; validator findings are facts the critic repeats, never overrules. The verdict is clean only with no issue of severity critical or high and no kind contradiction or blocker (the loop checks that, not this schema). Extra fields are allowed: a model adding an explanation is not a malformed critic, while a missing or misspelled required field is.",
+  "type": "object",
+  "required": ["verdict", "issues"],
+  "properties": {
+    "verdict": {"enum": ["clean", "issues"]},
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target", "category", "severity", "kind", "whatsMissing", "where", "fix"],
+        "properties": {
+          "target": {"enum": ["spec", "plan"], "description": "The artifact the fix goes into; a spec/plan mismatch names the side to change."},
+          "category": {"type": "string", "minLength": 1},
+          "severity": {"enum": ["critical", "high", "medium", "low"]},
+          "kind": {"enum": ["gap", "contradiction", "blocker", "style"]},
+          "whatsMissing": {"type": "string", "minLength": 1},
+          "where": {"type": "string", "description": "Section or task; part of the issue key (target|category|where) the no-progress stop compares."},
+          "fix": {"type": "string"}
+        }
+      }
+    },
+    "coverageCheck": {"type": "string"}
+  }
+}

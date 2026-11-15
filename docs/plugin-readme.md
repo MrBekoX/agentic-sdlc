@@ -156,7 +156,7 @@ The experimental adapters wire a subset of the same scripts. Kimi Code (inline h
 
 Judgment-based gates remain in skills and contracts. A script cannot decide whether a model understood test output, followed a spec, or completed a security review.
 
-## Deterministic scripts (25)
+## Deterministic scripts (26)
 
 | Script | Purpose |
 |---|---|
@@ -174,6 +174,7 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | `install_cursor_plugin.py` | Copy, update or uninstall the package in Cursor's local plugin directory. Update and uninstall keep files the installer did not write. |
 | `prepare_marketplace_release.py` | Export validated committed source and deterministic Grok/ZCode catalog packets to a new local destination, with separate producer/source provenance and byte verification; no publication or original Git mutation. |
 | `detect_context.py` | Workspace/dependency/toolchain classification. |
+| `sdlc.py` | Entry point of the middleware-chain runner (`scripts/sdlc_runner/`): starts a flow, prints one step card at a time, records runs and transitions in the work package. Under construction; no skill calls it yet. |
 | `run_trigger_eval.py` | Claude Code trigger eval runner. |
 | `run_codex_trigger_eval.py` | Codex route-classifier trigger runner. |
 | `run_all_trigger_evals.py` | Batch trigger eval runner. |
@@ -217,7 +218,7 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 - Live routing is model-dependent and must be evidenced per runtime, model, and run.
 - Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters. Local CLI install does not require a public directory listing.
 - Bounded native hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. Their source identities and the separate parser replay are recorded in [runtime evidence](runtime-adapter.md#current-binary-and-historical-hook-evidence); `transcript_path` remains unstable. The [0.4.3 release ledger](release-evidence-0.4.3.md) distinguishes this proof from the standalone routing and pipeline publication gates.
-- No live pipeline run has measured 0.6.0 yet; the zero-delegation rule is stated in the skill text, checked by the Claude Code flow hooks (warn by default) and graded offline by the strict procedure eval. Codex test runs wrapped in `/bin/bash -lc` or `powershell -Command` are not attributed, so strict RED/GREEN cannot pass on real Codex transcripts. See the [current release ledger](release-evidence-0.6.0.md).
+- One live pipeline run measured 0.6.0 (52a2ad1, 2026-10-22) and none of its six procedure rows passed; the fixes it led to have no live run yet. The zero-delegation rule is stated in the skill text, checked by the Claude Code flow hooks (warn by default) and graded offline by the strict procedure eval. Codex test runs wrapped in `/bin/bash -lc` or `powershell -Command` are not attributed, so strict RED/GREEN cannot pass on real Codex transcripts. See the [current release ledger](release-evidence-0.6.0.md).
 
 ## Artifact Layouts And Per-Package Evidence
 

@@ -16,6 +16,9 @@ Output contract:
   `artifacts_validation=passed|failed`.
 - `main()` returns exit 1 if any errors, else 0.
 - `--strict` promotes every `warning=` to `error=` (warnings become gating).
+- `run(mode, file, spec, strict)` returns `(exit_code, fields)`. An artifact it cannot read is an
+  error (`file_unreadable:<reason>`, `spec_unreadable:<reason>`), never an exception, so a caller
+  that imports it gets a failed gate rather than a traceback.
 """
 
 import argparse
@@ -35,6 +38,9 @@ REQUIRED_SPEC_SECTIONS = {
     "definition-of-done": "definition of done",
     "must-not-change": "must-not-change",
 }
+
+# A section whose body has fewer non-blank characters than this is thin (`thin_section:<slug>`).
+THIN_SECTION_CHARS = 40
 
 # A criterion is considered testable if it states an input->output relation or a
 # concrete outcome. Cheap heuristic, but it catches the "should work well" class.
@@ -142,20 +148,13 @@ def _section_body(text, start_lineno):
     return "\n".join(body)
 
 
-def _acceptance_criteria(text):
-    """Return [(index, line, nested)] for each bullet of the first acceptance-criteria section.
+def _criterion_bullets(body):
+    """[(index, line, nested)] for each bullet of a criteria section body.
 
     The index is the bullet's 1-based position: `untestable_criterion:<n>` and
     `ac_missing_id:<n>` name the same bullet by it. `nested` is True for a bullet indented
-    under another one. No section means no criteria.
+    under another one.
     """
-    needle = REQUIRED_SPEC_SECTIONS["acceptance-criteria"]
-    for lineno, _raw, norm in _iter_headings(text):
-        if needle in norm:
-            body = _section_body(text, lineno)
-            break
-    else:
-        return []
     criteria = []
     for line in body.splitlines():
         stripped = line.strip()
@@ -165,16 +164,34 @@ def _acceptance_criteria(text):
     return criteria
 
 
-def _unlabelled_criteria(text):
+def _acceptance_criteria(text):
+    """Return [(index, line, nested)] for each bullet of the first acceptance-criteria section.
+
+    No section means no criteria.
+    """
+    needle = REQUIRED_SPEC_SECTIONS["acceptance-criteria"]
+    for lineno, _raw, norm in _iter_headings(text):
+        if needle in norm:
+            return _criterion_bullets(_section_body(text, lineno))
+    return []
+
+
+def _unlabelled(criteria):
     """Indexes of the criteria the plan gate cannot check: a top-level bullet that reads as a
     criterion (it has a testable marker) and carries no `AC<n>` id.
 
     Real pipeline specs put a bold group heading, or a nested "Guards:"/"Variant:" line, inside the
     section. Neither is a criterion of its own, so neither is reported here. A top-level detail
-    bullet that happens to say "when" still is, which is why only the spec check uses this.
+    bullet that happens to say "when" still is, which is why only the criteria sources use this:
+    the spec check, and a spec-less bugfix plan's own section (no spec check runs there).
     """
-    return [index for index, line, nested in _acceptance_criteria(text)
+    return [index for index, line, nested in criteria
             if not nested and TESTABLE_MARKERS.search(line) and not AC_ID_RE.search(line)]
+
+
+def _unlabelled_criteria(text):
+    """`_unlabelled` over the first acceptance-criteria section of `text`."""
+    return _unlabelled(_acceptance_criteria(text))
 
 
 # Frontmatter the pipeline gates on. These MIRROR scripts/resolve_work_package.py, which
@@ -198,41 +215,117 @@ FRONTMATTER_REQUIRED = {
 }
 FRONTMATTER_STATUSES = {"draft", "reviewed", "approved", "in_progress", "ready_for_audit", "complete"}
 
+# Spec-less bugfix plans (design §5.19). A plan is one only when its frontmatter carries BOTH
+# `flow: bugfix` and `spec: none`; `spec: none` without `flow: bugfix` is an error, so a feature
+# plan cannot drop its spec by writing `none`. A spec-less plan given a spec anyway is an error too
+# (`spec_none_with_spec`): the artifact under test must not decide whether the caller's spec is
+# checked. Mirrored in scripts/resolve_work_package.py, which reports the same codes (there: a spec
+# file in the plan's package); tests/test_validator_resolver_parity.py runs both on one fixture set.
+SPEC_NONE = "none"
+BUGFIX_FLOW = "bugfix"
 
-def parse_frontmatter(text):
-    """Return the leading `---` block as a dict, or {} when there is none.
+# A frontmatter value is echoed in an error only when it is a short lowercase word, the shape of a
+# status. Anything else could be a pasted credential, so it is printed masked. A word may use any
+# script (`hazır`); digits, uppercase and spaces are not part of a word here.
+ECHOABLE_VALUE_RE = re.compile(r"^[^\W\d_](?:[^\W\d]|-){0,23}\Z")  # a letter, then letters, `_` or `-`
+
+
+def _frontmatter_block(text):
+    """(meta, errors) for the leading `---` block; ({}, []) when there is none.
 
     Only a block that OPENS ON THE FIRST LINE counts. Scanning for `---` anywhere would let a
     fenced example, a horizontal rule, or a document that merely discusses frontmatter satisfy
-    the check from outside the block.
+    the check from outside the block. The delimiters are whole lines: `---` with nothing before
+    it (trailing spaces aside), so an indented `---` or a `----` line is neither opener nor closer.
+    An unterminated block is not frontmatter.
 
     Deliberately not a YAML parser: `key: value` on one line, matching what the resolver reads
-    and what the skills tell authors to write. A nested or multi-line value is not frontmatter
-    this pipeline uses.
+    and what the skills tell authors to write. Blank lines and `#` comment lines are skipped; any
+    other line without a `:` or with an empty key is `invalid_frontmatter_line:<file line>`, as
+    the resolver reports it, rather than a line one tool skips and the other rejects. Surrounding
+    quotes are dropped the way the resolver drops them, so `status: "approved"` is `approved` to
+    both tools rather than a gate failure the resolver would never report.
     """
     lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}
+    end = _frontmatter_end(lines)
+    if end is None:
+        return {}, []                            # no block, or an unterminated one: not frontmatter
     meta = {}
-    for line in lines[1:]:
-        if line.strip() == "---":
-            return meta
+    errors = []
+    for lineno, raw in enumerate(lines[1:end], start=2):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
         key, sep, value = line.partition(":")
-        if sep and key.strip():
-            meta[key.strip()] = value.strip()
-    return {}                                    # unterminated block: not frontmatter
+        if not sep or not key.strip():
+            errors.append(f"invalid_frontmatter_line:{lineno}")
+            continue
+        meta[key.strip()] = value.strip().strip("\"'")
+    return meta, errors
+
+
+def _frontmatter_end(lines):
+    """Index of the line that closes a block opening on `lines[0]`; None without a terminated block.
+
+    `lines` may keep their line breaks: a delimiter is `---` once trailing whitespace is stripped.
+    """
+    if not lines or lines[0].rstrip() != "---":
+        return None
+    return next((i for i in range(1, len(lines)) if lines[i].rstrip() == "---"), None)
+
+
+def _body(text):
+    """The text after the block `_frontmatter_block` reads; the whole text when there is none.
+
+    Headings, sections, tasks and AC ids are read from here only. Inside the block a `#` line is a
+    comment and `- AC1: ...` is a `key: value` line, so neither may count as a heading, a task or a
+    criterion; the runner's body fingerprint ignores the block too, so an edit confined to the
+    block never changes a body verdict. The placeholder and secret scan still reads every line.
+    """
+    lines = text.splitlines(keepends=True)
+    end = _frontmatter_end(lines)
+    return text if end is None else "".join(lines[end + 1:])
+
+
+def parse_frontmatter(text):
+    """Return the leading `---` block as a dict, or {} when there is none (see `_frontmatter_block`)."""
+    return _frontmatter_block(text)[0]
+
+
+def _echo_value(value):
+    """`value` when it is safe to print in an error line, else the mask."""
+    if (ECHOABLE_VALUE_RE.match(value) and value == value.lower()
+            and not any(pat.search(value) for pat in SECRET_PATTERNS)):
+        return value
+    return _mask(value)
+
+
+def is_bugfix_plan(meta):
+    """True for a spec-less bugfix plan: `flow: bugfix` together with `spec: none`."""
+    return meta.get("spec") == SPEC_NONE and meta.get("flow") == BUGFIX_FLOW
+
+
+def check_plan_kind(meta):
+    """`spec: none` is accepted only with `flow: bugfix`; the resolver reports the same code."""
+    if meta.get("spec") == SPEC_NONE and meta.get("flow") != BUGFIX_FLOW:
+        return ["spec_none_requires_flow_bugfix"]
+    return []
 
 
 def check_frontmatter(text, mode):
-    """Errors for the required keys of `mode`. An empty value counts as missing."""
+    """Errors for the required keys of `mode`. An empty value counts as missing.
+
+    An unknown status is named only when it is a plain word (`invalid_status:wip`); any other
+    value is masked, so the gate never echoes a credential pasted into the frontmatter.
+    """
     required = FRONTMATTER_REQUIRED.get(mode)
     if not required:
         return []
-    meta = parse_frontmatter(text)
-    errors = [f"missing_frontmatter_key:{key}" for key in required if not meta.get(key)]
+    meta, errors = _frontmatter_block(text)
+    errors = errors + [f"missing_frontmatter_key:{key}" for key in required if not meta.get(key)]
     status = meta.get("status")
     if status and status not in FRONTMATTER_STATUSES:
-        errors.append(f"invalid_status:{status}")
+        errors.append(f"invalid_status:{_echo_value(status)}")
     return errors
 
 
@@ -244,10 +337,13 @@ def check_spec(text):
     heading); an acceptance-criteria bullet lacks a testable marker or an `AC<n>`
     id (the plan gate checks coverage by id, so an unlabelled criterion is one
     it cannot check).
+
+    Only the body after the frontmatter block is read (`_body`).
     """
     errors = []
     warnings = []
 
+    text = _body(text)
     headings = list(_iter_headings(text))
 
     # Map each required section to the first heading that contains its substring.
@@ -264,7 +360,7 @@ def check_spec(text):
             continue
         body = _section_body(text, found[slug])
         non_blank = "".join(ch for ch in body if not ch.isspace())
-        if len(non_blank) < 40:
+        if len(non_blank) < THIN_SECTION_CHARS:
             warnings.append(f"thin_section:{slug}")
 
     # Per-criterion checks, scoped to the acceptance-criteria section body.
@@ -344,17 +440,32 @@ def scan_placeholders_and_secrets(text):
     return {"errors": errors, "warnings": warnings}
 
 
-def _iter_task_blocks(text):
-    """Split plan text into task blocks. Returns a list of (number, block_text).
+def _fenced_lines(lines):
+    """Indexes of the lines that are code: the ``` / ~~~ fence markers and every line between them.
 
-    A task block starts at a "## Task N" heading or a line-leading "TN" marker (see
-    the detector regexes). `number` is the integer used for ordering, taken from a
-    'T\\d+' token when present, else None. Bare numbered list items and mid-prose
-    task-id references are intentionally NOT task starts (they over-count real plans).
+    The same toggle as `_strip_fenced_code` and the placeholder scanner. Structure detectors skip
+    these lines: a `# comment` in a shell snippet is not a heading, and a `T1 ...` line in an
+    example is not a task.
     """
-    lines = text.splitlines()
-    starts = []  # (line_index, number_or_None)
+    fenced = set()
+    in_fence = False
     for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            fenced.add(i)
+        elif in_fence:
+            fenced.add(i)
+    return fenced
+
+
+def _task_starts(lines):
+    """[(line_index, number_or_None)] for every task-block start among `lines`, outside code fences."""
+    fenced = _fenced_lines(lines)
+    starts = []
+    for i, line in enumerate(lines):
+        if i in fenced:
+            continue
         number = None
         is_start = False
         if TASK_HEADING_RE.match(line):
@@ -369,6 +480,19 @@ def _iter_task_blocks(text):
                 number = int(mtid.group(1)[1:])
         if is_start:
             starts.append((i, number))
+    return starts
+
+
+def _iter_task_blocks(text):
+    """Split plan text into task blocks. Returns a list of (number, block_text).
+
+    A task block starts at a "## Task N" heading or a line-leading "TN" marker (see
+    the detector regexes). `number` is the integer used for ordering, taken from a
+    'T\\d+' token when present, else None. Bare numbered list items and mid-prose
+    task-id references are intentionally NOT task starts (they over-count real plans).
+    """
+    lines = text.splitlines()
+    starts = _task_starts(lines)
 
     blocks = []
     for idx, (line_i, number) in enumerate(starts):
@@ -378,7 +502,90 @@ def _iter_task_blocks(text):
     return blocks
 
 
-def check_plan(text, spec_text):
+# The bug report of a bugfix plan: a heading that starts with the word "Bug" ("## Bug",
+# "## 1. Bug (expected, actual, reproduction)"). Start-anchored so a task heading such as
+# "## Task 2 — Fix the bug" never stands in for it.
+BUG_HEADING_RE = re.compile(r"^bugs?\b")
+
+
+def _heading_level(line):
+    stripped = line.lstrip()
+    return len(stripped) - len(stripped.lstrip("#"))
+
+
+def _bugfix_sections(text):
+    """(criteria_text or None, errors, warnings) for a spec-less bugfix plan.
+
+    Headings are read outside code fences (a `# comment` in a shell snippet is not a heading), and
+    task headings are never taken for either section. A section runs from its heading to the next
+    heading of the same or a higher level, and never past the first task block.
+
+    - The bug report is the first heading at level 2 or deeper, before the first task block, whose
+      text starts with "Bug". The document title (level 1), a sub-heading inside a task and a
+      section after the tasks are not the bug report (`missing_section:bug`). Design §5.19 has it
+      carry expected, actual and reproduction, so a body under THIN_SECTION_CHARS non-blank
+      characters warns `thin_section:bug`, as a thin spec section does.
+    - The criteria are the body of the plan's own acceptance-criteria section. It must come before
+      the first task block (`bugfix_ac_section_after_tasks`); one inside a task block would be
+      "covered" by the very block that holds it.
+    """
+    lines = text.splitlines()
+    fenced = _fenced_lines(lines)
+    starts = _task_starts(lines)
+    task_lines = {i for i, _number in starts}
+    first_task = starts[0][0] if starts else len(lines)
+    headings = []  # (line_index, normalized text, level)
+    for i, line in enumerate(lines):
+        match = HEADING_RE.match(line)
+        if match and i not in task_lines and i not in fenced:
+            headings.append((i, _normalize_heading(match.group(1)), _heading_level(line)))
+
+    def section_end(at, level):
+        return next((i for i, _norm, lvl in headings if at < i < first_task and lvl <= level), first_task)
+
+    errors = []
+    warnings = []
+    bug = next(((i, level) for i, norm, level in headings
+                if i < first_task and level >= 2 and BUG_HEADING_RE.match(norm)), None)
+    if bug is None:
+        errors.append("missing_section:bug")
+    else:
+        bug_body = "\n".join(lines[bug[0] + 1:section_end(*bug)])
+        if len("".join(bug_body.split())) < THIN_SECTION_CHARS:
+            warnings.append("thin_section:bug")
+    needle = REQUIRED_SPEC_SECTIONS["acceptance-criteria"]
+    section = next(((i, level) for i, norm, level in headings if needle in norm), None)
+    if section is None:
+        errors.append("missing_section:acceptance-criteria")
+        return None, errors, warnings
+    at, level = section
+    if at > first_task:
+        errors.append("bugfix_ac_section_after_tasks")
+        return None, errors, warnings
+    return "\n".join(lines[at + 1:section_end(at, level)]), errors, warnings
+
+
+def _ac_coverage(source_text, blocks, warnings):
+    """Count the AC ids of `source_text` that some task block names; warn for the rest.
+
+    One obligation per criterion, reported in the source's own spelling.
+    """
+    source_ids = {}
+    for m in AC_ID_RE.finditer(source_text):
+        source_ids.setdefault(_ac_key(m), m.group(0))
+    if not source_ids:
+        warnings.append("ac_source_empty")
+    cited = [{_ac_key(m) for m in AC_ID_RE.finditer(block)} for _, block in blocks]
+    covered = 0
+    for key in sorted(source_ids):
+        if any(key in ids for ids in cited):
+            covered += 1
+        else:
+            warnings.append(f"ac_not_covered:{source_ids[key]}")
+    return covered
+
+
+def check_plan(text, spec_text, bugfix=False):
     """Validate a plan artifact against the spec's acceptance criteria.
 
     AC ids are sourced from `spec_text` ONLY (DP-2): no mining from the plan body,
@@ -390,11 +597,27 @@ def check_plan(text, spec_text):
     A single criterion without an id is reported by the spec check
     (`ac_missing_id:<n>`), not here: telling a criterion bullet from a detail
     bullet is a heuristic, and this check is the strict plan gate.
+
+    `bugfix=True` is the one exception to DP-2 (design §5.19): a spec-less bugfix plan
+    has no spec, so `spec_text` is ignored and the ids come from the plan's own
+    acceptance-criteria section, which must come before the first task block
+    (`bugfix_ac_section_after_tasks`). Both that section and a `## Bug` section are
+    required (`missing_section:acceptance-criteria`, `missing_section:bug`; see
+    `_bugfix_sections`). Coverage is then judged exactly as against a spec. No spec
+    check runs on that section, so its criteria without an id are reported here
+    (`ac_missing_id:<n>`, fenced lines aside); otherwise they would drop out of the
+    gate in silence.
+
+    Only the bodies after the frontmatter blocks of the plan and the spec are read
+    (`_body`): a task, a section or an id inside a block does not count.
     """
     errors = []
     warnings = []
     metrics = {}
 
+    text = _body(text)
+    if spec_text is not None:
+        spec_text = _body(spec_text)
     blocks = _iter_task_blocks(text)
     metrics["plan_tasks"] = len(blocks)
     if not blocks:
@@ -424,25 +647,24 @@ def check_plan(text, spec_text):
     if any(b <= a for a, b in zip(numbers, numbers[1:])):
         warnings.append("tasks_unordered")
 
-    # AC coverage — only when we have a canonical spec source.
-    if spec_text is None:
+    # AC coverage — only when we have a canonical source: the spec, or a bugfix plan's own section.
+    if bugfix:
+        criteria, criteria_errors, criteria_warnings = _bugfix_sections(text)
+        errors += criteria_errors
+        warnings += criteria_warnings
+        if criteria is None:
+            metrics["plan_ac_covered"] = 0
+        else:
+            criteria_lines = criteria.splitlines()
+            fenced = _fenced_lines(criteria_lines)
+            unfenced = "\n".join(line for i, line in enumerate(criteria_lines) if i not in fenced)
+            warnings += [f"ac_missing_id:{index}" for index in _unlabelled(_criterion_bullets(unfenced))]
+            metrics["plan_ac_covered"] = _ac_coverage(criteria, blocks, warnings)
+    elif spec_text is None:
         warnings.append("ac_source_missing")
         metrics["plan_ac_covered"] = 0
     else:
-        # One obligation per criterion, reported in the spec's own spelling.
-        spec_ids = {}
-        for m in AC_ID_RE.finditer(spec_text):
-            spec_ids.setdefault(_ac_key(m), m.group(0))
-        if not spec_ids:
-            warnings.append("ac_source_empty")
-        cited = [{_ac_key(m) for m in AC_ID_RE.finditer(block)} for _, block in blocks]
-        covered = 0
-        for key in sorted(spec_ids):
-            if any(key in ids for ids in cited):
-                covered += 1
-            else:
-                warnings.append(f"ac_not_covered:{spec_ids[key]}")
-        metrics["plan_ac_covered"] = covered
+        metrics["plan_ac_covered"] = _ac_coverage(spec_text, blocks, warnings)
 
     return {"errors": errors, "warnings": warnings, "metrics": metrics}
 
@@ -465,16 +687,46 @@ def _read(path):
     return Path(path).read_text(encoding="utf-8-sig")
 
 
+def _read_artifact(path):
+    """(text, None), or (None, reason) when the file cannot be read: missing | not_utf8 | error."""
+    try:
+        return _read(path), None
+    except FileNotFoundError:
+        return None, "missing"
+    except UnicodeDecodeError:
+        return None, "not_utf8"
+    except (OSError, ValueError):
+        return None, "error"
+
+
+def _fields(mode, metrics, warnings, errors):
+    fields = {"mode": mode}
+    for k, v in metrics.items():
+        fields[k] = v
+    # Each warning/error becomes its own complete line (value None -> printed
+    # verbatim by emit()), so they sort alongside the scalar fields.
+    for w in warnings:
+        fields[f"warning={w}"] = None
+    for e in errors:
+        fields[f"error={e}"] = None
+    fields["artifacts_validation"] = "failed" if errors else "passed"
+    return fields
+
+
 def run(mode, file_path, spec_path, strict):
     """Run the requested checks and return (exit_code, fields_dict).
 
-    Kept separate from main() so callers/tests can drive it without argparse.
+    Kept separate from main() so callers/tests can drive it without argparse. The gate passes when
+    the exit code (`run(...)[0]`) is 0. An unreadable artifact or spec is a failed gate with a
+    named reason, never an exception.
     """
     errors = []
     warnings = []
     metrics = {}
 
-    file_text = _read(file_path)
+    file_text, unreadable = _read_artifact(file_path)
+    if unreadable:
+        return 1, _fields(mode, metrics, warnings, [f"file_unreadable:{unreadable}"])
 
     # The placeholder/secret scan runs in every mode, on the artifact under test.
     scan = scan_placeholders_and_secrets(file_text)
@@ -490,8 +742,21 @@ def run(mode, file_path, spec_path, strict):
         warnings += spec_res["warnings"]
 
     if mode in ("plan", "all"):
-        spec_text = _read(spec_path) if spec_path else None
-        plan_res = check_plan(file_text, spec_text)
+        # The plan's own frontmatter decides its kind. A spec-less bugfix plan is checked against
+        # its own criteria. A --spec given for it anyway means the caller and the artifact disagree
+        # about whether there is a spec; the artifact under test must not settle that by switching
+        # the caller's spec off, so the gate fails (`spec_none_with_spec`) and the spec is not read.
+        meta = parse_frontmatter(file_text)
+        errors += check_plan_kind(meta)
+        bugfix = is_bugfix_plan(meta)
+        spec_text = None
+        if spec_path and bugfix:
+            errors.append("spec_none_with_spec")
+        elif spec_path:
+            spec_text, unreadable = _read_artifact(spec_path)
+            if unreadable:
+                errors.append(f"spec_unreadable:{unreadable}")
+        plan_res = check_plan(file_text, spec_text, bugfix=bugfix)
         errors += plan_res["errors"]
         warnings += plan_res["warnings"]
         metrics.update(plan_res["metrics"])
@@ -501,19 +766,7 @@ def run(mode, file_path, spec_path, strict):
         errors += warnings
         warnings = []
 
-    fields = {}
-    fields["mode"] = mode
-    for k, v in metrics.items():
-        fields[k] = v
-    # Each warning/error becomes its own complete line (value None -> printed
-    # verbatim by emit()), so they sort alongside the scalar fields.
-    for w in warnings:
-        fields[f"warning={w}"] = None
-    for e in errors:
-        fields[f"error={e}"] = None
-    fields["artifacts_validation"] = "failed" if errors else "passed"
-
-    return (1 if errors else 0), fields
+    return (1 if errors else 0), _fields(mode, metrics, warnings, errors)
 
 
 def build_parser():
@@ -525,7 +778,9 @@ def build_parser():
     p.add_argument(
         "--spec",
         default=None,
-        help="canonical acceptance-criteria source for plan/all mode (DP-2)",
+        help="canonical acceptance-criteria source for plan/all mode (DP-2); a spec-less bugfix "
+             "plan (`flow: bugfix` with `spec: none`) takes none, and fails with "
+             "`spec_none_with_spec` when one is given",
     )
     p.add_argument(
         "--strict",

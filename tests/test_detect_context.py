@@ -11,6 +11,8 @@ We import it by path so the test suite stays independent of cwd / sys.path setup
 import contextlib
 import importlib.util
 import io
+import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -416,6 +418,185 @@ class TestExitZeroInvariant(unittest.TestCase):
             with mock.patch.object(dc.Path, "read_text", side_effect=OSError("locked")):
                 result = dc.probe_deps([tmp])
             self.assertEqual(result["deps_probe"], "stdlib_only")
+
+
+# ---------------------------------------------------------------------------
+# Ignored folders are pruned during the walk, not filtered after it
+# ---------------------------------------------------------------------------
+
+# Runs in a child interpreter so its audit hook (which cannot be removed) stays out of this test
+# process. `os.scandir` and `os.listdir` raise an audit event in C on every call, however the
+# caller reached them (os.walk, pathlib's glob, a bound reference), so the record does not depend
+# on how detect_context walks.
+LISTING_PROBE = """\
+import importlib.util
+import json
+import os
+import sys
+
+script, root = sys.argv[1], sys.argv[2]
+listed = []
+
+
+def hook(event, args):
+    if event not in ("os.scandir", "os.listdir"):
+        return
+    path = args[0] if args else None
+    if path is None:
+        path = "."
+    try:
+        listed.append(os.fsdecode(os.fspath(path)))
+    except TypeError:
+        listed.append(repr(path))
+
+
+spec = importlib.util.spec_from_file_location("detect_context_under_probe", script)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+sys.addaudithook(hook)
+result = module.detect([root])
+print(json.dumps({"result": result, "listed": listed}))
+"""
+
+
+def _write_tree(root, files):
+    for rel in files:
+        path = Path(root, *rel.split("/"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x\n")
+
+
+class TestIgnoredFoldersAreNeverListed(unittest.TestCase):
+    """An ignored folder below the scanned root is never listed, so its size costs nothing.
+
+    The walk used to list every folder (node_modules, .git, .venv, ...) and drop the ignored paths
+    afterwards: about 10 s on this repository. Pruning them during the walk gives the same result.
+    """
+
+    FILES = (
+        "app.py",
+        "src/main.py",
+        "src/node_modules/dep/index.js",
+        "api/server.py",
+        "api/build/gen/out.py",
+        "node_modules/pkg/deep/lib.js",
+        ".git/hooks/pre-commit.py",
+        ".venv/lib/site.py",
+        "web/dist/bundle.js",
+    )
+
+    def test_no_ignored_folder_is_listed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "proj"
+            _write_tree(root, self.FILES)
+            probe = Path(tmp) / "probe.py"
+            probe.write_bytes(LISTING_PROBE.encode("utf-8"))
+            proc = subprocess.run(
+                [sys.executable, "-I", "-B", str(probe), str(SCRIPT), str(root)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["result"]["source_files"], 3, data["result"])
+            self.assertEqual(data["result"]["layers"], ["api", "src"], data["result"])
+            listed = [Path(p) for p in data["listed"]]
+            self.assertIn(root, listed, "the probe saw no listing of the root: it would prove nothing")
+            root_parts = root.parts
+            for path in listed:
+                with self.subTest(listed=str(path)):
+                    self.assertEqual(path.parts[:len(root_parts)], root_parts, "listed outside the root")
+                    below = path.parts[len(root_parts):]
+                    self.assertFalse(
+                        any(part in dc.IGNORE for part in below),
+                        "listed an ignored folder; prune it before descending")
+
+
+def _reference_detect(paths):
+    """The walk this module used before pruning: list everything, then drop ignored paths.
+
+    Kept here only to prove the pruned walk returns the same result on the same tree.
+    """
+    def ignored_below(path, root):
+        return any(part in dc.IGNORE for part in path.relative_to(root).parts)
+
+    total = 0
+    layers = set()
+    for raw in paths:
+        root = Path(raw)
+        for item in root.rglob("*"):
+            if not ignored_below(item, root) and item.is_file() and dc._is_source(item):
+                total += 1
+        for child in root.iterdir():
+            if not child.is_dir() or child.name in dc.IGNORE or child.name.lower() not in dc.LAYER_HINTS:
+                continue
+            if any(dc._is_source(f) for f in child.rglob("*") if f.is_file() and not ignored_below(f, root)):
+                layers.add(child.name.lower())
+    return total, sorted(layers)
+
+
+class TestPrunedWalkKeepsResults(unittest.TestCase):
+    """Same counts and layers as the list-then-filter walk, links included.
+
+    Link behaviour (unchanged): a symlinked folder is never followed (its files do not count), but a
+    symlinked layer folder still counts as a layer when its target holds a source file, because the
+    layer check lists the child itself; a Windows junction is followed like a folder; a symlinked
+    file counts when its own name has a source extension and its target is a regular file; a broken
+    link does not count. Ignore names match exactly (case-sensitive), below the scanned root only.
+    """
+
+    FILES = (
+        "app.py",
+        "dist.py",               # a file named like an ignored folder plus an extension is source
+        "venv",                  # a file named like an ignored folder is not a folder to prune
+        ".hidden.py",
+        "README.md",
+        "Build/x.py",            # ignore names are case-sensitive
+        "node_modules_old/y.js",
+        "lib/a.TS",
+        "lib/node_modules/z.js",
+        "lib/deep/dist/w.py",
+        "coverage/c.js",
+    )
+
+    def _links(self, root, outside):
+        """Create the link cases this platform allows; return {case: extra source files counted}."""
+        made = {}
+        try:
+            os.symlink(str(outside), str(root / "linked-src"), target_is_directory=True)
+            os.symlink(str(outside), str(root / "web"), target_is_directory=True)
+            made["directory symlinks"] = 0
+        except (OSError, NotImplementedError):
+            pass
+        try:
+            os.symlink(str(outside / "notes.txt"), str(root / "link.py"))
+            made["file symlink"] = 1
+            os.symlink(str(outside / "missing.py"), str(root / "dangling.py"))
+            made["broken symlink"] = 0
+        except (OSError, NotImplementedError):
+            pass
+        if os.name == "nt":
+            try:
+                import _winapi
+                _winapi.CreateJunction(str(outside / "jn-target"), str(root / "vendor-jn"))
+                made["junction"] = 1
+            except (ImportError, AttributeError, OSError):
+                pass
+        return made
+
+    def test_counts_and_layers_match_the_list_then_filter_walk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "proj"
+            _write_tree(root, self.FILES)
+            outside = Path(tmp) / "outside"
+            _write_tree(outside, ("one.py", "two.py", "notes.txt", "jn-target/three.py"))
+            links = self._links(root, outside)
+            result = dc.detect([str(root)])
+            total, layers = _reference_detect([str(root)])
+            self.assertEqual((result["source_files"], result["layers"]), (total, layers), links)
+            self.assertEqual(dc._count_source_files(root), total)
+            self.assertEqual(result["source_files"], 6 + sum(links.values()), links)
+            expected_layers = ["lib", "web"] if "directory symlinks" in links else ["lib"]
+            self.assertEqual(result["layers"], expected_layers, links)
 
 
 if __name__ == "__main__":

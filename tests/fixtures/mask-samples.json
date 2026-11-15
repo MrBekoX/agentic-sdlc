@@ -1,0 +1,37 @@
+{
+  "schema": "agentic-sdlc/mask-samples@1",
+  "about": "Shared sample table for tests/test_sdlc_mask_parity.py. Every value is synthetic. Each text is split into parts that are joined at test time, so this file holds no secret-shaped string (the parity test scans it). secrets: text = prefix + join(masked) + suffix, and join(masked) must not survive masking. benign: join(text) must come back unchanged.",
+  "secrets": [
+    {"family": "private-key", "name": "pem-block", "prefix": "key:\n", "masked": ["-----BEGIN RSA PRIV", "ATE KEY-----\n", "MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu", "\n-----END RSA PRIV", "ATE KEY-----"], "suffix": "\ndone"},
+    {"family": "private-key", "name": "pem-unterminated", "prefix": "start\n", "masked": ["-----BEGIN OPENSSH PRIV", "ATE KEY-----\n", "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ", "\nmore key material"], "suffix": ""},
+    {"family": "private-key", "name": "header-without-space", "prefix": "x ", "masked": ["-----BEGINPRIV", "ATE KEY-----"], "suffix": " y"},
+    {"family": "aws-access-key-id", "name": "aws", "prefix": "aws_access_key_id = ", "masked": ["AKI", "AQ3VX7TLMN2BW5RZD"], "suffix": ""},
+    {"family": "github-token", "name": "github-classic", "prefix": "TOKEN = ", "masked": ["gh", "p_R8kLq2Wv9XmT4zNp7Hs3Jd6Fb1Yc5Ge0Ua8K"], "suffix": ""},
+    {"family": "github-token", "name": "github-env-prefix", "prefix": "export MYAPP_", "masked": ["gh", "p_R8kLq2Wv9XmT4zNp7Hs3Jd6Fb1Yc5Ge0Ua8K"], "suffix": "Z9"},
+    {"family": "github-token", "name": "github-glued-pair", "prefix": "pair ", "masked": ["gh", "p_R8kLq2Wv9XmT4zNp7Hs3Jd6Fb1Yc5Ge0Ua8K", "gh", "o_Tz5Mn8Qw2Er7Ty4Ui9Op3As6Df1Gh0Jk2Lxc"], "suffix": " end"},
+    {"family": "github-token", "name": "github-fine-grained", "prefix": "GH=", "masked": ["github", "_pat_11ABCDEFG0Qz7Wm4Lp9Xz2Rt8Kv3Nb6Hd1Jf5Tc8Yq2Ue"], "suffix": ""},
+    {"family": "slack-token", "name": "slack", "prefix": "slack: ", "masked": ["xo", "xb-48291736502-Zq7RkW3pLx9T"], "suffix": ""},
+    {"family": "stripe-key", "name": "stripe", "prefix": "STRIPE_KEY=", "masked": ["sk", "_live_Vb3Nm8Qz2Wx7Lp4Kt9Rc"], "suffix": ""},
+    {"family": "google-api-key", "name": "google", "prefix": "maps key ", "masked": ["AI", "zaSyB4kQ9x-Lm2Tv7Pq_Wn3Rc8Hd1Fg6Jz0Ks"], "suffix": " ok"},
+    {"family": "openai-key", "name": "openai", "prefix": "OPENAI=", "masked": ["sk", "-proj-T7bLq2Wx9Vm4Kp8Rz3Nc6Hd1Jf5"], "suffix": ""},
+    {"family": "jwt", "name": "jwt", "prefix": "cookie=", "masked": ["ey", "JhbGciOiJIUzI1NiJ9.", "eyJzdWIiOiJ1c2VyLTQyIn0.Qm9yS2lUZXN0U2lnbmF0dXJlMTIz"], "suffix": ""},
+    {"family": "bearer-token", "name": "bearer", "prefix": "Authorization: ", "masked": ["Bea", "rer Hn4Kq8Zw2Lx7Vt3Rp9Mc6Bd"], "suffix": ""},
+    {"family": "password-literal", "name": "connection-string", "prefix": "Server=db;", "masked": ["Pass", "word=Hq7mK2pWz9"], "suffix": ";Trusted=no"},
+    {"family": "password-literal", "name": "json-quoted-key", "prefix": "{", "masked": ["\"pass", "word\": \"Wq7Lm2Kz9\""], "suffix": "}"},
+    {"family": "json-credential", "name": "json-credential", "prefix": "", "masked": ["{\"api_sec", "ret\": \"q7Wm4Lp9Xz2Rt8Kv3Nb6\"}"], "suffix": ""},
+    {"family": "assigned-secret", "name": "assigned-secret", "prefix": "config ", "masked": ["api", "_key = Lq8Zt3Wm7Kx2Rv9Pn4Bc"], "suffix": ""}
+  ],
+  "benign": [
+    {"name": "git-status", "text": ["git status"]},
+    {"name": "git-clean", "text": ["On branch feat/x", "\n", "nothing to commit, working tree clean"]},
+    {"name": "commit-sha", "text": ["commit 52a2ad1c0f9e8b7a6d5c4b3a2918f7e6d5c4b3a2"]},
+    {"name": "test-output", "text": ["Ran 12 tests in 0.401s", "\r\n", "OK", "\n"]},
+    {"name": "turkish", "text": ["Değişiklik → ğüşİ tamam"]},
+    {"name": "placeholder-password", "text": ["pass", "word=<your-password>"]},
+    {"name": "env-reference-password", "text": ["pass", "word: $DB_PASSWORD"]},
+    {"name": "degenerate-github", "text": ["TOKEN = gh", "p_", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"]},
+    {"name": "sequential-github", "text": ["TOKEN = gh", "p_", "abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"]},
+    {"name": "aws-doc-sample", "text": ["KEY = AKI", "AIOSFODNN7EXAMPLE"]},
+    {"name": "word-with-sk-dash", "text": ["task", "-runner --skip-proj-checks"]}
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "$comment": "Design §5.15 one-step flow: strategy -> context -> draft(spec) -> review(gate) -> claim.",
+  "schema": "agentic-sdlc/flow@1",
+  "id": "spec",
+  "entry_skill": "spec-authoring",
+  "forms": ["gated"],
+  "work_types": ["feature", "bugfix", "refactor", "test"],
+  "loop_mode": "spec",
+  "steps": [
+    {
+      "id": "strategy",
+      "file": "skills/dispatch-strategy/steps/strategy.md",
+      "inputs": ["@start"],
+      "outputs": ["strategy.json"],
+      "done_when": [{"check": "strategy_ok"}],
+      "run_once": true,
+      "max_visits": 1
+    },
+    {
+      "id": "context",
+      "file": "skills/agentic-sdlc-pipeline/steps/context.md",
+      "inputs": ["request.md"],
+      "outputs": ["context.md"],
+      "done_when": [{"check": "report", "path": "context.md", "header": "## Scope Lock"}],
+      "mechanism_key": "context"
+    },
+    {
+      "id": "draft",
+      "file": "skills/spec-authoring/steps/draft.md",
+      "inputs": ["request.md", "context.md", "design.md?", "feedback.jsonl?"],
+      "outputs": ["spec/{work_id}.md", "spec/{work_id}.review.json"],
+      "done_when": [
+        {"check": "loop_done"},
+        {"check": "validator", "mode": "spec", "strict": false},
+        {"check": "sidecar_ok", "artifact": "spec"}
+      ],
+      "mechanism_key": "draft",
+      "loop": "spec-plan"
+    },
+    {
+      "id": "review",
+      "file": "skills/agentic-sdlc-pipeline/steps/review.md",
+      "inputs": ["spec/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "review"}],
+      "gate": "review"
+    },
+    {
+      "id": "claim",
+      "file": "skills/completion-claim-gate/steps/claim.md",
+      "inputs": ["spec/{work_id}.md#body"],
+      "outputs": ["evidence/{work_id}.claim.md"],
+      "done_when": [{"check": "report", "path": "evidence/{work_id}.claim.md", "header": "# Completion claim"}]
+    }
+  ]
+}

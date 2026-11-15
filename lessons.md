@@ -20,6 +20,29 @@ Each entry includes:
 
 ---
 
+## 2026-10-22 — A role file and the validator it feeds must share one vocabulary, pinned by a test
+
+- **Date:** 2026-10-22
+- **Task / context:** The first live run of the 0.6.0 pipeline (52a2ad1, Claude Haiku 5.5 and Codex 6-Luna at low effort, six procedure rows). None of the six passed.
+- **Symptom:**
+  - Both Claude pipeline rows saved a spec that `validate_artifacts.py --mode spec` rejects with `missing_section:business-rules` and `missing_frontmatter_key:work_id`. The model had followed the `spec-plan-author` role.
+  - Codex stopped at kickoff with "the required `dispatch-strategy` call isn't available in this runtime".
+- **Root cause:** Text that must agree with a machine check was written separately from it.
+  - The author role named the section "Business / domain rules", but the validator looks for the substring "business rules". The role also listed no must-not-change section.
+  - Neither template showed the frontmatter the validator requires.
+  - The pipeline's call-order guard named only the Claude `Skill` call, in a paragraph every runtime reads.
+- **Correct fix:**
+  - The author and critic roles name the validator's headings verbatim.
+  - The templates open with the required frontmatter.
+  - The pipeline states how the artifact is saved: frontmatter, `reviewed`, and the file-edit tool.
+  - The call-order guards in the pipeline and in six focused skills name the activation for a runtime without a `Skill` tool.
+- **Preventive rule / automated check:**
+  - When prose tells a model how to produce something a script validates, derive the test's expectations from the script's own constants (`REQUIRED_SPEC_SECTIONS`, `FRONTMATTER_REQUIRED`), not from a copied list, so the two cannot drift apart again.
+  - A rule in a runtime-neutral paragraph names no single runtime's tool unless it gives the other runtimes' equivalent in the same sentence.
+- **Related files & tests:** `agents/spec-plan-author.md`, `agents/spec-plan-critic.md`, `skills/agentic-sdlc-pipeline/{SKILL,playbook,templates}.md`, the six focused `SKILL.md` call-order guards; `tests/test_pipeline_eval_regressions.py`.
+
+---
+
 ## 2026-10-22 — Replay real model-written artifacts before tightening a strict gate
 
 - **Date:** 2026-10-22

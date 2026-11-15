@@ -1,0 +1,46 @@
+{
+  "$comment": "Design §5.15 one-step flow: strategy -> context -> audit -> claim. The package holds no plan of its own here, so resolver_ok resolves by the current branch (design §5.14: the runner runs the resolver, as the 0.6 implementation-control did); refactor and test work has no plan, so the check applies to feature and bugfix work only.",
+  "schema": "agentic-sdlc/flow@1",
+  "id": "audit",
+  "entry_skill": "implementation-control",
+  "forms": ["gated", "light"],
+  "work_types": ["feature", "bugfix", "refactor", "test"],
+  "loop_mode": null,
+  "steps": [
+    {
+      "id": "strategy",
+      "file": "skills/dispatch-strategy/steps/strategy.md",
+      "inputs": ["@start"],
+      "outputs": ["strategy.json"],
+      "done_when": [{"check": "strategy_ok"}],
+      "run_once": true,
+      "max_visits": 1
+    },
+    {
+      "id": "context",
+      "file": "skills/agentic-sdlc-pipeline/steps/context.md",
+      "inputs": ["request.md"],
+      "outputs": ["context.md"],
+      "done_when": [{"check": "report", "path": "context.md", "header": "## Scope Lock"}],
+      "mechanism_key": "context"
+    },
+    {
+      "id": "audit",
+      "file": "skills/implementation-control/steps/audit.md",
+      "inputs": ["request.md", "@source", "@tests"],
+      "outputs": ["evidence/{work_id}.audit.md"],
+      "done_when": [
+        {"check": "resolver_ok", "work_types": ["feature", "bugfix"]},
+        {"check": "report", "path": "evidence/{work_id}.audit.md", "header": "# Implementation audit"}
+      ],
+      "mechanism_key": "audit"
+    },
+    {
+      "id": "claim",
+      "file": "skills/completion-claim-gate/steps/claim.md",
+      "inputs": ["evidence/{work_id}.audit.md"],
+      "outputs": ["evidence/{work_id}.claim.md"],
+      "done_when": [{"check": "report", "path": "evidence/{work_id}.claim.md", "header": "# Completion claim"}]
+    }
+  ]
+}

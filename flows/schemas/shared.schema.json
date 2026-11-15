@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agentic-sdlc/shared@1",
+  "title": "Shared flow policy (flows/_shared.json)",
+  "description": "Policy every flow shares (design §5.2, contract §5, §9, §12): cap defaults, the high-risk lexicon, test globs, the `sdlc run` allowlist with its script names and exit-code meanings, and the runtime capability rows. scripts/sdlc_runner/manifest.validate_shared adds: loop_max_rounds <= loop_hard_max_rounds, runtime ids are the known eight, no lexicon term under two surfaces, every glob inside the fingerprint.py dialect, every allowlist entry reachable and script_after within subcommand, inner and insert_args only on wrapping entries (inner naming listed programs) and the argument rules only on the others, exit_codes keyed by allowlist runner ids with fail and invalid disjoint.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "caps", "risk_lexicon", "test_globs", "ignore_globs", "run_allowlist", "run_scripts", "exit_codes", "runtimes", "escalation"],
+  "properties": {
+    "$comment": {"type": "string"},
+    "schema": {"const": "agentic-sdlc/shared@1"},
+    "caps": {
+      "type": "object",
+      "description": "Design §5.11 defaults: max_visits per step (implement and strategy differ), the per-run transition cap, the no-progress count, loop rounds (default and hard ceiling), loop role re-entries per round, security fix rounds.",
+      "additionalProperties": false,
+      "required": ["max_visits", "implement_max_visits", "transition_cap", "no_progress_k", "loop_max_rounds", "loop_hard_max_rounds", "loop_role_reentry", "fix_rounds"],
+      "properties": {
+        "max_visits": {"type": "integer", "minimum": 1},
+        "implement_max_visits": {"type": "integer", "minimum": 1},
+        "transition_cap": {"type": "integer", "minimum": 1},
+        "no_progress_k": {"type": "integer", "minimum": 1},
+        "loop_max_rounds": {"type": "integer", "minimum": 1},
+        "loop_hard_max_rounds": {"type": "integer", "minimum": 1},
+        "loop_role_reentry": {"type": "integer", "minimum": 1},
+        "fix_rounds": {"type": "integer", "minimum": 1}
+      }
+    },
+    "risk_lexicon": {
+      "type": "object",
+      "description": "The eight high-risk surfaces of design D8, each with English terms. A request that matches a term needs --risk high or a --risk-reason at start (design §5.3). Terms are lowercase words separated by single spaces; match them case-insensitively as whole words, a space matching any run of whitespace or a hyphen.",
+      "additionalProperties": false,
+      "required": ["auth", "payment", "db-migration", "api-contract", "permissions", "user-data", "token-session", "rls"],
+      "properties": {
+        "auth": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]+(?: [a-z0-9]+)*$"}},
+        "payment": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]+(?: [a-z0-9]+)*$"}},
+        "db-migration": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]+(?: [a-z0-9]+)*$"}},
+        "api-contract": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]+(?: [a-z0-9]+)*$"}},
+        "permissions": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]+(?: [a-z0-9]+)*$"}},
+        "user-data": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]+(?: [a-z0-9]+)*$"}},
+        "token-session": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]+(?: [a-z0-9]+)*$"}},
+        "rls": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]+(?: [a-z0-9]+)*$"}}
+      }
+    },
+    "test_globs": {
+      "type": "array",
+      "description": "Changed paths matching any glob are tests; every other changed path outside docs/agentic-sdlc/** is source (contract §5). Dialect of scripts/sdlc_runner/fingerprint.py: POSIX paths relative to the project root, ** as a whole segment, * and ? within a segment, {a,b} alternatives, case-sensitive.",
+      "items": {"type": "string", "pattern": "^[A-Za-z0-9_.*?{},/-]+$"}
+    },
+    "ignore_globs": {
+      "type": "array",
+      "description": "Changed paths matching any glob are left out of every named set (contract §5, beside docs/agentic-sdlc/** and .git/**): tool caches and bytecode a test or check run writes, which are no source change of the work. Same dialect as test_globs.",
+      "items": {"type": "string", "pattern": "^[A-Za-z0-9_.*?{},/-]+$"}
+    },
+    "run_allowlist": {
+      "type": "array",
+      "description": "The (program, subcommand) pairs `sdlc run` executes (contract §12). Entries are tried in order and the first whose program and subcommand match decides; nothing else runs. program: a bare name resolved on PATH, or ./name for a launcher that must resolve in the run's directory inside the project. subcommand (optional): the first argument(s) must equal one of these, a value with spaces being a token sequence (\"-3 -m\"); absent, any arguments. script_after: after one of these subcommands the next token must match a run_scripts name. wraps: the tokens right after the matched subcommand (or right after the program) are an inner command, checked against this list again; the wrapper's own options are not accepted before it. inner (wrapping entries): the programs the inner command may name. insert_args (wrapping entries): tokens the runner places right after the wrapper and its subcommand. module_only: matches only as the module after a -m subcommand of a wrapping entry. runner: the exit_codes key (default: the program without ./); a wrapping entry takes its inner command's runner. deny_args: tokens refused anywhere in the arguments, as given, as token=value, or (a long option) as a prefix of two or more letters. deny_prefixes: an argument starting with one is refused (@file argument files). deny_vars: make-style variable assignments refused as arguments (NAME=, NAME:=, NAME+=, ...). path_flags: flags whose value must be a path inside the project (they load code or configuration), in every spelling including a long-option prefix of three or more letters.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["program", "$comment"],
+        "properties": {
+          "$comment": {"type": "string", "minLength": 1},
+          "program": {"type": "string", "pattern": "^(?:\\./)?[A-Za-z0-9][A-Za-z0-9._+-]*$"},
+          "subcommand": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9:-]+(?: [A-Za-z0-9:-]+)*$"}},
+          "script_after": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "wraps": {"type": "boolean"},
+          "module_only": {"type": "boolean"},
+          "runner": {"type": "string", "pattern": "^[a-z][a-z0-9._-]*$"},
+          "deny_args": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "deny_prefixes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "deny_vars": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z_.][A-Za-z0-9_.]*$"}},
+          "path_flags": {"type": "array", "items": {"type": "string", "pattern": "^--?[A-Za-z][A-Za-z0-9-]*$"}},
+          "inner": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"}},
+          "insert_args": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9_./:=@+,-]+$"}}
+        }
+      }
+    },
+    "run_scripts": {
+      "type": "array",
+      "description": "Package scripts `npm|pnpm|yarn run <script>` may name; * matches within the name (test:* matches test:unit).",
+      "items": {"type": "string", "pattern": "^[A-Za-z0-9:_.*-]+$"}
+    },
+    "exit_codes": {
+      "type": "object",
+      "description": "Runner id -> the exit codes that mean a test failure (a valid RED) and those that mean the run itself is invalid (usage error, nothing collected, crash). A code in neither list is invalid for a listed runner; a runner not listed here counts every non-zero code as a failure.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fail", "invalid"],
+        "properties": {
+          "$comment": {"type": "string"},
+          "fail": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 255}},
+          "invalid": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 255}}
+        }
+      }
+    },
+    "escalation": {
+      "type": "array",
+      "description": "Design §5.11 escalate lattice, upward only (light -> gated is a form change, not an edge). from and to are flow ids; work_type is the work type the target flow runs with: \"keep\" carries the package's own (it must be one of the target's work types), any other value replaces it (test -> feature runs as feature). manifest.validate_shared refuses a duplicate or self edge; manifest.validate_lattice checks the edges against the flow manifests (known flows, work types the target runs with an implement variant, no cycle).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "work_type"],
+        "properties": {
+          "$comment": {"type": "string"},
+          "from": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+          "to": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+          "work_type": {"enum": ["keep", "feature", "bugfix", "refactor", "test"]}
+        }
+      }
+    },
+    "runtimes": {
+      "type": "object",
+      "description": "Contract §9 capability rows; the strategy rule table maps them to the default map. workflow: native engine, a staged script, only on the user's explicit request (never a default), or none. freshness names the card text variant for fresh role sub-agents. verified stays false until a live run backs the row.",
+      "required": ["claude", "codex", "kimi", "grok", "zcode", "cursor", "antigravity", "other"],
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["workflow", "subagent", "team", "freshness", "verified"],
+        "properties": {
+          "workflow": {"enum": ["native", "staged", "explicit-request", "none"]},
+          "subagent": {"enum": ["yes", "config", "no"]},
+          "team": {"enum": ["flag", "no"]},
+          "freshness": {"enum": ["claude-agent", "grok-subagent", "zcode-new-actor", "kimi-agent", "codex-v1-v2", "cursor-task", "antigravity-invoke", "inline"]},
+          "verified": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

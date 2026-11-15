@@ -17,6 +17,10 @@ Initial hypothesis:
 
 ## Spec (step 4 — the WHAT, code-independent) — save to `docs/agentic-sdlc/specs/<work_id>.md` with `status: reviewed`; set `approved` only per the Approval receipt
 ```md
+---
+work_id: <work_id>
+status: reviewed
+---
 # Spec: <name>
 ## Problem / Goal / Non-goals
 ## Current vs Expected Behavior
@@ -31,6 +35,12 @@ Do **not** leak the HOW (files/methods) into the spec.
 
 ## Plan (step 5 — the HOW) — save to `docs/agentic-sdlc/plans/<work_id>.md` with `status: reviewed`; set `approved` only per the Approval receipt
 ```md
+---
+work_id: <work_id>
+spec: ../specs/<work_id>.md
+branch: <work branch>
+status: reviewed
+---
 # Implementation Plan
 ## Task N: <title>
 Purpose · Files to inspect · Files likely to change · TDD point (which failing test first) · Validation · Risks

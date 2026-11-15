@@ -8,13 +8,14 @@ toolchains.  This script makes those decisions deterministic and machine-readabl
 rather than gut-feel, so results are diffable and stable across runs.
 
 Design constraints:
-- Pure stdlib only (argparse, json, pathlib, re, sys).  No third-party imports.
+- Pure stdlib only (argparse, json, os, pathlib, re, sys).  No third-party imports.
 - Exit 0 ALWAYS — this is a classifier, not a blocking gate.
 - Output: sorted flat `key=value` lines, one per line.
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -52,17 +53,36 @@ def _is_source(path):
     return path.suffix.lower() in SOURCE_EXTS
 
 
-def _ignored_below(path, root):
-    """Return True if a component of `path` relative to `root` is an IGNORE name."""
-    try:
-        parts = path.relative_to(root).parts
-    except ValueError:
-        parts = path.parts
-    return any(part in IGNORE for part in parts)
+def _source_files(top):
+    """Yield the source files below `top`, pruning every IGNORE folder before it is listed.
+
+    os.walk (top-down, followlinks=False) lists one folder at a time and descends only into the
+    names left in `dirnames`, so an ignored folder (node_modules, .git, .venv, ...) is never
+    listed and its size costs nothing. Names are matched below `top` only: the folders that
+    contain it are not part of the project (a checkout at ~/work/build/shop is still a codebase,
+    not an ignored build output). Matching is exact, so `Build` is not `build`.
+
+    Links are treated as Path.rglob treated them: a symlinked folder is not descended (a Windows
+    junction is), a symlinked file counts when its own name has a source extension and its target
+    is a regular file, and a broken link does not count. A folder that cannot be listed is
+    skipped (os.walk drops listing errors); an entry whose type cannot be read does not count.
+    """
+    for dirpath, dirnames, filenames in os.walk(top):
+        dirnames[:] = [name for name in dirnames if name not in IGNORE]
+        for name in filenames:
+            path = Path(dirpath, name)
+            if not _is_source(path):
+                continue
+            try:
+                is_file = path.is_file()
+            except OSError:
+                continue
+            if is_file:
+                yield path
 
 
 def _count_source_files(root):
-    """Recursively count source files under `root`, skipping IGNORE dirs.
+    """Recursively count source files under `root`, skipping IGNORE dirs (see `_source_files`).
 
     OSError during traversal (unreadable subtree, symlink loop, a file locked by
     another process — common on Windows) is tolerated: count what is reachable and
@@ -71,17 +91,8 @@ def _count_source_files(root):
     """
     count = 0
     try:
-        for item in root.rglob("*"):
-            # Skip any path with an IGNORE component BELOW the scanned root. The folders that
-            # contain the root are not part of the project: a checkout at ~/work/build/shop is
-            # still a codebase, not an ignored build output.
-            if _ignored_below(item, root):
-                continue
-            try:
-                if item.is_file() and _is_source(item):
-                    count += 1
-            except OSError:
-                continue
+        for _path in _source_files(root):
+            count += 1
     except OSError:
         pass  # partial count survives an unreadable subtree
     return count
@@ -129,12 +140,9 @@ def detect(paths):
                     continue
                 if child.name.lower() not in LAYER_HINTS:
                     continue
-                # Lightweight check: at least one source file anywhere inside child.
-                has_source = any(
-                    _is_source(f)
-                    for f in child.rglob("*")
-                    if f.is_file() and not _ignored_below(f, root)
-                )
+                # Lightweight check: at least one source file anywhere inside child (the walk
+                # stops at the first one). A symlinked child is listed itself, as before.
+                has_source = next(_source_files(child), None) is not None
             except OSError:
                 continue  # unreadable child subtree: skip it, never crash
             if has_source:

@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agentic-sdlc/flow@1",
+  "title": "Flow manifest (flows/<flow>.json)",
+  "description": "An ordered list of steps (contract §6). scripts/sdlc_runner/manifest.py adds the rules a schema cannot state: the first step is a run-once strategy step with one visit, step ids and gate ids are unique, each check carries exactly its own parameters (contract §7), a step with an approval check names that gate, references use the package-path syntax with {work_id} as the only placeholder, applies_when names this flow's forms and work types and a known probe value, an implement file map covers every work type, a loop step names a known loop whose modes include loop_mode, a mechanism-bearing step (contract §9 key as its id) names its own key and no other, a check's work_types are this flow's, and every required package input is written by an earlier step, by start (request.md) or by an import. Uses only the keywords scripts/sdlc_runner/schema.py supports.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "entry_skill", "forms", "work_types", "loop_mode", "steps"],
+  "properties": {
+    "$comment": {"type": "string"},
+    "schema": {"const": "agentic-sdlc/flow@1"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$", "description": "Equals the file name."},
+    "entry_skill": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$", "description": "The skill whose entry starts this flow when no flow is active."},
+    "forms": {"type": "array", "items": {"enum": ["gated", "light"]}},
+    "work_types": {"type": "array", "items": {"enum": ["feature", "bugfix", "refactor", "test"]}},
+    "loop_mode": {"enum": ["spec+plan", "spec", "plan", "bugfix-plan", null], "description": "The spec/plan loop mode of the draft step; null when no step runs a loop."},
+    "imports": {
+      "type": "array",
+      "description": "Package files that start copies in from the user's project before the first step (contract §5.5 start options): path is the package path, option the start option that names the source file, status the frontmatter status the source must carry (the plan flow imports an approved spec).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "option", "status"],
+        "properties": {
+          "$comment": {"type": "string"},
+          "path": {"type": "string", "pattern": "^[A-Za-z0-9_{}][A-Za-z0-9_.{}/-]*$"},
+          "option": {"type": "string", "pattern": "^--[a-z][a-z0-9-]*$"},
+          "status": {"enum": ["approved"]}
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "file", "inputs", "outputs", "done_when"],
+        "properties": {
+          "$comment": {"type": "string"},
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+          "file": {
+            "type": ["string", "object"],
+            "description": "Plugin-relative step file; for implement, a map {work_type: file}.",
+            "pattern": "^skills/[a-z0-9][a-z0-9-]*/steps/[a-z0-9][a-z0-9.-]*\\.md$",
+            "additionalProperties": false,
+            "properties": {
+              "feature": {"type": "string", "pattern": "^skills/[a-z0-9][a-z0-9-]*/steps/[a-z0-9][a-z0-9.-]*\\.md$"},
+              "bugfix": {"type": "string", "pattern": "^skills/[a-z0-9][a-z0-9-]*/steps/[a-z0-9][a-z0-9.-]*\\.md$"},
+              "refactor": {"type": "string", "pattern": "^skills/[a-z0-9][a-z0-9-]*/steps/[a-z0-9][a-z0-9.-]*\\.md$"},
+              "test": {"type": "string", "pattern": "^skills/[a-z0-9][a-z0-9-]*/steps/[a-z0-9][a-z0-9.-]*\\.md$"}
+            }
+          },
+          "inputs": {
+            "type": "array",
+            "description": "Package-relative paths ({work_id} expands; #body fingerprints the body after the frontmatter; a trailing ? marks an optional file) or a named set @source, @tests, @diff, @start. A changed input makes a done step stale.",
+            "items": {"type": "string", "pattern": "^(?:@(?:source|tests|diff|start)|[A-Za-z0-9_{}][A-Za-z0-9_.{}/-]*(?:#body)?\\??)$"}
+          },
+          "outputs": {
+            "type": "array",
+            "description": "Package-relative paths the step writes, shown on the card; a trailing ? marks an optional file.",
+            "items": {"type": "string", "pattern": "^[A-Za-z0-9_{}][A-Za-z0-9_.{}/-]*\\??$"}
+          },
+          "done_when": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["check"],
+              "description": "One check (contract §7). The parameters each check takes are enforced by manifest.CHECK_PARAMS; work_types is allowed on every check.",
+              "properties": {
+                "check": {"enum": ["exists", "validator", "sidecar_ok", "report", "run_recorded", "approval", "branch_ok", "resolver_ok", "strategy_ok", "unchanged", "loop_done"]},
+                "path": {"type": "string", "pattern": "^[A-Za-z0-9_{}][A-Za-z0-9_.{}/-]*$"},
+                "header": {"type": "string", "minLength": 1},
+                "verdict": {"type": "string", "minLength": 1},
+                "fresh": {"type": "boolean"},
+                "mode": {"enum": ["spec", "plan"]},
+                "strict": {"type": "boolean"},
+                "artifact": {"enum": ["spec", "plan"]},
+                "expect": {"enum": ["fail", "pass"]},
+                "label": {"enum": ["red", "green", "check"]},
+                "gate": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+                "set": {"enum": ["production"]},
+                "work_types": {"type": "array", "description": "Any check: it applies only when the package's work type is listed (absent: always). A check that does not apply passes.", "items": {"enum": ["feature", "bugfix", "refactor", "test"]}}
+              }
+            }
+          },
+          "gate": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9-]{0,63}$", "description": "Gate id of a gate step (its approval check names the same id)."},
+          "run_once": {"type": "boolean", "description": "Default false: a done step is never reopened by staleness."},
+          "max_visits": {"type": "integer", "minimum": 1, "description": "Default _shared.caps.max_visits."},
+          "applies_when": {
+            "type": ["object", "null"],
+            "description": "All keys must hold; decided once from start-time facts. A probe error means the step applies.",
+            "additionalProperties": false,
+            "properties": {
+              "form": {"enum": ["gated", "light"]},
+              "option": {"enum": ["intent", "quality-review"]},
+              "work_type": {"type": "array", "items": {"enum": ["feature", "bugfix", "refactor", "test"]}},
+              "probe": {"enum": ["explore_mode", "deps", "toolchain"]},
+              "not": {"type": "string", "minLength": 1}
+            }
+          },
+          "may_ask": {"type": "array", "items": {"enum": ["consent", "design"]}},
+          "mechanism_key": {"enum": ["context", "draft", "draft.critic", "implement", "security", "quality-gates", "quality-review", "audit", "docs-check", null], "description": "The strategy entry this step's card prints (contract §9)."},
+          "loop": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9-]{0,63}$", "description": "A loop id under flows/loops/ (the draft step)."}
+        }
+      }
+    }
+  }
+}

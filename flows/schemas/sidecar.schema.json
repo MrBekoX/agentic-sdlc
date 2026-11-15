@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agentic-sdlc/sidecar@1",
+  "title": "Review sidecar (spec/<id>.review.json, plan/<id>.review.json)",
+  "description": "Written by `sdlc ingest-draft` next to each artifact (contract §10). The sidecar_ok check passes when the sidecar matches this schema and body_fingerprint equals the artifact's current body fingerprint (fingerprint.body_fp: the text after the frontmatter, normalised). Gate approvals read decisionPoints and residualCriticNotes from here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "artifact", "body_fingerprint", "mode", "engine", "rounds", "finalVerdict", "stopReason", "critic", "decisionPoints", "residualCriticNotes"],
+  "properties": {
+    "schema": {"const": "agentic-sdlc/sidecar@1"},
+    "artifact": {"type": "string", "pattern": "^(?:spec|plan)/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\.md$", "description": "The reviewed artifact, relative to the package: spec/<work_id>.md or plan/<work_id>.md."},
+    "body_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "mode": {"enum": ["spec+plan", "spec", "plan", "bugfix-plan"]},
+    "engine": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "rounds": {"type": "integer", "minimum": 0},
+    "finalVerdict": {"enum": ["clean", "issues"]},
+    "stopReason": {"enum": ["clean", "max-rounds", "no-progress"]},
+    "critic": {"enum": ["fresh", "degraded"]},
+    "decisionPoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "options", "recommendation"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "question": {"type": "string", "minLength": 1},
+          "options": {"type": "array", "items": {"type": "string"}},
+          "recommendation": {"type": "string"}
+        }
+      }
+    },
+    "residualCriticNotes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target", "category", "severity", "kind", "whatsMissing", "where", "fix"],
+        "properties": {
+          "target": {"enum": ["spec", "plan"]},
+          "category": {"type": "string", "minLength": 1},
+          "severity": {"enum": ["critical", "high", "medium", "low"]},
+          "kind": {"enum": ["gap", "contradiction", "blocker", "style"]},
+          "whatsMissing": {"type": "string", "minLength": 1},
+          "where": {"type": "string"},
+          "fix": {"type": "string"}
+        }
+      }
+    }
+  }
+}

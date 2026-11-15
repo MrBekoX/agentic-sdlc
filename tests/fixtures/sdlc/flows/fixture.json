@@ -1,0 +1,89 @@
+{
+  "$comment": "Test fixture for tests/test_sdlc_manifest.py: one flow that uses every check type, a loop step, a gate, an implement variant map and applies_when rules. Its step files live in tests/fixtures/sdlc/flows/steps/ and are copied to skills/fixture/steps/ of a temp plugin root, so check_files=True runs against real files.",
+  "schema": "agentic-sdlc/flow@1",
+  "id": "fixture",
+  "entry_skill": "fixture",
+  "forms": ["gated", "light"],
+  "work_types": ["feature", "bugfix"],
+  "loop_mode": "spec+plan",
+  "steps": [
+    {
+      "id": "strategy",
+      "file": "skills/fixture/steps/strategy.md",
+      "inputs": ["@start"],
+      "outputs": ["strategy.json"],
+      "done_when": [{"check": "strategy_ok"}],
+      "run_once": true,
+      "max_visits": 1
+    },
+    {
+      "id": "context",
+      "file": "skills/fixture/steps/context.md",
+      "inputs": ["request.md"],
+      "outputs": ["context.md"],
+      "done_when": [{"check": "exists", "path": "context.md"}],
+      "mechanism_key": "context"
+    },
+    {
+      "id": "draft",
+      "file": "skills/fixture/steps/draft.md",
+      "inputs": ["request.md", "context.md", "feedback.jsonl?"],
+      "outputs": ["spec/{work_id}.md", "plan/{work_id}.md"],
+      "done_when": [
+        {"check": "loop_done"},
+        {"check": "sidecar_ok", "artifact": "spec"},
+        {"check": "sidecar_ok", "artifact": "plan"}
+      ],
+      "mechanism_key": "draft",
+      "loop": "spec-plan"
+    },
+    {
+      "id": "review",
+      "file": "skills/fixture/steps/review.md",
+      "inputs": ["spec/{work_id}.md#body", "plan/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "review"}],
+      "gate": "review",
+      "applies_when": {"form": "gated"}
+    },
+    {
+      "id": "implement",
+      "file": {
+        "feature": "skills/fixture/steps/implement-feature.md",
+        "bugfix": "skills/fixture/steps/implement-bugfix.md"
+      },
+      "inputs": ["plan/{work_id}.md#body"],
+      "outputs": ["evidence/{work_id}.tdd.md"],
+      "done_when": [
+        {"check": "run_recorded", "expect": "fail", "label": "red"},
+        {"check": "run_recorded", "expect": "pass", "label": "green"},
+        {"check": "report", "path": "evidence/{work_id}.tdd.md", "header": "# TDD evidence", "fresh": true}
+      ],
+      "max_visits": 5,
+      "mechanism_key": "implement"
+    },
+    {
+      "id": "check",
+      "file": "skills/fixture/steps/check.md",
+      "inputs": ["@source", "@tests", "@diff"],
+      "outputs": ["evidence/{work_id}.check.md?"],
+      "done_when": [
+        {"check": "unchanged", "set": "production"},
+        {"check": "branch_ok"},
+        {"check": "resolver_ok"},
+        {"check": "validator", "mode": "plan", "strict": true}
+      ],
+      "applies_when": {"probe": "toolchain", "not": "absent", "work_type": ["feature"]},
+      "may_ask": ["consent"]
+    },
+    {
+      "id": "claim",
+      "file": "skills/fixture/steps/claim.md",
+      "inputs": ["@source"],
+      "outputs": ["evidence/{work_id}.claim.md"],
+      "done_when": [
+        {"check": "report", "path": "evidence/{work_id}.claim.md", "header": "# Completion claim", "verdict": "Verdict: pass"}
+      ]
+    }
+  ]
+}

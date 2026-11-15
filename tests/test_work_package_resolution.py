@@ -6,16 +6,80 @@ quality.
 """
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from unittest import mock
 
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 SCRIPT = REPO / "scripts" / "resolve_work_package.py"
+FLAT_PLAN_ROOT = "docs/agentic-sdlc/plans"
+# `git rev-parse --local-env-vars`: variables that would point a git child at another repository,
+# index or config. Dropped so a git call here only reads the repository it is given.
+GIT_LOCATION_VARS = (
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX",
+    "GIT_SHALLOW_FILE", "GIT_COMMON_DIR",
+)
+
+
+def _git_env():
+    env = {name: value for name, value in os.environ.items() if name not in GIT_LOCATION_VARS}
+    env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C"})
+    return env
+
+
+def tracked_flat_plans(repo):
+    """The flat plans (`docs/agentic-sdlc/plans/*.md`) git tracks in `repo` and the working tree holds.
+
+    Sorted paths, or None when git cannot say (no git on PATH, not a repository, git failed); the
+    caller then reads the folder. Read-only: `git --no-optional-locks ls-files` takes no index lock.
+    """
+    git = shutil.which("git")
+    if git is None:
+        return None
+    try:
+        proc = subprocess.run(
+            [git, "--no-optional-locks", "-C", str(repo), "ls-files", "-z", "--", FLAT_PLAN_ROOT],
+            capture_output=True, env=_git_env(), stdin=subprocess.DEVNULL, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    plans = []
+    for name in proc.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        rel = PurePosixPath(name)
+        if name and rel.parent == PurePosixPath(FLAT_PLAN_ROOT) and rel.suffix == ".md":
+            path = Path(repo, *rel.parts)
+            if path.is_file():
+                plans.append(path)
+    return sorted(plans)
+
+
+def canonical_flat_plans(repo):
+    """The plans the canonical-artifact check reads: the tracked ones, or the folder without git."""
+    tracked = tracked_flat_plans(repo)
+    if tracked is not None:
+        return tracked
+    plan_root = Path(repo) / FLAT_PLAN_ROOT
+    return sorted(plan_root.glob("*.md")) if plan_root.exists() else []
+
+
+def unresolved_plans(resolver, repo, plans):
+    """[(repo-relative path, resolver errors)] for each of `plans` that does not resolve."""
+    failures = []
+    for plan in plans:
+        result = resolver.resolve(repo, plan_path=plan)
+        if not result.ok:
+            failures.append((plan.relative_to(repo).as_posix(), result.errors))
+    return failures
 
 
 def _load_module():
@@ -345,6 +409,19 @@ class TestSlugModel(unittest.TestCase):
             self.assertFalse(self.resolver.is_valid_slug(seg), f"{seg!r} should be invalid")
         for good in ("work-x", "feature-1", "a", "a" * 64):
             self.assertTrue(self.resolver.is_valid_slug(good), f"{good!r} should be valid")
+
+    def test_slug_rejects_a_trailing_newline(self):
+        # `$` also matches before a final "\n", so `SLUG_RE.match` let `work-x\n` through. The
+        # pattern text is shared with hooks/flow-requirements.json and run_procedure_eval.py
+        # (tests/test_procedure_eval.py pins it), so the whole string is matched instead.
+        for seg in ("work-x\n", "a\n", "a" * 64 + "\n"):
+            with self.subTest(seg=seg):
+                self.assertFalse(self.resolver.is_valid_slug(seg), f"{seg!r} should be invalid")
+                with self.assertRaises(ValueError):
+                    self.resolver.evidence_path(self.root, seg, "work-x")
+        self.assertEqual(
+            self.resolver.evidence_path(self.root, "work-x", "work-x"),
+            self.root.resolve() / "docs" / "agentic-sdlc" / "work-x" / "evidence" / "work-x.md")
 
     def test_classify_flat_and_per_package(self):
         agentic = self.root / "docs" / "agentic-sdlc"
@@ -723,18 +800,235 @@ class TestEvidence(unittest.TestCase):
         self.assertFalse(Path(ep).parent.exists())
 
 
+def write_bugfix_plan(root, work_id="fix-x", slug=None, branch="fix/x", status="approved",
+                      spec="none", flow="bugfix", layout="per-package"):
+    """Write a spec-less bugfix plan (design §5.19); `flow=None` leaves the key out."""
+    if layout == "flat":
+        plan = root / "docs" / "agentic-sdlc" / "plans" / f"{work_id}.md"
+    else:
+        slug = slug if slug is not None else work_id
+        plan = root / "docs" / "agentic-sdlc" / slug / "plan" / f"{work_id}.md"
+    plan.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["---", f"work_id: {work_id}", f"spec: {spec}"]
+    if flow is not None:
+        lines.append(f"flow: {flow}")
+    lines += [f"branch: {branch}", f"status: {status}", "---", "", f"# {work_id} bugfix plan", ""]
+    plan.write_bytes("\n".join(lines).encode("utf-8"))
+    return plan
+
+
+class TestBugfixPlans(unittest.TestCase):
+    """Spec-less bugfix plans: `spec: none` resolves only together with `flow: bugfix`."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.resolver = _load_module()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_resolver_emits_spec_none(self):
+        plan = write_bugfix_plan(self.root)
+        result = self.resolver.resolve(self.root, plan_path=plan)
+        self.assertTrue(result.ok, result.errors)
+        self.assertIsNone(result.spec)
+        self.assertEqual(result.plan, plan.resolve())
+        self.assertEqual((result.work_id, result.branch, result.status), ("fix-x", "fix/x", "approved"))
+        rc, out, err = run_cli("--repo", str(self.root), "--plan", str(plan))
+        self.assertEqual(rc, 0, out + err)
+        for expected in ("spec=none", "work_package_resolution=passed", "layout=per-package",
+                         "slug=fix-x", "work_id=fix-x", "resolution_source=explicit-plan"):
+            self.assertIn(expected, out.splitlines())
+        lines = [line for line in out.splitlines() if line]
+        self.assertEqual(lines, sorted(lines))
+
+    def test_flat_bugfix_plan_resolves(self):
+        plan = write_bugfix_plan(self.root, layout="flat")
+        rc, out, err = run_cli("--repo", str(self.root), "--plan", str(plan))
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("spec=none", out.splitlines())
+        self.assertIn("layout=flat", out.splitlines())
+
+    def test_bugfix_plan_resolves_by_branch(self):
+        plan = write_bugfix_plan(self.root, branch="fix/current")
+        result = self.resolver.resolve(self.root, branch="fix/current")
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(result.source, "branch")
+        self.assertEqual(result.plan, plan.resolve())
+        self.assertIsNone(result.spec)
+
+    def test_spec_none_requires_flow_bugfix(self):
+        for name, flow in (("no flow key", None), ("another flow", "feature"), ("empty flow", "")):
+            with self.subTest(case=name):
+                plan = write_bugfix_plan(self.root, work_id="w-" + name.replace(" ", "-"), flow=flow)
+                result = self.resolver.resolve(self.root, plan_path=plan)
+                self.assertFalse(result.ok)
+                self.assertIn("spec_none_requires_flow_bugfix", result.errors)
+                rc, out, err = run_cli("--repo", str(self.root), "--plan", str(plan))
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("error=spec_none_requires_flow_bugfix", out.splitlines())
+                self.assertIn("work_package_resolution=failed", out.splitlines())
+                self.assertEqual(err, "")
+
+    def test_flow_bugfix_with_a_spec_resolves_like_any_plan(self):
+        spec, plan = write_per_package_artifacts(self.root, work_id="fix-y")
+        text = plan.read_text(encoding="utf-8").replace("status: in_progress\n", "status: in_progress\nflow: bugfix\n")
+        plan.write_bytes(text.encode("utf-8"))
+        result = self.resolver.resolve(self.root, plan_path=plan)
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(result.spec, spec.resolve())
+
+    def test_explicit_spec_never_pairs_with_a_bugfix_plan(self):
+        # `spec: none` is a keyword, not a relative path: `_plan_spec_path` returns None rather
+        # than `<plan dir>/none`. The pairing result below holds either way (no spec path can equal
+        # `<plan dir>/none`), so the None is what pins the keyword; the pairing guards against
+        # `none` ever becoming a wildcard that matches any spec.
+        spec, plan = write_per_package_artifacts(self.root, work_id="feat-z")
+        bugfix = write_bugfix_plan(self.root, work_id="fix-z")
+        meta, errors = self.resolver._parse_frontmatter(bugfix)
+        self.assertEqual(errors, [])
+        self.assertIsNone(self.resolver._plan_spec_path(self.root, bugfix.resolve(), meta))
+        result = self.resolver.resolve(self.root, spec_path=spec)
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(result.plan, plan.resolve())
+
+    def test_spec_none_plan_in_a_package_with_a_spec_fails(self):
+        # A plan cannot opt out of the spec its own package holds by declaring `spec: none`; the
+        # validator refuses a spec given for such a plan with the same code.
+        spec, plan = write_per_package_artifacts(self.root, work_id="feat-x", branch="feat/x")
+        self.assertEqual(write_bugfix_plan(self.root, work_id="feat-x", branch="feat/x"), plan)
+        for name, kwargs in (("explicit plan", {"plan_path": plan}), ("branch", {"branch": "feat/x"})):
+            with self.subTest(source=name):
+                result = self.resolver.resolve(self.root, **kwargs)
+                self.assertFalse(result.ok)
+                self.assertIn("spec_none_with_spec", result.errors)
+        rc, out, err = run_cli("--repo", str(self.root), "--plan", str(plan))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("error=spec_none_with_spec", out.splitlines())
+        self.assertIn("work_package_resolution=failed", out.splitlines())
+        # Any spec file in the package counts, not only one named like the plan.
+        other = write_bugfix_plan(self.root, work_id="fix-y", slug="pkg-y")
+        old_spec = self.root / "docs" / "agentic-sdlc" / "pkg-y" / "spec" / "old.md"
+        old_spec.parent.mkdir(parents=True)
+        old_spec.write_bytes(b"---\nwork_id: old\nstatus: approved\n---\n")
+        result = self.resolver.resolve(self.root, plan_path=other)
+        self.assertIn("spec_none_with_spec", result.errors)
+        # A flat plan is never paired by name, so flat specs leave a flat bugfix plan alone.
+        write_artifacts(self.root, work_id="fix-flat")
+        flat = write_bugfix_plan(self.root, work_id="fix-flat", layout="flat")
+        result = self.resolver.resolve(self.root, plan_path=flat)
+        self.assertTrue(result.ok, result.errors)
+        self.assertIsNone(result.spec)
+
+    def test_frontmatter_delimiters_are_whole_lines(self):
+        # The block ends only at a line that is `---` (trailing spaces aside), as the validator
+        # reads it. A `----` line ended the block here while the validator read on, so the two
+        # tools judged different keys; it is now an invalid line in both.
+        spec, plan = write_per_package_artifacts(self.root, work_id="feat-x", branch="feat/x")
+        text = plan.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("---\nwork_id: feat-x\nspec: ../spec/feat-x.md\nbranch: feat/x\n"
+                                        "status: in_progress\n---\n"), text)
+        cases = (
+            ("---- line, then keys", text.replace("status: in_progress\n---\n",
+                                                  "status: in_progress\n----\nspec: none\nflow: bugfix\n---\n"),
+             "plan_invalid_frontmatter_line:6"),
+            # The line number is the file's own (it was one too high).
+            ("colon-less line", text.replace("branch: feat/x\n", "branch: feat/x\nnotes\n"),
+             "plan_invalid_frontmatter_line:5"),
+            ("indented closer", text.replace("in_progress\n---\n", "in_progress\n  ---\n"),
+             "plan_missing_frontmatter_end"),
+            ("indented opener", "  " + text, "plan_missing_frontmatter"),
+        )
+        for name, body, error in cases:
+            with self.subTest(case=name):
+                plan.write_bytes(body.encode("utf-8"))
+                result = self.resolver.resolve(self.root, plan_path=plan)
+                self.assertFalse(result.ok, name)
+                self.assertIn(error, result.errors)
+        plan.write_bytes(text.replace("---\n", "--- \n").encode("utf-8"))
+        result = self.resolver.resolve(self.root, plan_path=plan)
+        self.assertTrue(result.ok, result.errors)
+
+
 class TestRepoWorkPackageArtifacts(unittest.TestCase):
     def test_canonical_work_package_artifacts_are_well_formed(self):
-        # Dogfooding specs/plans live under gitignored docs/agentic-sdlc/; a public
-        # clone (and CI) has none. Skip there — do not fail the shipped gate.
+        # The canonical plans are the ones git tracks, the set CI checks out. Dogfooding specs/plans
+        # live under the gitignored docs/agentic-sdlc/, so a local untracked draft is not part of the
+        # shipped gate and a clean clone has none (skip there). Without git the folder is read.
         resolver = _load_module()
-        plan_root = REPO / "docs" / "agentic-sdlc" / "plans"
-        plans = sorted(plan_root.glob("*.md")) if plan_root.exists() else []
+        plans = canonical_flat_plans(REPO)
         if not plans:
-            self.skipTest("no local dogfooding plans (gitignored; absent on a clean clone)")
-        for plan in plans:
-            result = resolver.resolve(REPO, plan_path=plan)
-            self.assertTrue(result.ok, f"{plan.relative_to(REPO)}: {result.errors}")
+            self.skipTest("no tracked flat plans (docs/agentic-sdlc/ is gitignored; a clean clone has none)")
+        self.assertEqual(unresolved_plans(resolver, REPO, plans), [])
+
+
+def _write_bytes(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+class TestCanonicalPlanSelection(unittest.TestCase):
+    """The canonical-artifact check reads the plans git tracks, as CI sees them, not every local file."""
+
+    MALFORMED = b"# A plan without frontmatter\n"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.resolver = _load_module()
+        self.plans = self.root / "docs" / "agentic-sdlc" / "plans"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _git(self, *args):
+        proc = subprocess.run(
+            [shutil.which("git"), "-C", str(self.root), *args], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", env=_git_env(), stdin=subprocess.DEVNULL, timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_untracked_plan_is_ignored_and_tracked_malformed_plan_fails(self):
+        self._git("init", "-q")
+        spec, good = write_artifacts(self.root, work_id="good-work")
+        tracked_bad = _write_bytes(self.plans / "tracked-bad.md", self.MALFORMED)
+        untracked = _write_bytes(self.plans / "untracked-draft.md", self.MALFORMED)
+        nested = _write_bytes(self.plans / "archive" / "old.md", self.MALFORMED)
+        # -f: a global excludes file must not decide what this fixture tracks.
+        self._git("add", "-f", "--", *(p.relative_to(self.root).as_posix()
+                                         for p in (spec, good, tracked_bad, nested)))
+        # The folder glob (the check's old input) sees the untracked draft; git does not.
+        self.assertIn(untracked, sorted(self.plans.glob("*.md")))
+        plans = canonical_flat_plans(self.root)
+        self.assertEqual(plans, [good, tracked_bad])
+        failures = unresolved_plans(self.resolver, self.root, plans)
+        self.assertEqual([name for name, _errors in failures], ["docs/agentic-sdlc/plans/tracked-bad.md"])
+        self.assertIn("plan_missing_frontmatter", failures[0][1])
+
+    def test_without_git_the_folder_is_read(self):
+        _spec, good = write_artifacts(self.root, work_id="good-work")
+        draft = _write_bytes(self.plans / "untracked-draft.md", self.MALFORMED)
+        expected = sorted([good, draft])
+        with self.subTest(case="no git on PATH"), mock.patch.object(shutil, "which", return_value=None):
+            self.assertIsNone(tracked_flat_plans(self.root))
+            self.assertEqual(canonical_flat_plans(self.root), expected)
+
+        def failing_git(argv, **kwargs):
+            # Fail closed: anything but the expected ls-files call is a test bug, never a real spawn.
+            if argv[0] != "/fake/git" or "ls-files" not in argv:
+                raise AssertionError("unexpected subprocess: %r" % (argv,))
+            return subprocess.CompletedProcess(argv, 128, b"", b"fatal: not a git repository")
+
+        with self.subTest(case="git cannot list"), \
+                mock.patch.object(shutil, "which", return_value="/fake/git"), \
+                mock.patch.object(subprocess, "run", failing_git):
+            self.assertIsNone(tracked_flat_plans(self.root))
+            self.assertEqual(canonical_flat_plans(self.root), expected)
+        self.assertEqual([name for name, _errors in unresolved_plans(self.resolver, self.root, expected)],
+                         ["docs/agentic-sdlc/plans/untracked-draft.md"])
 
 
 if __name__ == "__main__":
