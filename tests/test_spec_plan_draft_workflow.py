@@ -113,6 +113,7 @@ async function stubAgent(prompt, opts) {
     return report;
   }
   if (opts.agentType === 'agentic-sdlc:spec-plan-critic') {
+    if (label.endsWith(':retry') && CONFIG.retries) return CONFIG.retries[roundOf(label) - 1];
     if (label.endsWith(':retry') && CONFIG.retry) return CONFIG.retry;
     const list = CONFIG.critics || [];
     return list[Math.min(roundOf(label), list.length) - 1] || { verdict: 'clean', issues: [] };
@@ -453,6 +454,20 @@ class TestFailures(unittest.TestCase):
                 payload = run_script(ARGS, {"critics": [bad], "retry": bad})
                 self.assertThrows(payload, "critic:spec+plan:r1 returned no valid critic object (%s)" % why)
                 self.assertEqual(labels(payload)[-2:], ["critic:spec+plan:r1", "critic:spec+plan:r1:retry"])
+
+    def test_the_grok_agent_budget_covers_the_engines_worst_case(self):
+        # The Grok engine mirrors this script call for call (test_grok_rhai_workflows pins its
+        # structure) and Grok cannot catch an exhausted agent budget: the runner's launch budget
+        # must cover the longest loop, every critic answer asked for twice.
+        bad = issues(dict(_issue(), category=""))
+        for mode in LOOP["modes"]:
+            for max_rounds in range(1, LOOP["caps"]["hard_max_rounds"] + 1):
+                with self.subTest(mode=mode, max_rounds=max_rounds):
+                    retries = [issues(_issue(where="## Task %d" % n)) for n in range(1, max_rounds + 1)]
+                    payload = run_script(dict(ARGS, mode=mode, maxRounds=max_rounds),
+                                         {"critics": [bad], "retries": retries})
+                    self.assertEqual(payload["result"]["stopReason"], "max-rounds", payload)
+                    self.assertEqual(len(payload["calls"]), loop.agent_budget(LOOP, mode, max_rounds))
 
     def test_a_refused_critic_answer_is_asked_for_once_more(self):
         bad = issues(dict(_issue(), category=""))

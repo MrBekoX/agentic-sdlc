@@ -217,7 +217,9 @@ class TestCards(LoopCase):
             staged = self.draft("engine/spec-plan-draft.rhai", "gk")
             self.assertEqual(call["source"], {"type": "script_path", "script_path": str(staged)})
             self.assertEqual(staged.read_bytes(), source.read_bytes())
-            self.assertEqual(call["agent_budget"], 3 * 3 + 3)
+            # Two authors: per round a draft-check, two critic asks and the critic write, the two
+            # revisers and their writes below the cap, round 0's drafts, then loop.json and the ingest.
+            self.assertEqual(call["agent_budget"], 3 * (4 + 2 * 2) + 2)
             self.assertEqual(self.state("gk")["loop"]["engine_sha256"], hashlib.sha256(source.read_bytes()).hexdigest())
         with self.subTest(runtime="zcode"):
             text = self.to_draft(runtime="zcode", capabilities="workflow=yes,subagent=yes,team=no", slug="zc",

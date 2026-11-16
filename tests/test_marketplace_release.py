@@ -150,6 +150,9 @@ class TestMarketplacePreparation(unittest.TestCase):
         self.assertEqual(len(list((gp / "skills").glob("*/SKILL.md"))), 16)
         self.assertEqual(len(list((gp / "commands").glob("*.md"))), 1)
         self.assertEqual(len(list((gp / "agents").glob("*.md"))), 10)
+        # The runner stages its Grok engine from the installed plugin root.
+        self.assertEqual((gp / "workflows/grok/spec-plan-draft.rhai").read_bytes(),
+                         (REPO / "workflows/grok/spec-plan-draft.rhai").read_bytes())
         wire = json.loads((gp / "hooks/hooks-grok.json").read_bytes())
         self.assertEqual(set(wire["hooks"]), {"PreToolUse"})
         self.assertEqual(sum(len(group["hooks"]) for group in wire["hooks"]["PreToolUse"]), 3)

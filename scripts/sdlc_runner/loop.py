@@ -491,6 +491,15 @@ def _role_card(ctx, definition, step, round_no, role, author_mode) -> dict:
     }
 
 
+def agent_budget(definition, mode, max_rounds) -> int:
+    """Every agent call a staged Grok engine can make in a visit, because Grok cannot catch an
+    exhausted budget: round 0's authors and the scribe's writes of their drafts; per round a
+    draft-check, two critic asks (a refused answer is asked for once more) and the critic write;
+    below max_rounds the revisers and their writes; then the loop.json write and the ingest."""
+    authors = len(definition["modes"][mode]["first_round"])
+    return int(max_rounds) * (4 + 2 * authors) + 2
+
+
 def _launch(ctx, definition) -> dict:
     loop = _loop_state(ctx)
     runtime = ctx.state.get("runtime")
@@ -502,7 +511,7 @@ def _launch(ctx, definition) -> dict:
     elif runtime == "grok":
         staged = stage_engine(ctx, "grok")
         line = "workflow " + dumps_json({"source": {"type": "script_path", "script_path": str(staged)}, "args": args,
-                                         "agent_budget": 3 * int(loop["max_rounds"]) + 3})
+                                         "agent_budget": agent_budget(definition, loop["mode"], loop["max_rounds"])})
     elif runtime == "zcode":
         path = Path(ctx.root) / "workflows" / "zcode" / "spec-plan-draft.dwf.ts"
         line = "CreateWorkflow " + dumps_json({"path": str(path), "args": {"slug": args["slug"],
