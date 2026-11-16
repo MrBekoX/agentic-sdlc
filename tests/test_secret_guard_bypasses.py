@@ -1290,6 +1290,10 @@ class TestPerMatchSuppression(unittest.TestCase):
             AWS_PLACEHOLDER * 32000,
             (self.PASSWORD + self.CHANGE_ME + ",") * 16000,
             ('"pass' + 'word": "' + "change-me-please" + '", ') * 16000,
+            # url-credential's prefix is retried at every glued-token boundary of the AWS line above;
+            # these keep its scheme and user parts from reading on to the end of a long line.
+            ("ftp" + "://" + "x" * 30) * 16000,
+            "x" * 400000 + "://",
         ]
         started = time.time()
         found = _node_json(

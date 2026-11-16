@@ -52,7 +52,67 @@ const BLOCKED = [
     check: hasRecursiveRemoveItem,
     reason: 'Remove-Item -Recurse recursively deletes files.',
   },
+  {
+    label: 'cmd-remove-recursive',
+    check: hasCmdRecursiveRemove,
+    reason: 'rd, rmdir, del or erase with /s deletes a whole folder tree.',
+  },
 ];
+
+// cmd.exe's own delete commands: `rd /s` removes a folder tree, `del /s` deletes matching files in
+// every subfolder. A bare `rd build` or `del file` is not recursive.
+const CMD_REMOVE = new Set(['rd', 'rmdir', 'del', 'erase']);
+
+// cmd.exe escapes with `^` outside double quotes: `r^d` is `rd`, `^&` a literal `&`. The payload is
+// read with the carets removed. Inside quotes a caret stays, but the tokenizer has already removed
+// the quotes, so it is removed there too: that can only make a payload look MORE like a command.
+function stripCmdCarets(text) {
+  return text.replace(/\^(.?)/g, '$1');
+}
+
+// `/s` alone or in a switch run such as `/s/q`, `/q/s` or `/s/a:h`, any case, carets removed. Git
+// Bash users write `//s`, because its path conversion would turn a lone `/s` into a path.
+function hasCmdSubtreeSwitch(args) {
+  return args.some((arg) => /^(?:\/{1,2}[a-z?](?::[a-z-]*)?)*\/{1,2}s(?:\/{1,2}[a-z?](?::[a-z-]*)?)*$/i
+    .test(stripCmdCarets(arg)));
+}
+
+// cmd.exe by name, by the variable that names it, or glued to its switch (`cmd/c`).
+const CMD_NAMES = new Set(['cmd', '%comspec%', '$env:comspec']);
+const CMD_GLUED_RUN = /^(?:.*[\\/])?cmd(?:\.exe)?\/{1,2}[ckr]$/i;
+
+// The payload of `cmd [switches] /c|/k|/r <command>` (also `//c`, and `/c` glued to the command, as in
+// `/crd /s x` or `/c"rd /s x"` once the quotes are removed), read without its `^` escapes.
+function cmdPayload(tokens, i) {
+  let start = -1;
+  let head = '';
+  if (CMD_GLUED_RUN.test(stripCmdCarets(String(tokens[i])))) {
+    start = i + 1;
+  } else {
+    for (let j = i + 1; j < tokens.length; j += 1) {
+      const m = /^\/{1,2}([ckr])(.*)$/i.exec(stripCmdCarets(tokens[j]));
+      if (m) {
+        head = m[2];
+        start = j + 1;
+        break;
+      }
+    }
+  }
+  if (start < 0) return '';
+  return stripCmdCarets([head, ...tokens.slice(start)].join(' ').trim());
+}
+
+// A cmd.exe tree delete in one segment: `@` and `call` in front still run it, and the switches may be
+// glued to the name (`rd/s/q x`).
+function isCmdTreeDelete(tokens) {
+  let i = 0;
+  while (i < tokens.length && /^(?:@|call)$/i.test(stripCmdCarets(String(tokens[i])))) i += 1;
+  if (i >= tokens.length) return false;
+  const first = stripCmdCarets(String(tokens[i])).replace(/^@/, '');
+  const glued = /^(?:.*\\)?(rd|rmdir|del|erase)((?:\/{1,2}[a-z?](?::[a-z-]*)?)+)$/i.exec(first);
+  if (glued) return hasCmdSubtreeSwitch([glued[2]]) || hasCmdSubtreeSwitch(tokens.slice(i + 1));
+  return CMD_REMOVE.has(commandName(first)) && hasCmdSubtreeSwitch(tokens.slice(i + 1));
+}
 
 // Command wrappers whose real command follows them: `timeout 5 rm -rf`, `nice -n 10 rm -rf`,
 // `nohup rm -rf`, `xargs rm -rf`. positional = positional args the wrapper itself consumes
@@ -349,6 +409,7 @@ function widenedFindingLabel(cmd) {
     const riAfter = new Array(n + 1).fill(false);
     const resetAfter = new Array(n + 1).fill(false);
     const cleanAfter = new Array(n + 1).fill(false);
+    const subtreeAfter = new Array(n + 1).fill(false);
     for (let i = n - 1; i >= 0; i -= 1) {
       const t = tokens[i];
       const args = [t];
@@ -360,6 +421,7 @@ function widenedFindingLabel(cmd) {
       riAfter[i] = riAfter[i + 1] || hasRemoveItemRecursiveFlag(args);
       resetAfter[i] = resetAfter[i + 1] || t === 'reset';
       cleanAfter[i] = cleanAfter[i + 1] || t === 'clean';
+      subtreeAfter[i] = subtreeAfter[i + 1] || hasCmdSubtreeSwitch(args);
     }
     const REMOVE_ITEM = new Set(['remove-item', 'ri', 'del', 'erase', 'rd', 'rmdir', 'rm']);
     for (let i = 0; i < n; i += 1) {
@@ -370,6 +432,7 @@ function widenedFindingLabel(cmd) {
       }
       if (name === 'rm' && recursiveAfter[i + 1]) return 'rm-recursive';
       if (REMOVE_ITEM.has(name) && riAfter[i + 1]) return 'powershell-remove-item-recurse';
+      if (CMD_REMOVE.has(stripCmdCarets(name)) && subtreeAfter[i + 1]) return 'cmd-remove-recursive';
     }
   }
   return null;
@@ -450,6 +513,11 @@ function shellPayloads(segment, unescapeUnquoted) {
     if (name === 'eval') {
       const payload = tokens.slice(i + 1).join(' ').trim();
       if (payload) payloads.push({ text: payload, bashSemantics: unescapeUnquoted });
+      continue;
+    }
+    if (CMD_NAMES.has(name) || CMD_GLUED_RUN.test(stripCmdCarets(String(tokens[i])))) {
+      const payload = cmdPayload(tokens, i);
+      if (payload) payloads.push({ text: payload, bashSemantics: false });
       continue;
     }
     if (!SHELL_NAMES.includes(name)) continue;
@@ -613,6 +681,10 @@ function hasRecursiveRm(cmd, bashSemantics) {
     const name = commandName(tokens[0]);
     return name === 'rm' && hasRmRecursiveFlag(tokens.slice(1));
   });
+}
+
+function hasCmdRecursiveRemove(cmd, bashSemantics) {
+  return commandTokens(cmd, bashSemantics).some(isCmdTreeDelete);
 }
 
 function hasRecursiveRemoveItem(cmd, bashSemantics) {

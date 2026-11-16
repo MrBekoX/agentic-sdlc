@@ -122,7 +122,17 @@ export const HIGH = [
   // between the keyword and the separator, so the same value was reported in env/YAML spelling and
   // missed in JSON spelling, with json-credential's 16-character floor leaving 6-15 uncovered. It stays
   // one OPTIONAL quote, so `"password_hash": "..."` (a `_` follows the keyword) still does not match.
-  { label: 'password-literal', re: /\b(?:password|pwd|passwd|sa_password|mssql_sa_password)["']?\s*[:=]\s*["']?([^;"'\s]{6,})/i, valueGroup: 1 },
+  // `\b` missed the environment keys `DB_PASSWORD=`, `PGPASSWORD=`, `MYSQL_PWD=` and
+  // `AWS_SECRET_ACCESS_KEY=` (an underscore is a word character), so those four are named and may follow
+  // a prefix such as `MYAPP_`. The general keywords keep the old edge: `(?<!_)` after the alnum check, so a
+  // code identifier like `hashed_password = get_password_hash(...)` is not reported.
+  { label: 'password-literal', re: /(?<![A-Za-z0-9])(?:(?<!_)(?:password|pwd|passwd|sa_password|mssql_sa_password)|db_password|pgpassword|mysql_pwd|aws_secret_access_key)["']?\s*[:=]\s*["']?([^;"'\s]{6,})/i, valueGroup: 1 },
+  // A URL with credentials in its userinfo: scheme://user:<password>@host (a database URL, a git remote).
+  // The scheme and the user are bounded: the scan retries this prefix at every glued-token
+  // boundary, and an unbounded run there read to the end of the line each time (quadratic).
+  // Userinfo holds no `?`, `#`, `[` or `]`, so `host:8080?email=a@b` is not a credential; the user may be
+  // empty (`redis://:<password>@host`).
+  { label: 'url-credential', re: /(?<![A-Za-z0-9])[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:@\/?#\[\]]{0,256}:([^\s@\/?#\[\]]{6,})@/i, valueGroup: 1 },
   // JSON credential:  "...Key|Secret|Password|Token|Credential...": "long-value" (>=16 chars)
   { label: 'json-credential', re: /"[^"]*(?:password|secret|key|token|credential|signing)[^"]*"\s*:\s*"([^"]{16,})"/i, valueGroup: 1 },
 ];

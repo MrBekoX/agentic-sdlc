@@ -18,6 +18,14 @@
     {"family": "bearer-token", "name": "bearer", "prefix": "Authorization: ", "masked": ["Bea", "rer Hn4Kq8Zw2Lx7Vt3Rp9Mc6Bd"], "suffix": ""},
     {"family": "password-literal", "name": "connection-string", "prefix": "Server=db;", "masked": ["Pass", "word=Hq7mK2pWz9"], "suffix": ";Trusted=no"},
     {"family": "password-literal", "name": "json-quoted-key", "prefix": "{", "masked": ["\"pass", "word\": \"Wq7Lm2Kz9\""], "suffix": "}"},
+    {"family": "password-literal", "name": "env-prefixed-db-password", "prefix": "export ", "masked": ["DB_PASS", "WORD=Hq7mK2pWz9"], "suffix": ""},
+    {"family": "password-literal", "name": "pgpassword", "prefix": "", "masked": ["PGPASS", "WORD=Lq8Zt3Wm7K"], "suffix": " psql"},
+    {"family": "password-literal", "name": "mysql-pwd", "prefix": "env ", "masked": ["MYSQL_P", "WD=Zq7RkW3pLx9"], "suffix": " mysql"},
+    {"family": "password-literal", "name": "aws-secret-access-key", "prefix": "", "masked": ["AWS_SECRET_ACC", "ESS_KEY=Wq7Lm2Kz9Rt8Kv3Nb6Hd1Jf5Tc8Yq2Ue4Mx7Pz"], "suffix": ""},
+    {"family": "url-credential", "name": "database-url", "prefix": "DATABASE_URL=", "masked": ["postgres://app:", "Hq7mK2pWz9", "@db.internal/app"], "suffix": ""},
+    {"family": "url-credential", "name": "git-remote", "prefix": "remote: ", "masked": ["https://deploy:", "Lq8Zt3Wm7Kx2", "@git.example.org/team/repo.git"], "suffix": ""},
+    {"family": "url-credential", "name": "redis-empty-user", "prefix": "REDIS_URL=", "masked": ["redis://:", "s3cretPassw0rd", "@cache.internal:6379/0"], "suffix": ""},
+    {"family": "password-literal", "name": "app-prefixed-db-password", "prefix": "", "masked": ["MYAPP_DB_PASS", "WORD=Hq7mK2pWz9"], "suffix": ""},
     {"family": "json-credential", "name": "json-credential", "prefix": "", "masked": ["{\"api_sec", "ret\": \"q7Wm4Lp9Xz2Rt8Kv3Nb6\"}"], "suffix": ""},
     {"family": "assigned-secret", "name": "assigned-secret", "prefix": "config ", "masked": ["api", "_key = Lq8Zt3Wm7Kx2Rv9Pn4Bc"], "suffix": ""}
   ],
@@ -32,6 +40,16 @@
     {"name": "degenerate-github", "text": ["TOKEN = gh", "p_", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"]},
     {"name": "sequential-github", "text": ["TOKEN = gh", "p_", "abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"]},
     {"name": "aws-doc-sample", "text": ["KEY = AKI", "AIOSFODNN7EXAMPLE"]},
-    {"name": "word-with-sk-dash", "text": ["task", "-runner --skip-proj-checks"]}
+    {"name": "word-with-sk-dash", "text": ["task", "-runner --skip-proj-checks"]},
+    {"name": "url-template-password", "text": ["postgres://app:", "${DB_PASSWORD}", "@db/app"]},
+    {"name": "url-user-only", "text": ["https://user@", "example.com/x"]},
+    {"name": "url-host-port", "text": ["http://localhost:", "8080/path"]},
+    {"name": "password-hash-key", "text": ["DB_PASS", "WORD_HASH=Hq7mK2pWz9"]},
+    {"name": "code-hashed-password", "text": ["hashed_pass", "word = get_password_hash(user.password)"]},
+    {"name": "code-new-password", "text": ["new_pass", "word = form.cleaned_data['new_password']"]},
+    {"name": "code-private-field", "text": ["this._pass", "word = password;"]},
+    {"name": "ci-service-password", "text": ["POSTGRES_PASS", "WORD: postgres"]},
+    {"name": "url-query-at", "text": ["curl http://localhost:8080?email=admin", "@example.com"]},
+    {"name": "url-fragment-at", "text": ["see http://example.com:80#frag", "@x"]}
   ]
 }
