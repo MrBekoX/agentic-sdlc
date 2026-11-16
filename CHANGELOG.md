@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-11-16
+
+- Add the middleware-chain flow runner, a standard-library Python CLI: `scripts/sdlc.py` with the `scripts/sdlc_runner/` package, and the `flows/` manifests (12 flows, `flows/_shared.json`, the joint spec/plan loop `flows/loops/spec-plan.json` and seven schemas). `sdlc.py start <flow>` opens a work package under `docs/agentic-sdlc/<slug>/`, and `next` prints one card at a time. Approval gates are bound to a fingerprint and a quote. Transitions, test runs, approvals and notes go to hash-chained logs. `run` executes allow-listed test commands without a shell. Every flow starts with a run-once strategy step.
+- The joint loop drafts the spec and the plan, has a fresh-context critic check them together and revises. It stops on a clean verdict, when the same issues come back, or after 3 rounds (hard cap 5), and one review gate follows. Bugfix runs the loop in plan-only mode, and `scripts/validate_artifacts.py` and `scripts/resolve_work_package.py` accept a spec-less bugfix plan (`flow: bugfix`, `spec: none`).
+- Run the joint loop through each runtime's engine:
+  - Claude Code: `workflows/spec-plan-draft.js` takes the runner's launch arguments and writes round files through the new low-effort `draft-scribe` agent.
+  - Grok Build: the runner stages `workflows/grok/spec-plan-draft.rhai` into the work package and launches it by `script_path`.
+  - ZCode: `workflows/zcode/spec-plan-draft.dwf.ts` is now a driver that hands each role card to a new actor, used on an explicit workflow request.
+  - Codex, Kimi Code, Cursor and Google Antigravity use the runner loop: the runner prints author, critic and revise role cards, and each card goes to a new sub-agent.
+  - `tests/test_loop_engine_parity.py` pins the three engines to the same loop definition.
+- Roles:
+  - `agents/spec-plan-author.md` gains spec, plan, bugfix-plan and revise modes, and `agents/spec-plan-critic.md` returns the critic's JSON.
+  - The new `agents/draft-scribe.md` writes outputs byte for byte and runs only the runner's loop commands.
+  - `agents/implementation-auditor.md` gains a bugfix path, and contracts 02, 03 and 07 follow these changes.
+  - An author role card names a `decisions=` file, so a read-only author's open decision points reach the review sidecar.
+  - `cursor/agents/` mirrors the 10 roles under Cursor frontmatter, and the Cursor manifest's `agents` points there.
+  - The Kimi skill instructions name plugin skills `agentic-sdlc:<skill>` and send each role card to a new `Agent`.
+- Add 20 step files under `skills/<skill>/steps/`, one per runner card (the `implement` step has one per work type); the card prints the current one. The `branch` step branches from the current commit and does not fetch main.
+- Package the runner: the release and skills-only archives ship `scripts/sdlc.py`, `scripts/sdlc_runner/` and `flows/`, and the Grok and ZCode marketplace packets carry them byte for byte. The skills-only archive projects the loop roles to `references/roles/` and ships no engine.
+- Status of the runner: no skill, hook or command calls it in 0.7.0. The 16 skills keep their 0.6.0 procedures, and the Claude Code and Grok skills keep the 0.6.0 `spec-plan-draft` loop (`.grok/workflows/` on Grok) until the skills move onto the runner. Every runtime row in `flows/_shared.json` stays `verified: false`: no engine and no runner loop has a live run, only `feature` and `bugfix` are driven end to end by tests, Antigravity's staged folder has no role files (the runner stops with `role_file_missing`), and Cursor's `permissionMode: readonly` key is unverified.
+- `hooks/destructive-command-guard.mjs` denies cmd.exe tree deletes (`rd`, `rmdir`, `del` or `erase` with `/s`):
+  - It checks the top level and the payload of a `cmd /c`, `/k` or `/r`.
+  - It also catches glued switches, `@` or `call`, Git Bash's `//s` and `//c`, and cmd named as `%COMSPEC%` or `$env:ComSpec`.
+  - It does not parse `if exist <path> rd /s` or a command piped into `cmd`.
+- `hooks/cursor-launch.mjs` denies a shell command whose guard crashed or answered with anything but a JSON object. Empty output stays an allow.
+- `hooks/secret-patterns.mjs` and `scripts/sdlc_runner/mask.py` stay byte-equal and report two new kinds of secret:
+  - assignments to `DB_PASSWORD` (also with a prefix such as `MYAPP_`), `PGPASSWORD`, `MYSQL_PWD` and `AWS_SECRET_ACCESS_KEY`;
+  - credentials in a URL (`scheme://user:<password>@host`, also with an empty user).
+  - Throwaway CI passwords such as `POSTGRES_PASSWORD: postgres` are still not reported.
+- The eval runners pass the requested effort to the CLI. `run_trigger_eval.py` and `run_procedure_eval.py` take `--effort`, and `run_routing_eval.py --reasoning-effort` (default `high`) also sets Claude's `--effort`. The Codex trigger eval's default model is `gpt-5.6-luna`.
+- Add the 2026-11-14 status report `docs/analysis/2026-11-14-durum-analizi.md`.
+- CI gives each gate job 120 minutes, because a job runs the suite three times. Main gets one concurrency group per commit, so merging several pull requests in a row no longer cancels the CI runs of the merge commits in between.
+- Docs:
+  - The README and the adapter READMEs describe the runner, its engines, the role files and the step files.
+  - The Kimi docs name plugin skills `agentic-sdlc:<skill>`, as Kimi Code's plugin documentation does.
+  - `SECURITY.md` supports `0.7.x`.
+- Add the 0.7.0 release evidence ledger (`docs/release-evidence-0.7.0.md`); its verdict is do-not-publish. The 0.4.3, 0.5.0 and 0.6.0 ledgers are kept unchanged.
+
 ## 0.6.0 - 2026-10-16
 
 - Breaking: `agentic-sdlc-pipeline` no longer invokes or reads `feature-build`, `root-cause-fix`, `safe-refactor`, `test-authoring`, `security-audit` or `implementation-control`. Steps 8–13 read the selected work type's `skills/<skill>/references/core.md`; the security review dispatches `Agent(security-reviewer)`; the final audit runs `scripts/resolve_work_package.py` and dispatches `Agent(implementation-auditor)`. `dispatch-strategy` runs once per pipeline run, at kickoff, before Step 1. The four work-type skills read the same core file from their standalone entry, and the six focused skills' descriptions now exclude steps inside an active pipeline run.

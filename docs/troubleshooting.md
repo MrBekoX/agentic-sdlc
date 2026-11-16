@@ -77,7 +77,7 @@ Check:
 
 1. The plugin was installed in the Kimi TUI with `/plugins install <package-directory>` (or `/plugins install https://github.com/MrBekoX/agentic-sdlc`), and `/plugins info agentic-sdlc` lists it.
 2. After editing the source folder, install it again. Kimi runs a managed copy (`$KIMI_CODE_HOME/plugins/managed/<id>/`) that does not follow source edits, and `/plugins reload` does not copy changed files. Then run `/reload` or `/new`.
-3. Skills are invoked by bare name (`/skill:mind-spark`); Kimi does not resolve `agentic-sdlc:mind-spark`.
+3. Skills are invoked by their plugin-qualified name (`/skill:agentic-sdlc:mind-spark`); Kimi's plugin documentation says a bare skill name never resolves to a plugin skill.
 4. On Windows, Git for Windows is installed: Kimi's Bash tool needs it.
 5. `node` is on the `PATH` of the shell Kimi runs hooks with; without it the three PreToolUse command guards fail open.
 

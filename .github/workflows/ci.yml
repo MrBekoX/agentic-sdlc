@@ -12,9 +12,13 @@ permissions:
   contents: read
 
 # A pull request pushed twice cancels its own superseded run; main keeps every run, because each
-# merge commit's result is the record that the branch was green at that commit.
+# merge commit's result is the record that the branch was green at that commit. A group holds one
+# running and one pending run, and a newer pending run cancels the older one even when
+# cancel-in-progress is off, so main needs a group per commit: with one group for all of main,
+# merging several pull requests in a row cancelled the runs of every merge commit but the first
+# and the last.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:

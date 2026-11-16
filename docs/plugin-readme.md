@@ -1,8 +1,8 @@
 # AGENTIC-SDLC Plugin Reference
 
-> Version: `0.6.0`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md), [Codex](../.codex-plugin/README.md), [Kimi Code](../.kimi-plugin/README.md), [Grok CLI](../.grok-plugin/README.md), [ZCode](../.zcode-plugin/README.md) or [Cursor](../.cursor-plugin/README.md).
+> Version: `0.7.0`. This is the component-by-component reference. For runtime-specific behavior, start with [Claude Code](../.claude-plugin/README.md), [Codex](../.codex-plugin/README.md), [Kimi Code](../.kimi-plugin/README.md), [Grok CLI](../.grok-plugin/README.md), [ZCode](../.zcode-plugin/README.md) or [Cursor](../.cursor-plugin/README.md).
 
-AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**, with experimental adapters for **Kimi Code**, **Grok CLI** and **ZCode**. It routes each prompt to the smallest sufficient skill and reserves the full SDLC envelope for work that actually needs it.
+AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**, with a **Cursor** adapter and experimental adapters for **Kimi Code**, **Grok CLI**, **ZCode** and **Google Antigravity**. It routes each prompt to the smallest sufficient skill and reserves the full SDLC envelope for work that actually needs it.
 
 ## Supported Runtime Scope
 
@@ -10,10 +10,10 @@ AGENTIC-SDLC is a local development plugin for **Claude Code** and **Codex**, wi
 |---|---|---|
 | Claude Code | Supported | Native `Skill`, `Workflow`, `Agent`/`Task`, commands, and full hook wiring. See [`../.claude-plugin/README.md`](../.claude-plugin/README.md). |
 | Codex | Supported | Shared skills, Codex manifest metadata, install through `codex plugin marketplace add <package-directory>` then `codex plugin add agentic-sdlc@mrbekox` (a personal catalog is optional), and embedded pipeline adapter. See [`../.codex-plugin/README.md`](../.codex-plugin/README.md). |
-| ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Marketplace install through the root ZCode-schema `marketplace.json` added as a file source; a directory or GitHub source (`MrBekoX/agentic-sdlc`) is read through `.claude-plugin/marketplace.json` first and shows the Claude entry, and the GitHub source (public since 2026-10-12) is not natively verified. A narrow verified-event hook wire. ZCode 3.14.0 added dynamic workflows, but Z.ai publishes no script API and `plugin.json` has no `workflows` key, so none ships here. See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
-| Grok CLI | Adapter / experimental (not a 0.4.3 release target) | Local install with `grok plugin install <package-directory> --trust`; the shipped catalog `.grok-plugin/marketplace.json` carries a remote `url` entry pointing at the public repository; a narrow verified-event hook wire (`hooks/hooks-grok.json`); project-catalog Rhai at `.grok/workflows/*.rhai` (not a plugin component). See [`../.grok-plugin/README.md`](../.grok-plugin/README.md). |
+| ZCode (Z.ai) | Adapter / experimental (not a 0.4.3 release target) | Marketplace install through the root ZCode-schema `marketplace.json` added as a file source; a directory or GitHub source (`MrBekoX/agentic-sdlc`) is read through `.claude-plugin/marketplace.json` first and shows the Claude entry, and the GitHub source (public since 2026-10-12) is not natively verified. A narrow verified-event hook wire. ZCode 3.14.0 added dynamic workflows, but Z.ai publishes no script API and `plugin.json` has no `workflows` key, so no workflow is registered as a plugin component; the flow runner's driver `workflows/zcode/spec-plan-draft.dwf.ts` ships as a file that the runner hands to `CreateWorkflow` on an explicit workflow request (no live ZCode run yet). See [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md). |
+| Grok CLI | Adapter / experimental (not a 0.4.3 release target) | Local install with `grok plugin install <package-directory> --trust`; the shipped catalog `.grok-plugin/marketplace.json` carries a remote `url` entry pointing at the public repository; a narrow verified-event hook wire (`hooks/hooks-grok.json`); project-catalog Rhai at `.grok/workflows/*.rhai` (not a plugin component), which the 0.6.0 skills use; the flow runner instead stages the shipped `workflows/grok/spec-plan-draft.rhai` into the work package and launches it by `script_path`. See [`../.grok-plugin/README.md`](../.grok-plugin/README.md). |
 | Kimi Code | Adapter / experimental, limited runtime coverage (not a 0.4.3 release target) | `/plugins install <package-directory>` in the TUI; `.kimi-plugin/plugin.json`, `marketplace-kimi.json`, startup router and three inline command guards; see [Kimi](../.kimi-plugin/README.md). |
-| Cursor | Adapter | Local copy into Cursor's user plugin directory via `scripts/install_cursor_plugin.py`, or a team marketplace import of `.cursor-plugin/marketplace.json`. Shared skills, agents, commands, one rule, and `hooks/hooks-cursor.json`. See [Cursor](../.cursor-plugin/README.md). |
+| Cursor | Adapter | Local copy into Cursor's user plugin directory via `scripts/install_cursor_plugin.py`, or a team marketplace import of `.cursor-plugin/marketplace.json`. Shared skills and commands, Cursor's copies of the role files in `cursor/agents/`, one rule, and `hooks/hooks-cursor.json`. See [Cursor](../.cursor-plugin/README.md). |
 | Google Antigravity | Adapter / experimental (not a supported release target) | Local staging into `<workspace>/.agents/plugins/agentic-sdlc/` or `~/.gemini/config/plugins/agentic-sdlc/` with `.antigravity-plugin/plugin.json` copied as `<plugin-dir>/plugin.json`. Shared skills, portable `<runtime-root>` resolution, `invoke_subagent` delegation, no `hooks.json` wire. See [Google Antigravity](../.antigravity-plugin/README.md). |
 | OpenCode / GLM-style harnesses | Deferred adapter targets | Adapter concepts may be documented in [`runtime-adapter.md`](./runtime-adapter.md), but these are not supported release targets. |
 
@@ -60,16 +60,16 @@ These variables are set only in hook processes. None reaches the model's Bash or
 
 | Layer | Responsibility |
 |---|---|
-| `skills/` | Runnable procedures: `SKILL.md` plus optional `scripts/`, `references/`, and `assets/`. |
+| `skills/` | Runnable procedures: `SKILL.md` plus optional `scripts/`, `references/`, and `assets/`; `steps/` holds the flow runner's step files (20 across 14 skills), which the runner's cards print. |
 | `contracts/skills/` | Durable behavior rules: context-first, spec, plan, testing, security, git safety, documentation, collaboration. |
 | `agents/` | Bounded role contracts used for fresh-context analysis, review, audit, and author/critic passes; diagnostic roles may run tests, while reviewer/auditor roles omit shell tools. The author and critic are read-only; `draft-scribe` writes their outputs into the work package and runs the runner's loop commands for a native loop engine. |
-| `workflows/` | Claude Code dynamic workflow scripts. Codex does not run these directly. Grok CLI uses the separate project catalog `.grok/workflows/*.rhai` (not a plugin component). |
+| `workflows/` | Claude Code dynamic workflow scripts, and the flow runner's loop engines: `workflows/grok/spec-plan-draft.rhai` (staged and launched by the runner on Grok) and the ZCode driver `workflows/zcode/spec-plan-draft.dwf.ts`. Codex does not run these directly. The 0.6.0 skills on Grok CLI use the separate project catalog `.grok/workflows/*.rhai` (not a plugin component). |
 | `hooks/` | Deterministic guard scripts, active-flow evidence rules, and runtime hook wiring. |
 | `commands/` | Manual slash-command definitions such as `/agentic-sdlc:git-safety-check`. |
 | `scripts/` | Deterministic probes, validators, eval runners, version helpers, and review-package helpers. |
 | `flows/` | The middleware-chain runner's JSON flows, its spec/plan loop definition (`flows/loops/`) and schemas (`flows/schemas/`). `scripts/sdlc.py` reads them from the plugin root. |
 | `tests/` | Unit tests, harness, fixtures, golden references, and eval seeds. |
-| `.claude-plugin/` / `.codex-plugin/` / `.kimi-plugin/` / `.zcode-plugin/` / `.grok-plugin/` | Runtime manifests and runtime README files. The root `marketplace.json` (ZCode) and `marketplace-kimi.json` (Kimi Code) are the other catalogs. |
+| `.claude-plugin/` / `.codex-plugin/` / `.kimi-plugin/` / `.zcode-plugin/` / `.grok-plugin/` / `.cursor-plugin/` / `.antigravity-plugin/` | Runtime manifests and runtime README files. The root `marketplace.json` (ZCode) and `marketplace-kimi.json` (Kimi Code) are the other catalogs. |
 
 ## Entry Points
 
@@ -102,7 +102,7 @@ The standalone skill reads the same core file, so the implementation steps exist
 | Codex | Uses the embedded author -> critic -> revise adapter inside `agentic-sdlc-pipeline`; validates saved artifacts with `validate_artifacts.py`. |
 | Grok CLI (experimental) | Uses `/workflow spec-plan-draft` (project catalog `.grok/workflows/spec-plan-draft.rhai`) when present; otherwise `spawn_subagent` author -> critic -> revise plus `validate_artifacts.py`. Not a plugin-shipped workflow. |
 | Kimi Code (experimental) | No Claude Workflow runtime: `Agent` author -> critic -> revise with saved artifacts plus `validate_artifacts.py`, or an inline pass marked degraded. |
-| ZCode (experimental) | A plugin cannot deliver a ZCode workflow (`workflows/zcode/spec-plan-draft.dwf.ts` is an unverified port); uses the embedded author -> critic -> revise adapter, as on Codex, plus `validate_artifacts.py`. |
+| ZCode (experimental) | A plugin cannot register a ZCode workflow; the 0.6.0 skills use the embedded author -> critic -> revise adapter, as on Codex, plus `validate_artifacts.py`. The flow runner's driver `workflows/zcode/spec-plan-draft.dwf.ts` runs only on an explicit workflow request and has no live run. |
 
 The pipeline must not call standalone `spec-authoring` or `plan-authoring` for its internal steps 4-5.
 
@@ -175,7 +175,7 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | `install_cursor_plugin.py` | Copy, update or uninstall the package in Cursor's local plugin directory. Update and uninstall keep files the installer did not write. |
 | `prepare_marketplace_release.py` | Export validated committed source and deterministic Grok/ZCode catalog packets to a new local destination, with separate producer/source provenance and byte verification; no publication or original Git mutation. |
 | `detect_context.py` | Workspace/dependency/toolchain classification. |
-| `sdlc.py` | Entry point of the middleware-chain runner (`scripts/sdlc_runner/`): starts a flow from the JSON manifests in `flows/`, prints one step card at a time, records runs and transitions in the work package. Every package ships it with `scripts/sdlc_runner/` and `flows/`, the public skills-only package included; there it reads its role files from `skills/using-agentic-sdlc/references/roles/`, because that package has no `agents/`. The staged Antigravity folder has no role files yet, so there the runner stops at its first draft card with `role_file_missing`. Under construction; no skill calls it yet. |
+| `sdlc.py` | Entry point of the middleware-chain runner (`scripts/sdlc_runner/`): starts a flow from the JSON manifests in `flows/`, prints one step card at a time, records runs and transitions in the work package. Every package ships it with `scripts/sdlc_runner/` and `flows/`, the public skills-only package included; there it reads its role files from `skills/using-agentic-sdlc/references/roles/`, because that package has no `agents/`. The staged Antigravity folder has no role files yet, so there the runner stops at its first draft card with `role_file_missing`. The joint spec/plan loop runs through `workflows/spec-plan-draft.js` on Claude Code, the staged `workflows/grok/spec-plan-draft.rhai` on Grok and the ZCode driver on request; elsewhere the runner prints author, critic and revise role cards for new sub-agents. Under construction; no skill calls it yet. |
 | `run_trigger_eval.py` | Claude Code trigger eval runner. |
 | `run_codex_trigger_eval.py` | Codex route-classifier trigger runner. |
 | `run_all_trigger_evals.py` | Batch trigger eval runner. |
@@ -214,12 +214,13 @@ See [`testing.md`](./testing.md) and [`release-readiness.md`](./release-readines
 - The `0.4.3` release supported Claude Code and Codex only. The current tree also packages Kimi Code, Grok CLI and ZCode as experimental adapters with narrower hook wiring; their native install, discovery, update and uninstall pass on Windows, Linux and macOS ([compatibility matrix](publication/compatibility-matrix.md)), but hook delivery inside a live session and model behavior are not proven.
 - Codex hook wiring is declared via `.codex-plugin/plugin.json` -> `hooks/hooks-codex.json`; non-managed plugin-bundled command hooks require Codex review/trust before they run. It is deliberately not named `hooks/hooks.json`, which Claude Code would auto-load with an undefined `${PLUGIN_ROOT}`.
 - Codex trigger evals are classifier evidence, not Claude-style `Skill` event evidence.
-- Hooks fail open where necessary so a hook fault does not break a session.
+- Hooks fail open where necessary so a hook fault does not break a session. The Cursor shell guards are the exception: `hooks/cursor-launch.mjs` denies a shell command whose guard crashed or printed anything but a JSON object (empty output stays an allow).
 - `validate_artifacts.py` is structural; it cannot prove that a spec is semantically about the requested task.
 - Live routing is model-dependent and must be evidenced per runtime, model, and run.
+- The flow runner and its loop engines have no live run: every runtime row in `flows/_shared.json` is `verified: false`. The Claude Code engine has run only against a stubbed scribe in the suite, the Grok engine only under standalone Rhai 1.27 in review, and the ZCode driver never; only the `feature` and `bugfix` flows are driven end to end by tests. Cursor's `permissionMode: readonly` role key is unverified.
 - Codex public-listing fields now use `interface.category: "Developer Tools"` and a `shortDescription` of at most 30 characters. Local CLI install does not require a public directory listing.
 - Bounded native hook/lifecycle captures exist for Codex **0.154.0** and Claude Code **2.1.269**. Their source identities and the separate parser replay are recorded in [runtime evidence](runtime-adapter.md#current-binary-and-historical-hook-evidence); `transcript_path` remains unstable. The [0.4.3 release ledger](release-evidence-0.4.3.md) distinguishes this proof from the standalone routing and pipeline publication gates.
-- One live pipeline run measured 0.6.0 (52a2ad1, 2026-10-22) and none of its six procedure rows passed; the fixes it led to have no live run yet. The zero-delegation rule is stated in the skill text, checked by the Claude Code flow hooks (warn by default) and graded offline by the strict procedure eval. Codex test runs wrapped in `/bin/bash -lc` or `powershell -Command` are not attributed, so strict RED/GREEN cannot pass on real Codex transcripts. See the [current release ledger](release-evidence-0.6.0.md).
+- One live pipeline run measured 0.6.0 (52a2ad1, 2026-10-22) and none of its six procedure rows passed; the fixes it led to have no live run yet. The zero-delegation rule is stated in the skill text, checked by the Claude Code flow hooks (warn by default) and graded offline by the strict procedure eval. Codex test runs wrapped in `/bin/bash -lc` or `powershell -Command` are not attributed, so strict RED/GREEN cannot pass on real Codex transcripts. See the [current release ledger](release-evidence-0.7.0.md).
 
 ## Artifact Layouts And Per-Package Evidence
 
@@ -236,7 +237,7 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 - Project overview: [`../README.md`](../README.md)
 - Claude runtime README: [`../.claude-plugin/README.md`](../.claude-plugin/README.md)
 - Codex runtime README: [`../.codex-plugin/README.md`](../.codex-plugin/README.md)
-- Kimi Code, Grok CLI and ZCode adapter READMEs: [`../.kimi-plugin/README.md`](../.kimi-plugin/README.md), [`../.grok-plugin/README.md`](../.grok-plugin/README.md), [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md)
+- Kimi Code, Grok CLI, ZCode, Cursor and Google Antigravity adapter READMEs: [`../.kimi-plugin/README.md`](../.kimi-plugin/README.md), [`../.grok-plugin/README.md`](../.grok-plugin/README.md), [`../.zcode-plugin/README.md`](../.zcode-plugin/README.md), [`../.cursor-plugin/README.md`](../.cursor-plugin/README.md), [`../.antigravity-plugin/README.md`](../.antigravity-plugin/README.md)
 - Compatibility matrix: [`publication/compatibility-matrix.md`](publication/compatibility-matrix.md)
 - Skill boundaries: [`skill-boundaries.md`](./skill-boundaries.md)
 - Testing: [`testing.md`](./testing.md)

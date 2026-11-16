@@ -4,7 +4,7 @@
 
 > An AGENTIC-SDLC skill library with adapters for **Claude Code**, **Codex**, **Kimi Code**, **ZCode**, **Grok CLI** and **Cursor**. It packages repeatable software-delivery procedure as skills, hooks, contracts, scripts, agents, workflows, and eval fixtures.
 >
-> `Version 0.6.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
+> `Version 0.7.0` - `MIT` - `Author: Beko` - <https://github.com/MrBekoX/agentic-sdlc>
 
 ---
 
@@ -71,7 +71,7 @@ In the Kimi TUI:
 /reload
 ```
 
-Hooks run once the plugin is installed. Invoke skills by bare name (`/skill:using-agentic-sdlc`). On Windows, Kimi's Bash tool needs Git for Windows.
+Hooks run once the plugin is installed. Kimi names a plugin skill `<plugin-id>:<skill-name>`, so invoke `/skill:agentic-sdlc:using-agentic-sdlc`; Kimi's plugin documentation says a bare skill name never resolves to a plugin skill. On Windows, Kimi's Bash tool needs Git for Windows.
 
 ### Grok CLI
 
@@ -99,7 +99,7 @@ In a project chat, start with `/using-agentic-sdlc`. A full delivery request use
 
 ### Google Antigravity (experimental adapter)
 
-Google Antigravity discovers workspace plugins at `<workspace>/.agents/plugins/agentic-sdlc/` and global plugins at `~/.gemini/config/plugins/agentic-sdlc/`. Stage `.antigravity-plugin/plugin.json` as `<plugin-dir>/plugin.json` along with `skills/`, `contracts/`, `scripts/`, `assets/`, `commands/`, `workflows/`, `docs/`, and `agents/` using the copy commands in [`.antigravity-plugin/README.md`](.antigravity-plugin/README.md) (do not create a root `plugin.json` in this repository).
+Google Antigravity discovers workspace plugins at `<workspace>/.agents/plugins/agentic-sdlc/` and global plugins at `~/.gemini/config/plugins/agentic-sdlc/`. Stage `.antigravity-plugin/plugin.json` as `<plugin-dir>/plugin.json` along with `skills/`, `contracts/`, `scripts/`, `flows/`, `assets/`, `commands/` and `LICENSE` using the copy commands in [`.antigravity-plugin/README.md`](.antigravity-plugin/README.md) (do not create a root `plugin.json` in this repository).
 
 ### Update and uninstall
 
@@ -117,7 +117,7 @@ Native install, discovery, update and uninstall of a package directory passed in
 
 ## Distribution paths
 
-`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.6.0.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. A BLOCKED or GAP state concerns publication or a release gate; it does not mean the [Install](#install) steps above fail. Kimi, ZCode and Grok adapters are included in this distribution candidate; the historical four-path 0.4.3 verdict does not establish their native lifecycle or public-directory acceptance.
+`agentic-sdlc` has four release-gated distribution paths. Each one has its own prerequisites, steps, go condition and state. A state is a snapshot bound to the [release evidence ledger](docs/release-evidence-0.7.0.md); the per-path go/no-go verdicts live in [release readiness](docs/release-readiness.md#distribution-paths-and-gono-go). Ready to submit never means submitted, accepted or published. A BLOCKED or GAP state concerns publication or a release gate; it does not mean the [Install](#install) steps above fail. Kimi, ZCode and Grok adapters are included in this distribution candidate; the historical four-path 0.4.3 verdict does not establish their native lifecycle or public-directory acceptance.
 
 ### Claude own marketplace
 
@@ -203,11 +203,11 @@ The same skills run through the embedded author/critic adapter where Claude-only
 
 **Go condition.** Install through `codex plugin add agentic-sdlc@<marketplace-name>` from a catalog Codex recognizes (the package's own `mrbekox` catalog or a personal catalog); native discovery showing 16 skills (the app-server `skills/list` reports 17 entries, the `git-safety-check` command included) and `hooks/list` showing 8 hooks; and hook trust granted through the native `/hooks` trust protocol as a required step.
 
-State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the [compatibility matrix](docs/publication/compatibility-matrix.md); `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.6.0 package; the ledger carries the 26b0fe1 results.
+State: GAP. Native install, skill discovery, recopy and removal of a package built from main `1a9ac73` are recorded (E2, E6, E11 in the [compatibility matrix](docs/publication/compatibility-matrix.md); `hooks/list` was not part of those runs); final-package discovery of 16 skills and 8 hooks and real-profile hook trust are not yet recorded for the 0.7.0 package; the ledger carries the 26b0fe1 results.
 
 ### ZCode marketplace installs (experimental, not a release-gated path)
 
-> **Experimental adapter.** ZCode was not a supported 0.4.3 release target; 0.5.0 and 0.6.0 include it as an experimental adapter. These install paths carry no go/no-go verdict and no official submission exists. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
+> **Experimental adapter.** ZCode was not a supported 0.4.3 release target; 0.5.0, 0.6.0 and 0.7.0 include it as an experimental adapter. These install paths carry no go/no-go verdict and no official submission exists. See [`docs/runtime-adapter.md`](docs/runtime-adapter.md).
 
 **Prerequisites.** The ZCode desktop client (builds for Windows x64/ARM64, macOS Apple Silicon/Intel DMG and Linux x64 AppImage) and `node` on `PATH`; a file-source or directory marketplace add also needs a package directory (see [Get the package](#get-the-package)).
 
@@ -235,7 +235,7 @@ State: GAP for the desktop flow. The manifest, marketplace and hook wire pass `t
 /reload
 ```
 
-`/plugins install https://github.com/MrBekoX/agentic-sdlc` and the custom catalog [`marketplace-kimi.json`](marketplace-kimi.json) (`/plugins marketplace <path-or-url>`) use the public repository; neither route has been natively verified. Invoke skills by bare name (`/skill:using-agentic-sdlc`). Update: reinstall a changed local directory, or press Enter on an available update in the `/plugins` Installed tab; uninstall: `/plugins remove agentic-sdlc` (the managed copy stays on disk).
+`/plugins install https://github.com/MrBekoX/agentic-sdlc` and the custom catalog [`marketplace-kimi.json`](marketplace-kimi.json) (`/plugins marketplace <path-or-url>`) use the public repository; neither route has been natively verified. Invoke skills by their plugin-qualified name (`/skill:agentic-sdlc:using-agentic-sdlc`). Update: reinstall a changed local directory, or press Enter on an available update in the `/plugins` Installed tab; uninstall: `/plugins remove agentic-sdlc` (the managed copy stays on disk).
 
 State: packaging and relocated hook replays pass. Native install (16 skills and 1 command; 3 hooks reported on Windows, E4), reinstall of a version-bumped copy and removal passed on Kimi Code 2.1.1 on Windows, Linux and macOS through the local `kimi web` API (E4, E7, E12 in the [compatibility matrix](docs/publication/compatibility-matrix.md)); the TUI `/plugins install` and Enter-update from a catalog were not driven, and hook delivery inside a live session is unverified.
 
@@ -273,7 +273,7 @@ State: BLOCKED. The path needs the verified identity, `api.apps.write` and a ver
 
 | It is | It is not |
 |---|---|
-| A local development plugin for Claude Code, Codex, Kimi Code, Grok CLI and ZCode | A hosted service or CI/CD platform |
+| A local development plugin for Claude Code, Codex, Kimi Code, Grok CLI, ZCode, Cursor and Google Antigravity | A hosted service or CI/CD platform |
 | A library of reusable SDLC skills and guardrails | A general-purpose agent harness |
 | A router plus an optional full-envelope pipeline | A rule that every prompt must run the full pipeline |
 | Versioned, testable documentation-as-procedure | A replacement for human review and judgment |
@@ -315,6 +315,31 @@ The pipeline calls `dispatch-strategy` once, at kickoff, before Step 1, and `com
 
 Important boundary: `spec-authoring` and `plan-authoring` are standalone prompt-level skills. The pipeline does not call them for its internal spec/plan phases. Claude Code uses the `spec-plan-draft` workflow; Codex uses the embedded author/critic adapter documented in the runtime-specific README.
 
+### Flow runner (preview)
+
+0.7.0 adds a deterministic flow runner, the base for moving the skills off prose orchestration. It is a standard-library Python CLI, `scripts/sdlc.py`, with its package `scripts/sdlc_runner/` and the JSON flows in [`flows/`](flows/). No skill, hook or command calls it yet: the skills above still run their 0.6.0 procedures. A `feature` or `bugfix` run takes these steps:
+
+```text
+sdlc.py start <flow>   opens docs/agentic-sdlc/<slug>/: request, state, hash-chained logs
+  strategy             once per run: main loop, sub-agent, workflow or team for each step
+  draft                joint spec/plan loop: authors -> fresh critic -> revise, at most 3 rounds
+  review               one gate for spec and plan (gated form), bound to a fingerprint and a quote
+  branch -> implement -> security -> audit -> claim
+sdlc.py next           prints the next card; its step text comes from skills/<skill>/steps/
+```
+
+- **Flows:** `feature`, `bugfix`, `refactor`, `test`, `full`, `spec` and `plan`, and the one-step `design`, `code-review`, `security-review`, `audit` and `feedback`. Bugfix runs the loop in plan-only mode, `refactor` characterizes the current behaviour instead of drafting, `test` has no draft step, and `full` (gated only) adds intent, docs, quality-gate, diff-review and quality-review steps. `approve`, `run` (allow-listed test commands, no shell), `halt`, `resume` and `escalate` move a run on; `status` reads it.
+- **Loop engines:**
+
+  | Runtime | Engine for the joint spec/plan loop |
+  |---|---|
+  | Claude Code | `workflows/spec-plan-draft.js` through the Workflow tool; the `draft-scribe` agent writes the round files |
+  | Grok Build | `workflows/grok/spec-plan-draft.rhai`, which the runner stages into the work package and launches by `script_path` |
+  | ZCode | the runner loop; on an explicit workflow request, `workflows/zcode/spec-plan-draft.dwf.ts` drives it |
+  | Codex, Kimi Code, Cursor, Google Antigravity | the runner loop: author, critic and revise role cards, each handed to a new sub-agent (Cursor's role files are in `cursor/agents/`) |
+
+- **Status:** every runtime row in `flows/_shared.json` is `verified: false`, and no engine has a live run. The staged Antigravity folder has no role files, so its runner loop stops with `role_file_missing`.
+
 ## Repository Layout
 
 ```text
@@ -324,12 +349,13 @@ Important boundary: `spec-authoring` and `plan-authoring` are standalone prompt-
 .zcode-plugin/         ZCode adapter manifest and runtime READMEs (experimental)
 .grok-plugin/          Grok CLI adapter manifest + catalog whose entry installs from the repository URL (experimental)
 .antigravity-plugin/   Google Antigravity adapter manifest (strict two-key schema) + runtime README (experimental)
-.grok/workflows/       Grok CLI project workflow catalog (Rhai; loaded from the repo, not shipped by a plugin install)
+.cursor-plugin/        Cursor manifest, marketplace and runtime README; cursor/agents/ holds Cursor's copies of the role files
+.grok/workflows/       Grok CLI project workflow catalog the 0.6.0 skills use (Rhai; loaded from the repo, not a plugin component)
 marketplace.json       ZCode-schema marketplace, added as a file source
 marketplace-kimi.json  Kimi Code custom catalog (installs from the repository URL)
-skills/                Shared skill source: one directory per skill
-agents/                Bounded sub-agent role contracts (review roles are tool-level read-only)
-workflows/             Claude Code dynamic workflow scripts; workflows/zcode/ holds an UNVERIFIED ZCode port
+skills/                Shared skill source: one directory per skill; skills/<skill>/steps/ holds the runner's step files
+agents/                10 bounded sub-agent role contracts (review roles are tool-level read-only)
+workflows/             Claude Code dynamic workflow scripts and the runner's loop engines: workflows/grok/ (Rhai, staged by the runner) and workflows/zcode/ (driver)
 hooks/                 Deterministic guard scripts, flow evidence, and runtime hook wiring
 contracts/skills/      Durable behavior contracts
 commands/              Manual slash-command definitions
@@ -458,7 +484,7 @@ Per-package plan change-detection runs as a filesystem scan, not a `git status` 
 
 ## Versioning
 
-Current version: `0.6.0`.
+Current version: `0.7.0`.
 
 ```bash
 python3 scripts/bump_version.py --check
