@@ -12,8 +12,8 @@ this session and confirms or overrides each entry with a reason in one command:
   `draft` and `draft.critic`);
 - every override has a reason;
 - every mechanism is within the declared capabilities (`subagent` and `runner-loop` need
-  subagent=yes, `workflow` workflow=yes and a runtime with an engine, `team` team=yes); a
-  runtime whose workflow is `explicit-request` gets `workflow` only as an override;
+  subagent=yes, `workflow` workflow=yes and a runtime with an engine, `team` team=yes); the
+  spec/plan keys (`draft`, `draft.critic`) get `workflow` only as an override, on every runtime;
 - the mandated fresh-context keys (draft.critic, security, audit, quality-review) are never `main`
   (or `team`, `parallel-runs`): `workflow`, `subagent`, `runner-loop` (draft.critic only), or
   `inline-degraded`/`runner-loop-inline` with subagent declared no or denied;
@@ -106,17 +106,14 @@ def runtime_row(shared, runtime) -> dict:
 def _rule(key, row, probes) -> tuple:
     """(mechanism, reason) of `key` under the runtime row and the probes (design §5.7)."""
     sub = row.get("subagent") == "yes"
-    workflow = row.get("workflow")
     if key == "context":
         if probes.get("explore_mode") == "parallel" and sub:
             return "subagent", "explore mode parallel: one analyst sub-agent per layer"
         return "main", "one layer to explore: the main loop reads it"
     if key in DRAFT_KEYS:
-        if workflow in ("native", "staged"):
-            return "workflow", "the runtime's own workflow engine runs the spec/plan loop (%s)" % workflow
         if sub:
-            return "runner-loop", "no workflow engine: the runner drives the loop, each role a fresh sub-agent"
-        return "runner-loop-inline", "no workflow engine and no sub-agents: the runner drives the loop inline"
+            return "runner-loop", "the runner drives the loop, each role a fresh sub-agent"
+        return "runner-loop-inline", "no sub-agents: the runner drives the loop inline"
     if key in manifest.MANDATED_FRESH_KEYS:
         if sub:
             return "subagent", "a fresh-context gate: a fresh sub-agent"
@@ -165,9 +162,8 @@ def _entry_errors(key, entry, capabilities, row) -> list:
     if mechanism == "workflow":
         if row.get("workflow") == "none":
             errors.append("%s: no workflow engine on this runtime" % at)
-        elif row.get("workflow") == "explicit-request" and entry.get("source") != "override":
-            errors.append("%s: this runtime's workflow runs only on the user's explicit request (an override "
-                          "with a reason)" % at)
+        elif key in DRAFT_KEYS and entry.get("source") != "override":
+            errors.append("%s: an engine runs only on the user's explicit request (an override with a reason)" % at)
     if mechanism in LOOP_MECHANISMS and key not in DRAFT_KEYS:
         errors.append("%s: %s drives the spec/plan loop only" % (at, mechanism))
     if mechanism in DEGRADED and capabilities.get("subagent") not in ("no", "denied"):

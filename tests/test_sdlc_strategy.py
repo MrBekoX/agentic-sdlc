@@ -54,27 +54,30 @@ def _caps(workflow="no", subagent="yes", team="no"):
 
 
 class TestDefaultMap(unittest.TestCase):
-    def test_default_map_claude_uses_workflow_for_draft(self):
-        entries = strategy.default_map(_flow("feature"), SHARED, PLAIN, "claude", [])["entries"]
-        self.assertEqual(entries["draft"]["mechanism"], "workflow")
-        self.assertEqual(entries["draft.critic"]["mechanism"], "workflow")
-        for key in ("security", "audit"):
-            self.assertEqual(entries[key]["mechanism"], "subagent", key)
-        self.assertEqual(entries["implement"]["mechanism"], "main")
-        self.assertTrue(all(entry["source"] == "default" and entry["reason"] for entry in entries.values()))
+    def test_default_map_never_defaults_to_an_engine(self):
+        for runtime in ("claude", "grok"):
+            with self.subTest(runtime=runtime):
+                entries = strategy.default_map(_flow("feature"), SHARED, PLAIN, runtime, ["loop"])["entries"]
+                self.assertEqual(entries["draft"]["mechanism"], "runner-loop")
+                self.assertEqual(entries["draft.critic"]["mechanism"], "runner-loop")
+                for key in ("security", "audit"):
+                    self.assertEqual(entries[key]["mechanism"], "subagent", key)
+                self.assertEqual(entries["implement"]["mechanism"], "main")
+                self.assertTrue(all(entry["source"] == "default" and entry["reason"] for entry in entries.values()))
+                self.assertNotIn("workflow", {entry["mechanism"] for entry in entries.values()})
 
     def test_default_map_codex_uses_runner_loop(self):
-        entries = strategy.default_map(_flow("feature"), SHARED, PLAIN, "codex", [])["entries"]
+        entries = strategy.default_map(_flow("feature"), SHARED, PLAIN, "codex", ["loop"])["entries"]
         self.assertEqual((entries["draft"]["mechanism"], entries["draft.critic"]["mechanism"]),
                          ("runner-loop", "runner-loop"))
         self.assertEqual(entries["security"]["mechanism"], "subagent")
         # A runtime with no sub-agents runs the loop inline and degrades the fresh-context gates.
-        entries = strategy.default_map(_flow("feature"), SHARED, PLAIN, "other", [])["entries"]
+        entries = strategy.default_map(_flow("feature"), SHARED, PLAIN, "other", ["loop"])["entries"]
         self.assertEqual(entries["draft"]["mechanism"], "runner-loop-inline")
         self.assertEqual((entries["security"]["mechanism"], entries["audit"]["mechanism"]),
                          ("inline-degraded", "inline-degraded"))
         # ZCode's explicit-request workflow is never a default.
-        entries = strategy.default_map(_flow("feature"), SHARED, PLAIN, "zcode", [])["entries"]
+        entries = strategy.default_map(_flow("feature"), SHARED, PLAIN, "zcode", ["loop"])["entries"]
         self.assertEqual(entries["draft"]["mechanism"], "runner-loop")
 
     def test_default_map_covers_only_applicable_keys(self):
@@ -140,21 +143,43 @@ class TestValidate(unittest.TestCase):
                                            _flow("feature"), _state()), [])
 
     def test_mechanism_must_be_within_declared_capabilities(self):
-        errors = strategy.validate(_map("feature", "codex", _caps(subagent="no")), _flow("feature"), _state())
+        loop = ["loop"]
+        errors = strategy.validate(_map("feature", "codex", _caps(subagent="no"), options=loop), _flow("feature"),
+                                   _state(options=loop))
         self.assertTrue(any(e.startswith("/entries/draft:") and "subagent=yes" in e for e in errors), errors)
         self.assertTrue(any(e.startswith("/entries/security:") for e in errors), errors)
-        errors = strategy.validate(_map("feature", "claude", _caps(workflow="no")), _flow("feature"),
-                                   _state(runtime="claude"))
+        errors = strategy.validate(_map("feature", "claude", _caps(workflow="no"), options=loop,
+                                        overrides=[("draft", "workflow", "the user asked for the engine")]),
+                                   _flow("feature"), _state(runtime="claude", options=loop))
         self.assertTrue(any(e.startswith("/entries/draft:") and "workflow=yes" in e for e in errors), errors)
-        errors = strategy.validate(_map("feature", "codex", _caps(workflow="yes"),
-                                        overrides=[("draft", "workflow", "try it")]), _flow("feature"), _state())
+        errors = strategy.validate(_map("feature", "codex", _caps(workflow="yes"), options=loop,
+                                        overrides=[("draft", "workflow", "try it")]), _flow("feature"),
+                                   _state(options=loop))
         self.assertTrue(any(e.startswith("/entries/draft:") and "no workflow engine" in e for e in errors), errors)
-        errors = strategy.validate(_map("feature", "codex", _caps()), _flow("feature"), _state(runtime="claude"))
+        errors = strategy.validate(_map("feature", "codex", _caps(), options=loop), _flow("feature"),
+                                   _state(runtime="claude", options=loop))
         self.assertTrue(any(e.startswith("/runtime") for e in errors), errors)
-        missing = _map("feature", "codex", _caps())
+        missing = _map("feature", "codex", _caps(), options=loop)
         del missing["entries"]["audit"]
-        errors = strategy.validate(missing, _flow("feature"), _state())
+        errors = strategy.validate(missing, _flow("feature"), _state(options=loop))
         self.assertTrue(any(e.startswith("/entries/audit") and "missing" in e for e in errors), errors)
+
+    def test_engine_override_needs_a_reason_on_every_runtime(self):
+        loop = ["loop"]
+        message = "an engine runs only on the user's explicit request (an override with a reason)"
+        for runtime in ("claude", "grok", "zcode"):
+            with self.subTest(runtime=runtime):
+                state = _state(runtime=runtime, options=loop)
+                caps = _caps(workflow="yes")
+                for key in ("draft", "draft.critic"):
+                    forced = _map("feature", runtime, caps, options=loop)
+                    forced["entries"][key] = {"mechanism": "workflow", "reason": "the runtime has an engine",
+                                              "source": "default"}
+                    errors = strategy.validate(forced, _flow("feature"), state)
+                    self.assertTrue(any(e.startswith("/entries/%s:" % key) and message in e for e in errors), errors)
+                    asked = _map("feature", runtime, caps, options=loop,
+                                 overrides=[(key, "workflow", "the user said: use the workflow engine")])
+                    self.assertEqual(strategy.validate(asked, _flow("feature"), state), [])
 
     def test_mandated_keys_never_main(self):
         for key in ("draft.critic", "security", "audit", "quality-review"):
@@ -239,7 +264,7 @@ class TestConfirm(EngineCase):
                          ("inline-degraded", "subagent:no"))
 
     def test_escalate_amends_draft_keys_within_declared_capabilities(self):
-        self.start(flow="test", work_type="test", runtime="claude", work_id="tst")
+        self.start("--option", "loop", flow="test", work_type="test", runtime="claude", work_id="tst")
         self.confirm_strategy("tst", "workflow=denied,subagent=yes,team=no")
         self.next("tst")
         code, text = self.sdlc("escalate", "feature", "--slug", "tst", "--reason", "production code must change")

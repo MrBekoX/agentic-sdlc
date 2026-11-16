@@ -9,12 +9,12 @@ Do only this step now. Decide from the card and the request: read no project fil
 - `confirm=` is the command that writes `strategy.json`, with placeholders to fill in.
 - Runner commands start like the card's `then=` line: `"<python>" -B "<root>/scripts/sdlc.py"`. `-B` keeps `__pycache__` out of the plugin folder. `<slug>` is the last part of the card's `package=` value.
 
-Keys: `context` (analysis), `draft` (spec and plan authors), `draft.critic` (their critic), `implement`, `security`, `quality-gates`, `quality-review`, `audit`, `docs-check`.
+Keys: `context` (analysis), `draft` (spec and plan authors), `draft.critic` (their critic), `spec-check` (the spec's fresh reader), `implement`, `security`, `quality-gates`, `quality-review`, `audit`, `docs-check`.
 
 Mechanisms:
 - `main`: you do it in the main loop.
 - `subagent`: a fresh sub-agent does it and returns the result.
-- `workflow`: the runtime's own workflow engine runs it.
+- `workflow`: the runtime's own workflow engine runs it, only when the user asked for it.
 - `team`: an agent team whose members talk to each other, with you as the live lead.
 - `runner-loop`: the runner drives the spec/plan loop, and each role runs in a fresh sub-agent.
 - `runner-loop-inline`: the same loop, with you playing each role.
@@ -41,19 +41,19 @@ Pick the smallest mechanism that fits: `main` < `subagent` < `workflow` < `team`
 ## 3. Rules the runner enforces
 `confirm` is refused with `strategy_refused:<rule>` until all of these hold:
 - A mechanism needs its capability declared `yes`: `subagent` and `runner-loop` need `subagent=yes`; `workflow` needs `workflow=yes` and a runtime with an engine; `team` needs `team=yes`.
-- The fresh-context keys `draft.critic`, `security`, `audit` and `quality-review` are never `main`, `team` or `parallel-runs`. They take `workflow`, `subagent`, `runner-loop` (`draft.critic` only), or `inline-degraded` / `runner-loop-inline` when `subagent` is declared `no` or `denied`.
+- The fresh-context keys `draft.critic`, `spec-check`, `security`, `audit` and `quality-review` are never `main`, `team` or `parallel-runs`. They take `workflow`, `subagent`, `runner-loop` (`draft.critic` only), `inline-degraded`, or `runner-loop-inline` (`draft.critic` only); the two inline mechanisms need `subagent` declared `no` or `denied`.
 - `runner-loop` and `runner-loop-inline` belong to `draft` and `draft.critic` only.
-- A workflow engine that the runtime runs only on the user's explicit request is never a default. Override to it only when the user asked for it, and quote their words in the reason.
+- No engine is a default. Override `draft` and `draft.critic` to `workflow` only when the user asked for the runtime's engine, and quote their words in the reason.
 - Every override has a reason.
 
 When a default needs a capability you declared `no` or `denied`, override that entry. For example:
-- no workflow tool, sub-agents available: `--set draft=runner-loop:"no workflow tool in this session" --set draft.critic=runner-loop:"no workflow tool in this session"`;
-- no sub-agent tool: `--set security=inline-degraded:"no sub-agent tool in this session"`, the same for `audit` and `quality-review`, `runner-loop-inline` for the two draft keys, and `main` for `context`.
+- the user asked for the runtime's workflow engine: `--set draft=workflow:"<their words>" --set draft.critic=workflow:"<their words>"`, with `workflow=yes` declared;
+- no sub-agent tool: `--set security=inline-degraded:"no sub-agent tool in this session"`, the same for `spec-check`, `audit` and `quality-review`, `runner-loop-inline` for the two draft keys, and `main` for `context`.
 
 ## 4. Confirm
 Run the card's `confirm=` command with your values filled in, for example:
 
-`"<python>" -B "<root>/scripts/sdlc.py" strategy confirm --slug <slug> --capabilities workflow=no,subagent=yes,team=no --set draft=runner-loop:"no workflow tool in this session" --set draft.critic=runner-loop:"no workflow tool in this session"`
+`"<python>" -B "<root>/scripts/sdlc.py" strategy confirm --slug <slug> --capabilities workflow=no,subagent=yes,team=no --set implement=subagent:"three independent layers"`
 
 It prints `strategy=confirmed` and a preview of the next card. A refusal names the failing rule: correct the declaration or the override and run it again. `strategy_already_confirmed` means the map is already fixed: follow the current card.
 

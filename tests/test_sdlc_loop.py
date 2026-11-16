@@ -49,6 +49,11 @@ def _result(**changes):
     return result
 
 
+# A runtime's workflow engine is never a default: a test that wants one asks for it, as the user would.
+ENGINE_OVERRIDES = ("draft=workflow:the user asked for the workflow engine",
+                    "draft.critic=workflow:the user asked for the workflow engine")
+
+
 class LoopCase(EngineCase):
     def to_draft(self, flow="feature", work_type="feature", runtime="codex",
                  capabilities="workflow=no,subagent=yes,team=no", overrides=(), slug="demo"):
@@ -118,7 +123,8 @@ class TestStaging(LoopCase):
         for flow, work_type, slug, authors, first_mode in cases:
             with self.subTest(flow=flow):
                 self.to_draft(flow=flow, work_type=work_type, runtime="claude",
-                              capabilities="workflow=yes,subagent=yes,team=no", slug=slug)
+                              capabilities="workflow=yes,subagent=yes,team=no", slug=slug,
+                              overrides=ENGINE_OVERRIDES)
                 max_rounds = self.state(slug)["loop"]["max_rounds"]
                 expected = ["%s.r0.md" % role for role in authors]
                 for round_no in range(1, max_rounds + 1):
@@ -151,7 +157,7 @@ class TestStaging(LoopCase):
         # spec -> feature keeps the draft step and its visit but turns the loop to spec+plan: the
         # prompts staged for spec mode would name no plan author and give the critic no plan.
         self.to_draft(flow="spec", work_type="test", runtime="claude",
-                      capabilities="workflow=yes,subagent=yes,team=no", slug="esc")
+                      capabilities="workflow=yes,subagent=yes,team=no", slug="esc", overrides=ENGINE_OVERRIDES)
         self.assertFalse(self.draft("prompts/author-plan.r0.md", "esc").exists())
         code, text = self.sdlc("escalate", "feature", "--slug", "esc", "--reason", "build it")
         self.assertEqual(code, 0, text)
@@ -173,7 +179,8 @@ class TestStaging(LoopCase):
         source = self.root / "workflows" / "grok" / "spec-plan-draft.rhai"
         source.parent.mkdir(parents=True)
         source.write_bytes(b'let meta = #{ name: "spec-plan-draft" };\n')
-        self.to_draft(runtime="grok", capabilities="workflow=yes,subagent=yes,team=no", slug="gk")
+        self.to_draft(runtime="grok", capabilities="workflow=yes,subagent=yes,team=no", slug="gk",
+                      overrides=ENGINE_OVERRIDES)
         self.assertEqual(sorted(p.name for p in self.draft("prompts", "gk").iterdir()), full)
         # The ZCode driver asks the runner for each card, so its launch stages no prompt.
         self.to_draft(runtime="zcode", capabilities="workflow=yes,subagent=yes,team=no", slug="zc",
@@ -197,7 +204,8 @@ class TestStaging(LoopCase):
 class TestCards(LoopCase):
     def test_card_launch_line_per_runtime(self):
         with self.subTest(runtime="claude"):
-            text = self.to_draft(runtime="claude", capabilities="workflow=yes,subagent=yes,team=no", slug="cl")
+            text = self.to_draft(runtime="claude", capabilities="workflow=yes,subagent=yes,team=no", slug="cl",
+                                 overrides=ENGINE_OVERRIDES)
             launch = card_value(text, "launch")
             self.assertTrue(launch.startswith("Workflow "), text)
             call = json.loads(launch[len("Workflow "):])
@@ -210,7 +218,8 @@ class TestCards(LoopCase):
             source = self.root / "workflows" / "grok" / "spec-plan-draft.rhai"
             source.parent.mkdir(parents=True)
             source.write_bytes(b'let meta = #{ name: "spec-plan-draft" };\n')
-            text = self.to_draft(runtime="grok", capabilities="workflow=yes,subagent=yes,team=no", slug="gk")
+            text = self.to_draft(runtime="grok", capabilities="workflow=yes,subagent=yes,team=no", slug="gk",
+                                 overrides=ENGINE_OVERRIDES)
             launch = card_value(text, "launch")
             self.assertTrue(launch.startswith("workflow "), text)
             call = json.loads(launch[len("workflow "):])
