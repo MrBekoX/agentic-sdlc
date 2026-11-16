@@ -2123,6 +2123,14 @@ class TestCiWorkflowHygiene(unittest.TestCase):
             with self.subTest(job=job):
                 self.assertRegex(job_block(self.text, job), r"(?m)^    timeout-minutes: \d+$")
 
+    def test_testing_doc_states_the_gate_job_time_limit(self):
+        # docs/testing.md tells a reader how long a gate job may run. Read the number from the
+        # workflow, or the two drift apart the next time the budget changes.
+        limit = re.search(r"(?m)^    timeout-minutes: (\d+)$", job_block(self.text, "deterministic-gate"))
+        self.assertIsNotNone(limit)
+        doc = (REPO / "docs" / "testing.md").read_text(encoding="utf-8")
+        self.assertIn(f"under a finite job limit of {limit.group(1)} minutes", doc)
+
     def test_actions_are_pinned_to_a_full_sha_with_a_version_comment(self):
         uses = re.findall(r"uses: (\S+)(?: # (\S+))?", self.text)
         self.assertTrue(uses)

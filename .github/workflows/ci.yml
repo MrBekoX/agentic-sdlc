@@ -26,9 +26,10 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     # Three suite passes per OS: source, extracted archive, then source again for archive coverage.
-    # An observed Intel macOS source pass took about 27 minutes; allow three passes plus setup.
+    # Intel macOS passes took 26 to 32 minutes on 2026-11-16, so three can need 96 minutes; 90 cut
+    # one job off in its third pass. 120 leaves room for a slow runner and a growing suite.
     # Keep a finite budget instead of the GitHub default of 360 minutes.
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       # Actions are pinned to a full commit SHA: a tag can be moved, a SHA cannot. Dependabot keeps
       # both the SHA and the trailing version comment current (.github/dependabot.yml).
