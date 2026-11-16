@@ -224,13 +224,19 @@ class TestZcodeSkillAdapters(unittest.TestCase):
     def test_runtime_adapter_doc_records_the_capability_map(self):
         text = (REPO / "docs" / "zcode-runtime-adapter.md").read_text(encoding="utf-8")
         for fact in (
-            # NOT "CreateWorkflow": that name appears in no shipped source and in no Z.ai
-            # document. Pinning it here made an unverified API name harder to delete.
             "Goal Mode",
             "${ZCODE_PLUGIN_ROOT}",
             "spec-plan-draft",
             "agents/*.md",
             "not a 0.4.3 release target",
+            # The launch tool the runner's ZCode card prints (runner contract §10, design §5.9.2,
+            # the 2026-10-22 platform research), with the two rules that gate it.
+            "`CreateWorkflow`",
+            "only when the user explicitly asks",
+            "Auto permission mode denies",
+            "--engine zcode-dwf --json",
+            "sdlc loop-record",
+            "**UNVERIFIED** until a live ZCode run",
         ):
             self.assertIn(fact, text)
 
@@ -243,10 +249,10 @@ class TestZcodeSkillAdapters(unittest.TestCase):
     def test_dispatch_strategy_maps_zcode_mechanisms(self):
         text = (REPO / "skills" / "dispatch-strategy" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("docs/zcode-runtime-adapter.md", text)
-        # The ZCode row must state the tier is unavailable rather than naming an unpublished API.
+        # The skill's ZCode row keeps the workflow tier out of the defaults: the runner prints the
+        # workflow launch only on the user's explicit request.
         zcode_line = next(ln for ln in text.splitlines() if "ZCode (experimental adapter)" in ln)
         self.assertIn("unavailable", zcode_line)
-        self.assertNotIn("CreateWorkflow", text)
 
     def test_pipeline_names_the_zcode_adapter_gate(self):
         text = (REPO / "skills" / "agentic-sdlc-pipeline" / "SKILL.md").read_text(encoding="utf-8")
@@ -279,22 +285,21 @@ class TestZcodeSkillAdapters(unittest.TestCase):
                     self.test_exactly_one_zcode_workflow_script_exists()
 
     def test_spec_plan_draft_workflow_port_is_present(self):
+        # The driver's behaviour is tested in test_zcode_driver.py; this pins its shape.
         text = (REPO / "workflows" / "zcode" / "spec-plan-draft.dwf.ts").read_text(encoding="utf-8")
         self.assertIn("zcode-workflow", text)
         self.assertIn("agent(", text)
         self.assertIn("phase(", text)
         self.assertIn("world.run(", text)
-        self.assertIn("validate_artifacts.py", text)
-        # Fresh-context critic and the revise ceiling are the contract, not decoration.
-        self.assertIn("spec-critic", text)
-        self.assertIn("rounds < 2", text)
+        # A new actor for every card, the critic included: a reused actor is not fresh.
+        self.assertIn("const actor = agent(", text.split("for (let asked = 0;", 1)[1])
         # Negative lock: the Claude JS facade must not leak into the ZCode port. Without this a
         # copy of workflows/spec-plan-draft.js would satisfy every positive assertion above.
         for claude_token in ("export const meta", "agentType:", "isolation:", "pipeline("):
             self.assertNotIn(claude_token, text, f"Claude facade token {claude_token} in a ZCode port")
         # The header declares the args the body reads; a rename in one half must fail here.
         header = text.split("*/", 1)[0]
-        for arg in ("workId", "requirement", "mode"):
+        for arg in ("slug", "pluginRoot", "python", "maxRounds"):
             self.assertIn(f"{arg}:", header, f"{arg} missing from the zcode-workflow header")
             self.assertIn(f"args.{arg}", text, f"{arg} declared but never read")
 
@@ -310,12 +315,6 @@ class TestZcodeWorkflowClaimSweep(unittest.TestCase):
 
     #: Negative forms, in every language the adapter docs are written in.
     STALE_CLAIM = ("has no Workflow runtime", "\u6ca1\u6709 Workflow")
-    #: An API name that appears in no shipped workflow script and in no vendor document.
-    UNSOURCED_API = "CreateWorkflow"
-    #: The runner's ZCode launch card prints this tool name (runner contract §10; design §5.9.2 records
-    #: it from the 2026-10-22 platform research). Plan Task 13 replaces this sweep with pins for the
-    #: official name; until then only the runner's loop module and its test may carry it.
-    LAUNCH_CARD_FILES = ("scripts/sdlc_runner/loop.py", "tests/test_sdlc_loop.py")
 
     def _tracked_text_files(self):
         git = shutil.which("git")
@@ -350,16 +349,15 @@ class TestZcodeWorkflowClaimSweep(unittest.TestCase):
                         offenders.append((rel, claim))
         self.assertEqual(offenders, [], "stale ZCode workflow claim still tracked: %r" % offenders)
 
-    def test_no_tracked_file_asserts_the_unsourced_api_name(self):
-        offenders = [
-            rel for rel, text in self._tracked_text_files()
-            if self.UNSOURCED_API in text and rel not in self.LAUNCH_CARD_FILES
-        ]
-        self.assertEqual(
-            offenders, [],
-            "%s names no API in either workflow script and has no vendor source; "
-            "it must not be written into a tracked file: %r" % (self.UNSOURCED_API, offenders),
-        )
+    def test_the_launch_tool_is_named_where_the_runner_prints_it(self):
+        # The 2026-10-22 platform research sourced the ZCode launch tool; the runner's card prints
+        # it and the adapter docs explain when ZCode allows it (replacing the earlier sweep that
+        # forbade the name while it had no source).
+        source = (REPO / "scripts" / "sdlc_runner" / "loop.py").read_text(encoding="utf-8")
+        self.assertIn('line = "CreateWorkflow " + dumps_json(', source)
+        for rel in ("docs/zcode-runtime-adapter.md", ".zcode-plugin/README.md", ".zcode-plugin/README_CN.md"):
+            with self.subTest(doc=rel):
+                self.assertIn("`CreateWorkflow`", (REPO / rel).read_text(encoding="utf-8"))
 
 class TestZcodeFilesAreTracked(unittest.TestCase):
     """Every repository path this suite reads must be COMMITTED, not merely present here.
