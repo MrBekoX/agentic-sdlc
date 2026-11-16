@@ -64,6 +64,10 @@ FRESHNESS = {
     "inline": "Play the role yourself (degraded): read only the files listed on this card and write the result to "
               "the write path; the loop records critic=degraded.",
 }
+# An author agent may have no file tool (Claude plugin agents, Kimi, Cursor read-only roles): whoever
+# saves its answer saves its decision points too, or they never reach the review sidecar.
+DECISIONS_NOTE = ("Then save the draft's open decision points, if it lists any, to the decisions path as a JSON list "
+                  "of {id, question, options, recommendation}.")
 MODE_RULES = {
     "spec": "Write the spec (the WHAT) with these sections: Problem, Business Rules, Acceptance Criteria (each one "
             "with an id AC1, AC2, ... and a testable given/when/then), Edge Cases, Definition of Done, Must-Not-Change. "
@@ -454,14 +458,19 @@ def _mechanism(ctx, key) -> tuple:
 
 
 def _delegate(ctx, definition, role, mechanism) -> str:
+    """The card's delegate text: the runtime's freshness rule (or the inline rule), and for an
+    author card how to keep its decision points."""
     agent = definition["roles"][role]["agent"]
     if mechanism in strategy_mod.DEGRADED or _loop_state(ctx).get("engine") == "runner-loop-inline":
-        return FRESHNESS["inline"]
-    row = strategy_mod.runtime_row(ctx.shared, ctx.state.get("runtime"))
-    if _loop_state(ctx).get("engine") == "zcode-dwf":
-        row["freshness"] = "zcode-new-actor"
-    text = FRESHNESS.get(row.get("freshness"), FRESHNESS["inline"])
-    return text.format(agent=agent)
+        text = FRESHNESS["inline"]
+    else:
+        row = strategy_mod.runtime_row(ctx.shared, ctx.state.get("runtime"))
+        if _loop_state(ctx).get("engine") == "zcode-dwf":
+            row["freshness"] = "zcode-new-actor"
+        text = FRESHNESS.get(row.get("freshness"), FRESHNESS["inline"]).format(agent=agent)
+    if role != "critic":
+        text += " " + DECISIONS_NOTE
+    return text
 
 
 def _critic_freshness(ctx) -> str:
@@ -479,7 +488,10 @@ def _role_card(ctx, definition, step, round_no, role, author_mode) -> dict:
     write_rel = _output_rel(definition, role, round_no)
     prompt_rel = _file(definition, "prompt", role, round_no)
     schema_rel = definition["roles"][role].get("schema")
+    decisions_rel = _file(definition, "decisions", role, round_no) if role != "critic" else None
     return {
+        "decisions": _project_rel(ctx, decisions_rel) if decisions_rel else None,
+        "decisions_abs": str(_abs(ctx, decisions_rel)) if decisions_rel else None,
         "role": role, "round": round_no, "max_rounds": int(_loop_state(ctx)["max_rounds"]), "key": key,
         "mechanism": mechanism, "degraded": degraded,
         "role_file": str(role_path(ctx.root, definition["roles"][role]["agent"])),

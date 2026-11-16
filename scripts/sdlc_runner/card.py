@@ -174,6 +174,8 @@ def _loop_lines(loop) -> list:
     lines.append("prompt=" + loop["prompt"])
     lines += ["read=" + json.dumps(path, ensure_ascii=False) for path in loop["reads"]]
     lines.append("write=" + loop["write"])
+    if loop.get("decisions"):
+        lines.append("decisions=" + loop["decisions"])
     if loop.get("schema"):
         lines.append("schema=" + json.dumps(loop["schema"], ensure_ascii=False))
     lines.append("delegate=" + json.dumps(loop["delegate"], ensure_ascii=False))

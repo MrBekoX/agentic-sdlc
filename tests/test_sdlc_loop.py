@@ -237,6 +237,54 @@ class TestCards(LoopCase):
                 self.assertIn(needle, card_fields(text)["delegate"])
                 self.assertIsNone(card_value(text, "launch"))
 
+    def test_each_runtime_card_fits_the_budget_and_names_its_freshness_rule(self):
+        # The runner-driven loop on every runtime row (contract §14: a card is at most 8000 bytes):
+        # the author card carries that runtime's freshness rule and how to keep decision points.
+        no_workflow = ("draft=runner-loop:no workflow tool", "draft.critic=runner-loop:no workflow tool")
+        shared = json.loads((REPO / "flows" / "_shared.json").read_text(encoding="utf-8"))
+        cases = [(runtime, (), "workflow=no,subagent=yes,team=no")
+                 for runtime in ("codex", "kimi", "cursor", "antigravity", "zcode")]
+        cases += [("claude", no_workflow, "workflow=no,subagent=yes,team=no"),
+                  ("grok", no_workflow, "workflow=no,subagent=yes,team=no"),
+                  ("other", (), "workflow=no,subagent=no,team=no")]
+        self.assertEqual({runtime for runtime, _o, _c in cases}, set(shared["runtimes"]))
+        for runtime, overrides, capabilities in cases:
+            with self.subTest(runtime=runtime):
+                text = self.to_draft(runtime=runtime, capabilities=capabilities, overrides=overrides, slug=runtime)
+                self.assertLessEqual(len(text.encode("utf-8")), 8000)
+                rule = loop.FRESHNESS[shared["runtimes"][runtime]["freshness"]].format(agent="spec-plan-author")
+                self.assertEqual(card_fields(text)["delegate"], rule + " " + loop.DECISIONS_NOTE)
+        codex = loop.FRESHNESS["codex-v1-v2"]
+        for part in ("spawn_agent", "no fork_context", 'fork_turns "none"', "wait_agent", "close_agent",
+                     "read the write path"):
+            self.assertIn(part, codex)
+        self.assertIn("never resume or fork", loop.FRESHNESS["kimi-agent"])
+        self.assertIn("NEW Agent", loop.FRESHNESS["zcode-new-actor"])
+
+    def test_author_cards_name_a_decisions_path_and_critic_cards_none(self):
+        text = self.to_draft()
+        fields = card_fields(text)
+        self.assertEqual(fields["decisions"], "docs/agentic-sdlc/demo/draft/decisions.author-spec.r0.json")
+        self.assertIn("decision points", fields["delegate"])
+        critic = self.authors(0)
+        self.assertEqual(self.role(critic), ("critic", "1/3"))
+        self.assertNotIn("decisions", card_fields(critic))
+        self.assertNotIn("decision points", card_fields(critic)["delegate"])
+
+    def test_decision_points_saved_from_an_author_card_reach_the_sidecar(self):
+        # A read-only author cannot write files: the caller saves its points where the card says.
+        point = {"id": "DP1", "question": "CSV only?", "options": ["CSV", "CSV and JSON"], "recommendation": "CSV"}
+        text = self.to_draft()
+        self.record("author-spec", 0, SPEC_BODY)
+        (self.project / card_fields(text)["decisions"]).write_text(json.dumps([point]), encoding="utf-8")
+        self.next()
+        self.record("author-plan", 0, PLAN_BODY)
+        self.next()
+        self.record("critic", 1, CLEAN)
+        self.next()
+        sidecar = json.loads((self.pkg() / "spec" / "demo.review.json").read_text(encoding="utf-8"))
+        self.assertEqual(sidecar["decisionPoints"], [point])
+
     def test_machine_card_json_shape(self):
         self.to_draft()
         code, out = self.sdlc("next", "--slug", "demo", "--json")
