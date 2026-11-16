@@ -108,6 +108,9 @@ as printed. Its read-only author and critic agents read the prompts the runner
 staged, and a `draft-scribe` agent writes their answers and runs the runner's
 `draft-check` and `ingest-draft` commands. Without the workflow tool, the
 runner prints one role card at a time for `spawn_subagent` instead.
+The staged script has not run on a live Grok client yet: the gate pins its
+structure, and a reviewer ran it under standalone Rhai 1.27 beside the Claude
+engine.
 
 ## Update and versioning
 

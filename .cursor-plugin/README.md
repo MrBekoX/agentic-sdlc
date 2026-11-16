@@ -9,7 +9,7 @@ The manifest and component layout follow the Cursor plugin reference fetched on 
 | Tool | Where it is needed | If it is missing |
 |---|---|---|
 | Cursor | Desktop or CLI that can load `~/.cursor/plugins/local` | The package cannot be discovered |
-| Node.js 22 or newer | `node` on `PATH` for every hook | `scripts/install_cursor_plugin.py` exits with `error=node_missing`. A crash of the commit and destructive hooks is fail-closed |
+| Node.js 22 or newer | `node` on `PATH` for every hook | `scripts/install_cursor_plugin.py` exits with `error=node_missing`. The three shell-command guards (commit, destructive and branch) fail closed: a guard that crashes or prints anything but a JSON object denies the command, and empty output stays an allow |
 | Python 3.8+ | `python3`, `python`, or `py -3` for `scripts/validate_artifacts.py` and `scripts/detect_context.py` | Install exits with `error=python_missing` |
 | Git | Branch, commit and worktree guards | Install exits with `error=git_missing` |
 

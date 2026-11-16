@@ -63,9 +63,10 @@ documented. There is no `/plugins update` command promised here.
 
 ## Skills, agents and helper paths
 
-`sessionStart.skill` selects the `using-agentic-sdlc` router. Use
-`/skill:<name>` with the bare skill name (Kimi does not resolve `agentic-sdlc:<name>`)
-for a skill and `/agentic-sdlc:git-safety-check` for the command.
+`sessionStart.skill` selects the `using-agentic-sdlc` router. Kimi names a plugin
+skill `<plugin-id>:<skill-name>`, so use `/skill:agentic-sdlc:<name>` for a skill
+(Kimi's plugin documentation says a bare skill name never resolves to a plugin
+skill) and `/agentic-sdlc:git-safety-check` for the command.
 The manifest's `skillInstructions` supplies runtime mappings:
 
 - Map `TaskCreate`/`TaskUpdate`/`TodoWrite` to `TodoList` when exposed.
@@ -75,6 +76,11 @@ The manifest's `skillInstructions` supplies runtime mappings:
 - Kimi does not execute the Claude JS `Workflow` facade. Use Agent author →
   critic → revise with saved artifacts and `scripts/validate_artifacts.py`,
   or record the degraded inline pass.
+- When a flow runner card prints a role card (`role=`, `prompt=`, `write=`),
+  give the prompt file to a new `Agent(subagent_type=<role>)`; never resume or
+  fork an earlier agent for a card. Save its final message to the card's write
+  path and an author's decision points to its `decisions=` path, then run the
+  card's `then=` command.
 - Kimi substitutes `${KIMI_SKILL_DIR}` in skill text, so the shared **Plugin root**
   rule resolves the root as `${KIMI_SKILL_DIR}/../..`. Otherwise resolve helper roots from the loaded installed
   `skills/<name>/SKILL.md` path. Root notation from another runtime means that

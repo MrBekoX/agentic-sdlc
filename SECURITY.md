@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest `0.6.x` release. Older releases are unsupported; verify
+Security fixes are provided for the latest `0.7.x` release. Older releases are unsupported; verify
 the current version in `VERSION` before reporting.
 
 ## Reporting a vulnerability
@@ -14,7 +14,7 @@ If private reporting is unavailable, open an issue that contains no secret, expl
 sensitive machine data and ask the maintainer for a private contact channel. Do not publish a proof
 of concept before the maintainer has had a reasonable opportunity to investigate and release a fix.
 
-Include the affected version, runtime (Claude Code, Codex, Kimi Code, Grok CLI or ZCode), operating
+Include the affected version, runtime (Claude Code, Codex, Kimi Code, Grok CLI, ZCode, Cursor or Google Antigravity), operating
 system, minimal sanitized reproduction, observed impact, and whether the behavior requires a
 non-default environment flag.
 
