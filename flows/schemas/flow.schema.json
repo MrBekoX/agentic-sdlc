@@ -69,7 +69,7 @@
               "required": ["check"],
               "description": "One check (contract §7). The parameters each check takes are enforced by manifest.CHECK_PARAMS; work_types is allowed on every check.",
               "properties": {
-                "check": {"enum": ["exists", "validator", "sidecar_ok", "report", "run_recorded", "approval", "branch_ok", "resolver_ok", "strategy_ok", "unchanged", "loop_done"]},
+                "check": {"enum": ["exists", "validator", "sidecar_ok", "report", "run_recorded", "approval", "branch_ok", "resolver_ok", "strategy_ok", "unchanged", "loop_done", "settled"]},
                 "path": {"type": "string", "pattern": "^[A-Za-z0-9_{}][A-Za-z0-9_.{}/-]*$"},
                 "header": {"type": "string", "minLength": 1},
                 "verdict": {"type": "string", "minLength": 1},

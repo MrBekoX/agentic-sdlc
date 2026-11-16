@@ -97,7 +97,7 @@ TASK2_TEST_GLOBS = [
 ]
 CONTRACT_CHECKS = {
     "exists", "validator", "sidecar_ok", "report", "run_recorded", "approval", "branch_ok", "resolver_ok",
-    "strategy_ok", "unchanged", "loop_done",
+    "strategy_ok", "unchanged", "loop_done", "settled",
 }
 CONTRACT_MECHANISMS = ["main", "subagent", "workflow", "team", "runner-loop", "runner-loop-inline",
                        "inline-degraded", "parallel-runs"]
@@ -135,7 +135,7 @@ DESIGN_LATTICE = [
 SCHEMA_IDS = {
     "flow": "agentic-sdlc/flow@1", "shared": "agentic-sdlc/shared@1", "loop": "agentic-sdlc/loop-def@1",
     "critic": "agentic-sdlc/critic@1", "draft-result": "agentic-sdlc/draft-result@1",
-    "sidecar": "agentic-sdlc/sidecar@1", "strategy": "agentic-sdlc/strategy@1",
+    "sidecar": "agentic-sdlc/sidecar@1", "strategy": "agentic-sdlc/strategy@1", "check": "agentic-sdlc/check@1",
 }
 
 
@@ -896,7 +896,10 @@ class TestFixtureRoot(TempRoot):
         errors = manifest.validate_flow(flow, self.root, check_files=True)
         self.assertEqual(errors, [], _errors_text(errors))
         used = {check["check"] for step in flow["steps"] for check in step["done_when"]}
-        self.assertEqual(used, CONTRACT_CHECKS, "the fixture should exercise every check type")
+        # `settled` belongs to the spec-check step, which the fixture flow of tests/test_sdlc_speccheck.py uses.
+        used |= {check["check"] for step in textio.read_json(FIXTURES / "speccheck.json")["steps"]
+                 for check in step["done_when"]}
+        self.assertEqual(used, CONTRACT_CHECKS, "the fixtures should exercise every check type")
 
     def test_missing_step_file_fails_only_with_check_files(self):
         (self.root / "skills" / "fixture" / "steps" / "implement-bugfix.md").unlink()

@@ -360,11 +360,36 @@ def check_loop_done(ctx, step):
     return CheckResult(True, "the loop stopped: %s" % loop["stop_reason"])
 
 
+def check_settled(ctx, step):
+    """The spec check file validates, is the spec's, and every question has a pile (design 4.3).
+
+    The recorded body fingerprint is not compared with the spec: editing the spec after the check
+    does not re-run the reader, and the review gate covers the final body.
+    """
+    rel = check_file_rel(ctx)
+    try:
+        data = read_json(Path(ctx.pkg).joinpath(*rel.split("/")))
+    except (FileNotFoundError, NotADirectoryError):
+        return CheckResult(False, "%s is missing" % rel)
+    except (OSError, ValueError, SdlcError):
+        return CheckResult(False, "%s is not readable JSON" % rel)
+    errors = schema.validate(data, manifest.load_schema("check"))
+    if errors:
+        return CheckResult(False, "%s: %s" % (rel, errors[0]))
+    if data.get("artifact") != "spec":
+        return CheckResult(False, "%s names %r, not the spec" % (rel, data.get("artifact")))
+    open_ids = [q["id"] for q in data["questions"] if q.get("pile") is None]
+    if open_ids:
+        return CheckResult(False, "%d of %d question(s) are not settled: %s" % (
+            len(open_ids), len(data["questions"]), ", ".join(open_ids)))
+    return CheckResult(True, "%s: every question is settled (%d)" % (rel, len(data["questions"])))
+
+
 _CHECKS = {
     "exists": check_exists, "validator": check_validator, "sidecar_ok": check_sidecar_ok,
     "report": check_report, "run_recorded": check_run_recorded, "approval": check_approval,
     "branch_ok": check_branch_ok, "resolver_ok": check_resolver_ok, "strategy_ok": check_strategy_ok,
-    "unchanged": check_unchanged, "loop_done": check_loop_done,
+    "unchanged": check_unchanged, "loop_done": check_loop_done, "settled": check_settled,
 }
 
 
@@ -422,4 +447,6 @@ def describe(spec: dict, state: dict) -> str:
         return "no production file changed since start"
     if name == "loop_done":
         return "the spec/plan loop stopped and its result was ingested"
+    if name == "settled":
+        return "every question of the spec check is settled with `sdlc check-resolve`"
     return str(name)

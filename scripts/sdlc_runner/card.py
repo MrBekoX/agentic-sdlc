@@ -182,6 +182,13 @@ def _loop_lines(loop) -> list:
     return lines
 
 
+def _role_lines(role) -> list:
+    """The reader lines of a role step's card (speccheck.role_card builds `role`)."""
+    return ["role=" + role["role"], "role_file=" + json.dumps(role["role_file"], ensure_ascii=False),
+            "prompt=" + role["prompt"], "write=" + role["write"],
+            "delegate=" + json.dumps(role["delegate"], ensure_ascii=False)]
+
+
 def _do_lines(ctx, step, extra) -> list:
     lines = []
     key = step.get("mechanism_key")
@@ -191,6 +198,8 @@ def _do_lines(ctx, step, extra) -> list:
     elif key:
         mechanism, degraded = strategy_mod.resolve(ctx, key)
         lines.append("mechanism=%s degraded=%s" % (mechanism, "_".join(str(degraded).split())))
+    if extra.get("role_card"):
+        lines += _role_lines(extra["role_card"])
     if step.get("id") == manifest.STRATEGY_STEP:
         lines += strategy_mod.default_lines(ctx)
     lines.append("inputs=" + _expand_refs(ctx, step.get("inputs")))

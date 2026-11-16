@@ -535,6 +535,7 @@ SET_B_AGENT_FILES = (
     "agents/implementation-auditor.md",
     "agents/security-reviewer.md",
     "agents/software-architect.md",
+    "agents/spec-builder-check.md",
     "agents/spec-plan-author.md",
     "agents/spec-plan-critic.md",
     "agents/test-engineer.md",

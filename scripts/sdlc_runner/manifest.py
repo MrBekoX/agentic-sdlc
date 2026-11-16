@@ -27,7 +27,7 @@ from .textio import SdlcError, read_text
 FLOW_SCHEMA_ID = "agentic-sdlc/flow@1"
 SHARED_SCHEMA_ID = "agentic-sdlc/shared@1"
 LOOP_SCHEMA_ID = "agentic-sdlc/loop-def@1"
-SCHEMA_NAMES = ("flow", "shared", "loop", "critic", "draft-result", "sidecar", "strategy")
+SCHEMA_NAMES = ("flow", "shared", "loop", "critic", "draft-result", "sidecar", "strategy", "check")
 
 # Contract §7: check name -> (required parameters, optional parameters).
 CHECK_PARAMS = {
@@ -42,6 +42,7 @@ CHECK_PARAMS = {
     "strategy_ok": ((), ()),
     "unchanged": (("set",), ()),
     "loop_done": ((), ()),
+    "settled": ((), ()),
 }
 CHECK_TYPES = frozenset(CHECK_PARAMS)
 # Parameters every check may carry: work_types limits it to those work types (it passes for others).

@@ -161,7 +161,8 @@ class EngineCase(unittest.TestCase):
         """A plugin root holding the real flows, the fixture flow and its step files, and the two
         spec/plan role files and contracts the loop stages."""
         copies = list((REPO / "flows").rglob("*.json"))
-        copies += [REPO / "agents" / "spec-plan-author.md", REPO / "agents" / "spec-plan-critic.md"]
+        copies += [REPO / "agents" / "spec-plan-author.md", REPO / "agents" / "spec-plan-critic.md",
+               REPO / "agents" / "spec-builder-check.md"]
         copies += sorted((REPO / "contracts" / "skills").glob("0[23]-*.md"))
         for path in copies:
             target = root / path.relative_to(REPO)

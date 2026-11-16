@@ -200,7 +200,7 @@ PUBLIC_RUNTIME_PACKAGES = ("scripts/sdlc_runner/",)
 # package the runner finds role files only under `<PUBLIC_REFERENCE_ROOT>/roles/`.
 PUBLIC_ROLES = (
     "code-reviewer", "context-analyst", "debugger", "implementation-auditor",
-    "security-reviewer", "software-architect", "spec-plan-author", "spec-plan-critic", "test-engineer",
+    "security-reviewer", "software-architect", "spec-builder-check", "spec-plan-author", "spec-plan-critic", "test-engineer",
 )
 PUBLIC_DOCS = (
     "runtime-adapter", "zcode-runtime-adapter", "plugin-readme", "testing",

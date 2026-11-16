@@ -26,6 +26,7 @@ from pathlib import Path
 from . import card as card_mod
 from . import checks, fingerprint, frontmatter, logs, manifest, paths
 from . import loop as loop_mod
+from . import speccheck
 from . import state as state_mod
 from .textio import SdlcError, now_iso, read_text, write_text_atomic
 
@@ -597,4 +598,7 @@ def _current(ctx, original, step, entry, results, caps) -> Outcome:
             return advance(ctx, ctx.write)
         if role is not None:
             return role
-    return _finish(ctx, original, "do", step, {"results": results, "entering": entering}, 0)
+    extra = {"results": results, "entering": entering}
+    if step.get("role"):  # a role step hands its card to one fresh reader (design 4.3)
+        extra["role_card"] = speccheck.role_card(ctx, step, ctx.write)
+    return _finish(ctx, original, "do", step, extra, 0)

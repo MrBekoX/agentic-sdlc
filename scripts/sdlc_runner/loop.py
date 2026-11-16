@@ -62,7 +62,7 @@ FRESHNESS = {
     "cursor-task": "the Task tool with the plugin subagent {agent} and the prompt file.",
     "antigravity-invoke": "invoke_subagent with the prompt file (the role body has no frontmatter).",
     "inline": "Play the role yourself (degraded): read only the files listed on this card and write the result to "
-              "the write path; the loop records critic=degraded.",
+              "the write path; the runner records the role as degraded.",
 }
 # An author agent may have no file tool (Claude plugin agents, Kimi, Cursor read-only roles): whoever
 # saves its answer saves its decision points too, or they never reach the review sidecar.
