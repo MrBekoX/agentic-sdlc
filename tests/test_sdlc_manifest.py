@@ -101,8 +101,8 @@ CONTRACT_CHECKS = {
 }
 CONTRACT_MECHANISMS = ["main", "subagent", "workflow", "team", "runner-loop", "runner-loop-inline",
                        "inline-degraded", "parallel-runs"]
-CONTRACT_MECHANISM_KEYS = ["context", "draft", "draft.critic", "implement", "security", "quality-gates",
-                           "quality-review", "audit", "docs-check"]
+CONTRACT_MECHANISM_KEYS = ["context", "draft", "draft.critic", "spec-check", "implement", "security",
+                           "quality-gates", "quality-review", "audit", "docs-check"]
 LOOP_MODES = {"spec+plan", "spec", "plan", "bugfix-plan"}
 # Every step file the real manifests name exists since plan Task 16; a step file that is later
 # deleted or misnamed shows up here as a diff.
@@ -590,9 +590,19 @@ class TestFlows(unittest.TestCase):
                         self.assertIsNone(key)
                 if key:
                     used.add(key)
-        # draft.critic is read by the loop's critic role, never by a step card.
-        self.assertEqual(used, set(CONTRACT_MECHANISM_KEYS) - {"draft.critic"})
-        self.assertEqual(set(manifest.MANDATED_FRESH_KEYS), {"draft.critic", "security", "audit", "quality-review"})
+        # draft.critic is read by the loop's critic role, never by a step card. spec-check is not used
+        # by a flow yet (plan Task 6 gives the flows their spec-check step and removes this exemption).
+        self.assertEqual(used, set(CONTRACT_MECHANISM_KEYS) - {"draft.critic", "spec-check"})
+        self.assertEqual(set(manifest.MANDATED_FRESH_KEYS),
+                         {"draft.critic", "spec-check", "security", "audit", "quality-review"})
+
+    def test_spec_check_is_a_mandated_fresh_key(self):
+        self.assertIn("spec-check", manifest.MECHANISM_KEYS)
+        self.assertIn("spec-check", manifest.MANDATED_FRESH_KEYS)
+        entries = manifest.load_schema("strategy")["properties"]["entries"]["properties"]
+        self.assertIn("spec-check", entries)
+        self.assertIn("spec-check", manifest.load_schema("strategy")["properties"]["degraded"]["items"]
+                      ["properties"]["key"]["enum"])
 
     def test_report_checks_are_pinned_per_flow(self):
         for flow_id in DESIGN_ORDER:
@@ -928,6 +938,80 @@ class TestFixtureRoot(TempRoot):
         self.assertTrue(any(e.startswith("/roles/critic/schema: missing schema file") for e in errors),
                         _errors_text(errors))
 
+    def test_loop_and_spec_are_start_options(self):
+        self.assertEqual(manifest.OPTIONS, ("intent", "quality-review", "loop", "spec"))
+        flow = manifest.load_flow(self.root, "fixture")
+        for option in ("loop", "spec"):
+            for key in ("option", "not_option"):
+                with self.subTest(option=option, condition=key):
+                    broken = copy.deepcopy(flow)
+                    broken["steps"][1]["applies_when"] = {key: option}
+                    self.assertEqual(manifest.validate_flow(broken, self.root, check_files=True), [])
+        broken = copy.deepcopy(flow)
+        broken["steps"][1]["applies_when"] = {"not_option": "nosuch"}
+        self.assertTrue(manifest.validate_flow(broken, self.root, check_files=True))
+
+    def test_applies_when_imported_is_a_boolean_and_combines(self):
+        flow = manifest.load_flow(self.root, "fixture")
+        for value in (True, False):
+            with self.subTest(value=value):
+                ok = copy.deepcopy(flow)
+                ok["steps"][1]["applies_when"] = {"imported": value, "form": "gated", "option": "loop"}
+                self.assertEqual(manifest.validate_flow(ok, self.root, check_files=True), [])
+        bad = copy.deepcopy(flow)
+        bad["steps"][1]["applies_when"] = {"imported": "yes"}
+        self.assertTrue(manifest.validate_flow(bad, self.root, check_files=True))
+
+    def test_import_required_is_a_boolean(self):
+        flow = manifest.load_flow(self.root, "fixture")
+        item = {"path": "spec/{work_id}.md", "option": "--spec-file", "status": "approved"}
+        for extra in ({}, {"required": True}, {"required": False}):
+            with self.subTest(extra=extra):
+                ok = copy.deepcopy(flow)
+                ok["imports"] = [dict(item, **extra)]
+                self.assertEqual(manifest.validate_flow(ok, self.root, check_files=True), [])
+        bad = copy.deepcopy(flow)
+        bad["imports"] = [dict(item, required="no")]
+        self.assertTrue(manifest.validate_flow(bad, self.root, check_files=True))
+
+    def test_step_role_must_resolve_to_a_role_file(self):
+        flow = manifest.load_flow(self.root, "fixture")
+        flow["steps"][1]["role"] = "spec-plan-critic"
+        flow["steps"][1]["role_reads"] = ["request.md"]
+        self.assertEqual(manifest.validate_flow(flow, self.root, check_files=False), [])
+        errors = manifest.validate_flow(flow, self.root, check_files=True)
+        self.assertTrue(any(e.startswith("/steps/1/role") and "role_file_missing:spec-plan-critic" in e
+                            for e in errors), _errors_text(errors))
+        agents = self.root / "agents"
+        agents.mkdir()
+        shutil.copyfile(str(REPO / "agents" / "spec-plan-critic.md"), str(agents / "spec-plan-critic.md"))
+        self.assertEqual(manifest.validate_flow(flow, self.root, check_files=True), [])  # clean twin
+        _rename(agents / "spec-plan-critic.md", agents / "SPEC-PLAN-CRITIC.md")
+        errors = manifest.validate_flow(flow, self.root, check_files=True)
+        self.assertTrue(any("role_file_missing:spec-plan-critic" in e for e in errors), _errors_text(errors))
+
+    def test_step_role_must_be_an_agent_name(self):
+        flow = manifest.load_flow(self.root, "fixture")
+        for bad in ("../x", "Spec Plan", "", 3):
+            with self.subTest(role=bad):
+                broken = copy.deepcopy(flow)
+                broken["steps"][1]["role"] = bad
+                self.assertTrue(manifest.validate_flow(broken, self.root, check_files=False))
+
+    def test_role_reads_needs_a_role(self):
+        flow = manifest.load_flow(self.root, "fixture")
+        flow["steps"][1]["role_reads"] = ["request.md"]
+        errors = manifest.validate_flow(flow, self.root, check_files=False)
+        self.assertTrue(any(e.startswith("/steps/1/role_reads") and "role" in e for e in errors),
+                        _errors_text(errors))
+        flow["steps"][1]["role"] = "spec-plan-critic"
+        self.assertEqual(manifest.validate_flow(flow, self.root, check_files=False), [])  # clean twin
+        for bad in (["@source"], ["context.md?"], ["../x"], ["spec/{work_id}.md", "spec/{work_id}.md"]):
+            with self.subTest(reads=bad):
+                broken = copy.deepcopy(flow)
+                broken["steps"][1]["role_reads"] = bad
+                self.assertTrue(manifest.validate_flow(broken, self.root, check_files=False))
+
     def test_load_flow_refuses_unknown_and_invalid_manifests(self):
         for bad_id in ["nosuch", "_shared", "../flows/fixture", "Fixture", "", "loops/spec-plan"]:
             with self.subTest(flow=bad_id):
@@ -1165,6 +1249,10 @@ class TestSchemas(unittest.TestCase):
         self.assertEqual(set(manifest.CHECK_PARAMS), CONTRACT_CHECKS)
         self.assertEqual(step["properties"]["mechanism_key"]["enum"], CONTRACT_MECHANISM_KEYS + [None])
         self.assertEqual(list(manifest.MECHANISM_KEYS), CONTRACT_MECHANISM_KEYS)
+        conditions = step["properties"]["applies_when"]["properties"]
+        self.assertEqual(conditions["option"]["enum"], list(manifest.OPTIONS))
+        self.assertEqual(conditions["not_option"]["enum"], list(manifest.OPTIONS))
+        self.assertEqual(conditions["imported"], {"type": "boolean"})
         self.assertEqual(set(flow["properties"]["loop_mode"]["enum"]) - {None}, LOOP_MODES)
         strategy = manifest.load_schema("strategy")
         self.assertEqual(list(strategy["properties"]["entries"]["properties"]), CONTRACT_MECHANISM_KEYS)

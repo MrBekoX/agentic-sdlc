@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import re
+import types
 from pathlib import Path
 
 from . import RUNNER_VERSION, engine, fingerprint, frontmatter, gitinfo, logs, manifest, mask, paths, probes
@@ -89,14 +90,22 @@ def _lattice_or_error(root, shared) -> None:
 
 # --- start -------------------------------------------------------------------------------------
 
-def _imports(args, flow: dict, st_facts: dict) -> list:
-    """[(package path, text, status)] for the flow's `imports`; refusal when a source's status differs."""
-    found = []
+def _imports(args, flow: dict, st_facts: dict, start_state: dict) -> list:
+    """[(package path, text, status)] for the flow's `imports`; refusal when a source's status differs.
+
+    An import with `"required": false` whose option was not given is left out, unless a step that
+    applies under `start_state` (the facts `start` is about to write) reads its path as a required
+    input: that step could never run, so `start` refuses it as it refuses a missing required import.
+    """
+    found, left_out = [], []
     for item in flow.get("imports") or []:
         option = item["option"]
         source = getattr(args, option.lstrip("-").replace("-", "_"), None)
         if not source:
-            raise SdlcError(2, "import_missing:" + option)
+            if item.get("required", True):
+                raise SdlcError(2, "import_missing:" + option)
+            left_out.append(item)
+            continue
         try:
             text = read_text(source)
         except OSError:
@@ -105,7 +114,21 @@ def _imports(args, flow: dict, st_facts: dict) -> list:
         if status != item["status"]:
             raise SdlcError(4, "import_status:%s:%s (needs %s)" % (option, status or "none", item["status"]))
         found.append((manifest.expand(item["path"], st_facts), text, status))
+    state = dict(start_state, imported=[rel for rel, _text, _status in found])
+    for item in left_out:
+        for step in flow["steps"]:
+            if _reads_required(step, item["path"]) and engine.applies(types.SimpleNamespace(state=state), step)[0]:
+                raise SdlcError(2, "import_missing:" + item["option"])
     return found
+
+
+def _reads_required(step: dict, path: str) -> bool:
+    """Whether `step` lists the package path `path` as a required input (`#body` allowed, `?` not)."""
+    for ref in step.get("inputs") or []:
+        parsed = manifest.parse_ref(ref)
+        if parsed["path"] == path and not parsed["optional"]:
+            return True
+    return False
 
 
 def start(args) -> int:
@@ -142,13 +165,15 @@ def start(args) -> int:
     for option in args.option or []:
         if option not in options:
             options.append(option)
-    imports = _imports(args, flow, {"work_id": args.work_id})
+    found = probes.start_probes(project)
+    start_probes = {key: found.get(key) for key in ("explore_mode", "deps", "toolchain", "errors")}
+    imports = _imports(args, flow, {"work_id": args.work_id},
+                       {"form": args.form, "work_type": args.work_type, "options": options, "probes": start_probes})
     pkg = paths.package_dir(project, slug)
     _refuse_existing(pkg, slug)
     pkg.mkdir(parents=True, exist_ok=True)
     with PackageLock(pkg / ".lock"):
         _refuse_existing(pkg, slug)
-        found = probes.start_probes(project)
         git = found.get("git") or {}
         head = git.get("head") if git.get("repo") and not git.get("unborn") else None
         if head:
@@ -178,7 +203,7 @@ def start(args) -> int:
             request_sha256=hashlib.sha256(masked_request.encode("utf-8")).hexdigest(),
             transition_cap=int(caps.get("transition_cap", 60)), fix_round_cap=int(caps.get("fix_rounds", 3)),
             steps=_steps(flow, shared), loop=_loop_state(root, flow, shared),
-            probes={key: found.get(key) for key in ("explore_mode", "deps", "toolchain", "errors")},
+            probes=start_probes,
             imported=[rel for rel, _text, _status in imports],
             stamps={rel: status for rel, _text, status in imports},
         )
@@ -192,7 +217,8 @@ def start(args) -> int:
         })
         write_json_atomic(pkg / strategy_mod.DEFAULT_FILE,
                           strategy_mod.default_map(flow, shared, st["probes"], args.runtime, options,
-                                                   form=args.form, work_type=args.work_type), within=pkg)
+                                                   form=args.form, work_type=args.work_type,
+                                                   imported=st["imported"]), within=pkg)
         ctx = engine.Context(project, root, pkg, st, flow, shared)
         outcome = engine.advance(ctx, write=True)
     _print(args, outcome.card)

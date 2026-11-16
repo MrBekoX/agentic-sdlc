@@ -16,7 +16,7 @@
     "loop_mode": {"enum": ["spec+plan", "spec", "plan", "bugfix-plan", null], "description": "The spec/plan loop mode of the draft step; null when no step runs a loop."},
     "imports": {
       "type": "array",
-      "description": "Package files that start copies in from the user's project before the first step (contract §5.5 start options): path is the package path, option the start option that names the source file, status the frontmatter status the source must carry (the plan flow imports an approved spec).",
+      "description": "Package files that start copies in from the user's project before the first step (contract §5.5 start options): path is the package path, option the start option that names the source file, status the frontmatter status the source must carry (the plan flow imports an approved spec); required false lets start leave the file out (default true: start refuses a missing source).",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -25,7 +25,8 @@
           "$comment": {"type": "string"},
           "path": {"type": "string", "pattern": "^[A-Za-z0-9_{}][A-Za-z0-9_.{}/-]*$"},
           "option": {"type": "string", "pattern": "^--[a-z][a-z0-9-]*$"},
-          "status": {"enum": ["approved"]}
+          "status": {"enum": ["approved"]},
+          "required": {"type": "boolean"}
         }
       }
     },
@@ -90,18 +91,22 @@
           "max_visits": {"type": "integer", "minimum": 1, "description": "Default _shared.caps.max_visits."},
           "applies_when": {
             "type": ["object", "null"],
-            "description": "All keys must hold; decided once from start-time facts. A probe error means the step applies.",
+            "description": "All keys must hold; decided once from start-time facts (not_option: the option was not given; imported: whether start imported any file). A probe error means the step applies.",
             "additionalProperties": false,
             "properties": {
               "form": {"enum": ["gated", "light"]},
-              "option": {"enum": ["intent", "quality-review"]},
+              "option": {"enum": ["intent", "quality-review", "loop", "spec"]},
+              "not_option": {"enum": ["intent", "quality-review", "loop", "spec"]},
+              "imported": {"type": "boolean"},
               "work_type": {"type": "array", "items": {"enum": ["feature", "bugfix", "refactor", "test"]}},
               "probe": {"enum": ["explore_mode", "deps", "toolchain"]},
               "not": {"type": "string", "minLength": 1}
             }
           },
           "may_ask": {"type": "array", "items": {"enum": ["consent", "design"]}},
-          "mechanism_key": {"enum": ["context", "draft", "draft.critic", "implement", "security", "quality-gates", "quality-review", "audit", "docs-check", null], "description": "The strategy entry this step's card prints (contract §9)."},
+          "role": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$", "description": "The agent file (agents/<role>.md) whose role the step's card hands to a fresh reader."},
+          "role_reads": {"type": "array", "description": "Package paths that role reads; only with role.", "items": {"type": "string", "pattern": "^[A-Za-z0-9_{}][A-Za-z0-9_.{}/-]*$"}},
+          "mechanism_key": {"enum": ["context", "draft", "draft.critic", "spec-check", "implement", "security", "quality-gates", "quality-review", "audit", "docs-check", null], "description": "The strategy entry this step's card prints (contract §9)."},
           "loop": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9-]{0,63}$", "description": "A loop id under flows/loops/ (the draft step)."}
         }
       }

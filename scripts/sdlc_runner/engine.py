@@ -327,6 +327,12 @@ def applies(ctx, step):
         reasons.append("applies_when form=%s (the form is %s)" % (cond["form"], st.get("form")))
     if "option" in cond and cond["option"] not in (st.get("options") or []):
         reasons.append("applies_when option=%s (not given at start)" % cond["option"])
+    if "not_option" in cond and cond["not_option"] in (st.get("options") or []):
+        reasons.append("applies_when not_option=%s (given at start)" % cond["not_option"])
+    if "imported" in cond:
+        imported = st.get("imported") or []
+        if bool(imported) != cond["imported"]:
+            reasons.append("applies_when imported=%s (start imported %d files)" % (cond["imported"], len(imported)))
     if "work_type" in cond and st.get("work_type") not in cond["work_type"]:
         reasons.append("applies_when work_type in %s (the work type is %s)"
                        % (",".join(cond["work_type"]), st.get("work_type")))

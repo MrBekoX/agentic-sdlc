@@ -178,6 +178,13 @@ class EngineCase(unittest.TestCase):
             textio.write_json_atomic(root / "flows" / "_shared.json", shared)
         return root
 
+    def put_flow(self, flow_id, edit):
+        """A flow `flow_id` in the temp root: the engine fixture flow with `edit(flow)` applied."""
+        flow = json.loads(ENGINE_FLOW.read_text(encoding="utf-8"))
+        flow["id"] = flow_id
+        edit(flow)
+        textio.write_json_atomic(self.root / "flows" / (flow_id + ".json"), flow)
+
     def add_launcher(self, name):
         if WINDOWS:
             path = self.bin / (name + ".cmd")
@@ -763,6 +770,52 @@ class TestHandoffs(EngineCase):
         self.start("--spec-file", str(source), flow="plan")
         self.assertEqual((self.pkg() / "spec" / "demo.md").read_text(encoding="utf-8"), approved)
         self.assertEqual(self.state()["loop"]["mode"], "plan")
+
+    def test_not_option_skips_the_step_when_the_option_is_given(self):
+        step = {"id": "alone", "file": "skills/fixture/steps/extra.md", "inputs": [],
+                "outputs": ["evidence/{work_id}.alone.md"],
+                "done_when": [{"check": "exists", "path": "evidence/{work_id}.alone.md"}],
+                "applies_when": {"not_option": "quality-review"}}
+        self.put_flow("notopt", lambda flow: flow["steps"].insert(2, step))
+        self.start(flow="notopt", work_id="plain")
+        self.advance_to("alone", slug="plain")
+        self.assertTrue(self.state("plain")["steps"]["alone"]["applies"])
+        self.start("--option", "quality-review", flow="notopt", work_id="given")
+        self.advance_to("extra", slug="given")
+        entry = self.state("given")["steps"]["alone"]
+        self.assertFalse(entry["applies"])
+        self.assertEqual(entry["skip_reason"], "applies_when not_option=quality-review (given at start)")
+        self.assertEqual(entry["state"], "skipped")
+
+    def test_imported_condition_follows_start(self):
+        def edit(flow):
+            flow["imports"] = [{"path": "seed/{work_id}.md", "option": "--spec-file", "status": "approved",
+                                "required": False}]
+            for step_id, value in (("with-spec", True), ("without-spec", False)):
+                flow["steps"].insert(2, {
+                    "id": step_id, "file": "skills/fixture/steps/extra.md", "inputs": [],
+                    "outputs": ["evidence/{work_id}.%s.md" % step_id],
+                    "done_when": [{"check": "exists", "path": "evidence/{work_id}.%s.md" % step_id}],
+                    "applies_when": {"imported": value}})
+
+        self.put_flow("impcond", edit)
+        source = self.tmp / "approved-spec.md"
+        approved = "---\nwork_id: demo\nstatus: approved\n---\n" + SPEC_BODY
+        source.write_bytes(approved.encode("utf-8"))
+        self.start("--spec-file", str(source), flow="impcond", work_id="have")
+        self.put("evidence/have.with-spec.md", "# with spec", "have")
+        self.advance_to("snapshot", slug="have")
+        steps = self.state("have")["steps"]
+        self.assertTrue(steps["with-spec"]["applies"])
+        self.assertFalse(steps["without-spec"]["applies"])
+        self.assertEqual(steps["without-spec"]["skip_reason"], "applies_when imported=False (start imported 1 files)")
+        self.start(flow="impcond", work_id="none")
+        self.put("evidence/none.without-spec.md", "# without spec", "none")
+        self.advance_to("snapshot", slug="none")
+        steps = self.state("none")["steps"]
+        self.assertFalse(steps["with-spec"]["applies"])
+        self.assertEqual(steps["with-spec"]["skip_reason"], "applies_when imported=True (start imported 0 files)")
+        self.assertTrue(steps["without-spec"]["applies"])
 
     def test_check_outside_its_work_types_passes(self):
         from sdlc_runner import checks, engine

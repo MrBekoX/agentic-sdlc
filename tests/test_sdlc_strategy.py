@@ -10,6 +10,7 @@ tests/test_sdlc_engine.py (temp plugin root, temp git project, no paid CLI).
 """
 import json
 import sys
+import types
 import unittest
 from pathlib import Path
 
@@ -87,6 +88,46 @@ class TestDefaultMap(unittest.TestCase):
                          {"context", "implement"})
         parallel = strategy.default_map(_flow("feature"), SHARED, EVERYTHING, "codex", [])["entries"]
         self.assertEqual(parallel["context"]["mechanism"], "subagent")  # one analyst per layer
+
+
+def _imported(files):
+    state = _state()
+    state["imported"] = list(files)
+    return state
+
+
+class TestImportedFact(unittest.TestCase):
+    """The strategy decides `applies_when.imported` the way the engine does (plan Task 2)."""
+
+    FLOW = {"steps": [
+        {"id": "security", "mechanism_key": "security", "applies_when": {"imported": True}},
+        {"id": "audit", "mechanism_key": "audit", "applies_when": {"imported": False}},
+        {"id": "context", "mechanism_key": "context"},
+    ]}
+
+    def test_strategy_facts_carry_imported(self):
+        self.assertEqual(strategy._state_facts(_imported(["spec/x.md"]))["imported"], ["spec/x.md"])
+        self.assertEqual(strategy._state_facts(_state())["imported"], [])
+        self.assertEqual(strategy._facts({}, [], imported=["spec/x.md"])["imported"], ["spec/x.md"])
+        self.assertEqual(strategy.applicable_keys(self.FLOW, strategy._state_facts(_state())),
+                         ["context", "audit"])
+        self.assertEqual(strategy.applicable_keys(self.FLOW, strategy._state_facts(
+            _imported(["spec/x.md"]))), ["context", "security"])
+        from sdlc_runner import engine
+
+        for imported in ([], ["spec/x.md"]):
+            state = _imported(imported)
+            for step in self.FLOW["steps"]:
+                with self.subTest(imported=imported, step=step["id"]):
+                    engine_says = engine.applies(types.SimpleNamespace(state=state), step)[0]
+                    self.assertEqual(strategy._applies(step, strategy._state_facts(state)), engine_says)
+
+    def test_default_map_takes_imported(self):
+        flow = {"id": "x", "steps": self.FLOW["steps"]}
+        plain = strategy.default_map(flow, SHARED, PLAIN, "codex", [])["entries"]
+        given = strategy.default_map(flow, SHARED, PLAIN, "codex", [], imported=["spec/x.md"])["entries"]
+        self.assertEqual(set(plain), {"context", "audit"})
+        self.assertEqual(set(given), {"context", "security"})
 
 
 class TestValidate(unittest.TestCase):

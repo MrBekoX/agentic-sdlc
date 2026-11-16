@@ -235,5 +235,76 @@ class TestCli(EngineCase):
         self.assertEqual(len(text.splitlines()) - 1, 1, text)
 
 
+class TestOptionalImports(EngineCase):
+    """flow `imports` entries with "required": false (plan Task 2)."""
+
+    def setUp(self):
+        super().setUp()
+
+        def edit(flow):
+            flow["imports"] = [{"path": "seed/{work_id}.md", "option": "--spec-file", "status": "approved",
+                                "required": False}]
+            flow["steps"].insert(2, {
+                "id": "needs-spec", "file": "skills/fixture/steps/extra.md", "inputs": ["seed/{work_id}.md"],
+                "outputs": ["evidence/{work_id}.needs-spec.md"],
+                "done_when": [{"check": "exists", "path": "evidence/{work_id}.needs-spec.md"}],
+                "applies_when": {"option": "spec"}})
+
+        self.put_flow("optimp", edit)
+        self.put_flow("reqimp", lambda flow: flow.__setitem__(
+            "imports", [{"path": "seed/{work_id}.md", "option": "--spec-file", "status": "approved"}]))
+        self.source = self.tmp / "spec-source.md"
+
+    def spec(self, status):
+        text = "---\nwork_id: demo\nstatus: %s\n---\n# Spec\n" % status
+        self.source.write_bytes(text.encode("utf-8"))
+
+    def test_optional_import_may_be_left_out(self):
+        self.start(flow="optimp")
+        self.assertFalse((self.pkg() / "seed" / "demo.md").exists())
+        self.assertEqual(self.state()["imported"], [])
+
+    def test_optional_import_given_is_read_like_a_required_one(self):
+        self.spec("approved")
+        self.start("--spec-file", str(self.source), flow="optimp")
+        self.assertTrue((self.pkg() / "seed" / "demo.md").is_file())
+        self.assertEqual(self.state()["imported"], ["seed/demo.md"])
+
+    def test_optional_import_still_checks_a_given_status(self):
+        self.spec("draft")
+        code, text = self.start("--spec-file", str(self.source), flow="optimp", expect=4)
+        self.assertIn("error=import_status:--spec-file:draft", text)
+        self.assertFalse((self.pkg() / "state.json").exists())
+
+    def test_required_import_still_refused_when_missing(self):
+        code, text = self.start(flow="reqimp", expect=2)
+        self.assertIn("error=import_missing:--spec-file", text)
+        self.assertFalse((self.pkg() / "state.json").exists())
+
+    def test_optional_import_refused_when_an_applying_step_needs_it(self):
+        code, text = self.start("--option", "spec", flow="optimp", expect=2)
+        self.assertIn("error=import_missing:--spec-file", text)
+        self.assertFalse((self.pkg() / "state.json").exists())
+        self.spec("approved")  # clean twin: the same start with the file given
+        self.start("--option", "spec", "--spec-file", str(self.source), flow="optimp")
+
+    def test_optional_import_not_needed_when_the_reading_step_is_skipped(self):
+        self.start("--option", "loop", flow="optimp")  # needs-spec applies under `spec` only
+        self.assertEqual(self.state()["imported"], [])
+
+    def test_a_step_reading_the_import_as_optional_needs_no_file(self):
+        def edit(flow):
+            flow["imports"] = [{"path": "seed/{work_id}.md", "option": "--spec-file", "status": "approved",
+                                "required": False}]
+            flow["steps"].insert(2, {
+                "id": "may-use-spec", "file": "skills/fixture/steps/extra.md",
+                "inputs": ["seed/{work_id}.md#body?"], "outputs": ["evidence/{work_id}.may.md"],
+                "done_when": [{"check": "exists", "path": "evidence/{work_id}.may.md"}],
+                "applies_when": {"option": "spec"}})
+
+        self.put_flow("optmark", edit)
+        self.start("--option", "spec", flow="optmark")
+
+
 if __name__ == "__main__":
     unittest.main()

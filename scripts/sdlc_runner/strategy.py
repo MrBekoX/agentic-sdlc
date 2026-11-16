@@ -46,8 +46,9 @@ FRESH_ALLOWED = ("workflow", "subagent", "runner-loop") + DEGRADED
 
 # --- applicability -----------------------------------------------------------------------------
 
-def _facts(probes, options, form=None, work_type=None) -> dict:
-    return {"probes": dict(probes or {}), "options": list(options or []), "form": form, "work_type": work_type}
+def _facts(probes, options, form=None, work_type=None, imported=None) -> dict:
+    return {"probes": dict(probes or {}), "options": list(options or []), "form": form, "work_type": work_type,
+            "imported": list(imported or [])}
 
 
 def _applies(step, facts) -> bool:
@@ -91,7 +92,8 @@ def applicable_keys(flow, facts) -> list:
 
 
 def _state_facts(state) -> dict:
-    return _facts(state.get("probes"), state.get("options"), state.get("form"), state.get("work_type"))
+    return _facts(state.get("probes"), state.get("options"), state.get("form"), state.get("work_type"),
+                  state.get("imported"))
 
 
 # --- the rule table ----------------------------------------------------------------------------
@@ -126,10 +128,10 @@ def _rule(key, row, probes) -> tuple:
     return "main", "the main loop does it"
 
 
-def default_map(flow, shared, probes, runtime, options, *, form=None, work_type=None) -> dict:
+def default_map(flow, shared, probes, runtime, options, *, form=None, work_type=None, imported=None) -> dict:
     """strategy.default.json: one default entry per applicable key, from the runtime's row."""
     row = runtime_row(shared, runtime)
-    facts = _facts(probes, options, form, work_type)
+    facts = _facts(probes, options, form, work_type, imported)
     entries = {}
     for key in applicable_keys(flow, facts):
         mechanism, reason = _rule(key, row, facts["probes"])
@@ -260,7 +262,8 @@ def default_lines(ctx) -> list:
 
     data = load_default(ctx.pkg) or default_map(ctx.flow, ctx.shared, ctx.state.get("probes"), ctx.state.get("runtime"),
                                                 ctx.state.get("options"), form=ctx.state.get("form"),
-                                                work_type=ctx.state.get("work_type"))
+                                                work_type=ctx.state.get("work_type"),
+                                                imported=ctx.state.get("imported"))
     shown = ",".join("%s:%s" % (key, entry.get("mechanism")) for key, entry in (data.get("entries") or {}).items())
     command = runner_command("strategy", "confirm", "--slug", ctx.state["slug"], "--capabilities")
     return ["default=" + (shown or "none"),
@@ -305,7 +308,7 @@ def confirm(ctx, capabilities: dict, overrides: list) -> int:
         raise SdlcError(4, "strategy_already_confirmed (the strategy step runs once; the card is read-only)")
     st = ctx.state
     base = default_map(ctx.flow, ctx.shared, st.get("probes"), st.get("runtime"), st.get("options"),
-                       form=st.get("form"), work_type=st.get("work_type"))
+                       form=st.get("form"), work_type=st.get("work_type"), imported=st.get("imported"))
     entries = copy.deepcopy(base["entries"])
     applied = []
     for key, mechanism, reason in overrides:
