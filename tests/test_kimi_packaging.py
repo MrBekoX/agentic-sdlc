@@ -126,6 +126,18 @@ class TestKimiManifest(unittest.TestCase):
                 self.assertIn(fact, instructions)
         self.assertNotIn('subagent_type="agentic-sdlc:', instructions)
 
+    def test_skills_name_kimi_plugin_skills_as_the_manifest_does(self):
+        # Kimi's plugin docs: a plugin skill is listed and invoked as <plugin-id>:<skill-name>, and a
+        # bare skill name never resolves to a plugin skill. The skill text a Kimi session reads must
+        # not tell it the opposite of skillInstructions.
+        for skill in sorted((REPO / "skills").glob("*/SKILL.md")):
+            text = skill.read_text(encoding="utf-8")
+            with self.subTest(skill=skill.parent.name):
+                self.assertNotIn("resolves bare skill names", text)
+                self.assertNotIn("invoke skills by bare name", text)
+        router = (REPO / "skills" / "using-agentic-sdlc" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("/skill:agentic-sdlc:<name>", router)
+
     def test_interface_display_name_present(self):
         self.assertTrue(self.manifest["interface"]["displayName"])
 
