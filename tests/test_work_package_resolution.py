@@ -858,18 +858,45 @@ class TestBugfixPlans(unittest.TestCase):
         self.assertEqual(result.plan, plan.resolve())
         self.assertIsNone(result.spec)
 
-    def test_spec_none_requires_flow_bugfix(self):
-        for name, flow in (("no flow key", None), ("another flow", "feature"), ("empty flow", "")):
+    def test_spec_none_requires_a_specless_flow(self):
+        for name, flow in (("no flow key", None), ("another flow", "refactor"), ("empty flow", "")):
             with self.subTest(case=name):
                 plan = write_bugfix_plan(self.root, work_id="w-" + name.replace(" ", "-"), flow=flow)
                 result = self.resolver.resolve(self.root, plan_path=plan)
                 self.assertFalse(result.ok)
-                self.assertIn("spec_none_requires_flow_bugfix", result.errors)
+                self.assertIn("spec_none_requires_specless_flow", result.errors)
                 rc, out, err = run_cli("--repo", str(self.root), "--plan", str(plan))
                 self.assertEqual(rc, 1, out + err)
-                self.assertIn("error=spec_none_requires_flow_bugfix", out.splitlines())
+                self.assertIn("error=spec_none_requires_specless_flow", out.splitlines())
                 self.assertIn("work_package_resolution=failed", out.splitlines())
                 self.assertEqual(err, "")
+
+    def test_resolver_accepts_specless_feature_and_plan(self):
+        self.assertEqual(self.resolver.SPECLESS_FLOWS, ("bugfix", "feature", "plan"))
+        for flow in ("feature", "plan"):
+            with self.subTest(flow=flow):
+                plan = write_bugfix_plan(self.root, work_id="w-" + flow, flow=flow)
+                result = self.resolver.resolve(self.root, plan_path=plan)
+                self.assertTrue(result.ok, result.errors)
+                self.assertIsNone(result.spec)
+                rc, out, err = run_cli("--repo", str(self.root), "--plan", str(plan))
+                self.assertEqual(rc, 0, out + err)
+                self.assertIn("spec=none", out.splitlines())
+                self.assertIn("work_package_resolution=passed", out.splitlines())
+        # A per-package spec still contradicts `spec: none`, whatever the flow.
+        write_per_package_artifacts(self.root, work_id="w-held")
+        held = write_bugfix_plan(self.root, work_id="w-held", slug="w-held", flow="feature")
+        result = self.resolver.resolve(self.root, plan_path=held)
+        self.assertIn("spec_none_with_spec", result.errors)
+
+    def test_resolver_refuses_spec_none_with_another_flow(self):
+        for flow in ("refactor", "test", "feature-x", "Feature", None):
+            with self.subTest(flow=flow):
+                plan = write_bugfix_plan(self.root, work_id="w-other", flow=flow)
+                result = self.resolver.resolve(self.root, plan_path=plan)
+                self.assertFalse(result.ok)
+                self.assertIn("spec_none_requires_specless_flow", result.errors)
+                self.assertNotIn("spec_none_requires_flow_bugfix", result.errors)
 
     def test_flow_bugfix_with_a_spec_resolves_like_any_plan(self):
         spec, plan = write_per_package_artifacts(self.root, work_id="fix-y")

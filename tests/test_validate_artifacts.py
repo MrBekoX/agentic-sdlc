@@ -1340,5 +1340,342 @@ class TestQualityChecks(unittest.TestCase):
         assert "deferred_work" not in pres["warnings"]
 
 
+
+
+# ---- design mode, criterion sources and spec-less plans outside bugfix --------------------
+# `design.md` is the intent step's artifact: four sections, decisions that carry an id and an
+# owner. With `--sources`, every criterion of a spec (or of a spec-less plan) names where it came
+# from. A plan with `spec: none` is no longer only a bugfix plan: `flow: feature` and `flow: plan`
+# take their own acceptance criteria as well.
+DESIGN_OK = """\
+# Design: report export
+
+## Intent
+Users export a report as CSV so they stop copying numbers by hand every week.
+
+## Non-goals
+- No PDF or spreadsheet export in this change.
+
+## Approaches
+- A: stream the rows to the response. B: build the file in memory first.
+
+## Decisions
+- D1: The export is a CSV file. (user)
+- D2: Rows are streamed to the response. (author's call: memory stays flat for large reports)
+"""
+
+FEATURE_PLAN = """\
+---
+work_id: feat-export
+spec: none
+flow: feature
+branch: feat/export
+status: draft
+---
+
+# Plan: report export
+
+## Acceptance Criteria
+- AC1: Given a report, when the user exports it, then a CSV file returns every visible row. (source: request)
+- AC2: Given a large report, when it is exported, then rows are streamed. (source: D2)
+
+## Task 1 — Export the report (AC1)
+Modify `src/export.py`. TDD: add the failing export test (RED) first.
+Run: pytest tests/test_export.py
+
+## Task 2 — Stream the rows (AC1, AC2)
+Modify `src/export.py`. TDD: the RED streaming test turns GREEN.
+Run: pytest tests/test_export.py
+"""
+
+FEATURE_PLAN_AC_SECTION = """\
+## Acceptance Criteria
+- AC1: Given a report, when the user exports it, then a CSV file returns every visible row. (source: request)
+- AC2: Given a large report, when it is exported, then rows are streamed. (source: D2)
+
+"""
+
+CURLY = chr(0x2019)  # the typographic apostrophe a word processor types for `'`
+
+
+def _spec_with_criteria(criteria):
+    """COMPLETE_SPEC with its acceptance-criteria section replaced by `criteria`."""
+    head, _, rest = COMPLETE_SPEC.partition("## 3. Acceptance criteria\n")
+    _, _, tail = rest.partition("## 4. Edge cases")
+    return head + "## 3. Acceptance criteria\n" + criteria + "\n## 4. Edge cases" + tail
+
+
+def _plan_with_criteria(criteria):
+    return FEATURE_PLAN.replace(FEATURE_PLAN_AC_SECTION, "## Acceptance Criteria\n" + criteria + "\n")
+
+
+def _ac_errors(result):
+    return [e for e in result["errors"] if e.startswith("ac_")]
+
+
+class TestDesignMode(unittest.TestCase):
+    def test_design_requires_its_four_sections(self):
+        self.assertEqual(va.check_design(DESIGN_OK), {"errors": [], "warnings": []})
+        for slug, heading in (("intent", "## Intent"), ("non-goals", "## Non-goals"),
+                              ("approaches", "## Approaches"), ("decisions", "## Decisions")):
+            with self.subTest(section=slug):
+                text = DESIGN_OK.replace(heading, "## Something else")
+                self.assertIn("missing_section:" + slug, va.check_design(text)["errors"])
+        self.assertEqual(list(va.REQUIRED_DESIGN_SECTIONS), ["intent", "non-goals", "approaches", "decisions"])
+
+    def test_design_decisions_need_id_and_owner(self):
+        text = DESIGN_OK.replace(
+            "- D2: Rows are streamed to the response. (author's call: memory stays flat for large reports)\n",
+            "- Rows are streamed to the response. (user)\n"
+            "- D3: Files are named by report id.\n"
+            "- D4: Dates are UTC. (author's call: )\n"
+            "- **D5** Headers are always written. (user)\n")
+        errors = va.check_design(text)["errors"]
+        self.assertEqual(errors, ["decision_missing_id:2", "decision_missing_owner:D3", "decision_missing_owner:D4"])
+        # A nested bullet is a detail of its decision, not a decision of its own.
+        nested = DESIGN_OK.replace("(user)\n", "(user)\n  - because users asked for it\n")
+        self.assertEqual(va.check_design(nested)["errors"], [])
+        # An owner tag on a wrapped line counts.
+        wrapped = DESIGN_OK.replace("is a CSV file. (user)", "is a CSV file.\n  (user)")
+        self.assertEqual(va.check_design(wrapped)["errors"], [])
+
+    def test_design_duplicate_decision_id_is_an_error(self):
+        text = DESIGN_OK + "- D1: The export is also zipped. (user)\n"
+        self.assertEqual(va.check_design(text)["errors"], ["decision_duplicate_id:D1"])
+        # `D01` and `D1` name the same decision.
+        text = DESIGN_OK + "- D01: The export is also zipped. (user)\n"
+        self.assertEqual(va.check_design(text)["errors"], ["decision_duplicate_id:D01"])
+
+    def test_design_owner_tags_tolerate_crlf_bom_and_curly_apostrophe(self):
+        curly = DESIGN_OK.replace("author's call", "author" + CURLY + "s call")
+        turkish_reason = "b" + chr(0xfc) + "y" + chr(0xfc) + "k raporlarda bellek sabit kal" + chr(0x131) + "r"
+        turkish = curly.replace("memory stays flat for large reports", turkish_reason)
+        for name, text in (("curly", curly), ("turkish reason", turkish),
+                           ("crlf", DESIGN_OK.replace("\n", "\r\n")),
+                           ("bom and crlf", chr(0xfeff) + turkish.replace("\n", "\r\n"))):
+            with self.subTest(case=name):
+                self.assertEqual(va.check_design(text), {"errors": [], "warnings": []})
+        # The owner tag must be one of the two forms.
+        bad = DESIGN_OK.replace("(user)", "(somebody)")
+        self.assertEqual(va.check_design(bad)["errors"], ["decision_missing_owner:D1"])
+
+    def test_cli_design_mode_and_sources_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            design = Path(tmp) / "design.md"
+            design.write_bytes(DESIGN_OK.encode("utf-8"))
+            rc, out, err = run_cli("--mode", "design", "--file", str(design), "--strict")
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn("mode=design", out.splitlines())
+            self.assertIn("artifacts_validation=passed", out.splitlines())
+            design.write_bytes(DESIGN_OK.replace("(user)", "").encode("utf-8"))
+            rc, out, err = run_cli("--mode", "design", "--file", str(design))
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=decision_missing_owner:D1", out.splitlines())
+            # --sources, --design and --check drive a spec check.
+            design.write_bytes(DESIGN_OK.encode("utf-8"))
+            check = Path(tmp) / "w.check.json"
+            check.write_bytes(b'{"questions": [{"id": "Q1"}]}')
+            spec = Path(tmp) / "spec.md"
+            spec.write_bytes(_spec_with_criteria(
+                "- AC1: Given a refund, when the job runs, then the total drops once. (source: D1, Q1)\n"
+            ).encode("utf-8"))
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec), "--sources",
+                                   "--design", str(design), "--check", str(check))
+            self.assertEqual(rc, 0, out + err)
+            self.assertNotIn("error=ac_", out)
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec), "--sources", "--design", str(design))
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=ac_unknown_source:AC1:Q1", out.splitlines())
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec), "--sources",
+                                   "--design", str(Path(tmp) / "absent.md"))
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=design_unreadable:missing", out.splitlines())
+            check.write_bytes(b"{not json")
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec), "--sources", "--check", str(check))
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=check_unreadable:invalid_json", out.splitlines())
+
+
+class TestCriterionSources(unittest.TestCase):
+    CHECK = {"questions": [{"id": "Q1", "text": "Which format?"}, {"id": "Q2"}]}
+
+    def test_spec_sources_are_ignored_without_the_flag(self):
+        spec = _spec_with_criteria(
+            "- AC1: Given a refund, when the job runs, then the total drops once.\n"
+            "- AC2: Given a replay, when the job runs, then the total drops once. (source: guess)\n")
+        plain = va.check_spec(spec)
+        self.assertEqual(_ac_errors(plain), [])
+        self.assertEqual(va.check_spec(spec, DESIGN_OK, self.CHECK), plain)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "spec.md"
+            path.write_bytes(spec.encode("utf-8"))
+            rc, out, err = run_cli("--mode", "spec", "--file", str(path))
+            self.assertEqual(rc, 0, out + err)
+
+    def test_spec_criterion_without_source_fails_with_sources(self):
+        spec = _spec_with_criteria(
+            "- AC1: Given a refund, when the job runs, then the total drops once. (source: request)\n"
+            "- AC2: Given a replay, when the job runs, then the total drops once.\n"
+            "- A detail bullet that carries no id and so is no criterion.\n"
+            "  - AC9: a nested bullet is a detail, not a criterion\n")
+        result = va.check_spec(spec, DESIGN_OK, self.CHECK, require_sources=True)
+        self.assertEqual(_ac_errors(result), ["ac_no_source:AC2"])
+        self.assertNotIn("ac_no_source:AC2", va.check_spec(spec, DESIGN_OK, self.CHECK)["errors"])
+        # An empty tag names nothing.
+        empty = spec.replace("then the total drops once.\n- A detail", "then the total drops once. (source: )\n- A detail")
+        self.assertEqual(_ac_errors(va.check_spec(empty, DESIGN_OK, self.CHECK, require_sources=True)),
+                         ["ac_no_source:AC2"])
+
+    def test_spec_source_on_a_wrapped_line_counts(self):
+        spec = _spec_with_criteria(
+            "- AC1: Given a refund for an existing charge, when the job runs, then the gross\n"
+            "  total is reduced once. (source: request,\n"
+            "  D2)\n"
+            "- AC-A2: Given a replay, when the job runs, then the total drops once.\n"
+            "  (source: D1)\n")
+        result = va.check_spec(spec, DESIGN_OK, self.CHECK, require_sources=True)
+        self.assertEqual(_ac_errors(result), [])
+        # A tag on a NESTED bullet is not the criterion's own.
+        nested = spec.replace("  (source: D1)\n", "  - (source: D1)\n")
+        self.assertEqual(_ac_errors(va.check_spec(nested, DESIGN_OK, self.CHECK, require_sources=True)),
+                         ["ac_no_source:AC-A2"])
+
+    def test_spec_source_must_name_a_known_decision_or_question(self):
+        spec = _spec_with_criteria(
+            "- AC1: Given a refund, when the job runs, then the total drops once. (source: D9)\n"
+            "- AC2: Given a replay, when the job runs, then the total drops once. (source: Q3, Q1, D1)\n")
+        result = va.check_spec(spec, DESIGN_OK, self.CHECK, require_sources=True)
+        self.assertEqual(_ac_errors(result), ["ac_unknown_source:AC1:D9", "ac_unknown_source:AC2:Q3"])
+        # No design file: no decision is known. No check file: no question is known.
+        result = va.check_spec(spec, None, None, require_sources=True)
+        self.assertEqual(_ac_errors(result), [
+            "ac_unknown_source:AC1:D9", "ac_unknown_source:AC2:Q3",
+            "ac_unknown_source:AC2:Q1", "ac_unknown_source:AC2:D1"])
+        # `request` needs neither file.
+        only_request = _spec_with_criteria(
+            "- AC1: Given a refund, when the job runs, then the total drops once. (source: request)\n")
+        self.assertEqual(_ac_errors(va.check_spec(only_request, None, None, require_sources=True)), [])
+
+    def test_spec_bad_source_token_is_an_error(self):
+        spec = _spec_with_criteria(
+            "- AC1: Given a refund, when the job runs, then the total drops once. (source: guess, request)\n"
+            "- AC2: Given a replay, when the job runs, then the total drops once. (source: d1, Q)\n")
+        result = va.check_spec(spec, DESIGN_OK, self.CHECK, require_sources=True)
+        self.assertEqual(_ac_errors(result), ["ac_bad_source:AC1:guess", "ac_bad_source:AC2:d1", "ac_bad_source:AC2:Q"])
+
+    def test_specless_plan_criterion_needs_a_request_or_decision_source(self):
+        plan = _plan_with_criteria(
+            "- AC1: Given a report, when the user exports it, then a CSV file returns every row.\n"
+            "- AC2: Given a large report, when it is exported, then rows are streamed. (source: Q1)\n"
+            "- AC3: Given an empty report, when it is exported, then only the header row returns. (source: D7)\n")
+        result = va.check_plan(plan, None, own_criteria=True, design_text=DESIGN_OK, require_sources=True)
+        self.assertEqual(_ac_errors(result), [
+            "ac_no_source:AC1", "ac_unknown_source:AC2:Q1", "ac_unknown_source:AC3:D7"])
+        self.assertEqual(_ac_errors(va.check_plan(plan, None, own_criteria=True, design_text=DESIGN_OK)), [])
+        # A bugfix plan's own criteria are sourced the same way.
+        bugfix = va.check_plan(BUGFIX_PLAN, None, bugfix=True, design_text=None, require_sources=True)
+        self.assertEqual(_ac_errors(bugfix), ["ac_no_source:AC1", "ac_no_source:AC2"])
+        # With a design file, D2 counts; without one, none does.
+        self.assertEqual(_ac_errors(va.check_plan(FEATURE_PLAN, None, own_criteria=True, design_text=DESIGN_OK,
+                                                  require_sources=True)), [])
+        self.assertEqual(_ac_errors(va.check_plan(FEATURE_PLAN, None, own_criteria=True, design_text=None,
+                                                  require_sources=True)), ["ac_unknown_source:AC2:D2"])
+
+    def test_plan_sources_change_nothing_with_a_spec(self):
+        # A plan checked against a spec has no own criteria, so there is nothing to source.
+        spec = "## Acceptance criteria\n- AC1: Given a, when b, then c.\n- AC2: Given d, when e, then f.\n"
+        plan = ("# Plan\n## Task 1 (AC1)\nModify `a.py`. TDD: RED first.\nRun: pytest a\n"
+                "## Task 2 (AC2)\nModify `b.py`. TDD: RED first.\nRun: pytest b\n")
+        self.assertEqual(va.check_plan(plan, spec),
+                         va.check_plan(plan, spec, design_text=DESIGN_OK, require_sources=True))
+        # The plan's own unsourced section is not read when a spec is the source and own_criteria is off.
+        self.assertEqual(va.check_plan(BUGFIX_PLAN, spec, require_sources=True),
+                         va.check_plan(BUGFIX_PLAN, spec))
+
+
+class TestSpeclessPlans(unittest.TestCase):
+    def test_specless_feature_plan_takes_its_own_criteria(self):
+        result = va.check_plan(FEATURE_PLAN, None, own_criteria=True)
+        self.assertEqual(result["errors"], [], result)
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 2, result)
+        self.assertNotIn("ac_source_missing", result["warnings"])
+        # Without own_criteria a plan has no source for its coverage (the spec rule is unchanged).
+        plain = va.check_plan(FEATURE_PLAN, None)
+        self.assertIn("ac_source_missing", plain["warnings"])
+        # AC2 is named only by the criteria section, so dropping it from Task 2 uncovers it.
+        partial = FEATURE_PLAN.replace("(AC1, AC2)", "(AC1)")
+        result = va.check_plan(partial, None, own_criteria=True)
+        self.assertEqual(_warnings_with("ac_not_covered:", result["warnings"]), ["ac_not_covered:AC2"])
+        # A criterion with no id is reported, as for a bugfix plan.
+        idless = _plan_with_criteria(
+            "- Given a report, when the user exports it, then a CSV file returns every row.\n")
+        self.assertIn("ac_missing_id:1", va.check_plan(idless, None, own_criteria=True)["warnings"])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "plan.md"
+            path.write_bytes(FEATURE_PLAN.encode("utf-8"))
+            rc, out, err = run_cli("--mode", "plan", "--file", str(path), "--strict")
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn("plan_ac_covered=2", out)
+            self.assertNotIn("ac_source_missing", out)
+
+    def test_specless_plan_flow_is_accepted(self):
+        self.assertEqual(va.SPECLESS_FLOWS, ("bugfix", "feature", "plan"))
+        for flow in ("bugfix", "feature", "plan"):
+            with self.subTest(flow=flow):
+                meta = {"spec": "none", "flow": flow}
+                self.assertEqual(va.check_plan_kind(meta), [])
+                self.assertTrue(va.is_specless_plan(meta))
+        # is_bugfix_plan keeps its meaning.
+        self.assertTrue(va.is_bugfix_plan({"spec": "none", "flow": "bugfix"}))
+        self.assertFalse(va.is_bugfix_plan({"spec": "none", "flow": "feature"}))
+        self.assertFalse(va.is_specless_plan({"spec": "../spec/x.md", "flow": "feature"}))
+        self.assertFalse(va.is_specless_plan({"flow": "feature"}))
+
+    def test_specless_feature_plan_needs_no_bug_section(self):
+        self.assertNotIn("## Bug", FEATURE_PLAN)
+        self.assertEqual(va.check_plan(FEATURE_PLAN, None, own_criteria=True)["errors"], [])
+        # A bugfix plan still does.
+        no_bug = BUGFIX_PLAN.replace(BUGFIX_BUG_SECTION, "")
+        result = va.check_plan(no_bug, None, bugfix=True, own_criteria=True)
+        self.assertIn("missing_section:bug", result["errors"], result)
+        # And a feature plan still needs its criteria section.
+        none = FEATURE_PLAN.replace(FEATURE_PLAN_AC_SECTION, "")
+        self.assertEqual(va.check_plan(none, None, own_criteria=True)["errors"],
+                         ["missing_section:acceptance-criteria"])
+
+    def test_specless_feature_plan_criteria_after_tasks_is_an_error(self):
+        late = FEATURE_PLAN.replace(FEATURE_PLAN_AC_SECTION, "") + "\n" + FEATURE_PLAN_AC_SECTION
+        result = va.check_plan(late, None, own_criteria=True)
+        self.assertEqual(result["errors"], ["ac_section_after_tasks"], result)
+        # The bugfix code is unchanged for a bugfix plan.
+        self.assertIn("bugfix_ac_section_after_tasks",
+                      va.check_plan(_bugfix_ac_after_tasks(), None, bugfix=True)["errors"])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "plan.md"
+            path.write_bytes(late.encode("utf-8"))
+            rc, out, err = run_cli("--mode", "plan", "--file", str(path))
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=ac_section_after_tasks", out.splitlines())
+
+    def test_spec_none_with_another_flow_reports_the_new_code(self):
+        for flow in ("refactor", "test", "feature-x", ""):
+            with self.subTest(flow=flow), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "plan.md"
+                path.write_bytes(FEATURE_PLAN.replace("flow: feature", "flow: " + flow).encode("utf-8"))
+                rc, out, err = run_cli("--mode", "plan", "--file", str(path))
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("error=spec_none_requires_specless_flow", out.splitlines())
+                self.assertNotIn("spec_none_requires_flow_bugfix", out)
+        # A spec-less feature plan given a spec anyway is `spec_none_with_spec`, as a bugfix plan is.
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = Path(tmp) / "plan.md"
+            plan.write_bytes(FEATURE_PLAN.encode("utf-8"))
+            spec = Path(tmp) / "spec.md"
+            spec.write_bytes(COMPLETE_SPEC.encode("utf-8"))
+            rc, out, err = run_cli("--mode", "plan", "--file", str(plan), "--spec", str(spec))
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=spec_none_with_spec", out.splitlines())
+
+
 if __name__ == "__main__":
     unittest.main()

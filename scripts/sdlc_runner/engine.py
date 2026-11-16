@@ -212,6 +212,8 @@ def _referenced(ctx, step) -> set:
     for spec in step.get("done_when") or []:
         if spec.get("check") == "validator" and spec.get("mode") in ("spec", "plan"):
             rels.add(checks.artifact_rel(ctx, spec["mode"]))
+        if spec.get("check") == "validator" and spec.get("mode") == "design":
+            rels.add(checks.DESIGN_REL)
         if spec.get("check") == "sidecar_ok" and spec.get("artifact") in ("spec", "plan"):
             rels.add(checks.artifact_rel(ctx, spec["artifact"]))
     return rels

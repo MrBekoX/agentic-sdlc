@@ -10,6 +10,7 @@ step being evaluated) and may set `ctx.overlay` ({package-relative path: text}) 
 from __future__ import annotations
 
 import collections
+import contextlib
 import hashlib
 import importlib.util
 import shutil
@@ -43,9 +44,17 @@ def _rel(ctx, template: str) -> str:
     return manifest.expand(template, ctx.state)
 
 
+DESIGN_REL = "design.md"
+
+
 def artifact_rel(ctx, kind: str) -> str:
     """`spec/<work_id>.md` or `plan/<work_id>.md`."""
     return "%s/%s.md" % (kind, ctx.state["work_id"])
+
+
+def check_file_rel(ctx) -> str:
+    """`spec/<work_id>.check.json`: the questions the spec check raised."""
+    return "spec/%s.check.json" % ctx.state["work_id"]
 
 
 def current_sets(ctx) -> dict:
@@ -105,25 +114,45 @@ def check_exists(ctx, step, path):
     return CheckResult(True, "%s exists" % rel)
 
 
-def check_validator(ctx, step, mode, strict=False):
-    if mode not in ("spec", "plan"):
+def check_validator(ctx, step, mode, strict=False, sources=False):
+    """validate_artifacts on the spec, the plan, or (`design`) design.md at the package root.
+
+    `sources` makes the criteria of a spec, or of a spec-less plan, name their origin; the check
+    then hands the validator design.md and, for the spec, `spec/<work_id>.check.json`, each only
+    when it exists (a token that names a file that is not there is unknown, which the validator
+    reports).
+    """
+    if mode not in ("spec", "plan", "design"):
         return CheckResult(False, "unknown_validator_mode:%s" % mode)
-    rel = artifact_rel(ctx, mode)
+    rel = DESIGN_REL if mode == "design" else artifact_rel(ctx, mode)
     problem = _foreign(ctx, rel)
     if problem:
         return CheckResult(False, problem)
     if not Path(ctx.pkg).joinpath(*rel.split("/")).is_file():
         return CheckResult(False, "%s is missing" % rel)
+
+    def present(other):
+        return Path(ctx.pkg).joinpath(*other.split("/")).is_file()
+
     spec_rel = artifact_rel(ctx, "spec")
-    has_spec = mode == "plan" and Path(ctx.pkg).joinpath(*spec_rel.split("/")).is_file()
-    with _Materialised(ctx, rel) as artifact:
-        if has_spec:
-            with _Materialised(ctx, spec_rel) as spec_path:
-                code, fields = _validator().run(mode, str(artifact), str(spec_path), bool(strict))
-        else:
-            code, fields = _validator().run(mode, str(artifact), None, bool(strict))
+    has_spec = mode == "plan" and present(spec_rel)
+    with contextlib.ExitStack() as stack:
+        artifact = stack.enter_context(_Materialised(ctx, rel))
+        spec_path = stack.enter_context(_Materialised(ctx, spec_rel)) if has_spec else None
+        design_path = check_path = None
+        if sources and mode != "design":
+            if present(DESIGN_REL):
+                design_path = stack.enter_context(_Materialised(ctx, DESIGN_REL))
+            if mode == "spec" and present(check_file_rel(ctx)):
+                check_path = stack.enter_context(_Materialised(ctx, check_file_rel(ctx)))
+        code, fields = _validator().run(
+            mode, str(artifact), None if spec_path is None else str(spec_path), bool(strict),
+            design_path=None if design_path is None else str(design_path),
+            check_path=None if check_path is None else str(check_path),
+            sources=bool(sources) and mode != "design")
     if code == 0:
-        return CheckResult(True, "%s passes validate_artifacts (%s%s)" % (rel, mode, ", strict" if strict else ""))
+        return CheckResult(True, "%s passes validate_artifacts (%s%s%s)" % (
+            rel, mode, ", strict" if strict else "", ", sources" if sources and mode != "design" else ""))
     errors = [key[len("error="):] for key in fields if key.startswith("error=")]
     if strict and not errors:
         errors = [key[len("warning="):] for key in fields if key.startswith("warning=")]
@@ -376,7 +405,9 @@ def describe(spec: dict, state: dict) -> str:
         return "%s recorded with `sdlc run --expect %s%s -- <test command>`" % (
             kind, spec.get("expect"), " --label %s" % spec["label"] if spec.get("label") else "")
     if name == "validator":
-        return "validate_artifacts.py passes on the %s%s" % (spec.get("mode"), " (strict)" if spec.get("strict") else "")
+        return "validate_artifacts.py passes on the %s%s%s" % (
+            spec.get("mode"), " (strict)" if spec.get("strict") else "",
+            " (every criterion names its source)" if spec.get("sources") and spec.get("mode") != "design" else "")
     if name == "sidecar_ok":
         return "the %s review sidecar matches its body" % spec.get("artifact")
     if name == "approval":

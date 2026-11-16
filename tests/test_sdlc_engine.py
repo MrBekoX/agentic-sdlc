@@ -923,5 +923,110 @@ class TestFlowOps(EngineCase):
         self.assertIn("error=unknown_step:nosuch", text)
 
 
+
+DESIGN_BODY = (
+    "# Design: report export\n\n"
+    "## Intent\nUsers export a report as CSV so they stop copying numbers by hand every week.\n\n"
+    "## Non-goals\n- No PDF or spreadsheet export in this change.\n\n"
+    "## Approaches\n- A: stream the rows. B: build the file in memory first.\n\n"
+    "## Decisions\n- D1: The export is a CSV file. (user)\n"
+    "- D2: Rows are streamed. (author's call: memory stays flat)\n"
+)
+SOURCED_SPEC_BODY = SPEC_BODY.replace(
+    "then a CSV file returns every visible row.", "then a CSV file returns every visible row. (source: D1, Q1)")
+SPECLESS_PLAN = (
+    "---\nwork_id: demo\nspec: none\nflow: feature\nbranch: feat/demo\nstatus: draft\n---\n\n"
+    "# Plan: report export\n\n## Acceptance Criteria\n"
+    "- AC1: Given a report, when the user exports it, then a CSV file returns every row. (source: D2)\n\n"
+    "## Task 1: CSV export (AC1)\n\n"
+    "Create `src/export.py` and its test `tests/test_export.py`.\n\n"
+    "- RED: write the failing test for AC1 first.\n- Run: `pytest tests/test_export.py`\n"
+)
+
+
+class TestValidatorCheckModes(EngineCase):
+    """`design` reads the package root; `sources` hands the validator design.md and the check file."""
+
+    def ctx(self):
+        from sdlc_runner import engine
+
+        self.start()
+        return engine.load_context(self.project, self.root, "demo")
+
+    def put(self, rel, text):
+        target = self.pkg() / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(text.encode("utf-8"))
+
+    def test_validator_check_design_reads_the_package_root(self):
+        from sdlc_runner import checks, engine
+
+        ctx = self.ctx()
+        spec = {"check": "validator", "mode": "design", "strict": True}
+        missing = checks.run_check(ctx, spec)
+        self.assertFalse(missing.ok)
+        self.assertIn("design.md is missing", missing.detail)
+        # Not `design/demo.md`: the design sits at the package root beside request.md.
+        self.put("design/demo.md", DESIGN_BODY)
+        self.assertFalse(checks.run_check(ctx, spec).ok)
+        self.put("design.md", DESIGN_BODY)
+        found = checks.run_check(ctx, spec)
+        self.assertTrue(found.ok, found.detail)
+        self.assertIn("design.md", found.detail)
+        self.put("design.md", DESIGN_BODY.replace("(user)", ""))
+        broken = checks.run_check(ctx, spec)
+        self.assertFalse(broken.ok)
+        self.assertIn("decision_missing_owner:D1", broken.detail)
+        # A step that names the check treats design.md as a file it references.
+        step = {"id": "intent", "done_when": [spec]}
+        self.assertIn("design.md", engine._referenced(ctx, step))
+
+    def test_validator_check_sources_reads_design_and_check(self):
+        from sdlc_runner import checks
+
+        ctx = self.ctx()
+        self.put("spec/demo.md", "---\nwork_id: demo\nstatus: draft\n---\n" + SOURCED_SPEC_BODY)
+        spec = {"check": "validator", "mode": "spec", "sources": True}
+        # Neither file exists: D1 and Q1 are unknown.
+        result = checks.run_check(ctx, spec)
+        self.assertFalse(result.ok)
+        self.assertIn("ac_unknown_source:AC1:D1", result.detail)
+        self.assertIn("ac_unknown_source:AC1:Q1", result.detail)
+        self.put("design.md", DESIGN_BODY)
+        result = checks.run_check(ctx, spec)
+        self.assertFalse(result.ok)
+        self.assertNotIn("ac_unknown_source:AC1:D1", result.detail)
+        self.assertIn("ac_unknown_source:AC1:Q1", result.detail)
+        self.put("spec/demo.check.json", json.dumps({"questions": [{"id": "Q1"}]}))
+        result = checks.run_check(ctx, spec)
+        self.assertTrue(result.ok, result.detail)
+        # Without the parameter, sources are not read at all.
+        self.put("spec/demo.md", "---\nwork_id: demo\nstatus: draft\n---\n" + SPEC_BODY)
+        self.assertTrue(checks.run_check(ctx, {"check": "validator", "mode": "spec"}).ok)
+        self.assertFalse(checks.run_check(ctx, spec).ok)
+        # A spec-less plan: its own criteria are sourced from design.md (D2); no spec file is read.
+        self.put("plan/demo.md", SPECLESS_PLAN)
+        plan_spec = {"check": "validator", "mode": "plan", "strict": True, "sources": True}
+        result = checks.run_check(ctx, plan_spec)
+        self.assertFalse(result.ok, "a spec beside a spec-less plan")
+        (self.pkg() / "spec" / "demo.md").unlink()
+        result = checks.run_check(ctx, plan_spec)
+        self.assertTrue(result.ok, result.detail)
+        (self.pkg() / "design.md").unlink()
+        result = checks.run_check(ctx, plan_spec)
+        self.assertFalse(result.ok)
+        self.assertIn("ac_unknown_source:AC1:D2", result.detail)
+
+    def test_validator_check_rejects_an_unknown_mode_and_bad_sources(self):
+        from sdlc_runner import checks, manifest
+
+        ctx = self.ctx()
+        self.assertEqual(checks.run_check(ctx, {"check": "validator", "mode": "all"}).detail,
+                         "unknown_validator_mode:all")
+        required, optional = manifest.CHECK_PARAMS["validator"]
+        self.assertEqual(required, ("mode",))
+        self.assertIn("sources", optional)
+
+
 if __name__ == "__main__":
     unittest.main()

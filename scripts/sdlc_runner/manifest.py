@@ -32,7 +32,7 @@ SCHEMA_NAMES = ("flow", "shared", "loop", "critic", "draft-result", "sidecar", "
 # Contract §7: check name -> (required parameters, optional parameters).
 CHECK_PARAMS = {
     "exists": (("path",), ()),
-    "validator": (("mode",), ("strict",)),
+    "validator": (("mode",), ("strict", "sources")),
     "sidecar_ok": (("artifact",), ()),
     "report": (("path", "header"), ("verdict", "fresh")),
     "run_recorded": (("expect",), ("label",)),
