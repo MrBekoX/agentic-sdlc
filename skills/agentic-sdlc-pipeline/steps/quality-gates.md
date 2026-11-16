@@ -5,7 +5,7 @@ Run the project's own lint, typecheck and build checks on the current source, re
 In the commands below, `<python>` is the interpreter that starts the card's `then=` line and `<root>` is the card's `root=` value. Run them with `-B`, as the `then=` line does: it keeps `__pycache__` out of the plugin folder. `<slug>` is the last part of the card's `package=` value.
 
 ## 1. Pick the gates
-The start probe found a toolchain: read `probes.details.toolchain.toolchains` in `<package>/state.json` (`node`, `python`, `dotnet`, `go`, `rust`, `make`). Use the commands the project already configures, for example:
+The start probe found a toolchain; list it with `"<python>" -B "<root>/scripts/detect_context.py" --path <project root> --probe toolchain` (`node`, `python`, `dotnet`, `go`, `rust`, `make`). Use the commands the project already configures, for example:
 - Node or TypeScript: `npm run lint`, `npm run typecheck`, `npm run build`, `npx tsc --noEmit`, `npx eslint .`;
 - Python: `ruff check .`, `ruff format --check .`, `mypy <source dir>`;
 - Go: `go vet ./...`; Rust: `cargo test`; .NET: `dotnet test`;

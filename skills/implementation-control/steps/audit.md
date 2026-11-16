@@ -32,7 +32,7 @@ Give the auditor this section; its rows replace the role file's fixed checklist.
 PARTIAL or FAIL names the exact artifact that is absent ("no failing run before the first source edit"). The only statuses are PASS, PARTIAL, FAIL and N/A. Report `red.order` and `gate_order` from `state.json` when set.
 
 Special paths:
-- Refactor work: grade scope and behavior against the Goal Lock; the Spec and Plan rows are `N/A (refactor: Goal Lock)`. A missing Goal Lock is FAIL.
+- Refactor work with a Goal Lock and no spec or plan: grade scope and behavior against the Goal Lock; the Spec and Plan rows are `N/A (refactor: Goal Lock)`. With an approved spec and plan, grade them as for any work. A missing Goal Lock is FAIL.
 - A spec-less bugfix (the resolver prints `spec=none`): grade against the plan's own `## Bug` and `## Acceptance Criteria`; the Spec row is `N/A (bugfix: criteria in the plan)`.
 - A package with no implement step audits earlier work: grade the rows it needs (spec and plan or Goal Lock, tests run, security, diff scope) from what the resolver and the request point to. A row with no artifact is FAIL, not N/A. Change no code.
 

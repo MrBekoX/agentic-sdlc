@@ -6,14 +6,14 @@ In the commands below, `<python>` is the interpreter that starts the card's `the
 
 ## 1. List what to verify
 - Read the plan named on the card's `inputs=` line and list each third-party library, framework or service whose API the work calls, configures or upgrades.
-- Find the version in use in the manifest and the lock file. The start probe lists the manifests under `probes.details.deps` in `<package>/state.json`.
+- Find the version in use in the manifest and the lock file. List the manifests with `"<python>" -B "<root>/scripts/detect_context.py" --path <project root> --probe deps`.
 - Always verify: a new package; an existing package's API used in a new way; a framework upgrade; a native mobile change; a backend service's auth, row-level security, edge functions, realtime or storage; ORM migrations and queries; framework and build config; JWT, OAuth, session and cookie handling; any security-sensitive dependency.
 - When the plan uses no third-party API, the report says `Libraries: none` and why.
 
 ## 2. Verify, as the card's mechanism line says
 - `main`: check each library yourself.
 - `subagent`: give each library to a fresh sub-agent, all started in one message, and merge their findings yourself.
-- When the sub-agent tool is missing or refused, record it and check inline: `"<python>" -B "<root>/scripts/sdlc.py" note --slug <slug> --degraded subagent --reason missing|denied|unavailable`.
+- When the sub-agent tool is missing or refused, record it and check inline: `"<python>" -B "<root>/scripts/sdlc.py" note --slug <slug> --degraded subagent --reason <reason>`, where `<reason>` is `missing`, `denied` or `unavailable`.
 
 Sources, in order:
 1. A documentation tool (such as Context7) when the session has one.

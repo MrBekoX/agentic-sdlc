@@ -9,7 +9,7 @@ before and after every step, and none of their expected values change.
   pin behavior. Otherwise read the spec and the plan, and take the Goal Lock from the
   `## Goal Lock` section of `context.md`.
 - The card's `mechanism=` line says who edits: `main` is you, in this session. Any other
-  value: hand the edits out that way, one writer per file. You still run the command
+  value: hand the edits out that way, one writer per file, all in this checkout (never an isolated worktree: the runner reads only this one). You still run the command
   below and write the evidence file.
 - The card may list a failing (RED) run among its checks. It does not apply to refactor
   work and passes on its own: a behavior-preserving change has no failing test.

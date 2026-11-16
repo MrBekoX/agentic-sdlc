@@ -6,7 +6,7 @@ In the commands below, `<python>` is the interpreter that starts the card's `the
 
 ## 1. Read the request and the probes
 - Read `request.md` in the package: the user's words, verbatim.
-- The runner probed the workspace at start. Read `probes` in `<package>/state.json`: `explore_mode` (`parallel`, `single` or `greenfield_inline`), the layers under `details.explore_mode.layers`, the manifests under `details.deps`, the toolchains under `details.toolchain`. A probe value `error` means the probe failed: explore by hand and say so.
+- The runner probed the workspace at start. Read `probes` in `<package>/state.json`: `explore_mode` (`parallel`, `single` or `greenfield_inline`), `state.json` keeps only these values; for the layers, manifests and toolchains run `"<python>" -B "<root>/scripts/detect_context.py" --path <project root>` (add `--probe deps` or `--probe toolchain`). A probe value `error` means the probe failed: explore by hand and say so.
 - For a narrower scope than the project root, run the detector yourself: `"<python>" -B "<root>/scripts/detect_context.py" --path <scope>` (repeat `--path` per root). Never run a same-named file from the project.
 
 ## 2. Explore, as the card's mechanism line says
@@ -14,7 +14,7 @@ In the commands below, `<python>` is the interpreter that starts the card's `the
 - `subagent`: give each layer (in `single` mode, the one area) to a fresh sub-agent with the role file `<root>/agents/context-analyst.md`, the scope and the question. Start them in one message so they run in parallel. Merge, deduplicate and judge their findings yourself.
 - `team` or `workflow`: run one analyst per layer through that mechanism; you merge.
 - `greenfield_inline`: there is no code to explore. Write the analysis from the request; start no analyst with nothing to read.
-- When the sub-agent tool is missing or refused, record it and explore inline: `"<python>" -B "<root>/scripts/sdlc.py" note --slug <slug> --degraded subagent --reason missing|denied|unavailable`.
+- When the sub-agent tool is missing or refused, record it and explore inline: `"<python>" -B "<root>/scripts/sdlc.py" note --slug <slug> --degraded subagent --reason <reason>`, where `<reason>` is `missing`, `denied` or `unavailable`.
 
 What to read: the files the work will touch, their callers, tests and config, and the conventions (naming, structure, error handling, test style). Check every API and signature in the real code; never assume one. Scope the reading: do not read hundreds of files in the main loop.
 

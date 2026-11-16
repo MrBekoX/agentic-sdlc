@@ -9,7 +9,7 @@ because of the bug now passes, and nothing else changed.
   actual, how to reproduce) and its criteria in `## Acceptance Criteria`.
 - The code, tests, logs and config on the bug's path, and recent changes in that area.
 - The card's `mechanism=` line says who edits: `main` is you, in this session. Any other
-  value: hand the edits out that way, one writer per file. You still run the commands
+  value: hand the edits out that way, one writer per file, all in this checkout (never an isolated worktree: the runner reads only this one). You still run the commands
   below and write the evidence file.
 
 ## Commands

@@ -7,7 +7,7 @@ when the work started: only test files change.
 - `context.md` (its `## Scope Lock`) and `request.md` in the `package=` folder.
 - The code under test and its existing tests.
 - The card's `mechanism=` line says who edits: `main` is you, in this session. Any other
-  value: hand the edits out that way, one writer per file. You still run the commands
+  value: hand the edits out that way, one writer per file, all in this checkout (never an isolated worktree: the runner reads only this one). You still run the commands
   below and write the evidence file.
 
 ## What may change

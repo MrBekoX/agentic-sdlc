@@ -24,7 +24,7 @@ While the gate waits, make no branch, test or source change.
 
 ## Record the reply
 - Never approve on your own judgment. Silence, a tool error, a timeout or your own view of the draft is not approval.
-- Approval: run the card's `reply_approve=` command with the user's own words in `--quote`. For long text or text full of quotes, write the words to a file and pass `--quote-file <path>` in place of `--quote`.
+- Approval: run the card's `reply_approve=` command with the user's own words in `--quote`. For long text or text full of quotes, write the words to a file inside the package folder (for example `<package>/reply.txt`; a file elsewhere in the project counts as a source change) and pass `--quote-file <path>` in place of `--quote`.
 - Change request: run the card's `reply_reject=` command with the user's change request as the quote. The runner hands it to the drafting step as feedback.
 - A reply that changes the draft (an option other than the recommendation, an edit, an addition) is a change request, even when it also says "approved": record it with `reply_reject=`.
 - `fingerprint_mismatch` means the draft changed since the user saw it. Print the current gate card with `"<python>" -B "<root>/scripts/sdlc.py" card --slug <slug>` and show it again. `<python>` and `<root>` are the interpreter and root of the reply commands; `-B` keeps `__pycache__` out of the plugin folder; `<slug>` is the last part of `package=`.

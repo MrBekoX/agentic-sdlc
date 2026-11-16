@@ -8,7 +8,7 @@ The runner records every test run; the evidence file explains them.
   (acceptance criteria, edge cases, behavior that must not change) and the plan (tasks,
   files, test points).
 - The card's `mechanism=` line says who edits: `main` is you, in this session. Any other
-  value: hand the edits out that way, one writer per file. You still run the commands
+  value: hand the edits out that way, one writer per file, all in this checkout (never an isolated worktree: the runner reads only this one). You still run the commands
   below and write the evidence file.
 
 ## Commands
@@ -78,8 +78,9 @@ RED, then redo them.
   `python -B -m pytest` is refused. Use `python -m pytest`; bytecode caches never count
   as changes.
 - Node: `node --test <dir>` (often behind `npm test`) can load the folder as one module
-  and run nothing. Point it at a quoted glob, `node --test "**/*.test.js"`, and check
-  that the output counts more than zero tests: the runner does not count that output.
+  and run nothing; check that the output counts more than zero tests (the runner does not
+  count that output). A fix to the `test` script in `package.json` is a source change:
+  make it only after RED, or tell the user.
 
 ## Evidence file
 Write the file on the card's `outputs=` line, in the `package=` folder. Its first line is

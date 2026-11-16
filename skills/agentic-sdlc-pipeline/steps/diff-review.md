@@ -37,7 +37,7 @@ git diff --name-only --text --no-ext-diff --no-textconv -i -G "pass(word|wd)[[:s
 4. No formatting noise, debug output, commented-out code or stray files.
 5. The tests are meaningful, and their runs were recorded.
 6. No unintended breaking change. New env vars are in `.env.example`. Docs the change made stale are updated.
-7. The change is focused on one problem, and the branch is not `main` or `master`.
+7. The change is focused on one problem, and the branch is not `main` or `master` (unless the run started with branch policy `stay`).
 
 Fix what this run caused (a debug line, a stray file it created) and say so; a source fix reopens the earlier checks that depend on the source. Report everything else. Never revert the user's own changes.
 

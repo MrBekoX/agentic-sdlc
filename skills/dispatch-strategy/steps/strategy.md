@@ -30,7 +30,7 @@ Fill `--capabilities workflow=<v>,subagent=<v>,team=<v>` from the tools you can 
 Each value is `yes` (you can call it now), `no` (there is no such tool) or `denied` (the tool exists, but the user or the permission settings refuse it). Declare honestly: the record can be compared with the session's tool list.
 
 ## 2. Keep or override each default
-Keep a default unless the shape of the work says otherwise. An override is `--set <key>=<mechanism>:"<reason>"`, and the reason names the property of the work that picks the mechanism:
+Keep a default unless the shape of the work says otherwise. Override only a key the card's `default=` line lists: any other key is refused (`not_applicable:<key>`). An override is `--set <key>=<mechanism>:"<reason>"`, and the reason names the property of the work that picks the mechanism:
 - an independent part whose intermediate reads are not needed later: `subagent`;
 - about three or more similar independent items (layers, libraries, review lenses): one `subagent` per item, or `workflow`;
 - interdependent code, ordering or design decisions, small single-file work: `main`;
