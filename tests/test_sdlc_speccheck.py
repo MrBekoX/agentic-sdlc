@@ -425,7 +425,7 @@ class TestPackaging(SpecCheckCase):
         head, body = text[4:].split("\n---\n", 1)
         fields = dict(line.split(": ", 1) for line in head.splitlines())
         self.assertEqual(fields["name"], ROLE)
-        self.assertEqual(fields["tools"], "Glob, Grep, Read")
+        self.assertEqual(fields["tools"], "Read")  # the reader reads only the files its card names
         self.assertIn('{"questions": [{"question"', body)
         self.assertIn('{"questions": []}', body)
         mirror = (REPO / "cursor" / "agents" / (ROLE + ".md")).read_text(encoding="utf-8")
