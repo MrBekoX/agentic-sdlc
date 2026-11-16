@@ -36,8 +36,9 @@
 - CI gives each gate job 120 minutes, because a job runs the suite three times. Main gets one concurrency group per commit, so merging several pull requests in a row no longer cancels the CI runs of the merge commits in between.
 - Docs:
   - The README and the adapter READMEs describe the runner, its engines, the role files and the step files.
-  - The Kimi docs name plugin skills `agentic-sdlc:<skill>`, as Kimi Code's plugin documentation does.
+  - The Kimi docs, the `using-agentic-sdlc` router and the `mind-spark` skill name plugin skills `agentic-sdlc:<skill>` (invoked as `/skill:agentic-sdlc:<skill>`), as Kimi Code's plugin documentation does; the skills had said Kimi resolves bare names only. `tests/test_kimi_packaging.py` keeps the skill text in line with the manifest.
   - `SECURITY.md` supports `0.7.x`.
+- Correct the record of the 0.6.0 fix round: the 0.6.0 notes say no live run measured it, but a second live run on 2026-10-22 applied the same change as `5b21df4` and passed none of its six procedure rows (5 FAIL, 1 not-run). The release readiness page, the plugin readme and the 0.7.0 ledger now say so.
 - Add the 0.7.0 release evidence ledger (`docs/release-evidence-0.7.0.md`); its verdict is do-not-publish. The 0.4.3, 0.5.0 and 0.6.0 ledgers are kept unchanged.
 
 ## 0.6.0 - 2026-10-16
