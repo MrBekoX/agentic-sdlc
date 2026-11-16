@@ -317,7 +317,7 @@ Important boundary: `spec-authoring` and `plan-authoring` are standalone prompt-
 
 ### Flow runner (preview)
 
-0.7.0 adds a deterministic flow runner, the base for moving the skills off prose orchestration. It is a standard-library Python CLI, `scripts/sdlc.py`, with its package `scripts/sdlc_runner/` and the JSON flows in [`flows/`](flows/). No skill, hook or command calls it yet: the skills above still run their 0.6.0 procedures.
+0.7.0 adds a deterministic flow runner, the base for moving the skills off prose orchestration. It is a standard-library Python CLI, `scripts/sdlc.py`, with its package `scripts/sdlc_runner/` and the JSON flows in [`flows/`](flows/). No skill, hook or command calls it yet: the skills above still run their 0.6.0 procedures. A `feature` or `bugfix` run takes these steps:
 
 ```text
 sdlc.py start <flow>   opens docs/agentic-sdlc/<slug>/: request, state, hash-chained logs
@@ -328,7 +328,7 @@ sdlc.py start <flow>   opens docs/agentic-sdlc/<slug>/: request, state, hash-cha
 sdlc.py next           prints the next card; its step text comes from skills/<skill>/steps/
 ```
 
-- **Flows:** `feature`, `bugfix`, `refactor`, `test`, `full`, `spec` and `plan`, and the one-step `design`, `code-review`, `security-review`, `audit` and `feedback`. Bugfix runs the loop in plan-only mode. `approve`, `run` (allow-listed test commands, no shell), `halt`, `resume` and `escalate` move a run on; `status` reads it.
+- **Flows:** `feature`, `bugfix`, `refactor`, `test`, `full`, `spec` and `plan`, and the one-step `design`, `code-review`, `security-review`, `audit` and `feedback`. Bugfix runs the loop in plan-only mode, `refactor` characterizes the current behaviour instead of drafting, `test` has no draft step, and `full` (gated only) adds intent, docs, quality-gate, diff-review and quality-review steps. `approve`, `run` (allow-listed test commands, no shell), `halt`, `resume` and `escalate` move a run on; `status` reads it.
 - **Loop engines:**
 
   | Runtime | Engine for the joint spec/plan loop |
