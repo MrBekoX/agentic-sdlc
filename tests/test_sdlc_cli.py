@@ -25,7 +25,7 @@ TESTS = REPO / "tests"
 if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
 
-from test_sdlc_engine import CHAIN_LINE, DATA_LINE, WINDOWS, EngineCase, card_fields  # noqa: E402
+from test_sdlc_engine import CHAIN_LINE, DATA_LINE, WINDOWS, EngineCase, TwoGateCase, card_fields, card_value  # noqa: E402
 from sdlc_runner import logs, runexec  # noqa: E402
 from sdlc_runner.textio import SdlcError  # noqa: E402
 
@@ -304,6 +304,72 @@ class TestOptionalImports(EngineCase):
 
         self.put_flow("optmark", edit)
         self.start("--option", "spec", flow="optmark")
+
+
+class TestTwoGateCards(TwoGateCase):
+    """The gate and claim cards of the two-gate fixture flow (hybrid spec/plan design §4.4, §5)."""
+
+    def data(self, text) -> list:
+        """(name, parsed value) of each line of the card's data section."""
+        lines = text.splitlines()
+        if DATA_LINE not in lines:
+            return []
+        section = lines[lines.index(DATA_LINE) + 1:lines.index("--- end data ---")]
+        return [(name, json.loads(value)) for name, value in (line.split("=", 1) for line in section)]
+
+    def gate_body(self, text, gate) -> str:
+        return text.split("--- gate: %s ---\n" % gate, 1)[1].split("\n--- end gate ---", 1)[0]
+
+    def test_wait_gate_card_names_the_gate_and_its_artifacts(self):
+        self.start()
+        self.advance_to("spec-check")
+        self.check_record("Which file format?", "Which delimiter?", "Who may export?")
+        self.check_resolve("Q1", "answered")
+        self.check_resolve("Q2", "minor")
+        self.check_resolve("Q3", "theirs", "--author-call")
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("wait-gate", "spec-review"), text)
+        self.assertLessEqual(len(text.encode("utf-8")), CARD_BUDGET)
+        first = self.gate_body(text, "spec-review").splitlines()[0]
+        for name in ("spec-review", "design.md", "spec/demo.md"):
+            self.assertIn(name, first)
+        self.assertNotIn("The draft waits", text)
+        self.assertEqual(card_value(text, "artifacts"), "design.md,spec/demo.md")
+        data = self.data(text)
+        self.assertEqual([name for name, _value in data], ["reader", "settled_answered", "settled_minor", "settled_theirs"])
+        self.assertEqual(data[0][1], {"artifact": "spec/demo.md", "reader": "fresh"})
+        self.assertEqual([value["id"] for _name, value in data[1:]], ["Q1", "Q2", "Q3"])
+        self.assertEqual(data[1][1], {"id": "Q1", "question": "Which file format?", "resolution": "settled as answered"})
+        lines = text.splitlines()
+        self.assertTrue(all(i > lines.index(DATA_LINE) for i, line in enumerate(lines) if "Which file format?" in line))
+        self.approve(text, gate="spec-review")
+        code, text = self.advance_to("plan-review")
+        first = self.gate_body(text, "plan-review").splitlines()[0]
+        self.assertIn("plan-review", first)
+        self.assertIn("plan/demo.md", first)
+        self.assertNotIn("design.md", first)
+        self.assertEqual(self.data(text), [])  # the plan's gate has no reader and no questions
+
+    def test_claim_card_lists_author_calls(self):
+        self.start()
+        self.advance_to("spec-check")
+        self.check_record("Which file format?", "Which delimiter?", "Who may export?", "Which encoding?")
+        self.check_resolve("Q1", "answered")
+        self.check_resolve("Q2", "minor")
+        self.check_resolve("Q3", "theirs", "--author-call")
+        self.check_resolve("Q4", "theirs", "--answer-seq", str(self.answer_seq()))
+        self.next()
+        code, text = self.advance_to("claim")
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("do", "claim"), text)
+        calls = [value for name, value in self.data(text) if name == "author_call"]
+        # design.md's D2 is the author's call (D1 is the user's), then the questions the main loop settled.
+        self.assertEqual([call["id"] for call in calls], ["D2", "Q2", "Q3"], text)
+        self.assertEqual(calls[0], {"id": "D2", "from": "design.md",
+                                    "text": "D2: Rows are streamed. (author's call: memory stays flat)"})
+        self.assertEqual(calls[1], {"id": "Q2", "from": "spec/demo.check.json", "pile": "minor",
+                                    "question": "Which delimiter?", "resolution": "settled as minor"})
+        self.assertEqual(calls[2]["pile"], "theirs")
+        self.assertLessEqual(len(text.encode("utf-8")), CARD_BUDGET)
 
 
 if __name__ == "__main__":

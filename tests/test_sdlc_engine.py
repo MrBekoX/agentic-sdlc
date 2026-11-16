@@ -1082,5 +1082,182 @@ class TestValidatorCheckModes(EngineCase):
         self.assertIn("sources", optional)
 
 
+# ---------------------------------------------------------------------------------------------
+# two gates (hybrid spec/plan design §3-§5) on tests/fixtures/sdlc/flows/twogate.json
+# ---------------------------------------------------------------------------------------------
+
+TWOGATE_FLOW = FIXTURES / "flows" / "twogate.json"
+# What the spec step's sources check wants: the one criterion names design.md's D1.
+TWOGATE_SPEC = SPEC_BODY.replace("then a CSV file returns every visible row.",
+                                 "then a CSV file returns every visible row. (source: D1)")
+# A plan without a spec: its own sourced criteria come before the first task (design §4.5).
+SPECLESS_PLAN_BODY = SPECLESS_PLAN[SPECLESS_PLAN.index("# Plan"):]
+
+
+class TwoGateCase(EngineCase):
+    """The two-gate fixture flow: `spec-review` over design.md and the spec after intent, spec and
+    the spec reader; `plan-review` over the plan; the loop's `draft` and `review` under --option loop."""
+
+    def make_root(self, root, shared_edit=None):
+        root = super().make_root(root, shared_edit)
+        shutil.copyfile(str(TWOGATE_FLOW), str(root / "flows" / "twogate.json"))
+        return root
+
+    def start(self, *extra, flow="twogate", **kwargs):
+        return super().start(*extra, flow=flow, **kwargs)
+
+    def put_twogate(self, flow_id, edit=None):
+        """The two-gate fixture flow saved under another id in the temp root, `edit(flow)` applied."""
+        flow = json.loads(TWOGATE_FLOW.read_text(encoding="utf-8"))
+        flow["id"] = flow_id
+        if edit is not None:
+            edit(flow)
+        textio.write_json_atomic(self.root / "flows" / (flow_id + ".json"), flow)
+
+    def check_record(self, *questions, slug="demo"):
+        """`check-record` with one reader question per argument (none: an empty list)."""
+        text = json.dumps({"questions": [{"question": q, "why": "the plan depends on it"} for q in questions]})
+        code, out = self.sdlc("check-record", "--slug", slug, "--text", text)
+        self.assertEqual(code, 0, out)
+        return out
+
+    def check_resolve(self, qid, pile, *extra, slug="demo"):
+        code, out = self.sdlc("check-resolve", "--slug", slug, "--id", qid, "--pile", pile,
+                              "--resolution", "settled as %s" % pile, *extra)
+        self.assertEqual(code, 0, out)
+        return out
+
+    def answer_seq(self, slug="demo"):
+        """Ask a design question in the current step, answer it, and return the answer record's seq."""
+        code, out = self.sdlc("ask", "--slug", slug, "--kind", "design", "--question", "Which encoding?")
+        self.assertEqual(code, 0, out)
+        code, out = self.sdlc("answer", "--slug", slug, "--quote", "UTF-8, please.")
+        self.assertEqual(code, 0, out)
+        return [r for r in logs.read(self.pkg(slug) / "questions.jsonl") if r["kind"] == "answer"][-1]["seq"]
+
+    def meta(self, kind, slug="demo") -> dict:
+        return frontmatter.split((self.pkg(slug) / kind / ("%s.md" % slug)).read_text(encoding="utf-8"))[0]
+
+    def edit(self, rel, old, new, slug="demo"):
+        path = self.pkg(slug) / rel
+        text = path.read_text(encoding="utf-8")
+        self.assertIn(old, text)
+        path.write_bytes(text.replace(old, new).encode("utf-8"))
+
+    def satisfy(self, step, text, slug="demo"):
+        if step == "intent":
+            self.put("design.md", DESIGN_BODY, slug)
+        elif step == "spec":
+            self.put("spec/%s.md" % slug, TWOGATE_SPEC, slug)
+        elif step == "spec-check":
+            self.check_record(slug=slug)
+        elif step in ("spec-review", "plan-review"):
+            self.approve(text, slug, gate=step)
+        elif step == "plan":
+            has_spec = (self.pkg(slug) / "spec" / ("%s.md" % slug)).is_file()
+            self.put("plan/%s.md" % slug, PLAN_BODY if has_spec else SPECLESS_PLAN_BODY, slug)
+        elif step == "branch":
+            self.git("checkout", "-q", "-b", "feat/%s" % slug)
+        else:
+            super().satisfy(step, text, slug)
+
+
+class TestTwoGates(TwoGateCase):
+    def test_gate_reopens_while_a_later_drafting_step_runs(self):
+        self.start()
+        code, text = self.advance_to("plan")
+        self.assertEqual(self.state()["steps"]["plan"]["visits"], 1)
+        self.edit("spec/demo.md", "every week", "every Monday")
+        code, text = self.next()  # only drafting steps started after spec-review: it waits again, no halt
+        fields = card_fields(text)
+        self.assertEqual((fields["state"], fields["step"]), ("wait-gate", "spec-review"), text)
+        self.assertEqual(self.state()["status"], "active")
+        self.assertEqual(self.records("halt"), [])
+        self.approve(text, gate="spec-review")
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "plan")
+
+    def test_gate_still_halts_after_branch_started(self):
+        self.start()
+        code, text = self.advance_to("branch")
+        self.assertEqual((card_fields(text)["state"], self.state()["steps"]["branch"]["visits"]), ("do", 1))
+        self.edit("spec/demo.md", "every week", "every Monday")
+        code, text = self.next(expect=3)
+        self.assertIn("reapproval needed: spec/demo.md", text)
+        self.assertEqual(self.state()["halt"]["step"], "spec-review")
+
+    def test_spec_is_approved_before_the_plan_gate(self):
+        self.start()
+        self.advance_to("spec-check")
+        self.assertEqual(self.meta("spec")["status"], "draft")  # written, not yet read by the reader
+        code, text = self.advance_to("spec-review")
+        self.assertEqual(card_fields(text)["state"], "wait-gate")
+        self.assertEqual(self.meta("spec")["status"], "reviewed")
+        self.approve(text, gate="spec-review")
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "plan")
+        self.assertEqual(self.meta("spec"), {"work_id": "demo", "status": "approved"})
+        self.assertFalse((self.pkg() / "plan" / "demo.md").exists())
+
+    def test_plan_stays_reviewed_until_its_own_gate(self):
+        self.start()
+        code, text = self.advance_to("plan-review")
+        self.assertEqual(card_fields(text)["state"], "wait-gate")
+        self.assertEqual((self.meta("spec")["status"], self.meta("plan")["status"]), ("approved", "reviewed"))
+        self.assertEqual(self.state()["stamps"], {"spec/demo.md": "approved", "plan/demo.md": "reviewed"})
+        self.approve(text, gate="plan-review")
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "branch")
+        self.assertEqual((self.meta("spec")["status"], self.meta("plan")["status"]), ("approved", "approved"))
+        self.advance_to("implement")
+        self.assertEqual((self.meta("spec")["status"], self.meta("plan")["status"]), ("in_progress", "in_progress"))
+
+    def test_loop_variant_stamps_as_before(self):
+        self.start("--option", "loop")
+        code, text = self.advance_to("review")
+        self.assertEqual(card_fields(text)["state"], "wait-gate")
+        steps = self.state()["steps"]
+        self.assertEqual([s for s in ("spec", "spec-check", "spec-review", "plan", "plan-review")
+                          if steps[s]["applies"]], [])
+        self.assertEqual(self.meta("spec"), {"work_id": "demo", "status": "reviewed"})
+        self.assertEqual(self.meta("plan"), {"work_id": "demo", "spec": "../spec/demo.md", "branch": "main",
+                                             "flow": "twogate", "status": "reviewed"})
+        self.approve(text)  # one gate over both; the steps that do not apply are not re-checked
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "branch")
+        self.assertEqual((self.meta("spec")["status"], self.meta("plan")["status"]), ("approved", "approved"))
+
+    def test_specless_feature_plan_is_stamped_spec_none_and_feature(self):
+        def spec_on_request(flow):  # the feature shape: the spec and its reader and gate only with --option spec
+            for step in flow["steps"]:
+                if step["id"] in ("spec", "spec-check", "spec-review"):
+                    step["applies_when"]["option"] = "spec"
+
+        for flow_id in ("feature", "plan"):
+            self.put_twogate(flow_id, spec_on_request)
+            slug = "nospec-" + flow_id
+            with self.subTest(flow=flow_id):
+                self.start(flow=flow_id, work_id=slug)
+                code, text = self.advance_to("plan-review", slug=slug)
+                self.assertEqual(card_fields(text)["state"], "wait-gate", text)
+                self.assertFalse((self.pkg(slug) / "spec" / ("%s.md" % slug)).exists())
+                self.assertEqual(self.meta("plan", slug), {"work_id": slug, "spec": "none", "branch": "main",
+                                                           "flow": flow_id, "status": "reviewed"})
+        # The clean twin: a feature run that asked for a spec plans from it and is stamped `flow: feature` too.
+        self.start("--option", "spec", flow="feature", work_id="with-spec")
+        code, text = self.advance_to("plan-review", slug="with-spec")
+        self.assertEqual(card_fields(text)["state"], "wait-gate", text)
+        self.assertEqual(self.meta("plan", "with-spec"), {"work_id": "with-spec", "spec": "../spec/with-spec.md",
+                                                          "branch": "main", "flow": "feature", "status": "reviewed"})
+
+
+class TestSpeclessFlows(unittest.TestCase):
+    def test_specless_flows_match_the_validator(self):
+        import validate_artifacts
+
+        self.assertEqual(manifest.SPECLESS_FLOWS, validate_artifacts.SPECLESS_FLOWS)
+        self.assertEqual(manifest.SPECLESS_FLOWS, ("bugfix", "feature", "plan"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,11 +3,14 @@
 - `approve <gate> --fingerprint F (--quote Q | --quote-file P) --source reply|original-request`
   records the user's approval in approvals.jsonl. Refused (exit 4) when the flow has no such gate,
   the gate is not where `next` waits (its artifacts fail their checks), F is not the current gate
-  fingerprint, a `reply` has no recorded wait at this fingerprint, or an `original-request` quote
-  is not in the stored request, the gate was approved before (the original quote cannot re-approve
-  a changed draft), a decision point has no recommendation, or a residual critic note is critical
-  or high or a contradiction or blocker. A degraded critic does not block a pre-approval; the
-  record says `critic=degraded`.
+  fingerprint, a step that wrote a gated artifact fails its done-checks again
+  (`artifact_checks_failed:<step>:<detail>`: a spec edited after its step must still pass it), a
+  `reply` has no recorded wait at this fingerprint, or an `original-request` quote is not in the
+  stored request, the gate was approved before (the original quote cannot re-approve a changed
+  draft), a decision point has no recommendation, a residual critic note is critical or high or a
+  contradiction or blocker, or (a gate over the spec) a question of the spec check is not settled.
+  A degraded critic or reader does not block a pre-approval; the record says `critic=degraded`
+  (with no review sidecar, `critic` is the freshness of the spec's reader).
 - `reject <gate> --quote ...` appends the user's change request to feedback.jsonl and reopens
   the step that drafted the gated artifacts (it re-enters with cause `reject`).
 - `ask --kind consent|design --question T` (the kind must be in the current step's `may_ask`)
@@ -19,12 +22,13 @@ Every quote is masked before it is stored. Each handler takes the package lock i
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import re
 import unicodedata
 from pathlib import Path
 
-from . import checks, engine, logs, manifest, mask
+from . import checks, engine, logs, manifest, mask, speccheck
 from . import state as state_mod
 from .lock import PackageLock
 from .textio import SdlcError, now_iso, read_json, read_text
@@ -133,7 +137,23 @@ def _waiting_at(ctx, step):
         raise SdlcError(4, "gate_not_waiting:%s:%s (run sdlc next)" % (preview.state, preview.step or "none"))
 
 
+def _check_file(ctx, step) -> tuple:
+    """(data, problem) of the spec check file (checks.read_check) when the gate covers the spec and
+    the file exists, else (None, None): a gate without the spec, or a spec nobody checked."""
+    if checks.artifact_rel(ctx, "spec") not in checks.gated_artifacts(ctx, step):
+        return None, None
+    if not Path(ctx.pkg).joinpath(*checks.check_file_rel(ctx).split("/")).exists():
+        return None, None
+    return checks.read_check(ctx)
+
+
+def _is_check(data) -> bool:
+    return data.get("schema") == speccheck.CHECK_SCHEMA_ID
+
+
 def _sidecars(ctx, step) -> list:
+    """The review sidecar of each gated artifact, then the spec check file when the gate covers the
+    spec and the file validates (told apart by its schema id)."""
     found = []
     for rel in checks.gated_artifacts(ctx, step):
         path = Path(ctx.pkg).joinpath(*rel.split("/")).with_suffix(".review.json")
@@ -143,16 +163,24 @@ def _sidecars(ctx, step) -> list:
             continue
         if isinstance(data, dict):
             found.append(data)
+    check, _problem = _check_file(ctx, step)
+    if check is not None:
+        found.append(check)
     return found
 
 
 def _critic(sidecars) -> str:
-    if not sidecars:
-        return "none"
-    return "degraded" if any(s.get("critic") == "degraded" for s in sidecars) else "fresh"
+    """The critic of the review sidecars; with none, the freshness of the spec's reader; else none."""
+    reviews = [s for s in sidecars if not _is_check(s)]
+    if reviews:
+        return "degraded" if any(s.get("critic") == "degraded" for s in reviews) else "fresh"
+    readers = [s.get("reader") for s in sidecars if _is_check(s)]
+    if readers:
+        return "degraded" if "degraded" in readers else "fresh"
+    return "none"
 
 
-def _preapproval_problem(sidecars):
+def _preapproval_problem(ctx, step, sidecars):
     for data in sidecars:
         for point in data.get("decisionPoints") or []:
             if isinstance(point, dict) and not str(point.get("recommendation") or "").strip():
@@ -161,7 +189,50 @@ def _preapproval_problem(sidecars):
             if isinstance(note, dict) and (note.get("severity") in BLOCKING_SEVERITIES
                                            or note.get("kind") in BLOCKING_KINDS):
                 return "blocking_residual_note:%s:%s" % (note.get("target"), note.get("category"))
+    check, problem = _check_file(ctx, step)
+    if problem:
+        return "check_invalid:%s" % problem
+    open_ids = checks.open_questions(check) if check is not None else []
+    if open_ids:
+        return "unsettled_question:%s" % ",".join(open_ids)
     return None
+
+
+def _applying(ctx, step) -> bool:
+    entry = (ctx.state.get("steps") or {}).get(step["id"]) or {}
+    if entry.get("applies") is None:
+        return engine.applies(ctx, step)[0]
+    return bool(entry["applies"])
+
+
+def _writers(ctx, step) -> list:
+    """The applying steps before the gate whose outputs hold a gated artifact, in flow order."""
+    gated = set(checks.gated_artifacts(ctx, step))
+    steps = ctx.flow["steps"]
+    found = []
+    for candidate in steps[:steps.index(step)]:
+        outputs = set()
+        for entry in candidate.get("outputs") or []:
+            parsed = manifest.parse_ref(entry)
+            if parsed["path"] is not None:
+                outputs.add(manifest.expand(parsed["path"], ctx.state))
+        if outputs & gated and _applying(ctx, candidate):
+            found.append(candidate)
+    return found
+
+
+def _recheck(ctx, step) -> None:
+    """Run the done-checks of the steps that wrote the gated artifacts again, as `next` would (with
+    the frontmatter it would stamp); SdlcError(4, artifact_checks_failed:<step>:<detail>) at the
+    first that fails. A done step is not checked again while its inputs hold, so a spec edited after
+    its step was done must still pass that step's checks before it is approved (design 4.4)."""
+    probe = engine.Context(ctx.project, ctx.root, ctx.pkg, copy.deepcopy(ctx.state), ctx.flow, ctx.shared)
+    probe.write = False
+    engine.stamp(probe)
+    for writer in _writers(probe, step):
+        for _name, result in engine._run_checks(probe, writer):
+            if not result.ok:
+                raise SdlcError(4, "artifact_checks_failed:%s:%s" % (writer["id"], result.detail))
 
 
 def _locked_context(ctx):
@@ -198,6 +269,7 @@ def approve(ctx, gate, fingerprint, quote, source, out=None) -> int:
     current = checks.gate_fingerprint(ctx, step)
     if fingerprint != current:
         raise SdlcError(4, "fingerprint_mismatch (run sdlc card and show the user the current gate message)")
+    _recheck(ctx, step)
     transitions = logs.read(Path(ctx.pkg) / engine.TRANSITIONS_LOG)
     sidecars = _sidecars(ctx, step)
     if source == "reply":
@@ -215,7 +287,7 @@ def approve(ctx, gate, fingerprint, quote, source, out=None) -> int:
             raise SdlcError(2, "request_unreadable") from None
         if not quote_in_request(quote, request):
             raise SdlcError(4, "quote_not_in_request (whole words of the stored request)")
-        problem = _preapproval_problem(sidecars)
+        problem = _preapproval_problem(ctx, step, sidecars)
         if problem:
             raise SdlcError(4, problem)
     plan_rel = _plan_rel(ctx, step)
@@ -230,18 +302,13 @@ def approve(ctx, gate, fingerprint, quote, source, out=None) -> int:
 
 
 def _drafting_step(ctx, step):
-    """The latest step before the gate whose outputs hold a gated artifact (else the one before it)."""
-    gated = set(checks.gated_artifacts(ctx, step))
+    """The latest applying step before the gate whose outputs hold a gated artifact (else the one
+    before it): `spec` for spec-review, never the reader of `spec-check`, which writes no gated file."""
+    writers = _writers(ctx, step)
+    if writers:
+        return writers[-1]
     steps = ctx.flow["steps"]
     earlier = steps[:steps.index(step)]
-    for candidate in reversed(earlier):
-        outputs = set()
-        for entry in candidate.get("outputs") or []:
-            parsed = manifest.parse_ref(entry)
-            if parsed["path"] is not None:
-                outputs.add(manifest.expand(parsed["path"], ctx.state))
-        if outputs & gated:
-            return candidate
     return earlier[-1] if earlier else None
 
 

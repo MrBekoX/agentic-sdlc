@@ -222,10 +222,17 @@ def _referenced(ctx, step) -> set:
 
 # --- runner-owned frontmatter ------------------------------------------------------------------
 
-def lifecycle_status(ctx) -> str:
-    """The status the runner stamps on the spec and plan (contract §8)."""
+def lifecycle_status(ctx, kind: str) -> str:
+    """The status the runner stamps on the spec or the plan (`kind`; contract §8, hybrid design §5).
+
+    `complete`, `ready_for_audit` and `in_progress` follow the run. Before that each artifact has
+    its own: `approved` once a done gate step has its body among its inputs; `reviewed` once the
+    step that writes it is done (`spec` or `plan`, or the loop's `draft`) and, for the spec, its
+    reader (`spec-check`) is done or does not apply; `draft` until then.
+    """
     steps = ctx.state.get("steps") or {}
-    ids = [step.get("id") for step in ctx.flow.get("steps", [])]
+    flow_steps = ctx.flow.get("steps", [])
+    ids = [step.get("id") for step in flow_steps]
 
     def done(step_id):
         return steps.get(step_id, {}).get("state") == "done"
@@ -233,23 +240,32 @@ def lifecycle_status(ctx) -> str:
     def entered(step_id):
         return steps.get(step_id, {}).get("visits", 0) > 0
 
+    def left_out(step_id):
+        return step_id not in ids or steps.get(step_id, {}).get("applies") is False
+
     if "claim" in ids and done("claim"):
         return "complete"
     if "audit" in ids and entered("audit"):
         return "ready_for_audit"
     if manifest.IMPLEMENT_STEP in ids and entered(manifest.IMPLEMENT_STEP):
         return "in_progress"
-    if any(step.get("gate") and done(step.get("id")) for step in ctx.flow.get("steps", [])):
+    rel = checks.artifact_rel(ctx, kind)
+    if any(step.get("gate") and done(step.get("id")) and rel in checks.gated_artifacts(ctx, step)
+           for step in flow_steps):
         return "approved"
-    if "draft" in ids and done("draft"):
+    read = kind != "spec" or done(speccheck.STEP_ID) or left_out(speccheck.STEP_ID)
+    if done("draft") or (done(kind) and read):
         return "reviewed"
     return "draft"
 
 
 def _plan_spec_value(ctx):
+    """`none` for a plan whose package has no spec in a flow that allows one (or the loop's bugfix
+    plan), else the path of the package's spec."""
     spec = ctx.pkg / "spec" / ("%s.md" % ctx.state["work_id"])
     loop = ctx.state.get("loop") or {}
-    if not spec.is_file() and (loop.get("mode") == "bugfix-plan" or ctx.state.get("flow") == "bugfix"):
+    specless = ctx.state.get("flow") in manifest.SPECLESS_FLOWS or loop.get("mode") == "bugfix-plan"
+    if specless and not spec.is_file():
         return "none"
     return "../spec/%s.md" % ctx.state["work_id"]
 
@@ -261,11 +277,11 @@ def _shown(value: str) -> str:
 def stamp(ctx) -> None:
     """Write the runner's frontmatter on spec/<id>.md and plan/<id>.md (`card`: into ctx.overlay).
 
-    A status that differs from the one the runner last stamped on that file is foreign: the file is
-    left alone and ctx.foreign names it, which fails every check of a step that reads it. A file
-    `start` imported (the plan flow's approved spec) keeps the status it was imported with.
+    Each file gets its own lifecycle status, and a plan gets the run's flow. A status that differs
+    from the one the runner last stamped on that file is foreign: the file is left alone and
+    ctx.foreign names it, which fails every check of a step that reads it. A file `start` imported
+    (the plan flow's approved spec) keeps the status it was imported with.
     """
-    status = lifecycle_status(ctx)
     branch = None
     imported = ctx.state.get("imported") or []
     for kind in ("spec", "plan"):
@@ -273,6 +289,7 @@ def stamp(ctx) -> None:
         path = ctx.pkg.joinpath(*rel.split("/"))
         if not path.is_file():
             continue
+        status = lifecycle_status(ctx, kind)
         try:
             text = read_text(path)
         except SdlcError:
@@ -293,10 +310,9 @@ def stamp(ctx) -> None:
         if kind == "plan":
             if branch is None:
                 branch = checks.current_branch(ctx) or ctx.state.get("base_branch") or "none"
-            spec_value = _plan_spec_value(ctx)
-            wanted["spec"] = spec_value
+            wanted["spec"] = _plan_spec_value(ctx)
             wanted["branch"] = branch
-            wanted["flow"] = "bugfix" if spec_value == "none" else ctx.state["flow"]
+            wanted["flow"] = ctx.state["flow"]
         wanted["status"] = status
         merged = collections.OrderedDict(wanted)
         for key, value in meta.items():
@@ -507,11 +523,14 @@ def advance(ctx, write: bool) -> Outcome:
 
 
 def _reopened_after_start(ctx, step) -> list:
-    """The gated artifacts changed since the last approval of `step`'s gate when a later step has
-    already started (design §5.10: a gate reopened after implement started halts); else []."""
+    """The gated artifacts changed since the last approval of `step`'s gate when a later step
+    outside the drafting steps has already started (design §5.10: a gate reopened after implement
+    started halts); else []. A later drafting step does not count (hybrid design §5): with two
+    gates, a spec changed while the plan is written reopens spec-review instead of halting."""
     steps = ctx.flow["steps"]
-    later = steps[steps.index(step) + 1:]
-    if not any((ctx.state.get("steps") or {}).get(s["id"], {}).get("visits", 0) > 0 for s in later):
+    entries = ctx.state.get("steps") or {}
+    later = [s for s in steps[steps.index(step) + 1:] if s["id"] not in manifest.DRAFTING_STEPS]
+    if not any(entries.get(s["id"], {}).get("visits", 0) > 0 for s in later):
         return []
     records = [r for r in logs.read(ctx.pkg / checks.APPROVALS_LOG)
                if r.get("kind") == "approve" and r.get("gate") == step.get("gate")]

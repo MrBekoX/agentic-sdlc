@@ -1,0 +1,133 @@
+{
+  "$comment": "Test fixture for the two-gate shape (hybrid spec/plan design §3, §4.3-§4.6, §5): intent -> spec -> spec-check -> spec-review (gate over design.md and the spec) -> plan -> plan-review (gate over the plan) -> branch -> implement -> claim, and under --option loop the loop's draft -> review (one gate over both) instead of the new steps, placed after them so a check of an earlier step must skip the steps that do not apply. Used by tests/test_sdlc_engine.py (TwoGateCase), tests/test_sdlc_gates.py and tests/test_sdlc_cli.py. Its step files live in tests/fixtures/sdlc/steps/ and are copied to skills/fixture/steps/ of a temp plugin root; both gates read review.md.",
+  "schema": "agentic-sdlc/flow@1",
+  "id": "twogate",
+  "entry_skill": "fixture",
+  "forms": ["gated", "light"],
+  "work_types": ["feature", "bugfix"],
+  "loop_mode": null,
+  "steps": [
+    {
+      "id": "strategy",
+      "file": "skills/fixture/steps/strategy.md",
+      "inputs": ["@start"],
+      "outputs": ["strategy.json"],
+      "done_when": [{"check": "strategy_ok"}],
+      "run_once": true,
+      "max_visits": 1
+    },
+    {
+      "id": "context",
+      "file": "skills/fixture/steps/context.md",
+      "inputs": ["request.md"],
+      "outputs": ["context.md"],
+      "done_when": [{"check": "exists", "path": "context.md"}],
+      "mechanism_key": "context"
+    },
+    {
+      "id": "intent",
+      "file": "skills/fixture/steps/intent.md",
+      "inputs": ["request.md", "context.md"],
+      "outputs": ["design.md"],
+      "done_when": [{"check": "validator", "mode": "design", "strict": true}],
+      "may_ask": ["design"]
+    },
+    {
+      "id": "spec",
+      "file": "skills/fixture/steps/spec.md",
+      "inputs": ["request.md", "context.md", "design.md"],
+      "outputs": ["spec/{work_id}.md"],
+      "done_when": [{"check": "validator", "mode": "spec", "strict": false, "sources": true}],
+      "applies_when": {"not_option": "loop"}
+    },
+    {
+      "id": "spec-check",
+      "file": "skills/fixture/steps/spec-check.md",
+      "inputs": ["design.md"],
+      "outputs": ["spec/{work_id}.check.json"],
+      "done_when": [{"check": "settled"}],
+      "applies_when": {"not_option": "loop", "form": "gated"},
+      "mechanism_key": "spec-check",
+      "role": "spec-builder-check",
+      "role_reads": ["design.md", "spec/{work_id}.md"],
+      "may_ask": ["design"]
+    },
+    {
+      "id": "spec-review",
+      "file": "skills/fixture/steps/review.md",
+      "inputs": ["design.md#body", "spec/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "spec-review"}],
+      "gate": "spec-review",
+      "applies_when": {"not_option": "loop", "form": "gated"}
+    },
+    {
+      "id": "plan",
+      "file": "skills/fixture/steps/plan.md",
+      "inputs": ["request.md", "context.md", "design.md", "spec/{work_id}.md#body?"],
+      "outputs": ["plan/{work_id}.md"],
+      "done_when": [{"check": "validator", "mode": "plan", "strict": true, "sources": true}],
+      "applies_when": {"not_option": "loop"}
+    },
+    {
+      "id": "plan-review",
+      "file": "skills/fixture/steps/review.md",
+      "inputs": ["plan/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "plan-review"}],
+      "gate": "plan-review",
+      "applies_when": {"not_option": "loop", "form": "gated"}
+    },
+    {
+      "id": "draft",
+      "file": "skills/fixture/steps/draft.md",
+      "inputs": ["request.md", "context.md", "design.md"],
+      "outputs": ["spec/{work_id}.md", "plan/{work_id}.md"],
+      "done_when": [
+        {"check": "validator", "mode": "spec", "strict": false},
+        {"check": "exists", "path": "plan/{work_id}.md"}
+      ],
+      "applies_when": {"option": "loop"},
+      "mechanism_key": "draft"
+    },
+    {
+      "id": "review",
+      "file": "skills/fixture/steps/review.md",
+      "inputs": ["spec/{work_id}.md#body", "plan/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "review"}],
+      "gate": "review",
+      "applies_when": {"option": "loop", "form": "gated"}
+    },
+    {
+      "id": "branch",
+      "file": "skills/fixture/steps/branch.md",
+      "inputs": [],
+      "outputs": [],
+      "done_when": [{"check": "branch_ok"}]
+    },
+    {
+      "id": "implement",
+      "file": {
+        "feature": "skills/fixture/steps/implement-feature.md",
+        "bugfix": "skills/fixture/steps/implement-bugfix.md"
+      },
+      "inputs": ["spec/{work_id}.md#body?", "plan/{work_id}.md#body"],
+      "outputs": ["evidence/{work_id}.tdd.md"],
+      "done_when": [
+        {"check": "run_recorded", "expect": "fail", "label": "red"},
+        {"check": "run_recorded", "expect": "pass", "label": "green"},
+        {"check": "report", "path": "evidence/{work_id}.tdd.md", "header": "# TDD evidence"}
+      ],
+      "max_visits": 5,
+      "mechanism_key": "implement"
+    },
+    {
+      "id": "claim",
+      "file": "skills/fixture/steps/claim.md",
+      "inputs": ["@source", "@tests"],
+      "outputs": ["evidence/{work_id}.claim.md"],
+      "done_when": [{"check": "report", "path": "evidence/{work_id}.claim.md", "header": "# Completion claim"}]
+    }
+  ]
+}

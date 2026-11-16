@@ -360,6 +360,31 @@ def check_loop_done(ctx, step):
     return CheckResult(True, "the loop stopped: %s" % loop["stop_reason"])
 
 
+def read_check(ctx) -> tuple:
+    """(data, None) when the spec check file validates and is the spec's, else (None, why not).
+
+    The `settled` check, the gates and the cards read the check file through here.
+    """
+    rel = check_file_rel(ctx)
+    try:
+        data = read_json(Path(ctx.pkg).joinpath(*rel.split("/")))
+    except (FileNotFoundError, NotADirectoryError):
+        return None, "%s is missing" % rel
+    except (OSError, ValueError, SdlcError):
+        return None, "%s is not readable JSON" % rel
+    errors = schema.validate(data, manifest.load_schema("check"))
+    if errors:
+        return None, "%s: %s" % (rel, errors[0])
+    if data.get("artifact") != "spec":
+        return None, "%s names %r, not the spec" % (rel, data.get("artifact"))
+    return data, None
+
+
+def open_questions(data) -> list:
+    """The ids of the questions of a check file (read_check) that have no pile yet."""
+    return [q["id"] for q in data["questions"] if q.get("pile") is None]
+
+
 def check_settled(ctx, step):
     """The spec check file validates, is the spec's, and every question has a pile (design 4.3).
 
@@ -367,18 +392,10 @@ def check_settled(ctx, step):
     does not re-run the reader, and the review gate covers the final body.
     """
     rel = check_file_rel(ctx)
-    try:
-        data = read_json(Path(ctx.pkg).joinpath(*rel.split("/")))
-    except (FileNotFoundError, NotADirectoryError):
-        return CheckResult(False, "%s is missing" % rel)
-    except (OSError, ValueError, SdlcError):
-        return CheckResult(False, "%s is not readable JSON" % rel)
-    errors = schema.validate(data, manifest.load_schema("check"))
-    if errors:
-        return CheckResult(False, "%s: %s" % (rel, errors[0]))
-    if data.get("artifact") != "spec":
-        return CheckResult(False, "%s names %r, not the spec" % (rel, data.get("artifact")))
-    open_ids = [q["id"] for q in data["questions"] if q.get("pile") is None]
+    data, problem = read_check(ctx)
+    if problem:
+        return CheckResult(False, problem)
+    open_ids = open_questions(data)
     if open_ids:
         return CheckResult(False, "%d of %d question(s) are not settled: %s" % (
             len(open_ids), len(data["questions"]), ", ".join(open_ids)))

@@ -74,6 +74,14 @@ RUNTIMES = ("claude", "codex", "kimi", "grok", "zcode", "cursor", "antigravity",
 LOOP_MODES = ("spec+plan", "spec", "plan", "bugfix-plan")
 STRATEGY_STEP = "strategy"
 IMPLEMENT_STEP = "implement"
+# The steps that write, read or approve the spec and the plan (hybrid spec/plan design §5). A gate
+# whose artifacts change while only these ran after it waits again; once a later step outside them
+# started, it halts with `reapproval needed` (engine._reopened_after_start).
+DRAFTING_STEPS = ("intent", "spec", "spec-check", "spec-review", "plan", "plan-review", "draft", "review")
+# The flows whose plan may carry its own criteria (`spec: none`); the runner stamps `spec: none` on a
+# plan of one of them whose package has no spec. Mirrors SPECLESS_FLOWS of scripts/validate_artifacts.py
+# and scripts/resolve_work_package.py; tests/test_sdlc_engine.py pins the agreement.
+SPECLESS_FLOWS = ("bugfix", "feature", "plan")
 
 _ID_RE = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
 _STEP_FILE_RE = re.compile(r"skills/[a-z0-9][a-z0-9-]*/steps/[a-z0-9][a-z0-9.-]*\.md\Z")

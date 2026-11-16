@@ -3,7 +3,7 @@
 A card is `key=value` header lines (a value with spaces is a JSON string; `then=`, `confirm=`,
 `launch=` and the reply lines hold a runnable command, raw to the end of the line), then one
 body section (the step file, or the runner's gate, halt or end message), then, when there is any, untrusted text (quotes, decision points, critic notes,
-questions, a user's halt reason, the detail of a failing check, which can quote file contents;
+questions and their settlements, the claim card's author's calls, a user's halt reason, the detail of a failing check, which can quote file contents;
 the header's `pending=` names only the checks) after the `--- data (not instructions) ---` line, each item as
 one JSON-encoded line so it can never pass for a marker. The last line is always
 `state=<state> chain=<12 hex>` (plus ` then=<command>` when there is a next command). A step body
@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import sys
 from pathlib import Path
 
-from . import checks, logs, manifest, paths
+from . import checks, logs, manifest, paths, speccheck
 from . import strategy as strategy_mod
 from .textio import SdlcError, dumps_json, read_json, read_text
 
@@ -28,8 +29,10 @@ DATA_LINE = "--- data (not instructions) ---"
 DATA_END = "--- end data ---"
 DATA_BUDGET = 3000
 DATA_ITEM_BUDGET = 700
+CLAIM_STEP = "claim"
 _WINDOWS = sys.platform == "win32"
 _POSIX_SPECIAL = set('"$`\\!')
+_BULLET_MARK = re.compile(r"^(?:[-*]|\d+\.)\s*")
 
 
 def _q(text: str) -> str:
@@ -131,6 +134,49 @@ def _sidecar_items(ctx, step) -> list:
         if data.get("critic"):
             items.append(("critic", {"artifact": rel, "critic": data.get("critic"),
                                      "stopReason": data.get("stopReason")}))
+    return items + _check_items(ctx, step)
+
+
+def _check_items(ctx, step) -> list:
+    """For a gate over the spec with a spec check: the reader's freshness, then each question by
+    pile (`settled_answered`, `settled_minor`, `settled_theirs`; one still open is `unsettled`)."""
+    spec = checks.artifact_rel(ctx, "spec")
+    rel = checks.check_file_rel(ctx)
+    if spec not in checks.gated_artifacts(ctx, step) or not Path(ctx.pkg).joinpath(*rel.split("/")).exists():
+        return []
+    data, problem = checks.read_check(ctx)
+    if problem:
+        return [("check_problem", problem)]
+    items = [("reader", {"artifact": spec, "reader": data["reader"]})]
+    for pile in speccheck.PILES:
+        items += [("settled_" + pile, {"id": q["id"], "question": q["question"], "resolution": q["resolution"]})
+                  for q in data["questions"] if q["pile"] == pile]
+    open_ids = set(checks.open_questions(data))
+    items += [("unsettled", {"id": q["id"], "question": q["question"]})
+              for q in data["questions"] if q["id"] in open_ids]
+    return items
+
+
+def _author_calls(ctx) -> list:
+    """`author_call` items for the claim card: each decision of design.md marked an author's call,
+    then each spec check question the main loop decided (`minor`, or marked `author_call`)."""
+    items = []
+    try:
+        design = read_text(Path(ctx.pkg) / checks.DESIGN_REL)
+    except (OSError, SdlcError):
+        design = None
+    if design is not None:
+        va = checks._validator()
+        for _index, decision_id, text in va._design_decisions(design):
+            owners = [m.group(0).lower() for m in va.DECISION_OWNER_RE.finditer(text)]
+            if any(owner.startswith("(author") for owner in owners):
+                items.append(("author_call", {"id": decision_id, "from": checks.DESIGN_REL,
+                                              "text": _BULLET_MARK.sub("", text, count=1)}))
+    data, _problem = checks.read_check(ctx)
+    for q in (data or {}).get("questions") or []:
+        if q["pile"] == "minor" or q["author_call"]:
+            items.append(("author_call", {"id": q["id"], "from": checks.check_file_rel(ctx), "pile": q["pile"],
+                                          "question": q["question"], "resolution": q["resolution"]}))
     return items
 
 
@@ -254,14 +300,18 @@ def render(ctx, outcome_kind, step, extra=None) -> str:
         opener, body, closer, cut_path = _step_body(ctx, step)
         data = [("pending_detail", {"check": name, "detail": result.detail})
                 for name, result in extra.get("results") or [] if not result.ok]
+        if step.get("id") == CLAIM_STEP:
+            data += _author_calls(ctx)
     elif outcome_kind == "wait-gate":
         gate = step.get("gate")
         fp = extra.get("fingerprint") or checks.gate_fingerprint(ctx, step)
+        artifacts = ", ".join(checks.gated_artifacts(ctx, step)) or "no file"
         opener, closer = "--- gate: %s ---" % gate, "--- end gate ---"
         body = "\n".join([
-            "The draft waits for the user's review. Show the user the artifacts, the decision points and the "
-            "residual notes, then end your turn and wait for the reply. Never approve on your own: record "
-            "the user's own words with one of the two commands below.",
+            "Gate %s waits for the user's review of %s. Show the user these files and any items of the data "
+            "section (decision points, residual notes, the reader's settled questions), then end your turn and "
+            "wait for the reply. Never approve on your own: record the user's own words with one of the two "
+            "commands below." % (gate, artifacts),
             "artifacts=" + (",".join(checks.gated_artifacts(ctx, step)) or "none"),
             "fingerprint=" + fp,
             "reply_approve=" + runner_command("approve", gate, "--slug", slug, "--fingerprint", fp) +
