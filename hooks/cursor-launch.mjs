@@ -8,7 +8,7 @@
 // (Cursor staff, forum, 2026-04-13). CURSOR_PLUGIN_ROOT is only how the manifest
 // finds this file; handler paths are not taken from the shell command.
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -185,22 +185,53 @@ if (!HANDLERS.has(handler)) {
   process.exit(0);
 }
 
+// A shell command is the one place where a guard that could not answer must not let the command
+// through: a crashed shell-command guard (scan-commit, destructive-command-guard, branch-guard) or
+// an answer that is not a JSON object denies it. Empty output is the guards' normal "nothing to
+// say" and stays an allow; other events keep failing open.
+function failed(event, code) {
+  if (event === 'beforeShellExecution') {
+    return permission('deny', `agentic-sdlc: the ${handler} shell-command guard could not check this command `
+      + `(${code}); it was not run.`);
+  }
+  return allow(event);
+}
+
+// The handler runs in the project folder. A folder that no longer exists (deleted, or a stale
+// workspace root) would make the spawn itself fail and lock every shell command out, `cd ..`
+// included, so the launcher's own folder stands in for it.
+function runnableCwd(input) {
+  const cwd = projectCwd(input);
+  try {
+    if (statSync(cwd).isDirectory()) return cwd;
+  } catch {
+    // fall through
+  }
+  return process.cwd();
+}
+
 const translated = translateIn(event, input);
-const result = await runHandler(handler, event, translated, projectCwd(input));
+const result = await runHandler(handler, event, translated, runnableCwd(input));
 if (result.stderr) process.stderr.write(result.stderr.endsWith('\n') ? result.stderr : `${result.stderr}\n`);
 if (result.code !== 0) {
   process.stderr.write(`error=cursor_handler_failed:${handler}\n`);
-  emit(allow(event));
+  emit(failed(event, 'cursor_handler_failed'));
   process.exit(0);
 }
 if (!result.stdout.trim()) {
   emit(allow(event));
   process.exit(0);
 }
+let answer;
 try {
-  emit(translateOut(event, handler, JSON.parse(result.stdout)));
+  answer = JSON.parse(result.stdout);
 } catch {
+  answer = undefined;
+}
+if (!answer || typeof answer !== 'object' || Array.isArray(answer)) {
   process.stderr.write('error=cursor_handler_output_invalid\n');
-  emit(allow(event));
+  emit(failed(event, 'cursor_handler_output_invalid'));
+} else {
+  emit(translateOut(event, handler, answer));
 }
 process.exit(0);

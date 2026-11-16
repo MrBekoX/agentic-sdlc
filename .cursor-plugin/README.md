@@ -77,7 +77,7 @@ Cursor has no Claude Workflow tool. Spec and plan drafting uses the author, then
 | Rules | `rules/agentic-sdlc.mdc` | Always-on pointer at the skills and contracts |
 | Hooks | `hooks/hooks-cursor.json` | Command guards, write scan, flow-order, startup context, opt-in worktree scan |
 
-Hook commands read `CURSOR_PLUGIN_ROOT` inside Node. They do not splice the install path into shell code, so a path with spaces or non-ASCII characters stays data. `hooks/cursor-launch.mjs` maps Cursor's hook JSON onto the shared handlers and maps their decisions back to `permission`, `additional_context` or `followup_message`.
+Hook commands read `CURSOR_PLUGIN_ROOT` inside Node. They do not splice the install path into shell code, so a path with spaces or non-ASCII characters stays data. `hooks/cursor-launch.mjs` maps Cursor's hook JSON onto the shared handlers and maps their decisions back to `permission`, `additional_context` or `followup_message`. Before a shell command, a guard that crashes or answers with output the launcher cannot read denies the command; empty output is an allow.
 
 ## Limits
 

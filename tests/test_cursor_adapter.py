@@ -206,5 +206,86 @@ class CursorRoleFileTests(unittest.TestCase):
         self.assertEqual([e for e in check_cursor_plugin.validate(REPO) if "agent" in e], [])
 
 
+class CursorLauncherFailClosedTests(unittest.TestCase):
+    """Plan Task 20: for `beforeShellExecution` the launcher denies when the command guard crashes or
+    answers with output it cannot read; empty output stays an allow, and the other events keep
+    failing open. The launcher only starts handlers that sit next to it, so each case copies it into
+    a temp folder beside a stand-in handler with an allowed name."""
+
+    HANDLER = "destructive-command-guard.mjs"
+
+    def setUp(self):
+        if shutil.which("node") is None:
+            self.skipTest("node not available")
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        shutil.copyfile(REPO / "hooks" / "cursor-launch.mjs", self.tmp / "cursor-launch.mjs")
+
+    def launch(self, event, handler_source, payload=None):
+        (self.tmp / self.HANDLER).write_text(handler_source, encoding="utf-8")
+        proc = subprocess.run([shutil.which("node"), str(self.tmp / "cursor-launch.mjs"), "--event", event,
+                               "--handler", self.HANDLER],
+                              input=json.dumps(payload or {"command": "git status", "cwd": str(self.tmp)}),
+                              capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout), proc.stderr
+
+    def test_a_crashed_or_unreadable_guard_denies_the_shell_command(self):
+        for name, source, error in (("crash", "process.exit(3);\n", "cursor_handler_failed"),
+                                    ("throw", "throw new Error('boom');\n", "cursor_handler_failed"),
+                                    ("invalid", "process.stdout.write('not json');\n", "cursor_handler_output_invalid")):
+            with self.subTest(handler=name):
+                out, stderr = self.launch("beforeShellExecution", source)
+                self.assertEqual(out["permission"], "deny", out)
+                self.assertIn(error, out["agent_message"])
+                self.assertIn("error=" + error, stderr)
+
+    def test_an_answer_that_is_not_an_object_denies_the_shell_command(self):
+        for value in ("null", "42", "[]", '"allow"'):
+            with self.subTest(answer=value):
+                out, stderr = self.launch("beforeShellExecution", "process.stdout.write(%r);\n" % value)
+                self.assertEqual(out["permission"], "deny", out)
+                self.assertIn("error=cursor_handler_output_invalid", stderr)
+
+    def test_a_missing_project_folder_does_not_lock_the_shell(self):
+        # A deleted folder (or a stale workspace root) used to make the spawn itself fail, which now
+        # denies: the launcher runs the guard from its own folder instead, so `cd ..` still works.
+        gone = self.tmp / "deleted-project"
+        launcher = REPO / "hooks" / "cursor-launch.mjs"
+        for payload, expected in (({"command": "cd ..", "cwd": str(gone)}, "allow"),
+                                  ({"command": "rd /s /q build", "cwd": str(gone)}, "deny"),
+                                  ({"command": "git status", "workspace_roots": [str(gone)]}, "allow")):
+            with self.subTest(payload=payload):
+                proc = subprocess.run([shutil.which("node"), str(launcher), "--event", "beforeShellExecution",
+                                       "--handler", self.HANDLER], input=json.dumps(payload),
+                                      capture_output=True, text=True, encoding="utf-8", timeout=30,
+                                      env={k: v for k, v in os.environ.items() if k != "CURSOR_PROJECT_DIR"})
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(json.loads(proc.stdout)["permission"], expected, proc.stdout + proc.stderr)
+
+    def test_empty_output_allows_and_other_events_stay_open(self):
+        out, _ = self.launch("beforeShellExecution", "")
+        self.assertEqual(out, {"permission": "allow"})
+        for source in ("process.exit(3);\n", "process.stdout.write('not json');\n"):
+            with self.subTest(source=source):
+                out, _ = self.launch("preToolUse", source, {"tool_name": "Write", "cwd": str(self.tmp),
+                                                             "tool_input": {"path": "a.txt", "contents": "x"}})
+                self.assertEqual(out, {"permission": "allow"})
+
+    def test_cmd_tree_deletes_are_denied_through_the_launcher(self):
+        shutil.copyfile(REPO / "hooks" / "cursor-launch.mjs", self.tmp / "cursor-launch.mjs")
+        hooks = REPO / "hooks"
+        for command, expected in (("cmd /c rd /s /q build", "deny"), ('cmd /d /s /c "r^d /s /q build"', "deny"),
+                                  ("cmd /c echo ok & del /s /q *.log", "deny"), ("dir /s", "allow"),
+                                  ("rmdir build", "allow")):
+            with self.subTest(command=command):
+                proc = subprocess.run([shutil.which("node"), str(hooks / "cursor-launch.mjs"), "--event",
+                                       "beforeShellExecution", "--handler", self.HANDLER],
+                                      input=json.dumps({"command": command, "cwd": str(self.tmp)}),
+                                      capture_output=True, text=True, encoding="utf-8", timeout=30)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(json.loads(proc.stdout)["permission"], expected, proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

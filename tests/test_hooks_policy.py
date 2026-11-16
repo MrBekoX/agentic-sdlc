@@ -94,6 +94,53 @@ class TestDestructiveCommandGuard(unittest.TestCase):
                 reason = out["hookSpecificOutput"]["permissionDecisionReason"]
                 self.assertIn("powershell-remove-item-recurse", reason)
 
+    def test_blocks_cmd_recursive_removes(self):
+        # Plan Task 20: cmd.exe's own tree deletes, at the top level and inside a `cmd /c` or `/k`
+        # payload, with `^` escapes, `&`/`&&`/`||` separators and run-together switches. Each of
+        # these was an allow before (probed on the wave-A review).
+        blocked = [
+            r"cmd /c rd /s /q C:\work\tmp",
+            'cmd.exe /c "rmdir /s /q build"',
+            'cmd /d /s /c "r^d /s /q build"',
+            "cmd /c echo ok & rd /s /q build",
+            "cmd /c del /s /q *.log",
+            r"cmd /c erase /s /q build\*",
+            'cmd /c "cd build && rd /s /q ."',
+            "cmd /c dir || rd /s/q build",
+            "cmd /k rmdir /S build",
+            "rd /s /q build",
+            "RD /S /Q build",
+            "del /q/s *.tmp",
+            # Found by the Task 20 review: Git Bash's `//` spellings, glued switches and runs, the
+            # `/r` synonym, `@` and `call` prefixes, and cmd named through its variable.
+            'cmd //c "rd /s /q x"',
+            "cmd //c rd //s //q x",
+            "rd/s/q x",
+            "cmd /c del/s/q *.obj",
+            "cmd/c rd /s /q x",
+            'cmd /c"rd /s /q x"',
+            "cmd /crd /s /q x",
+            "cmd /r rd /s /q x",
+            "cmd /c @rd /s /q x",
+            "cmd /c call rd /s /q x",
+            "& $env:ComSpec /c rd /s /q x",
+            "%COMSPEC% /c rd /s /q x",
+            "del /s/a:h x",
+        ]
+        for tool in ("Bash", "PowerShell"):
+            for command in blocked:
+                with self.subTest(tool=tool, command=command):
+                    out = self.run_hook(command, tool_name=tool)
+                    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+                    self.assertIn("cmd-remove-recursive", reason)
+
+    def test_allows_cmd_commands_that_delete_no_tree(self):
+        for command in ("dir /s", "rmdir build", "rd build", "del /q file.txt", "cmd /c dir /s",
+                        "cmd /c echo rd /s /q build", "findstr /s needle *.txt", "xcopy /s a b", "robocopy /s a b",
+                        "attrib /s *.txt", "rd /?", "call build.cmd", "@echo off", "cmd /c echo hi"):
+            with self.subTest(command=command):
+                self.assertEqual(self.run_hook(command, tool_name="PowerShell"), {})
+
     def test_blocks_git_clean_fdx(self):
         out = self.run_hook("git clean -fdx")
         reason = out["hookSpecificOutput"]["permissionDecisionReason"]
