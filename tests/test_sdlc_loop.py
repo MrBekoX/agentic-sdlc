@@ -109,6 +109,79 @@ class TestStaging(LoopCase):
         self.assertIn(str(self.draft("brief.md")), prompt)
         self.assertIn(str(self.draft("spec.r0.md")), prompt)
 
+    def test_native_engine_prompts_are_staged_for_every_round(self):
+        # A Claude or Grok workflow asks the runner for no cards, so every prompt it will name is
+        # written with the brief: round 0's authors, each round's critic, and the revisers below
+        # max_rounds (contract §10, design §5.9.2).
+        cases = (("feature", "feature", "demo", ["author-spec", "author-plan"], "spec"),
+                 ("bugfix", "bugfix", "fix", ["author-plan"], "bugfix-plan"))
+        for flow, work_type, slug, authors, first_mode in cases:
+            with self.subTest(flow=flow):
+                self.to_draft(flow=flow, work_type=work_type, runtime="claude",
+                              capabilities="workflow=yes,subagent=yes,team=no", slug=slug)
+                max_rounds = self.state(slug)["loop"]["max_rounds"]
+                expected = ["%s.r0.md" % role for role in authors]
+                for round_no in range(1, max_rounds + 1):
+                    expected.append("critic.r%d.md" % round_no)
+                    if round_no < max_rounds:
+                        expected += ["%s.r%d.md" % (role, round_no) for role in authors]
+                staged = sorted(p.name for p in self.draft("prompts", slug).iterdir())
+                self.assertEqual(staged, sorted(expected))
+                first = self.draft("prompts/%s.r0.md" % authors[0], slug).read_text(encoding="utf-8")
+                self.assertIn("author mode %s" % first_mode, first)
+                critic = self.draft("prompts/critic.r2.md", slug).read_text(encoding="utf-8")
+                for name in ["brief.md", "validator.r2.json"] + ["%s.r1.md" % a.split("-")[1] for a in authors]:
+                    self.assertIn(str(self.draft(name, slug)), critic)
+                revise = self.draft("prompts/author-plan.r1.md", slug).read_text(encoding="utf-8")
+                self.assertIn("author mode revise", revise)
+                for name in ("plan.r0.md", "critic.r1.json", "validator.r1.json"):
+                    self.assertIn(str(self.draft(name, slug)), revise)
+
+    def test_runner_loop_stages_only_the_current_prompt(self):
+        # The engine decides, not the runtime: Claude Code with the draft on the runner-driven loop
+        # gets one card at a time like Codex.
+        no_workflow = ("draft=runner-loop:no workflow tool", "draft.critic=runner-loop:no workflow tool")
+        for runtime, slug, overrides in (("codex", "demo", ()), ("claude", "cl", no_workflow)):
+            with self.subTest(runtime=runtime):
+                self.to_draft(runtime=runtime, slug=slug, overrides=overrides)
+                self.assertEqual(self.state(slug)["loop"]["engine"], "runner-loop")
+                self.assertEqual(sorted(p.name for p in self.draft("prompts", slug).iterdir()), ["author-spec.r0.md"])
+
+    def test_an_escalation_that_changes_the_mode_stages_the_prompts_again(self):
+        # spec -> feature keeps the draft step and its visit but turns the loop to spec+plan: the
+        # prompts staged for spec mode would name no plan author and give the critic no plan.
+        self.to_draft(flow="spec", work_type="test", runtime="claude",
+                      capabilities="workflow=yes,subagent=yes,team=no", slug="esc")
+        self.assertFalse(self.draft("prompts/author-plan.r0.md", "esc").exists())
+        code, text = self.sdlc("escalate", "feature", "--slug", "esc", "--reason", "build it")
+        self.assertEqual(code, 0, text)
+        for _ in range(4):
+            code, text = self.next("esc")
+            if card_fields(text).get("step") == "draft":
+                break
+            self.satisfy(card_fields(text).get("step"), text, "esc")
+        launch = json.loads(card_value(text, "launch")[len("Workflow "):])
+        self.assertEqual(launch["args"]["mode"], "spec+plan")
+        self.assertTrue(self.draft("prompts/author-plan.r0.md", "esc").is_file())
+        critic = self.draft("prompts/critic.r1.md", "esc").read_text(encoding="utf-8")
+        self.assertIn(str(self.draft("plan.r0.md", "esc")), critic)
+        self.assertIn("loop mode spec+plan", critic)
+
+    def test_staged_prompts_follow_the_engine_of_each_workflow_runtime(self):
+        full = sorted(["author-spec.r0.md", "author-plan.r0.md", "critic.r1.md", "author-spec.r1.md", "author-plan.r1.md",
+                       "critic.r2.md", "author-spec.r2.md", "author-plan.r2.md", "critic.r3.md"])
+        source = self.root / "workflows" / "grok" / "spec-plan-draft.rhai"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b'let meta = #{ name: "spec-plan-draft" };\n')
+        self.to_draft(runtime="grok", capabilities="workflow=yes,subagent=yes,team=no", slug="gk")
+        self.assertEqual(sorted(p.name for p in self.draft("prompts", "gk").iterdir()), full)
+        # The ZCode driver asks the runner for each card, so its launch stages no prompt.
+        self.to_draft(runtime="zcode", capabilities="workflow=yes,subagent=yes,team=no", slug="zc",
+                      overrides=("draft=workflow:the user asked for a ZCode workflow",
+                                 "draft.critic=workflow:the user asked for a ZCode workflow"))
+        self.assertEqual(self.state("zc")["loop"]["engine"], "zcode-workflow")
+        self.assertFalse(self.draft("prompts", "zc").exists())
+
     def test_role_path_falls_back_to_public_layout(self):
         self.assertEqual(loop.role_path(REPO, "spec-plan-critic"), REPO / "agents" / "spec-plan-critic.md")
         public = self.tmp / "public"
