@@ -2114,7 +2114,14 @@ class TestCiWorkflowHygiene(unittest.TestCase):
                              "`push` must stay filtered to main")
 
     def test_superseded_runs_are_cancelled_except_on_main(self):
-        self.assertIn("group: ${{ github.workflow }}-${{ github.ref }}", self.text)
+        # A concurrency group holds one running and one pending run, and a newer pending run cancels
+        # the older one even with cancel-in-progress off. With one group for all of main, merging
+        # #18-#25 in a row on 2026-11-16 left the first and last merge commits a run and cancelled
+        # the six between. Main therefore gets a group per commit; a pull request keeps one per ref.
+        self.assertIn(
+            "group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}",
+            self.text,
+        )
         self.assertIn("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}", self.text)
 
     def test_every_job_bounds_its_runtime(self):
