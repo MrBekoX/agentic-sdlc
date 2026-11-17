@@ -4,11 +4,12 @@ Contract: docs/agentic-sdlc/notes/2026-10-22-runner-contract.md §3 (state.json)
 §8 (`next`, fix rounds), §9 (strategy, mandated fresh keys), §10 (the spec/plan loop, ingest),
 §12 (`sdlc run`), §13 (the CLI's last line), §14 (cards), §15 (every flow end to end).
 
-Each test drives a real flow (flows/feature.json or flows/bugfix.json) from `start` to its end
-through the in-process CLI, on the harness of tests/test_sdlc_engine.py and tests/test_sdlc_loop.py
+Each test drives a real flow (flows/*.json) from `start` to its end through the in-process CLI,
+on the harness of tests/test_sdlc_engine.py and tests/test_sdlc_loop.py
 (a temp plugin root with the real flows, the role files and the contracts; a temp git project).
-The test plays the model: it does what each card asks (the context report, each loop role's output
-at the card's write path, the reports), records RED and GREEN runs through `sdlc run` with the
+The test plays the model: it does what each card asks (the context report, design.md, the spec and the
+plan the main loop writes, the spec reader's answer at the card's write path, each loop role's output
+under `--option loop`, the reports), records RED and GREEN runs through `sdlc run` with the
 guarded fake test runner, creates the work branch in the temp repo, and records the user's reply at
 the gate. The assertions read only what the runner wrote: the cards' `state=` and `chain=` lines,
 state.json, the hash-chained logs and the package files.
@@ -55,14 +56,27 @@ from sdlc_runner import frontmatter, logs, textio  # noqa: E402
 from sdlc_runner import state as sdlc_state  # noqa: E402
 from scripts import build_release  # noqa: E402
 
-# The steps a finished run did, in order: the loop variant (`--option loop`) of the feature and bugfix
-# flows, and the main loop's default feature path with and without a spec (hybrid spec/plan design §3).
-FLOW_STEPS = ["strategy", "context", "intent", "draft", "review", "branch", "implement", "security", "audit",
-              "claim"]
-BUGFIX_STEPS = ["strategy", "context", "draft", "review", "branch", "implement", "security", "audit", "claim"]
-SPECLESS_STEPS = ["strategy", "context", "intent", "plan", "plan-review", "branch", "implement", "security", "audit",
-                  "claim"]
-SPEC_STEPS = SPECLESS_STEPS[:3] + ["spec", "spec-check", "spec-review"] + SPECLESS_STEPS[3:]
+def default_steps(flow_id, form="gated", options=(), imported=False) -> list:
+    """The steps a finished run of a real flow records, in order (hybrid spec/plan design §3), read from
+    flows/<id>.json: a step applies when its `form`, `option`, `not_option` and `imported` conditions hold.
+    A probe-gated step (docs-check, quality-gates) is left out: the temp project has no dependency to
+    document and no toolchain to gate."""
+    flow = json.loads((REPO / "flows" / (flow_id + ".json")).read_text(encoding="utf-8"))
+    found = []
+    for step in flow["steps"]:
+        when = step.get("applies_when") or {}
+        holds = (when.get("form", form) == form and when.get("option", "any") in tuple(options) + ("any",)
+                 and when.get("not_option") not in options and when.get("imported", imported) == imported
+                 and "probe" not in when)
+        if holds:
+            found.append(step["id"])
+    return found
+
+
+# The steps a finished run did: the default shape of each real flow, and the opt-in loop variants.
+FLOW_STEPS = {flow_id: default_steps(flow_id) for flow_id in ("feature", "full", "spec", "plan", "bugfix")}
+LOOP_STEPS = default_steps("feature", options=("loop",))
+BUGFIX_LOOP_STEPS = default_steps("bugfix", options=("loop",))
 SCOPE = "# Context\n\n## Scope Lock\n\nOnly the report page and its new export.\n"
 RUN_LINE = r"run_seq=\d+ exit=%d valid=yes reason=\S+ chain=[0-9a-f]{12}$"
 DECISION = {"id": "DP1", "question": "CSV only?", "options": ["CSV", "CSV and JSON"], "recommendation": "CSV"}
@@ -89,6 +103,20 @@ BUGFIX_PLAN_BODY = (
     "Modify `src/app.py` and its test `tests/test_app.py`.\n\n"
     "- RED: write the failing test for AC1 first.\n- Run: `pytest tests/test_app.py`\n"
 )
+# What the user's pre-approval covers: the request holds it, so nobody is there to ask and every decision of
+# the design is an author's call (hybrid design §4.1).
+PREAPPROVED_REQUEST = "Add a CSV export to the report page. Go ahead without asking me again.\n"
+PREAPPROVAL_QUOTE = "Go ahead without asking me again"
+UNATTENDED_DESIGN = DESIGN_BODY.replace("(user)", "(author's call: nobody was there to ask)")
+# A reader question the user's answer settled becomes a criterion of its own, sourced from that question.
+ANSWERED_AC = ("\n- AC2: Given a report with hidden rows, when the user exports it, then the CSV file skips them. "
+               "(source: Q1)")
+TWO_AC_SPEC = TWOGATE_SPEC.replace("every visible row. (source: D1)", "every visible row. (source: D1)" + ANSWERED_AC)
+TWO_AC_PLAN = PLAN_BODY.replace("(AC1)", "(AC1, AC2)")
+DEFAULT_CAPABILITIES = "workflow=no,subagent=yes,team=no"
+# A runtime with no sub-agent tool runs each fresh role inline and says so (hybrid design §4.3).
+NO_SUBAGENT_STRATEGY = ("spec-check=inline-degraded:no sub-agent tool", "security=inline-degraded:no sub-agent tool",
+                        "audit=inline-degraded:no sub-agent tool")
 
 
 class FlowCase(LoopCase):
@@ -96,6 +124,7 @@ class FlowCase(LoopCase):
 
     def setUp(self):
         super().setUp()
+        self.cards = {}
         real = subprocess.Popen
         case = self
 
@@ -231,16 +260,107 @@ class FlowCase(LoopCase):
         return self.step(slug, state="complete")
 
     def feature_to_security(self, slug):
-        """The feature flow on codex with sub-agents, from start to the security card."""
-        text, fields = self.begin(slug)
-        text, fields = self.spec_plan_authors(text, slug)
-        self.write_role(fields, CLEAN)
-        text, fields = self.step(slug, state="wait-gate", step="review")  # the loop stopped and was ingested
-        self.approve_at_gate(text, slug)
-        self.make_branch(slug, "work/" + slug)
-        self.red_then_green(slug, "tests/test_export.py", "def test_export():\n    assert False\n",
-                            "src/export.py", "def export(rows):\n    return rows\n")
-        return self.step(slug, step="security")
+        """The feature flow on codex with sub-agents (the default path: intent, plan, one gate), from
+        start to the security card."""
+        code, text = self.start(flow="feature", work_type="feature", runtime="codex", work_id=slug)
+        return self.play(slug, text=text, stop="security")
+
+    # -- the main loop's side of the default path (hybrid design §4) ---------------------------
+
+    def play(self, slug, text=None, stop=None, capabilities=DEFAULT_CAPABILITIES, overrides=(), reader=(),
+             quote=None, design=DESIGN_BODY, plan=None, branch=None):
+        """The model's work from the current card (`text`, else `sdlc card`) to the end of the flow, or to
+        the card of step `stop`, returned as (text, fields) before that step's work is done (a gate's card
+        before it is approved).
+
+        `reader` is the spec reader's questions, one `(pile, extra check-resolve args)` each; `quote`
+        approves every gate as the original request's pre-approval; `plan` is the plan body, else the one
+        the package calls for. Every `do` card is kept in `self.cards[(slug, step)]`."""
+        if text is None:
+            code, text = self.card(slug)
+        for _ in range(80):
+            fields = card_fields(text)
+            step = fields.get("step")
+            if fields.get("state") == "complete":
+                return text, fields
+            if step == stop:
+                return text, fields
+            if fields["state"] == "wait-gate":
+                if quote is None:
+                    self.approve(text, slug, gate=step)
+                else:
+                    self.approve(text, slug, gate=step, source="original-request", quote=quote)
+            else:
+                self.expect(text, "do", step)
+                self.cards[(slug, step)] = text
+                if fields.get("mechanism") == "inline-degraded":
+                    self.sdlc_ok("note", "--slug", slug, "--degraded", "subagent", "--reason", "missing")
+                self.work(slug, step, fields, capabilities, overrides, reader, design, plan, branch)
+            code, text = self.next(slug)
+        self.fail("the flow did not end: %s" % text)
+
+    def work(self, slug, step, fields, capabilities, overrides, reader, design, plan, branch):
+        """What the model does for one `do` card of the main-loop path."""
+        pkg = self.pkg(slug)
+        if step == "strategy":
+            self.confirm_strategy(slug, capabilities, *overrides)
+        elif step == "context":
+            self.put("context.md", SCOPE, slug)
+        elif step == "intent":
+            self.put("design.md", design, slug)
+        elif step == "spec":
+            self.put("spec/%s.md" % slug, TWOGATE_SPEC, slug)
+        elif step == "spec-check":
+            self.read_spec(slug, fields, ["Question %d?" % n for n in range(1, len(reader) + 1)])
+            for n, (pile, extra) in enumerate(reader, 1):
+                self.sdlc_ok("check-resolve", "--slug", slug, "--id", "Q%d" % n, "--pile", pile,
+                             "--resolution", "Settled as %s." % pile, *extra)
+        elif step == "plan":
+            if plan is None:
+                has_spec = (pkg / "spec" / ("%s.md" % slug)).is_file()
+                plan = BUGFIX_PLAN_BODY if self.state(slug)["flow"] == "bugfix" else (
+                    PLAN_BODY if has_spec else SPECLESS_PLAN_BODY)
+            self.put("plan/%s.md" % slug, plan, slug)
+        elif step == "branch":
+            self.git("checkout", "-q", "-b", branch or "work/" + slug)
+        elif step == "implement":
+            self.red_then_green(slug, "tests/test_export.py", "def test_export():\n    assert False\n",
+                                "src/export.py", "def export(rows):\n    return rows\n")
+        elif step == "diff-review":
+            self.put("evidence/%s.diff.md" % slug, "# Diff review\n\nThe diff holds only the planned files.\n", slug)
+        elif step == "security":
+            self.security_pass(slug)
+        elif step == "audit":
+            self.put("evidence/%s.audit.md" % slug, "# Implementation audit\n\nEvery task is done.\n", slug)
+        elif step == "claim":
+            self.put("evidence/%s.claim.md" % slug, "# Completion claim\n\nDone, with the evidence above.\n", slug)
+        else:
+            self.fail("no work for step %r: %s" % (step, fields))
+
+    def read_spec(self, slug, fields, questions):
+        """The spec reader's part: its answer at the card's write path, recorded with `check-record`."""
+        self.assertEqual(fields["role"], "spec-builder-check", fields)
+        answer = {"questions": [{"question": q, "why": "the plan depends on the answer"} for q in questions]}
+        self.write_role(fields, json.dumps(answer))
+        return self.sdlc_ok("check-record", "--slug", slug)
+
+    def ask_the_user(self, slug, question, quote) -> int:
+        """A design question and the user's reply (`sdlc ask`, the run waits, `sdlc answer`); returns the
+        answer record's seq."""
+        self.sdlc_ok("ask", "--slug", slug, "--kind", "design", "--question", question)
+        text, fields = self.step(slug, state="wait-answer")
+        self.sdlc_ok("answer", "--slug", slug, "--quote", quote)
+        return [r for r in logs.read(self.pkg(slug) / "questions.jsonl") if r["kind"] == "answer"][-1]["seq"]
+
+    def approvals(self, slug) -> list:
+        """(gate, source, critic) of each approval the runner recorded."""
+        return [(r["gate"], r["source"], r["critic"]) for r in logs.read(self.pkg(slug) / "approvals.jsonl")
+                if r["kind"] == "approve"]
+
+    def author_calls(self, text) -> list:
+        """(id, file) of each `author_call=` line of a claim card."""
+        calls = [json.loads(line[len("author_call="):]) for line in text.splitlines() if line.startswith("author_call=")]
+        return [(c["id"], c["from"]) for c in calls]
 
     # -- what the runner left behind -----------------------------------------------------------
 
@@ -250,7 +370,7 @@ class FlowCase(LoopCase):
     def runs(self, slug) -> list:
         return [r for r in logs.read(self.pkg(slug) / "runs.jsonl") if r["kind"] == "finished"]
 
-    def assert_completed(self, text, slug, steps=FLOW_STEPS):
+    def assert_completed(self, text, slug, steps):
         """A finished flow: every step done once and in order, the chains intact, nothing active."""
         st = self.state(slug)
         self.assertEqual((st["status"], st["current"], st["waiting"]), ("complete", None, None))
@@ -262,9 +382,12 @@ class FlowCase(LoopCase):
             self.assertTrue(logs.verify(self.pkg(slug) / name)[0], name)
         self.assertEqual(text.splitlines()[-1], "state=complete chain=%s" % logs.head12(self.pkg(slug) / "transitions.jsonl"))
         runs = self.runs(slug)
-        self.assertEqual([(r["label"], r["expect"], r["exit"], r["valid"]) for r in runs],
-                         [("red", "fail", 1, True), ("green", "pass", 0, True)])
-        self.assertEqual(runs[0]["changed_source_count"], 0)  # RED ran before any source change
+        if "implement" in steps:
+            self.assertEqual([(r["label"], r["expect"], r["exit"], r["valid"]) for r in runs],
+                             [("red", "fail", 1, True), ("green", "pass", 0, True)])
+            self.assertEqual(runs[0]["changed_source_count"], 0)  # RED ran before any source change
+        else:
+            self.assertEqual(runs, [])
         self.assertEqual(sdlc_state.find_active(self.project), [])
         code, again = self.next(slug)
         self.expect(again, "complete")
@@ -281,7 +404,7 @@ class TestFlowsEndToEnd(FlowCase):
                     subprocess.Popen(args)
                 self.assertIn("unexpected subprocess", str(raised.exception))
 
-    def test_feature_flow_end_to_end(self):
+    def test_loop_option_runs_the_old_loop_end_to_end(self):
         import resolve_work_package
 
         slug = "demo"
@@ -348,7 +471,7 @@ class TestFlowsEndToEnd(FlowCase):
         text, fields = self.step(slug, step="audit")
         self.assertEqual(fields["pending"], "report")  # resolver_ok and the GREEN run pass again
         text, fields = self.audit_and_claim(slug)
-        self.assert_completed(text, slug)
+        self.assert_completed(text, slug, LOOP_STEPS)
         for name in ("spec", "plan"):
             self.assertEqual(self.meta("%s/demo.md" % name, slug)["status"], "complete", name)
         approval = [r for r in logs.read(self.pkg(slug) / "approvals.jsonl") if r["kind"] == "approve"]
@@ -358,80 +481,324 @@ class TestFlowsEndToEnd(FlowCase):
         self.assertEqual((resolution.source, resolution.plan, resolution.spec),
                          ("branch", self.pkg(slug) / "plan" / "demo.md", self.pkg(slug) / "spec" / "demo.md"))
 
-    def main_loop_feature(self, slug, with_spec) -> str:
-        """The feature flow without the loop (hybrid design §3): the design, the spec and its reader when
-        asked for, the plan and its gate, then the build; returns the claim card."""
+    def test_feature_flow_end_to_end(self):
         import resolve_work_package
 
-        code, text = self.start(*(("--option", "spec") if with_spec else ()), flow="feature", work_type="feature",
-                                runtime="codex", work_id=slug)
+        slug = "demo"
+        code, text = self.start(flow="feature", work_type="feature", runtime="codex", work_id=slug)
         fields = self.expect(text, "do", "strategy")
-        self.assertNotIn("draft", fields["default"])
-        self.assertEqual("spec-check:subagent" in fields["default"], with_spec)
-        self.confirm_strategy(slug)
-        text, fields = self.step(slug, step="context")
-        self.put("context.md", SCOPE, slug)
-        if with_spec:
-            text, fields = self.design(slug, then="spec")
-            self.put("spec/%s.md" % slug, TWOGATE_SPEC, slug)
-            text, fields = self.step(slug, step="spec-check")
-            self.assertEqual((fields["role"], fields["mechanism"]), ("spec-builder-check", "subagent"))
-            self.write_role(fields, json.dumps({"questions": [{"question": "Does AC1 count hidden rows?",
-                                                                 "why": "a hidden row adds a filter task"}]}))
-            self.sdlc_ok("check-record", "--slug", slug)
-            self.sdlc_ok("check-resolve", "--slug", slug, "--id", "Q1", "--pile", "minor",
-                         "--resolution", "Only visible rows, as the business rule says.")
-            text, fields = self.step(slug, state="wait-gate", step="spec-review")
-            self.assertEqual(card_value(text, "artifacts"), "design.md,spec/%s.md" % slug)
-            self.assertIn('settled_minor={"id": "Q1"', text)
-            self.approve(text, slug, gate="spec-review")
-            text, fields = self.step(slug, step="plan")
-            self.put("plan/%s.md" % slug, PLAN_BODY, slug)
-        else:
-            text, fields = self.design(slug, then="plan")
-            self.put("plan/%s.md" % slug, SPECLESS_PLAN_BODY, slug)
-        text, fields = self.step(slug, state="wait-gate", step="plan-review")
-        self.assertEqual(card_value(text, "artifacts"), "plan/%s.md" % slug)
-        self.approve(text, slug, gate="plan-review")
-        self.make_branch(slug, "work/" + slug)
-        self.red_then_green(slug, "tests/test_export.py", "def test_export():\n    assert False\n",
-                            "src/export.py", "def export(rows):\n    return rows\n")
-        text, fields = self.step(slug, step="security")
-        self.security_pass(slug)
-        text, fields = self.step(slug, step="audit")
-        self.assertEqual(fields["pending"], "report")  # the real resolver accepts the package
-        self.put("evidence/%s.audit.md" % slug, "# Implementation audit\n\nEvery task is done.\n", slug)
-        claim, fields = self.step(slug, step="claim")
-        self.put("evidence/%s.claim.md" % slug, "# Completion claim\n\nDone, with the evidence above.\n", slug)
-        text, fields = self.step(slug, state="complete")
-        self.assert_completed(text, slug, SPEC_STEPS if with_spec else SPECLESS_STEPS)
-        approvals = [r["gate"] for r in logs.read(self.pkg(slug) / "approvals.jsonl") if r["kind"] == "approve"]
-        self.assertEqual(approvals, (["spec-review"] if with_spec else []) + ["plan-review"])
+        self.assertEqual(FLOW_STEPS["feature"], ["strategy", "context", "intent", "plan", "plan-review", "branch",
+                                                 "implement", "security", "audit", "claim"])
+        self.assertNotIn("draft", fields["default"])  # the main loop writes: no loop, no reader
+        self.assertNotIn("spec-check", fields["default"])
+        text, fields = self.play(slug, text=text, stop="intent")
+        self.assertEqual((fields["pending"], fields["may_ask"]), ("validator", "design"), text)
+        # One design question, asked and answered through the runner; design.md is the record of the answer.
+        seq = self.ask_the_user(slug, "Stream the rows or build the file first?", "Stream them.")
+        asked = [r for r in logs.read(self.pkg(slug) / "questions.jsonl") if r["kind"] == "ask"]
+        self.assertEqual([(r["ask_kind"], r["step"]) for r in asked], [("design", "intent")])
+        self.assertEqual(seq, 2)
+        text, fields = self.play(slug, stop="plan")
+        self.assertEqual((self.pkg(slug) / "design.md").read_text(encoding="utf-8"), DESIGN_BODY)
+        text, fields = self.play(slug, text=text, stop="plan-review")
+        self.assertEqual((fields["state"], card_value(text, "artifacts")), ("wait-gate", "plan/demo.md"))
+        self.assertFalse((self.pkg(slug) / "spec").exists())
+        self.assertEqual(self.meta("plan/demo.md", slug),
+                         {"work_id": slug, "spec": "none", "branch": "main", "flow": "feature", "status": "reviewed"})
+        text, fields = self.play(slug, text=text)
+        self.assert_completed(text, slug, FLOW_STEPS["feature"])
+        self.assertEqual(self.approvals(slug), [("plan-review", "reply", "none")])
+        self.assertEqual(self.meta("plan/demo.md", slug),
+                         {"work_id": slug, "spec": "none", "branch": "work/demo", "flow": "feature",
+                          "status": "complete"})
+        # The audit grades the plan's own criteria: the resolver finds no spec and says so.
+        resolution = resolve_work_package.resolve(self.project, branch="work/demo")
+        self.assertTrue(resolution.ok, resolution.errors)
+        self.assertEqual((resolution.plan, resolution.spec), (self.pkg(slug) / "plan" / "demo.md", None))
+        self.assertIn("spec=none", resolve_work_package.fields_for(resolution, self.project))
+        audit = self.cards[(slug, "audit")]
+        self.assertEqual(card_fields(audit)["inputs"], "@source,@tests,plan/demo.md")  # no spec to grade against
+        step_file = (REPO / "skills" / "implementation-control" / "steps" / "audit.md").read_text(encoding="utf-8")
+        self.assertIn("grade against the plan's own `## Acceptance Criteria`", step_file)
+        calls = self.author_calls(self.cards[(slug, "claim")])
+        self.assertEqual(calls, [("D2", "design.md")])  # the claim lists the design's author's call
+
+    def test_feature_with_spec_option_end_to_end(self):
+        import resolve_work_package
+
+        slug = "withspec"
+        steps = FLOW_STEPS["feature"][:3] + ["spec", "spec-check", "spec-review"] + FLOW_STEPS["feature"][3:]
+        self.assertEqual(default_steps("feature", options=("spec",)), steps)
+        code, text = self.start("--option", "spec", flow="feature", work_type="feature", runtime="codex", work_id=slug)
+        fields = self.expect(text, "do", "strategy")
+        self.assertIn("spec-check:subagent", fields["default"])
+        text, fields = self.play(slug, text=text, stop="spec-check")
+        # The reader's card: a role, its prompt, the path it writes its answer to, and the delegation text.
+        self.assertEqual((fields["role"], fields["mechanism"], fields["inputs"]),
+                         ("spec-builder-check", "subagent", "design.md"))
+        self.assertTrue(fields["write"].endswith("/draft/check.answer.json"), fields)
+        self.assertIn("spawn_agent", fields["delegate"])
+        self.assertTrue(fields["prompt"].endswith("/draft/prompts/spec-builder-check.md"), fields)
+        text, fields = self.play(slug, text=text, stop="spec-review", reader=[("minor", ())])
+        self.assertEqual(self.meta("spec/%s.md" % slug, slug), {"work_id": slug, "status": "reviewed"})
+        self.assertEqual(card_value(text, "artifacts"), "design.md,spec/%s.md" % slug)
+        self.assertIn('settled_minor={"id": "Q1"', text)
+        check = textio.read_json(self.pkg(slug) / "spec" / (slug + ".check.json"))
+        self.assertEqual((check["reader"], [(q["id"], q["pile"], q["author_call"]) for q in check["questions"]]),
+                         ("fresh", [("Q1", "minor", True)]))
+        text, fields = self.play(slug, text=text, stop="plan")  # the spec gate approved by the user's reply
+        self.assertEqual(self.meta("spec/%s.md" % slug, slug), {"work_id": slug, "status": "approved"})
+        text, fields = self.play(slug, text=text, stop="plan-review")
+        self.assertEqual(self.meta("plan/%s.md" % slug, slug),
+                         {"work_id": slug, "spec": "../spec/%s.md" % slug, "branch": "main", "flow": "feature",
+                          "status": "reviewed"})
+        text, fields = self.play(slug, text=text)
+        self.assert_completed(text, slug, steps)
+        self.assertEqual(self.approvals(slug), [("spec-review", "reply", "fresh"), ("plan-review", "reply", "none")])
+        self.assertEqual(self.author_calls(self.cards[(slug, "claim")]),
+                         [("D2", "design.md"), ("Q1", "spec/%s.check.json" % slug)])
+        for name in ("spec", "plan"):
+            self.assertEqual(self.meta("%s/%s.md" % (name, slug), slug)["status"], "complete", name)
         resolution = resolve_work_package.resolve(self.project, branch="work/" + slug)
         self.assertTrue(resolution.ok, resolution.errors)
-        spec = self.pkg(slug) / "spec" / ("%s.md" % slug)
-        self.assertEqual(resolution.spec, spec if with_spec else None)
+        self.assertEqual(resolution.spec, self.pkg(slug) / "spec" / (slug + ".md"))
+
+    def test_feature_light_has_no_reader_and_no_gate(self):
+        slug = "lite"
+        steps = default_steps("feature", form="light", options=("spec",))
+        self.assertEqual(steps, ["strategy", "context", "intent", "spec", "plan", "branch", "implement", "security",
+                                 "audit", "claim"])
+        code, text = self.start("--option", "spec", flow="feature", work_type="feature", form="light",
+                                runtime="codex", work_id=slug)
+        self.assertNotIn("spec-check", self.expect(text, "do", "strategy")["default"])
+        text, fields = self.play(slug, text=text)  # no card waits at a gate on the way
+        self.assert_completed(text, slug, steps)
+        self.assertEqual(self.approvals(slug), [])
+        self.assertFalse((self.pkg(slug) / "spec" / (slug + ".check.json")).exists())
+        for sid in ("spec-check", "spec-review", "plan-review"):
+            self.assertFalse(self.state(slug)["steps"][sid]["applies"], sid)
         self.assertEqual(self.meta("plan/%s.md" % slug, slug),
-                         {"work_id": slug, "spec": "../spec/%s.md" % slug if with_spec else "none",
-                          "branch": "work/" + slug, "flow": "feature", "status": "complete"})
-        return claim
+                         {"work_id": slug, "spec": "../spec/%s.md" % slug, "branch": "work/lite", "flow": "feature",
+                          "status": "complete"})
 
-    def test_feature_flow_without_a_spec_end_to_end(self):
-        claim = self.main_loop_feature("nospec", with_spec=False)
-        self.assertFalse((self.pkg("nospec") / "spec").exists())
-        # The claim card lists the design's author's calls (hybrid design §5).
-        calls = [json.loads(line[len("author_call="):]) for line in claim.splitlines()
-                 if line.startswith("author_call=")]
-        self.assertEqual([(c["id"], c["from"]) for c in calls], [("D2", "design.md")])
+    def test_full_flow_writes_the_spec_and_passes_both_gates(self):
+        slug = "full"
+        steps = ["strategy", "context", "intent", "spec", "spec-check", "spec-review", "plan", "plan-review",
+                 "branch", "implement", "security", "diff-review", "audit", "claim"]
+        self.assertEqual(FLOW_STEPS["full"], steps)
+        code, text = self.start(flow="full", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, stop="spec-check")
+        # The reader asks three things: the answer goes into the spec (Q1), the user is asked (Q2), the
+        # main loop decides (Q3).
+        questions = ["Do hidden rows count?", "Which file name?", "Quote every cell?"]
+        self.read_spec(slug, fields, questions)
+        (self.pkg(slug) / "spec" / (slug + ".md")).write_bytes(TWO_AC_SPEC.encode("utf-8"))
+        self.sdlc_ok("check-resolve", "--slug", slug, "--id", "Q1", "--pile", "answered",
+                     "--resolution", "Hidden rows are skipped; AC2 says so.")
+        seq = self.ask_the_user(slug, "Which file name?", "report.csv, please.")
+        self.sdlc_ok("check-resolve", "--slug", slug, "--id", "Q2", "--pile", "theirs",
+                     "--resolution", "The file is report.csv.", "--answer-seq", str(seq))
+        self.sdlc_ok("check-resolve", "--slug", slug, "--id", "Q3", "--pile", "minor",
+                     "--resolution", "Cells are quoted, as the CSV format says.")
+        code, text = self.next(slug)
+        fields = self.expect(text, "wait-gate", "spec-review")
+        self.assertEqual(card_value(text, "artifacts"), "design.md,spec/%s.md" % slug)
+        for pile, qid in (("answered", "Q1"), ("theirs", "Q2"), ("minor", "Q3")):
+            self.assertIn('settled_%s={"id": "%s"' % (pile, qid), text)
+        text, fields = self.play(slug, text=text, stop="plan")
+        self.assertEqual(self.meta("spec/%s.md" % slug, slug), {"work_id": slug, "status": "approved"})
+        text, fields = self.play(slug, text=text, plan=TWO_AC_PLAN)
+        self.assert_completed(text, slug, steps)
+        check = textio.read_json(self.pkg(slug) / "spec" / (slug + ".check.json"))
+        self.assertEqual([(q["id"], q["pile"], q["answer_seq"], q["author_call"]) for q in check["questions"]],
+                         [("Q1", "answered", None, False), ("Q2", "theirs", seq, False), ("Q3", "minor", None, True)])
+        self.assertEqual(self.approvals(slug), [("spec-review", "reply", "fresh"), ("plan-review", "reply", "none")])
+        self.assertEqual(self.author_calls(self.cards[(slug, "claim")]),
+                         [("D2", "design.md"), ("Q3", "spec/%s.check.json" % slug)])
+        self.assertEqual(self.meta("plan/%s.md" % slug, slug),
+                         {"work_id": slug, "spec": "../spec/%s.md" % slug, "branch": "work/full", "flow": "full",
+                          "status": "complete"})
 
-    def test_feature_flow_with_a_spec_end_to_end(self):
-        claim = self.main_loop_feature("withspec", with_spec=True)
-        check = textio.read_json(self.pkg("withspec") / "spec" / "withspec.check.json")
-        self.assertEqual([(q["id"], q["pile"], q["author_call"]) for q in check["questions"]], [("Q1", "minor", True)])
-        calls = [json.loads(line[len("author_call="):]) for line in claim.splitlines()
-                 if line.startswith("author_call=")]
-        self.assertEqual([(c["id"], c["from"]) for c in calls],
-                         [("D2", "design.md"), ("Q1", "spec/withspec.check.json")])
+    def test_spec_flow_ends_at_spec_review(self):
+        slug = "specrun"
+        self.assertEqual(FLOW_STEPS["spec"], ["strategy", "context", "intent", "spec", "spec-check", "spec-review",
+                                              "claim"])
+        code, text = self.start(flow="spec", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, reader=[("minor", ())])
+        self.assert_completed(text, slug, FLOW_STEPS["spec"])
+        self.assertEqual(self.approvals(slug), [("spec-review", "reply", "fresh")])
+        self.assertFalse((self.pkg(slug) / "plan").exists())  # a spec run plans nothing
+        self.assertEqual(self.meta("spec/%s.md" % slug, slug)["status"], "complete")
+        self.assertEqual(self.author_calls(self.cards[(slug, "claim")]),
+                         [("D2", "design.md"), ("Q1", "spec/%s.check.json" % slug)])
+
+    def approved_spec(self, slug) -> Path:
+        source = self.tmp / ("approved-%s.md" % slug)
+        source.write_bytes(("---\nwork_id: %s\nstatus: approved\n---\n" % slug + SPEC_BODY).encode("utf-8"))
+        return source
+
+    def test_plan_flow_from_an_imported_spec(self):
+        slug = "given"
+        steps = default_steps("plan", imported=True)
+        self.assertEqual(steps, ["strategy", "context", "plan", "plan-review", "claim"])  # no intent
+        code, text = self.start("--spec-file", str(self.approved_spec(slug)), flow="plan", work_type="feature",
+                                runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text)
+        self.assert_completed(text, slug, steps)
+        self.assertFalse((self.pkg(slug) / "design.md").exists())
+        self.assertEqual(self.meta("plan/%s.md" % slug, slug),
+                         {"work_id": slug, "spec": "../spec/%s.md" % slug, "branch": "main", "flow": "plan",
+                          "status": "complete"})
+        self.assertEqual(self.approvals(slug), [("plan-review", "reply", "none")])
+        # The plan cites the imported spec's criteria; the spec was kept as it came.
+        self.assertIn("(AC1)", (self.pkg(slug) / "plan" / (slug + ".md")).read_text(encoding="utf-8"))
+        self.assertEqual(self.meta("spec/%s.md" % slug, slug)["status"], "approved")
+
+    def test_plan_flow_without_a_spec_writes_its_own_criteria(self):
+        slug = "alone"
+        self.assertEqual(FLOW_STEPS["plan"], ["strategy", "context", "intent", "plan", "plan-review", "claim"])
+        code, text = self.start(flow="plan", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text)
+        self.assert_completed(text, slug, FLOW_STEPS["plan"])
+        self.assertTrue((self.pkg(slug) / "design.md").is_file())
+        self.assertFalse((self.pkg(slug) / "spec").exists())
+        self.assertEqual(self.meta("plan/%s.md" % slug, slug),
+                         {"work_id": slug, "spec": "none", "branch": "main", "flow": "plan", "status": "complete"})
+        body = frontmatter.split((self.pkg(slug) / "plan" / (slug + ".md")).read_text(encoding="utf-8"))[1]
+        self.assertEqual(body, SPECLESS_PLAN_BODY)
+        self.assertLess(body.index("## Acceptance Criteria"), body.index("## Task 1"))  # criteria come first
+
+    def test_bugfix_flow_plan_gate_only(self):
+        import resolve_work_package
+
+        slug = "fix-add"
+        self.assertEqual(FLOW_STEPS["bugfix"], ["strategy", "context", "plan", "plan-review", "branch", "implement",
+                                                "security", "audit", "claim"])
+        self.request.write_bytes(BUGFIX_REQUEST.encode("utf-8"))
+        code, text = self.start(flow="bugfix", work_type="bugfix", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, stop="plan-review", branch="fix/add-sign")
+        self.assertEqual(card_value(text, "artifacts"), "plan/fix-add.md")
+        text, fields = self.play(slug, text=text, branch="fix/add-sign")
+        self.assert_completed(text, slug, FLOW_STEPS["bugfix"])
+        self.assertEqual(self.approvals(slug), [("plan-review", "reply", "none")])  # one gate, no reader
+        self.assertEqual(self.meta("plan/fix-add.md", slug),
+                         {"work_id": slug, "spec": "none", "branch": "fix/add-sign", "flow": "bugfix",
+                          "status": "complete"})
+        plan = self.pkg(slug) / "plan" / "fix-add.md"
+        self.assertEqual(frontmatter.split(plan.read_text(encoding="utf-8"))[1], BUGFIX_PLAN_BODY)
+        for absent in ("design.md", "spec", "draft", "plan/fix-add.review.json"):  # no intent, no loop, no critic
+            self.assertFalse((self.pkg(slug) / absent).exists(), absent)
+        resolution = resolve_work_package.resolve(self.project, branch="fix/add-sign")
+        self.assertTrue(resolution.ok, resolution.errors)
+        self.assertIn("spec=none", resolve_work_package.fields_for(resolution, self.project))
+
+    def test_preapproved_feature_passes_its_one_gate(self):
+        slug = "pre"
+        self.request.write_bytes(PREAPPROVED_REQUEST.encode("utf-8"))
+        code, text = self.start(flow="feature", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, quote=PREAPPROVAL_QUOTE, design=UNATTENDED_DESIGN)
+        self.assert_completed(text, slug, FLOW_STEPS["feature"])
+        self.assertEqual(self.approvals(slug), [("plan-review", "original-request", "none")])
+        record = logs.read(self.pkg(slug) / "approvals.jsonl")[0]
+        self.assertEqual(record["quote"], PREAPPROVAL_QUOTE)
+        # Nobody was asked, so every decision of the design is an author's call and the claim lists them.
+        self.assertFalse((self.pkg(slug) / "questions.jsonl").exists())
+        self.assertEqual(self.author_calls(self.cards[(slug, "claim")]), [("D1", "design.md"), ("D2", "design.md")])
+
+    def test_preapproved_full_passes_both_gates_with_author_calls(self):
+        slug = "prefull"
+        self.request.write_bytes(PREAPPROVED_REQUEST.encode("utf-8"))
+        code, text = self.start(flow="full", work_type="feature", runtime="codex", work_id=slug)
+        reader = [("minor", ()), ("theirs", ("--author-call",))]  # a `theirs` question is an author's call here
+        text, fields = self.play(slug, text=text, quote=PREAPPROVAL_QUOTE, design=UNATTENDED_DESIGN, reader=reader)
+        self.assert_completed(text, slug, FLOW_STEPS["full"])
+        self.assertEqual(self.approvals(slug), [("spec-review", "original-request", "fresh"),
+                                                ("plan-review", "original-request", "none")])  # one use per gate
+        check = textio.read_json(self.pkg(slug) / "spec" / (slug + ".check.json"))
+        self.assertEqual([(q["id"], q["pile"], q["answer_seq"], q["author_call"]) for q in check["questions"]],
+                         [("Q1", "minor", None, True), ("Q2", "theirs", None, True)])
+        self.assertEqual(self.author_calls(self.cards[(slug, "claim")]),
+                         [("D1", "design.md"), ("D2", "design.md"), ("Q1", "spec/%s.check.json" % slug),
+                          ("Q2", "spec/%s.check.json" % slug)])
+
+    def test_full_without_subagents_marks_the_reader_degraded(self):
+        slug = "nosub"
+        declared = "workflow=no,subagent=no,team=no"
+        code, text = self.start(flow="full", work_type="feature", runtime="codex", work_id=slug)
+        # The defaults need sub-agents: confirming them as they are is refused.
+        code, out = self.sdlc("strategy", "confirm", "--slug", slug, "--capabilities", declared)
+        self.assertEqual(code, 4, out)
+        self.assertIn("error=strategy_refused:/entries/", out)
+        self.assertIn("needs subagent=yes (declared no)", out)
+        text, fields = self.play(slug, text=text, stop="spec-check", capabilities=declared,
+                                 overrides=NO_SUBAGENT_STRATEGY)
+        self.assertEqual((fields["mechanism"], fields["degraded"]), ("inline-degraded", "subagent:no"), text)
+        self.assertIn("yourself", fields["delegate"])
+        text, fields = self.play(slug, text=text, capabilities=declared)
+        self.assert_completed(text, slug, FLOW_STEPS["full"])
+        data = textio.read_json(self.pkg(slug) / "strategy.json")
+        self.assertEqual(sorted((d["key"], d["reason"]) for d in data["degraded"]),
+                         [(key, "subagent=no") for key in ("audit", "security", "spec-check")])
+        self.assertEqual({key: data["entries"][key]["mechanism"] for key in ("spec-check", "security", "audit")},
+                         {key: "inline-degraded" for key in ("spec-check", "security", "audit")})
+        check = textio.read_json(self.pkg(slug) / "spec" / (slug + ".check.json"))
+        self.assertEqual(check["reader"], "degraded")
+        self.assertEqual(self.state(slug)["degraded"],
+                         [{"step": sid, "capability": "subagent", "reason": "missing"}
+                          for sid in ("spec-check", "security", "audit")])
+        # The gate records the degraded reader; a user who approves sees it.
+        self.assertEqual(self.approvals(slug), [("spec-review", "reply", "degraded"), ("plan-review", "reply", "none")])
+
+    def test_spec_edit_after_the_reader_still_needs_sources_at_approve(self):
+        slug = "late"
+        code, text = self.start("--option", "spec", flow="feature", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, stop="spec-review")
+        self.assertEqual(self.state(slug)["steps"]["spec-check"]["state"], "done")
+        spec = self.pkg(slug) / "spec" / (slug + ".md")
+        sourced = spec.read_text(encoding="utf-8")
+        # The main loop drops a criterion's source after the reader has read the spec.
+        spec.write_bytes(sourced.replace(" (source: D1)", "").encode("utf-8"))
+        text, fields = self.step(slug, state="wait-gate", step="spec-review")
+        self.assertEqual(self.state(slug)["steps"]["spec-check"]["state"], "done")  # the reader does not run again
+        code, out = self.approve(text, slug, gate="spec-review", expect=4)
+        self.assertIn("error=artifact_checks_failed:spec:", out)
+        self.assertIn("ac_no_source:AC1", out)
+        self.assertEqual(self.approvals(slug), [])
+        spec.write_bytes(sourced.encode("utf-8"))
+        text, fields = self.step(slug, state="wait-gate", step="spec-review")
+        self.approve(text, slug, gate="spec-review")
+        self.assertEqual(self.approvals(slug), [("spec-review", "reply", "fresh")])
+
+    def test_design_change_after_the_plan_restales_spec_and_plan(self):
+        slug = "redo"
+        code, text = self.start(flow="full", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, stop="plan-review")  # the spec gate is approved, the plan written
+        self.assertEqual(self.approvals(slug), [("spec-review", "reply", "fresh")])
+        design = self.pkg(slug) / "design.md"
+        design.write_bytes(design.read_text(encoding="utf-8").replace("Rows are streamed.", "Rows are buffered.")
+                           .encode("utf-8"))
+        code, text = self.next(slug)  # a changed design is a new intent: no `reapproval needed` halt
+        fields = self.expect(text, "do", "spec")
+        steps = self.state(slug)["steps"]
+        self.assertEqual((steps["spec"]["state"], steps["spec"]["stale_cause"]), ("stale", "design.md"))
+        self.assertEqual((self.state(slug)["status"], self.records("halt", slug)), ("active", []))
+        # The spec is written again from the new design; its reader runs again; the spec gate waits again.
+        spec = self.pkg(slug) / "spec" / (slug + ".md")
+        spec.write_bytes(spec.read_text(encoding="utf-8").replace("(source: D1)", "(source: D1, D2)").encode("utf-8"))
+        text, fields = self.step(slug, step="spec-check")
+        self.assertEqual(fields["visit"], "2/3")
+        self.read_spec(slug, fields, [])
+        text, fields = self.step(slug, state="wait-gate", step="spec-review")
+        self.assertEqual(self.state(slug)["status"], "active")
+        self.approve(text, slug, gate="spec-review")  # the changed spec needs the user's yes again
+        text, fields = self.step(slug, step="plan")  # the walk reaches the plan: its design and spec changed
+        self.assertEqual(self.state(slug)["steps"]["plan"]["state"], "stale")
+        self.assertEqual([r["step"] for r in self.records("stale", slug)], ["spec", "spec-check", "spec-review", "plan"])
+        plan = self.pkg(slug) / "plan" / (slug + ".md")
+        plan.write_bytes((plan.read_text(encoding="utf-8") + "\nThe rows are buffered first.\n").encode("utf-8"))
+        text, fields = self.step(slug, state="wait-gate", step="plan-review")
+        self.assertEqual(self.records("halt", slug), [])
+        self.assertEqual([r["gate"] for r in self.records("approve", slug)], ["spec-review", "spec-review"])
 
     def test_bugfix_flow_end_to_end_plan_only(self):
         import resolve_work_package
@@ -465,7 +832,7 @@ class TestFlowsEndToEnd(FlowCase):
         text, fields = self.step(slug, step="audit")
         self.assertEqual(fields["pending"], "report")  # the real resolver accepts the spec-less plan
         text, fields = self.audit_and_claim(slug)
-        self.assert_completed(text, slug, BUGFIX_STEPS)
+        self.assert_completed(text, slug, BUGFIX_LOOP_STEPS)
         plan = self.pkg(slug) / "plan" / "fix-add.md"
         self.assertEqual(self.meta("plan/fix-add.md", slug),
                          {"work_id": "fix-add", "spec": "none", "branch": "fix/add-sign", "flow": "bugfix",
@@ -567,7 +934,7 @@ class TestFlowsEndToEnd(FlowCase):
             if gate == "security":
                 self.security_pass(slug)
         text, fields = self.audit_and_claim(slug)
-        self.assert_completed(text, slug)
+        self.assert_completed(text, slug, LOOP_STEPS)
         self.assertEqual(self.state(slug)["degraded"],
                          [{"step": sid, "capability": "subagent", "reason": "missing"} for sid in ("draft", "security", "audit")])
         notes = logs.read(self.pkg(slug) / "notes.jsonl")
