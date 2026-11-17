@@ -1,5 +1,5 @@
 {
-  "$comment": "Design §5.15 one-step flow: strategy -> context -> draft(spec) -> review(gate) -> claim.",
+  "$comment": "Hybrid spec/plan design §3: strategy -> context -> intent -> spec -> spec-check -> spec-review -> claim. Gated only, so no step carries a form. Under start --option loop the loop's draft(spec) -> review run in place of spec, spec-check and spec-review.",
   "schema": "agentic-sdlc/flow@1",
   "id": "spec",
   "entry_skill": "spec-authoring",
@@ -25,6 +25,14 @@
       "mechanism_key": "context"
     },
     {
+      "id": "intent",
+      "file": "skills/mind-spark/steps/intent.md",
+      "inputs": ["request.md", "context.md"],
+      "outputs": ["design.md"],
+      "done_when": [{"check": "validator", "mode": "design"}],
+      "may_ask": ["design"]
+    },
+    {
       "id": "draft",
       "file": "skills/spec-authoring/steps/draft.md",
       "inputs": ["request.md", "context.md", "design.md?", "feedback.jsonl?"],
@@ -34,6 +42,7 @@
         {"check": "validator", "mode": "spec", "strict": false},
         {"check": "sidecar_ok", "artifact": "spec"}
       ],
+      "applies_when": {"option": "loop"},
       "mechanism_key": "draft",
       "loop": "spec-plan"
     },
@@ -43,7 +52,37 @@
       "inputs": ["spec/{work_id}.md#body"],
       "outputs": [],
       "done_when": [{"check": "approval", "gate": "review"}],
-      "gate": "review"
+      "gate": "review",
+      "applies_when": {"option": "loop"}
+    },
+    {
+      "id": "spec",
+      "file": "skills/spec-authoring/steps/spec.md",
+      "inputs": ["request.md", "context.md", "design.md"],
+      "outputs": ["spec/{work_id}.md"],
+      "done_when": [{"check": "validator", "mode": "spec", "strict": false, "sources": true}],
+      "applies_when": {"not_option": "loop"}
+    },
+    {
+      "id": "spec-check",
+      "file": "skills/spec-authoring/steps/spec-check.md",
+      "inputs": ["design.md"],
+      "outputs": ["spec/{work_id}.check.json"],
+      "done_when": [{"check": "settled"}],
+      "applies_when": {"not_option": "loop"},
+      "mechanism_key": "spec-check",
+      "role": "spec-builder-check",
+      "role_reads": ["design.md", "spec/{work_id}.md"],
+      "may_ask": ["design"]
+    },
+    {
+      "id": "spec-review",
+      "file": "skills/agentic-sdlc-pipeline/steps/spec-review.md",
+      "inputs": ["design.md#body", "spec/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "spec-review"}],
+      "gate": "spec-review",
+      "applies_when": {"not_option": "loop"}
     },
     {
       "id": "claim",

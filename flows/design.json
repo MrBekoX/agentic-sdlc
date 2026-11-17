@@ -1,5 +1,5 @@
 {
-  "$comment": "Design §5.15 one-step flow: strategy -> context -> intent -> claim. The intent step (mind-spark) may ask design questions before it writes design.md.",
+  "$comment": "Design §5.15 one-step flow: strategy -> context -> intent -> claim. The intent step (mind-spark) may ask design questions before it writes design.md, which the validator's design mode checks (hybrid spec/plan design §4.1).",
   "schema": "agentic-sdlc/flow@1",
   "id": "design",
   "entry_skill": "mind-spark",
@@ -29,7 +29,7 @@
       "file": "skills/mind-spark/steps/intent.md",
       "inputs": ["request.md", "context.md"],
       "outputs": ["design.md"],
-      "done_when": [{"check": "exists", "path": "design.md"}],
+      "done_when": [{"check": "validator", "mode": "design"}],
       "may_ask": ["design"]
     },
     {

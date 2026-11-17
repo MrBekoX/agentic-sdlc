@@ -95,8 +95,8 @@
             "additionalProperties": false,
             "properties": {
               "form": {"enum": ["gated", "light"]},
-              "option": {"enum": ["intent", "quality-review", "loop", "spec"]},
-              "not_option": {"enum": ["intent", "quality-review", "loop", "spec"]},
+              "option": {"enum": ["quality-review", "loop", "spec"]},
+              "not_option": {"enum": ["quality-review", "loop", "spec"]},
               "imported": {"type": "boolean"},
               "work_type": {"type": "array", "items": {"enum": ["feature", "bugfix", "refactor", "test"]}},
               "probe": {"enum": ["explore_mode", "deps", "toolchain"]},

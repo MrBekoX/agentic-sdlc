@@ -21,7 +21,9 @@ Read `mechanism=` on the card.
 
 ## The rows
 Give the auditor this section; its rows replace the role file's fixed checklist. One row per step of this package before this one, except the strategy step, in order (`steps` in `state.json`); a step the runner skipped is `N/A` with its `skip_reason`. Then four rows every audit has. A row is PASS only with its own artifact quoted:
-- context: the `## Scope Lock` text. intent: `design.md`. branch: the branch name, or `branch_policy=stay` with its quote.
+- context: the `## Scope Lock` text. intent: `design.md` and its decisions with their owners. branch: the branch name, or `branch_policy=stay` with its quote.
+- spec: the spec path and one acceptance criterion with its `(source: ...)` tag. spec-check: `spec/<work_id>.check.json`, its `reader` value (`fresh` or `degraded`) and the pile of each question; an open question is FAIL.
+- plan: the plan path, its `spec:` line, and one task with the criteria it covers. spec-review: the approval record of the spec gate. plan-review: the approval record of the plan gate.
 - draft: the spec and plan paths, one acceptance criterion read from them, the sidecar's `critic` value. review: the approval record.
 - docs-check, quality-gates, diff-review, quality-review: the report and its result; an open must-fix or a failing gate is PARTIAL or FAIL.
 - characterize: the `## Goal Lock` text and its GREEN run before the first edit.
@@ -33,7 +35,7 @@ PARTIAL or FAIL names the exact artifact that is absent ("no failing run before 
 
 Special paths:
 - Refactor work with a Goal Lock and no spec or plan: grade scope and behavior against the Goal Lock; the Spec and Plan rows are `N/A (refactor: Goal Lock)`. With an approved spec and plan, grade them as for any work. A missing Goal Lock is FAIL.
-- A spec-less bugfix (the resolver prints `spec=none`): grade against the plan's own `## Bug` and `## Acceptance Criteria`; the Spec row is `N/A (bugfix: criteria in the plan)`.
+- A plan with its own criteria (the resolver prints `spec=none`; the plan carries `spec: none` with `flow:` `bugfix`, `feature` or `plan`): grade against the plan's own `## Acceptance Criteria`, and a bugfix plan also against its `## Bug`; the Spec row is `N/A (criteria in the plan)`. Tell the auditor so. `spec: none` with any other flow is a missing spec: FAIL.
 - A package with no implement step audits earlier work: grade the rows it needs (spec and plan or Goal Lock, tests run, security, diff scope) from what the resolver and the request point to. A row with no artifact is FAIL, not N/A. Change no code.
 
 ## The report: `<package>/evidence/<work_id>.audit.md`

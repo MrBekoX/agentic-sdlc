@@ -26,30 +26,104 @@ FLOWS = REPO / "flows"
 SCHEMAS = FLOWS / "schemas"
 FIXTURES = REPO / "tests" / "fixtures" / "sdlc" / "flows"
 
-# Design §5.15, written out: every flow begins strategy -> context; bracketed steps are conditional.
+# Design §5.15 with the hybrid spec/plan shapes (hybrid design §3), written out: every flow begins
+# strategy -> context. The loop's draft and review steps run only under `--option loop`, in place of the
+# main loop's steps that follow them (spec, spec-check, spec-review, plan, plan-review); the intent step
+# before them runs in both.
+_MAIN_LOOP = ["spec", "spec-check", "spec-review", "plan", "plan-review"]
 DESIGN_ORDER = {
-    "full": ["strategy", "context", "intent", "draft", "review", "branch", "docs-check", "implement",
-             "security", "quality-gates", "diff-review", "quality-review", "audit", "claim"],
-    "feature": ["strategy", "context", "draft", "review", "branch", "implement", "security", "audit", "claim"],
-    "bugfix": ["strategy", "context", "draft", "review", "branch", "implement", "security", "audit", "claim"],
+    "full": ["strategy", "context", "intent", "draft", "review"] + _MAIN_LOOP
+            + ["branch", "docs-check", "implement", "security", "quality-gates", "diff-review", "quality-review",
+               "audit", "claim"],
+    "feature": ["strategy", "context", "intent", "draft", "review"] + _MAIN_LOOP
+               + ["branch", "implement", "security", "audit", "claim"],
+    "bugfix": ["strategy", "context", "draft", "review", "plan", "plan-review", "branch", "implement", "security",
+               "audit", "claim"],
     "refactor": ["strategy", "context", "characterize", "branch", "implement", "security", "audit", "claim"],
     "test": ["strategy", "context", "branch", "implement", "claim"],
-    "spec": ["strategy", "context", "draft", "review", "claim"],
-    "plan": ["strategy", "context", "draft", "review", "claim"],
+    "spec": ["strategy", "context", "intent", "draft", "review", "spec", "spec-check", "spec-review", "claim"],
+    "plan": ["strategy", "context", "intent", "draft", "review", "plan", "plan-review", "claim"],
     "security-review": ["strategy", "context", "security", "claim"],
     "code-review": ["strategy", "context", "quality-review", "claim"],
     "audit": ["strategy", "context", "audit", "claim"],
     "design": ["strategy", "context", "intent", "claim"],
     "feedback": ["strategy", "context", "feedback", "claim"],
 }
-# Design §5.15: the conditional steps and what they hang on. Any step not listed always applies.
+# Design §5.15 and hybrid design §3: the conditional steps and what they hang on. Any step not listed
+# always applies. The intent step runs in both variants (hybrid design §7 call 1), in the plan flow only
+# when start imported no spec, and the feature flow writes a spec only with `--option spec`. `form: gated`
+# marks the steps a light run skips; the full, spec and plan flows are gated only and carry no form.
+_LOOP = {"option": "loop"}
+_NOT_LOOP = {"not_option": "loop"}
+_GATED = {"form": "gated"}
+_ON_REQUEST = {"not_option": "loop", "option": "spec"}
 DESIGN_APPLIES = {
-    ("full", "intent"): {"option": "intent"},
+    ("full", "draft"): _LOOP,
+    ("full", "review"): _LOOP,
+    ("full", "spec"): _NOT_LOOP,
+    ("full", "spec-check"): _NOT_LOOP,
+    ("full", "spec-review"): _NOT_LOOP,
+    ("full", "plan"): _NOT_LOOP,
+    ("full", "plan-review"): _NOT_LOOP,
     ("full", "docs-check"): {"probe": "deps", "not": "stdlib_only"},
     ("full", "quality-gates"): {"probe": "toolchain", "not": "absent"},
     ("full", "quality-review"): {"option": "quality-review"},
-    ("feature", "review"): {"form": "gated"},
-    ("bugfix", "review"): {"form": "gated"},
+    ("feature", "draft"): _LOOP,
+    ("feature", "review"): dict(_GATED, **_LOOP),
+    ("feature", "spec"): _ON_REQUEST,
+    ("feature", "spec-check"): dict(_GATED, **_ON_REQUEST),
+    ("feature", "spec-review"): dict(_GATED, **_ON_REQUEST),
+    ("feature", "plan"): _NOT_LOOP,
+    ("feature", "plan-review"): dict(_GATED, **_NOT_LOOP),
+    ("bugfix", "draft"): _LOOP,
+    ("bugfix", "review"): dict(_GATED, **_LOOP),
+    ("bugfix", "plan"): _NOT_LOOP,
+    ("bugfix", "plan-review"): dict(_GATED, **_NOT_LOOP),
+    ("spec", "draft"): _LOOP,
+    ("spec", "review"): _LOOP,
+    ("spec", "spec"): _NOT_LOOP,
+    ("spec", "spec-check"): _NOT_LOOP,
+    ("spec", "spec-review"): _NOT_LOOP,
+    ("plan", "intent"): {"imported": False},
+    ("plan", "draft"): _LOOP,
+    ("plan", "review"): _LOOP,
+    ("plan", "plan"): _NOT_LOOP,
+    ("plan", "plan-review"): _NOT_LOOP,
+}
+# Hybrid design §4: the main loop's steps, the same in every flow that has them except where a flow
+# is named. A step's inputs are what makes it stale: the reader reads design.md only, so an edited or
+# rejected spec does not run it again, and no drafting step reads feedback.jsonl (it holds every
+# gate's rejects; a reject reopens the right step on its own).
+_SPEC_STEP = {"inputs": ["request.md", "context.md", "design.md"], "outputs": ["spec/{work_id}.md"],
+              "done_when": [{"check": "validator", "mode": "spec", "strict": False, "sources": True}]}
+_PLAN_DONE = [{"check": "validator", "mode": "plan", "strict": True, "sources": True}]
+DESIGN_STEPS = {
+    "intent": {"inputs": ["request.md", "context.md"], "outputs": ["design.md"],
+               "done_when": [{"check": "validator", "mode": "design"}], "may_ask": ["design"]},
+    "spec": _SPEC_STEP,
+    "spec-check": {"inputs": ["design.md"], "outputs": ["spec/{work_id}.check.json"],
+                   "done_when": [{"check": "settled"}], "mechanism_key": "spec-check",
+                   "role": "spec-builder-check", "role_reads": ["design.md", "spec/{work_id}.md"],
+                   "may_ask": ["design"]},
+    "spec-review": {"inputs": ["design.md#body", "spec/{work_id}.md#body"], "outputs": [],
+                    "done_when": [{"check": "approval", "gate": "spec-review"}], "gate": "spec-review"},
+    "plan": {"outputs": ["plan/{work_id}.md"], "done_when": _PLAN_DONE},
+    "plan-review": {"inputs": ["plan/{work_id}.md#body"], "outputs": [],
+                    "done_when": [{"check": "approval", "gate": "plan-review"}], "gate": "plan-review"},
+}
+DESIGN_PLAN_INPUTS = {
+    "feature": ["request.md", "context.md", "design.md", "spec/{work_id}.md#body?"],
+    "full": ["context.md", "design.md", "spec/{work_id}.md#body"],
+    "plan": ["request.md", "context.md", "design.md?", "spec/{work_id}.md#body?"],
+    "bugfix": ["request.md", "context.md"],
+}
+DESIGN_STEP_FILES = {
+    "intent": "skills/mind-spark/steps/intent.md",
+    "spec": "skills/spec-authoring/steps/spec.md",
+    "spec-check": "skills/spec-authoring/steps/spec-check.md",
+    "spec-review": "skills/agentic-sdlc-pipeline/steps/spec-review.md",
+    "plan": "skills/plan-authoring/steps/plan.md",
+    "plan-review": "skills/agentic-sdlc-pipeline/steps/plan-review.md",
 }
 # Design §5.8: the loop mode of each flow's draft step (None: the flow has no draft step).
 DESIGN_LOOP_MODE = {
@@ -554,6 +628,11 @@ class TestFlows(unittest.TestCase):
                     self.assertEqual(steps["draft"]["loop"], "spec-plan")
                     self.assertEqual(steps["draft"]["mechanism_key"], "draft")
                     self.assertEqual(steps["review"]["gate"], "review")
+                    # The loop drafts from the design when the intent step wrote one, and from the gate
+                    # feedback when a reject reopened it.
+                    self.assertIn("feedback.jsonl?", steps["draft"]["inputs"])
+                    if "intent" in steps:
+                        self.assertIn("design.md?", steps["draft"]["inputs"])
                 # design §5.3: --form light is refused for full; a spec or plan flow exists for its gate.
                 if flow_id in ("full", "spec", "plan"):
                     self.assertEqual(flow["forms"], ["gated"])
@@ -590,9 +669,8 @@ class TestFlows(unittest.TestCase):
                         self.assertIsNone(key)
                 if key:
                     used.add(key)
-        # draft.critic is read by the loop's critic role, never by a step card. spec-check is not used
-        # by a flow yet (plan Task 6 gives the flows their spec-check step and removes this exemption).
-        self.assertEqual(used, set(CONTRACT_MECHANISM_KEYS) - {"draft.critic", "spec-check"})
+        # draft.critic is read by the loop's critic role, never by a step card.
+        self.assertEqual(used, set(CONTRACT_MECHANISM_KEYS) - {"draft.critic"})
         self.assertEqual(set(manifest.MANDATED_FRESH_KEYS),
                          {"draft.critic", "spec-check", "security", "audit", "quality-review"})
 
@@ -626,7 +704,13 @@ class TestFlows(unittest.TestCase):
             steps = _steps(manifest.load_flow(REPO, flow_id))
             gates = [s for s in steps.values() if s.get("gate")]
             with self.subTest(flow=flow_id):
-                self.assertEqual([s["id"] for s in gates], ["review"] if "review" in steps else [])
+                # Hybrid design §3: spec-review over design.md and the spec, plan-review over the plan; the
+                # loop's one review gate over both only under the loop option.
+                expected = [gate for gate in ("review", "spec-review", "plan-review") if gate in steps]
+                self.assertEqual([s["id"] for s in gates], expected)
+                self.assertEqual([s["gate"] for s in gates], expected)
+                if "review" in steps:
+                    self.assertEqual(steps["review"]["applies_when"]["option"], "loop")
                 implement = steps.get("implement")
                 if implement is None:
                     continue
@@ -651,13 +735,60 @@ class TestFlows(unittest.TestCase):
         self.assertIn({"check": "resolver_ok", "work_types": ["feature", "bugfix"]}, audit["done_when"])
 
     def test_plan_flow_imports_the_approved_spec(self):
-        # The plan flow's draft reads an existing approved spec that no step of the flow writes.
+        # The plan flow plans from an approved spec that no step of the flow writes, when it is given one
+        # (hybrid design §3: `--spec-file` is optional; without it the plan carries its own criteria).
         flow = manifest.load_flow(REPO, "plan")
-        self.assertEqual(flow["imports"], [{"path": "spec/{work_id}.md", "option": "--spec-file", "status": "approved"}])
+        self.assertEqual(flow["imports"], [{"path": "spec/{work_id}.md", "option": "--spec-file", "status": "approved",
+                                            "required": False}])
         for flow_id in DESIGN_ORDER:
             if flow_id != "plan":
                 with self.subTest(flow=flow_id):
                     self.assertNotIn("imports", manifest.load_flow(REPO, flow_id))
+
+    def test_main_loop_steps_match_design(self):
+        # Hybrid design §4: intent, spec, the reader, the two gates and the plan, step by step.
+        for flow_id in DESIGN_ORDER:
+            steps = _steps(manifest.load_flow(REPO, flow_id))
+            for step_id, expected in DESIGN_STEPS.items():
+                if step_id not in steps:
+                    continue
+                step = steps[step_id]
+                bug_plan = (flow_id, step_id) == ("bugfix", "plan")
+                with self.subTest(flow=flow_id, step=step_id):
+                    for key, value in expected.items():
+                        if not (bug_plan and key == "done_when"):
+                            self.assertEqual(step.get(key), value, key)
+                    if step_id == "plan":
+                        self.assertEqual(step["inputs"], DESIGN_PLAN_INPUTS[flow_id])
+                    if bug_plan:
+                        self.assertEqual(step["file"], "skills/root-cause-fix/steps/plan.md")
+                    else:
+                        self.assertEqual(step["file"], DESIGN_STEP_FILES[step_id])
+                    for key in ("role", "role_reads", "mechanism_key", "may_ask", "gate"):
+                        if key not in expected:
+                            self.assertNotIn(key, step, key)
+        # The bug plan carries the bug and its own criteria; it has no design.md to cite, so no sources.
+        bug_plan = _steps(manifest.load_flow(REPO, "bugfix"))["plan"]
+        self.assertEqual(bug_plan["done_when"], [{"check": "validator", "mode": "plan", "strict": True}])
+        self.assertEqual(bug_plan["outputs"], ["plan/{work_id}.md"])
+        # Every flow with an intent step checks design.md with the validator's design mode.
+        for flow_id in ("design", "feature", "full", "spec", "plan"):
+            with self.subTest(flow=flow_id, step="intent"):
+                self.assertEqual(_steps(manifest.load_flow(REPO, flow_id))["intent"]["done_when"],
+                                 [{"check": "validator", "mode": "design"}])
+        # No drafting step reads feedback.jsonl but the loop's draft (design §5: one file holds every
+        # gate's rejects, so a plan reject would stale the spec).
+        for flow_id in DESIGN_ORDER:
+            for step in manifest.load_flow(REPO, flow_id)["steps"]:
+                if step["id"] in manifest.DRAFTING_STEPS and step["id"] != "draft":
+                    with self.subTest(flow=flow_id, step=step["id"]):
+                        self.assertFalse([ref for ref in step["inputs"] if ref.startswith("feedback.jsonl")])
+        # The implement step builds to the plan, and to the spec when the package has one; the full
+        # flow always writes a spec.
+        implement = {flow_id: _steps(manifest.load_flow(REPO, flow_id))["implement"]["inputs"]
+                     for flow_id in ("feature", "full")}
+        self.assertEqual(implement["feature"], ["spec/{work_id}.md#body?", "plan/{work_id}.md#body"])
+        self.assertEqual(implement["full"], ["spec/{work_id}.md#body", "plan/{work_id}.md#body"])
 
     def test_real_manifest_step_files_are_the_p1_missing_list(self):
         missing = set()
@@ -942,8 +1073,14 @@ class TestFixtureRoot(TempRoot):
                         _errors_text(errors))
 
     def test_loop_and_spec_are_start_options(self):
-        self.assertEqual(manifest.OPTIONS, ("intent", "quality-review", "loop", "spec"))
+        # Hybrid design §5: `--option intent` goes away; the intent step runs where it is in the flow.
+        self.assertEqual(manifest.OPTIONS, ("quality-review", "loop", "spec"))
         flow = manifest.load_flow(self.root, "fixture")
+        for option in ("intent",):
+            with self.subTest(option=option):
+                broken = copy.deepcopy(flow)
+                broken["steps"][1]["applies_when"] = {"option": option}
+                self.assertTrue(manifest.validate_flow(broken, self.root, check_files=True))
         for option in ("loop", "spec"):
             for key in ("option", "not_option"):
                 with self.subTest(option=option, condition=key):

@@ -81,12 +81,32 @@ class TestDefaultMap(unittest.TestCase):
         self.assertEqual(entries["draft"]["mechanism"], "runner-loop")
 
     def test_default_map_covers_only_applicable_keys(self):
+        # Hybrid design §5: intent, spec and plan are the main loop's (no key); the spec reader's key only
+        # where the reader runs, and the loop's draft keys only under --option loop.
         keys = set(strategy.default_map(_flow("feature"), SHARED, PLAIN, "codex", [])["entries"])
+        self.assertEqual(keys, {"context", "implement", "security", "audit"})
+        keys = set(strategy.default_map(_flow("feature"), SHARED, PLAIN, "codex", ["spec"])["entries"])
+        self.assertEqual(keys, {"context", "spec-check", "implement", "security", "audit"})
+        keys = set(strategy.default_map(_flow("feature"), SHARED, PLAIN, "codex", ["spec"], form="light")["entries"])
+        self.assertEqual(keys, {"context", "implement", "security", "audit"})  # D8: a light run has no reader
+        keys = set(strategy.default_map(_flow("feature"), SHARED, PLAIN, "codex", ["loop", "spec"])["entries"])
         self.assertEqual(keys, {"context", "draft", "draft.critic", "implement", "security", "audit"})
         keys = set(strategy.default_map(_flow("full"), SHARED, PLAIN, "codex", [])["entries"])
-        self.assertEqual(keys, {"context", "draft", "draft.critic", "implement", "security", "audit"})
+        self.assertEqual(keys, {"context", "spec-check", "implement", "security", "audit"})
         keys = set(strategy.default_map(_flow("full"), SHARED, EVERYTHING, "codex", ["quality-review"])["entries"])
+        self.assertEqual(keys, ALL_KEYS - {"draft", "draft.critic"} | {"spec-check"})
+        keys = set(strategy.default_map(_flow("full"), SHARED, EVERYTHING, "codex", ["quality-review", "loop"])
+                   ["entries"])
         self.assertEqual(keys, ALL_KEYS)
+        for flow_id in ("spec", "plan", "bugfix"):
+            with self.subTest(flow=flow_id):
+                keys = set(strategy.default_map(_flow(flow_id), SHARED, PLAIN, "codex", [])["entries"])
+                self.assertEqual("spec-check" in keys, flow_id == "spec")
+                self.assertFalse(keys & {"draft", "draft.critic"})
+        entries = strategy.default_map(_flow("full"), SHARED, PLAIN, "other", [])["entries"]
+        self.assertEqual(entries["spec-check"]["mechanism"], "inline-degraded")  # no sub-agents: the inline reader
+        self.assertEqual(strategy.default_map(_flow("full"), SHARED, PLAIN, "codex", [])["entries"]["spec-check"]
+                         ["mechanism"], "subagent")
         self.assertEqual(set(strategy.default_map(_flow("test"), SHARED, PLAIN, "codex", [])["entries"]),
                          {"context", "implement"})
         parallel = strategy.default_map(_flow("feature"), SHARED, EVERYTHING, "codex", [])["entries"]
@@ -287,10 +307,12 @@ class TestConfirm(EngineCase):
             self.assertEqual(after["entries"][key], entry, key)
         self.assertEqual(after["capabilities"], before["capabilities"])
         added = set(after["entries"]) - set(before["entries"])
-        self.assertEqual(added, {"quality-review"})
-        self.assertEqual(after["entries"]["quality-review"]["mechanism"], "subagent")
-        self.assertIn("escalate", after["entries"]["quality-review"]["reason"])
-        self.assertEqual(self.records("escalate", slug="feat")[0]["strategy_added"], ["quality-review"])
+        # The full flow always writes a spec, so its fresh reader joins the quality review.
+        self.assertEqual(added, {"spec-check", "quality-review"})
+        for key in sorted(added):
+            self.assertEqual(after["entries"][key]["mechanism"], "subagent", key)
+            self.assertIn("escalate", after["entries"][key]["reason"])
+        self.assertEqual(self.records("escalate", slug="feat")[0]["strategy_added"], ["spec-check", "quality-review"])
         self.assertEqual(strategy.validate(after, manifest.load_flow(self.root, "full"), self.state("feat")), [])
 
 

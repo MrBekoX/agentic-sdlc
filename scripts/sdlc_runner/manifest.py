@@ -56,7 +56,7 @@ NAMED_SETS = ("@source", "@tests", "@diff", "@start")
 PLACEHOLDERS = ("work_id",)
 FORMS = ("gated", "light")
 WORK_TYPES = ("feature", "bugfix", "refactor", "test")
-OPTIONS = ("intent", "quality-review", "loop", "spec")
+OPTIONS = ("quality-review", "loop", "spec")
 ASK_KINDS = ("consent", "design")
 # start_probes() values (probes.py); "error" always means "the step applies" and is never listed.
 PROBE_VALUES = {

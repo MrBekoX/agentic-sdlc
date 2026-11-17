@@ -1,5 +1,5 @@
 {
-  "$comment": "Design §5.15: strategy -> context -> draft(spec+plan) -> review(gate; absent in light) -> branch -> implement -> security -> audit -> claim.",
+  "$comment": "Hybrid spec/plan design §3: strategy -> context -> intent -> {spec} spec -> {spec}[spec-check] -> {spec}[spec-review] -> plan -> [plan-review] -> branch -> implement -> security -> audit -> claim ([x]: gated form only; {spec}: start --option spec). Under start --option loop the loop's draft(spec+plan) -> [review] run in place of spec ... plan-review, and --option spec has no effect there.",
   "schema": "agentic-sdlc/flow@1",
   "id": "feature",
   "entry_skill": "feature-build",
@@ -25,9 +25,17 @@
       "mechanism_key": "context"
     },
     {
+      "id": "intent",
+      "file": "skills/mind-spark/steps/intent.md",
+      "inputs": ["request.md", "context.md"],
+      "outputs": ["design.md"],
+      "done_when": [{"check": "validator", "mode": "design"}],
+      "may_ask": ["design"]
+    },
+    {
       "id": "draft",
       "file": "skills/plan-authoring/steps/draft.md",
-      "inputs": ["request.md", "context.md", "feedback.jsonl?"],
+      "inputs": ["request.md", "context.md", "design.md?", "feedback.jsonl?"],
       "outputs": ["spec/{work_id}.md", "spec/{work_id}.review.json", "plan/{work_id}.md", "plan/{work_id}.review.json"],
       "done_when": [
         {"check": "loop_done"},
@@ -36,6 +44,7 @@
         {"check": "validator", "mode": "plan", "strict": true},
         {"check": "sidecar_ok", "artifact": "plan"}
       ],
+      "applies_when": {"option": "loop"},
       "mechanism_key": "draft",
       "loop": "spec-plan"
     },
@@ -46,7 +55,53 @@
       "outputs": [],
       "done_when": [{"check": "approval", "gate": "review"}],
       "gate": "review",
-      "applies_when": {"form": "gated"}
+      "applies_when": {"form": "gated", "option": "loop"}
+    },
+    {
+      "id": "spec",
+      "file": "skills/spec-authoring/steps/spec.md",
+      "inputs": ["request.md", "context.md", "design.md"],
+      "outputs": ["spec/{work_id}.md"],
+      "done_when": [{"check": "validator", "mode": "spec", "strict": false, "sources": true}],
+      "applies_when": {"not_option": "loop", "option": "spec"}
+    },
+    {
+      "id": "spec-check",
+      "file": "skills/spec-authoring/steps/spec-check.md",
+      "inputs": ["design.md"],
+      "outputs": ["spec/{work_id}.check.json"],
+      "done_when": [{"check": "settled"}],
+      "applies_when": {"form": "gated", "not_option": "loop", "option": "spec"},
+      "mechanism_key": "spec-check",
+      "role": "spec-builder-check",
+      "role_reads": ["design.md", "spec/{work_id}.md"],
+      "may_ask": ["design"]
+    },
+    {
+      "id": "spec-review",
+      "file": "skills/agentic-sdlc-pipeline/steps/spec-review.md",
+      "inputs": ["design.md#body", "spec/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "spec-review"}],
+      "gate": "spec-review",
+      "applies_when": {"form": "gated", "not_option": "loop", "option": "spec"}
+    },
+    {
+      "id": "plan",
+      "file": "skills/plan-authoring/steps/plan.md",
+      "inputs": ["request.md", "context.md", "design.md", "spec/{work_id}.md#body?"],
+      "outputs": ["plan/{work_id}.md"],
+      "done_when": [{"check": "validator", "mode": "plan", "strict": true, "sources": true}],
+      "applies_when": {"not_option": "loop"}
+    },
+    {
+      "id": "plan-review",
+      "file": "skills/agentic-sdlc-pipeline/steps/plan-review.md",
+      "inputs": ["plan/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "plan-review"}],
+      "gate": "plan-review",
+      "applies_when": {"form": "gated", "not_option": "loop"}
     },
     {
       "id": "branch",
@@ -59,7 +114,7 @@
     {
       "id": "implement",
       "file": {"feature": "skills/feature-build/steps/implement.md"},
-      "inputs": ["spec/{work_id}.md#body", "plan/{work_id}.md#body"],
+      "inputs": ["spec/{work_id}.md#body?", "plan/{work_id}.md#body"],
       "outputs": ["evidence/{work_id}.tdd.md"],
       "done_when": [
         {"check": "run_recorded", "expect": "fail", "label": "red"},

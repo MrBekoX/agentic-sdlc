@@ -760,8 +760,11 @@ class TestEngine(EngineCase):
 class TestHandoffs(EngineCase):
     def test_start_imports_an_approved_spec(self):
         source = self.tmp / "approved-spec.md"
-        code, text = self.start(flow="plan", expect=2)
+        # The loop drafts the plan from the spec, so a loop run without one is refused; without the
+        # loop the plan flow starts spec-less (test_plan_flow_runs_intent_only_without_an_import).
+        code, text = self.start("--option", "loop", flow="plan", expect=2)
         self.assertIn("error=import_missing:--spec-file", text)
+        self.assertFalse((self.pkg() / "state.json").exists())
         source.write_bytes(("---\nwork_id: demo\nstatus: draft\n---\n" + SPEC_BODY).encode("utf-8"))
         code, text = self.start("--spec-file", str(source), flow="plan", expect=4)
         self.assertIn("error=import_status:--spec-file:draft", text)
@@ -917,7 +920,12 @@ class TestFlowOps(EngineCase):
         old_ids = {s["id"] for s in manifest.load_flow(self.root, "bugfix")["steps"]}
         added = [s for s in manifest.load_flow(self.root, "full")["steps"] if s["id"] not in old_ids]
         self.assertEqual(sorted(s["id"] for s in added),
-                         ["diff-review", "docs-check", "intent", "quality-gates", "quality-review"])
+                         ["diff-review", "docs-check", "intent", "quality-gates", "quality-review", "spec",
+                          "spec-check", "spec-review"])
+        # The spec reader's key only where it applies: a bugfix run has none, the full flow's spec gets one.
+        self.assertNotIn("spec-check", strategy_before["entries"])
+        self.assertIn("spec-check", strategy_after["entries"])
+        self.assertFalse({"draft", "draft.critic"} & set(strategy_after["entries"]))
         self.assertEqual(after["transition_cap"], 60 + sum(s.get("max_visits", 3) for s in added))
         self.assertEqual(after["steps"]["strategy"], before["steps"]["strategy"])
         self.assertEqual(after["steps"]["context"]["visits"], 1)
@@ -1249,6 +1257,260 @@ class TestTwoGates(TwoGateCase):
         self.assertEqual(card_fields(text)["state"], "wait-gate", text)
         self.assertEqual(self.meta("plan", "with-spec"), {"work_id": "with-spec", "spec": "../spec/with-spec.md",
                                                           "branch": "main", "flow": "feature", "status": "reviewed"})
+
+
+# ---------------------------------------------------------------------------------------------
+# the real flows (hybrid spec/plan design §3-§5): ask first, the main loop writes, a spec only when wanted
+# ---------------------------------------------------------------------------------------------
+
+# A bug plan (design §4.5, the bugfix plan of design §5.19): the bug and its own criteria come before
+# the first task; it cites no sources, since a bugfix run has no design.md.
+BUG_PLAN_BODY = (
+    "# Bugfix plan: the export drops the last row\n\n"
+    "## Bug\n\n"
+    "Expected: the CSV file holds every visible row. Actual: the last row of the report is missing.\n"
+    "Reproduction: export a report of three rows and count the rows of the CSV file it returns.\n\n"
+    "## Acceptance Criteria\n\n"
+    "- AC1: Given a report of three rows, when the user exports it, then the CSV file returns all three rows.\n\n"
+    "## Task 1: Keep the last row (AC1)\n\n"
+    "Modify `src/export.py` and its test `tests/test_export.py`.\n\n"
+    "- RED: write the failing test for AC1 first.\n- Run: `pytest tests/test_export.py`\n"
+)
+MAIN_LOOP_STEPS = ("spec", "spec-check", "spec-review", "plan", "plan-review")
+
+
+class RealFlowCase(TwoGateCase):
+    """The real flows of the temp root (flows/*.json as committed), played like TwoGateCase."""
+
+    def start(self, *extra, flow="feature", **kwargs):
+        return EngineCase.start(self, *extra, flow=flow, **kwargs)
+
+    def satisfy(self, step, text, slug="demo"):
+        if step == "plan" and self.state(slug)["flow"] == "bugfix":
+            self.put("plan/%s.md" % slug, BUG_PLAN_BODY, slug)
+        else:
+            super().satisfy(step, text, slug)
+
+    def approved_spec(self, slug="demo") -> Path:
+        source = self.tmp / ("approved-%s.md" % slug)
+        source.write_bytes(("---\nwork_id: %s\nstatus: approved\n---\n" % slug + SPEC_BODY).encode("utf-8"))
+        return source
+
+    def steps(self, slug="demo") -> dict:
+        return self.state(slug)["steps"]
+
+    def defaults(self, slug="demo") -> set:
+        return set(textio.read_json(self.pkg(slug) / "strategy.default.json")["entries"])
+
+
+class TestRealFlows(RealFlowCase):
+    def test_feature_default_has_no_spec_steps(self):
+        self.start()
+        code, text = self.advance_to("intent")
+        self.assertEqual(card_fields(text)["may_ask"], "design")
+        code, text = self.advance_to("plan")
+        steps = self.steps()
+        for step_id in ("spec", "spec-check", "spec-review"):
+            self.assertFalse(steps[step_id]["applies"], step_id)
+            self.assertIn("applies_when option=spec (not given at start)", steps[step_id]["skip_reason"])
+        for step_id in ("draft", "review"):
+            self.assertFalse(steps[step_id]["applies"], step_id)
+            self.assertIn("applies_when option=loop (not given at start)", steps[step_id]["skip_reason"])
+        self.assertEqual(steps["intent"]["state"], "done")
+        self.assertEqual(self.defaults(), {"context", "implement", "security", "audit"})
+        code, text = self.advance_to("plan-review")
+        self.assertEqual(card_fields(text)["state"], "wait-gate")
+        self.assertEqual(card_value(text, "artifacts"), "plan/demo.md")
+        self.assertFalse((self.pkg() / "spec").exists())
+        self.assertEqual(self.meta("plan"), {"work_id": "demo", "spec": "none", "branch": "main", "flow": "feature",
+                                             "status": "reviewed"})
+        self.approve(text, gate="plan-review")
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "branch")
+        self.assertEqual(self.meta("plan")["status"], "approved")
+        self.assertEqual([r["gate"] for r in logs.read(self.pkg() / "approvals.jsonl")], ["plan-review"])
+
+    def test_spec_option_adds_the_spec_steps_to_feature(self):
+        self.start("--option", "spec")
+        self.assertEqual(self.defaults(), {"context", "spec-check", "implement", "security", "audit"})
+        code, text = self.advance_to("spec-check")
+        fields = card_fields(text)
+        self.assertEqual((fields["role"], fields["mechanism"]), ("spec-builder-check", "subagent"))
+        self.assertIn("spawn_agent", fields["delegate"])  # codex: the reader is one fresh sub-agent
+        self.assertEqual(fields["inputs"], "design.md")
+        code, text = self.advance_to("spec-review")
+        self.assertEqual(card_fields(text)["state"], "wait-gate")
+        self.assertEqual(card_value(text, "artifacts"), "design.md,spec/demo.md")
+        self.approve(text, gate="spec-review")
+        code, text = self.advance_to("plan-review")
+        self.assertEqual(card_fields(text)["state"], "wait-gate")
+        self.assertEqual(self.meta("plan"), {"work_id": "demo", "spec": "../spec/demo.md", "branch": "main",
+                                             "flow": "feature", "status": "reviewed"})
+        self.assertEqual(self.meta("spec")["status"], "approved")
+        # A light run asked for a spec too: D8 keeps no reader and no gate.
+        self.start("--option", "spec", work_id="lite", form="light")
+        self.assertEqual(self.defaults("lite"), {"context", "implement", "security", "audit"})
+        code, text = self.advance_to("branch", slug="lite")
+        steps = self.steps("lite")
+        self.assertEqual([s for s in MAIN_LOOP_STEPS if steps[s]["applies"]], ["spec", "plan"])
+
+    def test_plan_flow_runs_intent_only_without_an_import(self):
+        self.start(flow="plan", work_id="fresh")
+        code, text = self.advance_to("intent", slug="fresh")
+        self.assertTrue(self.steps("fresh")["intent"]["applies"])
+        self.advance_to("plan", slug="fresh")
+        self.assertTrue((self.pkg("fresh") / "design.md").is_file())
+        self.start("--spec-file", str(self.approved_spec("given")), flow="plan", work_id="given")
+        code, text = self.advance_to("plan", slug="given")
+        intent = self.steps("given")["intent"]
+        self.assertEqual((intent["applies"], intent["state"]), (False, "skipped"))
+        self.assertEqual(intent["skip_reason"], "applies_when imported=False (start imported 1 files)")
+        self.assertFalse((self.pkg("given") / "design.md").exists())
+        code, text = self.advance_to("plan-review", slug="given")
+        self.assertEqual(self.meta("plan", "given")["spec"], "../spec/given.md")
+        self.assertEqual(self.meta("spec", "given")["status"], "approved")  # kept as it was imported
+
+    def test_plan_flow_without_import_stamps_spec_none(self):
+        self.start(flow="plan")
+        code, text = self.advance_to("plan-review")
+        self.assertEqual(card_fields(text)["state"], "wait-gate")
+        self.assertEqual(self.meta("plan"), {"work_id": "demo", "spec": "none", "branch": "main", "flow": "plan",
+                                             "status": "reviewed"})
+        self.approve(text, gate="plan-review")
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "claim")
+        self.assertEqual(self.meta("plan")["status"], "approved")
+
+    def test_plan_loop_without_a_spec_is_refused(self):
+        code, text = self.start("--option", "loop", flow="plan", expect=2)
+        self.assertIn("error=import_missing:--spec-file", text)
+        self.assertFalse((self.pkg() / "state.json").exists())
+        self.start("--option", "loop", "--spec-file", str(self.approved_spec()), flow="plan")
+        code, text = self.advance_to("draft")
+        self.assertEqual(card_fields(text)["role"], "author-plan")
+        self.assertEqual(self.state()["loop"]["mode"], "plan")
+        self.assertFalse(self.steps()["intent"]["applies"])
+
+    def test_escalate_from_spec_keeps_the_approved_spec(self):
+        self.start(flow="spec", work_type="test")
+        code, text = self.advance_to("claim")
+        before = {s: self.steps()[s]["state"] for s in ("intent", "spec", "spec-check", "spec-review")}
+        self.assertEqual(set(before.values()), {"done"})
+        code, text = self.sdlc("escalate", "feature", "--reason", "build it")
+        self.assertEqual(code, 0, text)
+        st = self.state()
+        self.assertEqual((st["flow"], st["work_type"], st["options"]), ("feature", "feature", ["spec"]))
+        self.assertEqual(self.records("escalate")[0]["options"], ["spec"])
+        # The approved spec, its check and its gate are kept, not re-decided as skipped.
+        self.assertEqual({s: st["steps"][s]["state"] for s in before}, before)
+        self.assertEqual(card_fields(text)["step"], "plan")
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "plan")
+        self.assertEqual({s: (self.steps()[s]["state"], self.steps()[s]["applies"]) for s in before},
+                         {s: ("done", True) for s in before})
+        self.assertEqual(self.meta("spec")["status"], "approved")
+        self.assertEqual([r["gate"] for r in self.records("approve")], ["spec-review"])  # nothing asked again
+        code, text = self.advance_to("plan-review")
+        self.assertEqual(card_fields(text)["state"], "wait-gate")
+        self.assertEqual(self.meta("plan")["spec"], "../spec/demo.md")
+        # The clean twin: a spec run escalated before its spec step was done adds no option.
+        self.start(flow="spec", work_type="test", work_id="early")
+        code, text = self.sdlc("escalate", "feature", "--slug", "early", "--reason", "build it")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.state("early")["options"], [])
+
+    def test_loop_option_keeps_the_old_steps(self):
+        from sdlc_runner import engine
+
+        cases = (("feature", "feature", "author-spec", ()), ("full", "feature", "author-spec", ()),
+                 ("spec", "test", "author-spec", ()), ("bugfix", "bugfix", "author-plan", ()),
+                 ("plan", "feature", "author-plan", ("--spec-file",)))
+        for flow_id, work_type, role, extra in cases:
+            slug = "loop-" + flow_id
+            with self.subTest(flow=flow_id):
+                if extra:
+                    extra = ("--spec-file", str(self.approved_spec(slug)))
+                self.start("--option", "loop", *extra, flow=flow_id, work_type=work_type, work_id=slug)
+                self.assertTrue({"draft", "draft.critic"} <= self.defaults(slug))
+                self.assertNotIn("spec-check", self.defaults(slug))
+                code, text = self.advance_to("draft", slug=slug)
+                self.assertEqual(card_fields(text)["role"], role)
+                # The main loop's steps come after the loop's and are decided from the start facts when
+                # the walk reaches them: under the loop none of them applies.
+                ctx = engine.load_context(self.project, self.root, slug)
+                for step in ctx.flow["steps"]:
+                    if step["id"] in MAIN_LOOP_STEPS:
+                        does, reason = engine.applies(ctx, step)
+                        self.assertFalse(does, step["id"])
+                        self.assertIn("applies_when not_option=loop (given at start)", reason)
+                if flow_id in ("feature", "full", "spec"):  # the intent step runs in both variants
+                    self.assertEqual(self.steps(slug)["intent"]["state"], "done")
+
+    def test_bugfix_plan_carries_the_bug_and_its_own_criteria(self):
+        self.start(flow="bugfix", work_type="bugfix")
+        self.assertEqual(self.defaults(), {"context", "implement", "security", "audit"})
+        code, text = self.advance_to("plan-review")
+        self.assertEqual(card_fields(text)["state"], "wait-gate")
+        self.assertNotIn("intent", self.steps())
+        self.assertEqual(self.meta("plan"), {"work_id": "demo", "spec": "none", "branch": "main", "flow": "bugfix",
+                                             "status": "reviewed"})
+        self.start(flow="bugfix", work_type="bugfix", work_id="lite", form="light")
+        self.advance_to("branch", slug="lite")
+        self.assertFalse(self.steps("lite")["plan-review"]["applies"])
+
+    def test_design_change_after_spec_approval_reopens_spec_review(self):
+        self.start("--option", "spec")
+        code, text = self.advance_to("spec-review")
+        approved = card_value(text, "fingerprint")
+        self.approve(text, gate="spec-review")
+        code, text = self.advance_to("plan")
+        self.edit("design.md", "- D2:", "- D3: The file name carries the date. (user)\n- D2:")
+        code, text = self.next()  # a new intent: the spec is written again from it
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("do", "spec"), text)
+        self.assertEqual(self.steps()["spec"]["stale_cause"], "design.md")
+        self.edit("spec/demo.md", "(source: D1)", "(source: D1, D3)")
+        code, text = self.next()  # and its reader runs again, for the new design
+        fields = card_fields(text)
+        self.assertEqual((fields["step"], fields["role"], fields["visit"]), ("spec-check", "spec-builder-check", "2/3"))
+        self.check_record()
+        code, text = self.next()
+        fields = card_fields(text)
+        self.assertEqual((fields["state"], fields["step"]), ("wait-gate", "spec-review"), text)
+        self.assertNotEqual(card_value(text, "fingerprint"), approved)
+        self.assertEqual((self.state()["status"], self.records("halt")), ("active", []))
+        self.approve(text, gate="spec-review")
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "plan")
+
+    def test_design_change_restales_a_specless_plan(self):
+        self.start()
+        code, text = self.advance_to("plan-review")
+        before = card_value(text, "fingerprint")
+        self.edit("design.md", "- D2:", "- D3: The file name carries the date. (user)\n- D2:")
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("do", "plan"), text)
+        self.assertEqual(self.steps()["plan"]["stale_cause"], "design.md")
+        self.edit("plan/demo.md", "every row. (source: D2)", "every row, dated. (source: D2, D3)")
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("wait-gate", "plan-review"), text)
+        self.assertNotEqual(card_value(text, "fingerprint"), before)
+
+    def test_plan_reject_does_not_stale_the_spec(self):
+        self.start("--option", "spec")
+        code, text = self.advance_to("plan-review")
+        code, out = self.sdlc("reject", "plan-review", "--quote", "Split the task in two.")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(r["gate"], r["quote"]) for r in logs.read(self.pkg() / "feedback.jsonl")],
+                         [("plan-review", "Split the task in two.")])
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["step"], self.steps()["plan"]["visit_cause"]), ("plan", "reject"), text)
+        for step_id in ("intent", "spec", "spec-check", "spec-review"):
+            self.assertEqual(self.steps()[step_id]["state"], "done", step_id)
+        self.assertEqual(self.records("stale", step="spec"), [])
+        self.edit("plan/demo.md", "Create `src/export.py`", "Create `src/export.py` in two parts")
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("wait-gate", "plan-review"), text)
+        self.assertEqual(self.meta("spec")["status"], "approved")
 
 
 class TestSpeclessFlows(unittest.TestCase):

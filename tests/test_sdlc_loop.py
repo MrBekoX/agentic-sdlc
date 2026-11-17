@@ -22,7 +22,7 @@ for folder in (REPO / "scripts", TESTS):
     if str(folder) not in sys.path:
         sys.path.insert(0, str(folder))
 
-from test_sdlc_engine import CHAIN_LINE, PLAN_BODY, SPEC_BODY, EngineCase, card_fields, card_value  # noqa: E402
+from test_sdlc_engine import CHAIN_LINE, DESIGN_BODY, PLAN_BODY, SPEC_BODY, EngineCase, card_fields, card_value  # noqa: E402,E501
 from sdlc_runner import fingerprint, frontmatter, logs, loop, manifest, schema, textio  # noqa: E402
 from sdlc_runner.textio import SdlcError  # noqa: E402
 
@@ -55,16 +55,29 @@ ENGINE_OVERRIDES = ("draft=workflow:the user asked for the workflow engine",
 
 
 class LoopCase(EngineCase):
+    """The loop runs only on the user's request (`start --option loop`, hybrid spec/plan design §3); the
+    intent step before it writes design.md in the flows that have one."""
+
     def to_draft(self, flow="feature", work_type="feature", runtime="codex",
                  capabilities="workflow=no,subagent=yes,team=no", overrides=(), slug="demo"):
-        """Start `flow`, confirm the strategy, write the context; return the first draft card."""
-        self.start(flow=flow, work_type=work_type, runtime=runtime, work_id=slug)
+        """Start `flow` with the loop, confirm the strategy, write the context and the design; return the
+        first draft card."""
+        self.start("--option", "loop", flow=flow, work_type=work_type, runtime=runtime, work_id=slug)
         self.confirm_strategy(slug, capabilities, *overrides)
         code, text = self.next(slug)
         self.satisfy("context", text, slug)
         code, text = self.next(slug)
+        if card_fields(text)["step"] == "intent":
+            self.satisfy("intent", text, slug)
+            code, text = self.next(slug)
         self.assertEqual(card_fields(text)["step"], "draft", text)
         return text
+
+    def satisfy(self, step, text, slug="demo"):
+        if step == "intent":
+            self.put("design.md", DESIGN_BODY, slug)
+        else:
+            super().satisfy(step, text, slug)
 
     def record(self, role, round_no, text, slug="demo", expect=0):
         code, out = self.sdlc("loop-record", "--slug", slug, "--role", role, "--round", str(round_no), "--text", text)
@@ -94,10 +107,13 @@ class LoopCase(EngineCase):
 
 class TestStaging(LoopCase):
     def test_stage_writes_brief_and_prompt_files_inside_package(self):
-        self.start(flow="feature")
+        self.start("--option", "loop", flow="feature")
         self.confirm_strategy()
         code, text = self.next()
         self.satisfy("context", text, "demo")
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "intent", text)
+        self.satisfy("intent", text, "demo")
         before = {p for p in self.project.rglob("*") if ".git" not in p.parts}
         code, text = self.next()
         created = {p for p in self.project.rglob("*") if ".git" not in p.parts} - before
@@ -106,6 +122,7 @@ class TestStaging(LoopCase):
         brief = self.draft("brief.md").read_text(encoding="utf-8")
         self.assertIn("Add a CSV export to the report page", brief)
         self.assertIn("Only the report page.", brief)
+        self.assertIn("D1: The export is a CSV file. (user)", brief)  # the intent step's design.md
         self.assertIn("02-spec-driven-development", brief)
         prompt = self.draft("prompts/author-spec.r0.md").read_text(encoding="utf-8")
         role_body = frontmatter.split((REPO / "agents" / "spec-plan-author.md").read_text(encoding="utf-8"))[1]

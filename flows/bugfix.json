@@ -1,5 +1,5 @@
 {
-  "$comment": "Design §5.15: strategy -> context -> draft(bugfix-plan) -> review(gate; absent in light) -> branch -> implement -> security -> audit -> claim. No spec: the plan carries the bug and its acceptance criteria (design §5.19).",
+  "$comment": "Hybrid spec/plan design §3: strategy -> context -> plan (the bug report and its own criteria) -> [plan-review] -> branch -> implement -> security -> audit -> claim ([x]: gated form only). No intent step (the bug report is the intent) and no spec: the plan carries the bug and its acceptance criteria (design §5.19). Under start --option loop the loop's draft(bugfix-plan) -> [review] run in place of plan and plan-review.",
   "schema": "agentic-sdlc/flow@1",
   "id": "bugfix",
   "entry_skill": "root-cause-fix",
@@ -34,6 +34,7 @@
         {"check": "validator", "mode": "plan", "strict": true},
         {"check": "sidecar_ok", "artifact": "plan"}
       ],
+      "applies_when": {"option": "loop"},
       "mechanism_key": "draft",
       "loop": "spec-plan"
     },
@@ -44,7 +45,24 @@
       "outputs": [],
       "done_when": [{"check": "approval", "gate": "review"}],
       "gate": "review",
-      "applies_when": {"form": "gated"}
+      "applies_when": {"form": "gated", "option": "loop"}
+    },
+    {
+      "id": "plan",
+      "file": "skills/root-cause-fix/steps/plan.md",
+      "inputs": ["request.md", "context.md"],
+      "outputs": ["plan/{work_id}.md"],
+      "done_when": [{"check": "validator", "mode": "plan", "strict": true}],
+      "applies_when": {"not_option": "loop"}
+    },
+    {
+      "id": "plan-review",
+      "file": "skills/agentic-sdlc-pipeline/steps/plan-review.md",
+      "inputs": ["plan/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "plan-review"}],
+      "gate": "plan-review",
+      "applies_when": {"form": "gated", "not_option": "loop"}
     },
     {
       "id": "branch",

@@ -1,5 +1,5 @@
 {
-  "$comment": "Design §5.15: strategy -> context -> [intent] -> draft(spec+plan) -> review(gate) -> branch -> [docs-check] -> implement -> security -> [quality-gates] -> diff-review -> [quality-review] -> audit -> claim. Gated only (design §5.3).",
+  "$comment": "Hybrid spec/plan design §3: strategy -> context -> intent -> spec -> spec-check -> spec-review -> plan -> plan-review -> branch -> [docs-check] -> implement -> security -> [quality-gates] -> diff-review -> [quality-review] -> audit -> claim. Gated only (design §5.3), so no step carries a form. Under start --option loop the loop's draft(spec+plan) -> review run in place of spec ... plan-review.",
   "schema": "agentic-sdlc/flow@1",
   "id": "full",
   "entry_skill": "agentic-sdlc-pipeline",
@@ -29,8 +29,7 @@
       "file": "skills/mind-spark/steps/intent.md",
       "inputs": ["request.md", "context.md"],
       "outputs": ["design.md"],
-      "done_when": [{"check": "exists", "path": "design.md"}],
-      "applies_when": {"option": "intent"},
+      "done_when": [{"check": "validator", "mode": "design"}],
       "may_ask": ["design"]
     },
     {
@@ -45,6 +44,7 @@
         {"check": "validator", "mode": "plan", "strict": true},
         {"check": "sidecar_ok", "artifact": "plan"}
       ],
+      "applies_when": {"option": "loop"},
       "mechanism_key": "draft",
       "loop": "spec-plan"
     },
@@ -54,7 +54,54 @@
       "inputs": ["spec/{work_id}.md#body", "plan/{work_id}.md#body"],
       "outputs": [],
       "done_when": [{"check": "approval", "gate": "review"}],
-      "gate": "review"
+      "gate": "review",
+      "applies_when": {"option": "loop"}
+    },
+    {
+      "id": "spec",
+      "file": "skills/spec-authoring/steps/spec.md",
+      "inputs": ["request.md", "context.md", "design.md"],
+      "outputs": ["spec/{work_id}.md"],
+      "done_when": [{"check": "validator", "mode": "spec", "strict": false, "sources": true}],
+      "applies_when": {"not_option": "loop"}
+    },
+    {
+      "id": "spec-check",
+      "file": "skills/spec-authoring/steps/spec-check.md",
+      "inputs": ["design.md"],
+      "outputs": ["spec/{work_id}.check.json"],
+      "done_when": [{"check": "settled"}],
+      "applies_when": {"not_option": "loop"},
+      "mechanism_key": "spec-check",
+      "role": "spec-builder-check",
+      "role_reads": ["design.md", "spec/{work_id}.md"],
+      "may_ask": ["design"]
+    },
+    {
+      "id": "spec-review",
+      "file": "skills/agentic-sdlc-pipeline/steps/spec-review.md",
+      "inputs": ["design.md#body", "spec/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "spec-review"}],
+      "gate": "spec-review",
+      "applies_when": {"not_option": "loop"}
+    },
+    {
+      "id": "plan",
+      "file": "skills/plan-authoring/steps/plan.md",
+      "inputs": ["context.md", "design.md", "spec/{work_id}.md#body"],
+      "outputs": ["plan/{work_id}.md"],
+      "done_when": [{"check": "validator", "mode": "plan", "strict": true, "sources": true}],
+      "applies_when": {"not_option": "loop"}
+    },
+    {
+      "id": "plan-review",
+      "file": "skills/agentic-sdlc-pipeline/steps/plan-review.md",
+      "inputs": ["plan/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "plan-review"}],
+      "gate": "plan-review",
+      "applies_when": {"not_option": "loop"}
     },
     {
       "id": "branch",

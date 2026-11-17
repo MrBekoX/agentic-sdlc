@@ -48,13 +48,21 @@ for folder in (REPO / "scripts", TESTS):
 if str(REPO) not in sys.path:  # for `scripts.build_release`; appended so it shadows nothing above
     sys.path.append(str(REPO))
 
-from test_sdlc_engine import CHAIN_LINE, GIT, PLAN_BODY, SPEC_BODY, WINDOWS, card_fields, card_value  # noqa: E402
+from test_sdlc_engine import (CHAIN_LINE, DESIGN_BODY, GIT, PLAN_BODY, SPEC_BODY, SPECLESS_PLAN_BODY,  # noqa: E402
+                              TWOGATE_SPEC, WINDOWS, card_fields, card_value)
 from test_sdlc_loop import CLEAN, NO_SUBAGENTS, LoopCase, _result  # noqa: E402
 from sdlc_runner import frontmatter, logs, textio  # noqa: E402
 from sdlc_runner import state as sdlc_state  # noqa: E402
 from scripts import build_release  # noqa: E402
 
-FLOW_STEPS = ["strategy", "context", "draft", "review", "branch", "implement", "security", "audit", "claim"]
+# The steps a finished run did, in order: the loop variant (`--option loop`) of the feature and bugfix
+# flows, and the main loop's default feature path with and without a spec (hybrid spec/plan design §3).
+FLOW_STEPS = ["strategy", "context", "intent", "draft", "review", "branch", "implement", "security", "audit",
+              "claim"]
+BUGFIX_STEPS = ["strategy", "context", "draft", "review", "branch", "implement", "security", "audit", "claim"]
+SPECLESS_STEPS = ["strategy", "context", "intent", "plan", "plan-review", "branch", "implement", "security", "audit",
+                  "claim"]
+SPEC_STEPS = SPECLESS_STEPS[:3] + ["spec", "spec-check", "spec-review"] + SPECLESS_STEPS[3:]
 SCOPE = "# Context\n\n## Scope Lock\n\nOnly the report page and its new export.\n"
 RUN_LINE = r"run_seq=\d+ exit=%d valid=yes reason=\S+ chain=[0-9a-f]{12}$"
 DECISION = {"id": "DP1", "question": "CSV only?", "options": ["CSV", "CSV and JSON"], "recommendation": "CSV"}
@@ -145,14 +153,24 @@ class FlowCase(LoopCase):
 
     def begin(self, slug, flow="feature", work_type="feature", capabilities="workflow=no,subagent=yes,team=no",
               overrides=()) -> tuple:
-        """start -> strategy confirm -> context report; returns the first draft card."""
-        code, text = self.start(flow=flow, work_type=work_type, runtime="codex", work_id=slug)
+        """start --option loop -> strategy confirm -> context report (-> the design, where the flow has an
+        intent step); returns the first draft card."""
+        code, text = self.start("--option", "loop", flow=flow, work_type=work_type, runtime="codex", work_id=slug)
         self.expect(text, "do", "strategy")
         self.confirm_strategy(slug, capabilities, *overrides)
         text, fields = self.step(slug, step="context")
         self.assertEqual(fields["pending"], "report", text)
         self.put("context.md", SCOPE, slug)
-        return self.step(slug, step="draft")
+        if flow == "bugfix":
+            return self.step(slug, step="draft")
+        return self.design(slug)
+
+    def design(self, slug, then="draft") -> tuple:
+        """The intent card's work: design.md with its four sections and owned decisions."""
+        text, fields = self.step(slug, step="intent")
+        self.assertEqual((fields["pending"], fields["may_ask"]), ("validator", "design"), text)
+        self.put("design.md", DESIGN_BODY, slug)
+        return self.step(slug, step=then)
 
     def spec_plan_authors(self, text, slug) -> tuple:
         """Round 0 of spec+plan, each role written at its card's write path; returns the critic card."""
@@ -232,13 +250,13 @@ class FlowCase(LoopCase):
     def runs(self, slug) -> list:
         return [r for r in logs.read(self.pkg(slug) / "runs.jsonl") if r["kind"] == "finished"]
 
-    def assert_completed(self, text, slug):
+    def assert_completed(self, text, slug, steps=FLOW_STEPS):
         """A finished flow: every step done once and in order, the chains intact, nothing active."""
         st = self.state(slug)
         self.assertEqual((st["status"], st["current"], st["waiting"]), ("complete", None, None))
-        self.assertEqual([r["step"] for r in self.records("done", slug)], FLOW_STEPS)
-        self.assertEqual([r["step"] for r in self.records("enter", slug)], FLOW_STEPS)
-        self.assertEqual({sid: st["steps"][sid]["visits"] for sid in FLOW_STEPS}, {sid: 1 for sid in FLOW_STEPS})
+        self.assertEqual([r["step"] for r in self.records("done", slug)], steps)
+        self.assertEqual([r["step"] for r in self.records("enter", slug)], steps)
+        self.assertEqual({sid: st["steps"][sid]["visits"] for sid in steps}, {sid: 1 for sid in steps})
         self.assertEqual(self.transitions(slug)[-1]["kind"], "complete")
         for name in ("transitions.jsonl", "runs.jsonl", "approvals.jsonl"):
             self.assertTrue(logs.verify(self.pkg(slug) / name)[0], name)
@@ -267,13 +285,13 @@ class TestFlowsEndToEnd(FlowCase):
         import resolve_work_package
 
         slug = "demo"
-        code, text = self.start(flow="feature", work_type="feature", runtime="codex", work_id=slug)
+        code, text = self.start("--option", "loop", flow="feature", work_type="feature", runtime="codex", work_id=slug)
         fields = self.expect(text, "do", "strategy")
         self.assertIn("draft:runner-loop", fields["default"])
         self.confirm_strategy(slug)
         text, fields = self.step(slug, step="context")
         self.put("context.md", SCOPE, slug)
-        text, fields = self.step(slug, step="draft")
+        text, fields = self.design(slug)
         self.assertEqual(fields["mechanism"], "runner-loop")
         self.assertIn("spawn_agent", fields["delegate"])  # codex: each role a fresh sub-agent
         # The runner-loop roles: the test writes each role's output at its card's write path, and the
@@ -340,6 +358,81 @@ class TestFlowsEndToEnd(FlowCase):
         self.assertEqual((resolution.source, resolution.plan, resolution.spec),
                          ("branch", self.pkg(slug) / "plan" / "demo.md", self.pkg(slug) / "spec" / "demo.md"))
 
+    def main_loop_feature(self, slug, with_spec) -> str:
+        """The feature flow without the loop (hybrid design §3): the design, the spec and its reader when
+        asked for, the plan and its gate, then the build; returns the claim card."""
+        import resolve_work_package
+
+        code, text = self.start(*(("--option", "spec") if with_spec else ()), flow="feature", work_type="feature",
+                                runtime="codex", work_id=slug)
+        fields = self.expect(text, "do", "strategy")
+        self.assertNotIn("draft", fields["default"])
+        self.assertEqual("spec-check:subagent" in fields["default"], with_spec)
+        self.confirm_strategy(slug)
+        text, fields = self.step(slug, step="context")
+        self.put("context.md", SCOPE, slug)
+        if with_spec:
+            text, fields = self.design(slug, then="spec")
+            self.put("spec/%s.md" % slug, TWOGATE_SPEC, slug)
+            text, fields = self.step(slug, step="spec-check")
+            self.assertEqual((fields["role"], fields["mechanism"]), ("spec-builder-check", "subagent"))
+            self.write_role(fields, json.dumps({"questions": [{"question": "Does AC1 count hidden rows?",
+                                                                 "why": "a hidden row adds a filter task"}]}))
+            self.sdlc_ok("check-record", "--slug", slug)
+            self.sdlc_ok("check-resolve", "--slug", slug, "--id", "Q1", "--pile", "minor",
+                         "--resolution", "Only visible rows, as the business rule says.")
+            text, fields = self.step(slug, state="wait-gate", step="spec-review")
+            self.assertEqual(card_value(text, "artifacts"), "design.md,spec/%s.md" % slug)
+            self.assertIn('settled_minor={"id": "Q1"', text)
+            self.approve(text, slug, gate="spec-review")
+            text, fields = self.step(slug, step="plan")
+            self.put("plan/%s.md" % slug, PLAN_BODY, slug)
+        else:
+            text, fields = self.design(slug, then="plan")
+            self.put("plan/%s.md" % slug, SPECLESS_PLAN_BODY, slug)
+        text, fields = self.step(slug, state="wait-gate", step="plan-review")
+        self.assertEqual(card_value(text, "artifacts"), "plan/%s.md" % slug)
+        self.approve(text, slug, gate="plan-review")
+        self.make_branch(slug, "work/" + slug)
+        self.red_then_green(slug, "tests/test_export.py", "def test_export():\n    assert False\n",
+                            "src/export.py", "def export(rows):\n    return rows\n")
+        text, fields = self.step(slug, step="security")
+        self.security_pass(slug)
+        text, fields = self.step(slug, step="audit")
+        self.assertEqual(fields["pending"], "report")  # the real resolver accepts the package
+        self.put("evidence/%s.audit.md" % slug, "# Implementation audit\n\nEvery task is done.\n", slug)
+        claim, fields = self.step(slug, step="claim")
+        self.put("evidence/%s.claim.md" % slug, "# Completion claim\n\nDone, with the evidence above.\n", slug)
+        text, fields = self.step(slug, state="complete")
+        self.assert_completed(text, slug, SPEC_STEPS if with_spec else SPECLESS_STEPS)
+        approvals = [r["gate"] for r in logs.read(self.pkg(slug) / "approvals.jsonl") if r["kind"] == "approve"]
+        self.assertEqual(approvals, (["spec-review"] if with_spec else []) + ["plan-review"])
+        resolution = resolve_work_package.resolve(self.project, branch="work/" + slug)
+        self.assertTrue(resolution.ok, resolution.errors)
+        spec = self.pkg(slug) / "spec" / ("%s.md" % slug)
+        self.assertEqual(resolution.spec, spec if with_spec else None)
+        self.assertEqual(self.meta("plan/%s.md" % slug, slug),
+                         {"work_id": slug, "spec": "../spec/%s.md" % slug if with_spec else "none",
+                          "branch": "work/" + slug, "flow": "feature", "status": "complete"})
+        return claim
+
+    def test_feature_flow_without_a_spec_end_to_end(self):
+        claim = self.main_loop_feature("nospec", with_spec=False)
+        self.assertFalse((self.pkg("nospec") / "spec").exists())
+        # The claim card lists the design's author's calls (hybrid design §5).
+        calls = [json.loads(line[len("author_call="):]) for line in claim.splitlines()
+                 if line.startswith("author_call=")]
+        self.assertEqual([(c["id"], c["from"]) for c in calls], [("D2", "design.md")])
+
+    def test_feature_flow_with_a_spec_end_to_end(self):
+        claim = self.main_loop_feature("withspec", with_spec=True)
+        check = textio.read_json(self.pkg("withspec") / "spec" / "withspec.check.json")
+        self.assertEqual([(q["id"], q["pile"], q["author_call"]) for q in check["questions"]], [("Q1", "minor", True)])
+        calls = [json.loads(line[len("author_call="):]) for line in claim.splitlines()
+                 if line.startswith("author_call=")]
+        self.assertEqual([(c["id"], c["from"]) for c in calls],
+                         [("D2", "design.md"), ("Q1", "spec/withspec.check.json")])
+
     def test_bugfix_flow_end_to_end_plan_only(self):
         import resolve_work_package
 
@@ -372,7 +465,7 @@ class TestFlowsEndToEnd(FlowCase):
         text, fields = self.step(slug, step="audit")
         self.assertEqual(fields["pending"], "report")  # the real resolver accepts the spec-less plan
         text, fields = self.audit_and_claim(slug)
-        self.assert_completed(text, slug)
+        self.assert_completed(text, slug, BUGFIX_STEPS)
         plan = self.pkg(slug) / "plan" / "fix-add.md"
         self.assertEqual(self.meta("plan/fix-add.md", slug),
                          {"work_id": "fix-add", "spec": "none", "branch": "fix/add-sign", "flow": "bugfix",
@@ -420,7 +513,7 @@ class TestFlowsEndToEnd(FlowCase):
 
     def test_codex_like_run_without_subagents_degrades_and_completes(self):
         slug = "demo"
-        code, text = self.start(flow="feature", work_type="feature", runtime="codex", work_id=slug)
+        code, text = self.start("--option", "loop", flow="feature", work_type="feature", runtime="codex", work_id=slug)
         self.expect(text, "do", "strategy")
         declared = "workflow=no,subagent=no,team=no"
         # The codex defaults need sub-agents: confirming them as they are is refused.
@@ -439,7 +532,7 @@ class TestFlowsEndToEnd(FlowCase):
         self.assertEqual(self.records("strategy", slug)[0]["capabilities"], {"workflow": "no", "subagent": "no", "team": "no"})
         text, fields = self.step(slug, step="context")
         self.put("context.md", SCOPE, slug)
-        text, fields = self.step(slug, step="draft")
+        text, fields = self.design(slug)
         self.assertEqual((fields["mechanism"], fields["degraded"]), ("runner-loop-inline", "subagent:no"))
         self.assertIn("yourself", fields["delegate"])
         self.sdlc_ok("note", "--slug", slug, "--degraded", "subagent", "--reason", "missing")
