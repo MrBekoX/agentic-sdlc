@@ -39,7 +39,12 @@ write.
 7. **Present the design** in sections scaled to their weight before you write it, when you asked
    anything: one line for a plain part, up to a couple of hundred words for a subtle one. Cover
    what matters here: the units and their interfaces, the data flow, error handling, how it will
-   be tested. Go back when the user says a part is wrong.
+   be tested.
+8. **Get an explicit yes** for the whole design with one last question, before you write
+   `design.md`, whenever you asked the user anything. "Just build it" names what to build, not
+   how: it is not approval. When the user changes a part, present that part again and ask again.
+   A decision the user chose or confirmed in that yes is `(user)`. A clear request that needed no
+   question gets no yes either: its decisions are author's calls.
 
 Prefer small units with one purpose and a clear interface: you can tell what a unit does without
 reading its insides, and change its insides without breaking its users. In an existing codebase,
