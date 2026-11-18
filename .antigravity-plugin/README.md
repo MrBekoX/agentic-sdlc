@@ -49,7 +49,7 @@ foreach ($item in @("skills", "contracts", "scripts", "flows", "assets", "comman
 }
 ```
 
-The flow runner `scripts/sdlc.py` looks for its role files in `<plugin-root>/agents/` and then in `skills/using-agentic-sdlc/references/roles/`. This staged folder has neither, so a runner spec/plan loop stops at its first draft card with `role_file_missing`; the skills themselves do not call the runner in 0.7.0.
+The flow runner `scripts/sdlc.py` looks for its role files in `<plugin-root>/agents/` and then in `skills/using-agentic-sdlc/references/roles/`. This staged folder has neither, so a runner spec/plan loop (`start --option loop`) or spec check stops at its first role card with `role_file_missing`; the skills themselves do not call the runner in 0.7.0.
 
 > **Important — Do not copy `agents/*.md` as custom Antigravity subagent definitions without tool-name mapping:**
 > The official Antigravity Subagents documentation (`https://antigravity.google/docs/subagents`) warns:

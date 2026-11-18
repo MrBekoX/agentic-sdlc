@@ -6,7 +6,7 @@ Separate planning from implementation so you don't build the wrong thing. The pl
 ## When applied
 For any change that is multi-file, architectural, or in unfamiliar code. Skip for changes you could describe as a one-sentence diff.
 
-The plan comes from the spec. In the joint loop (`spec+plan`), the plan is drafted from that round's spec draft, a fresh critic checks both artifacts and the fit between them, and both go to one review gate together (in the gated form; the light form has no review gate). A plan-only flow starts from an approved spec. A bugfix plan has no spec: its own `## Bug` and `## Acceptance Criteria` sections, before the first task, take the spec's place (contract 02, bugfix exception).
+The main loop writes the plan. With an approved spec, every task cites the spec's criteria. Without one (a bugfix, a feature run without the spec option, a plan run with no imported spec), the plan carries its own `## Acceptance Criteria` section before the first task and is stamped `spec: none` with its flow (contract 02, spec-less plan); a bugfix plan also carries `## Bug`. The plan is approved at its own gate (`plan-review`), so the default feature flow has one gate and the full flow has two, the spec's and the plan's; the light form has no reader and no gate. The runner's joint spec/plan loop (`spec+plan`: both drafted by `spec-plan-author`, checked by a fresh critic, one review gate together) is an opt-in path.
 
 ## Required
 - Use plan mode for non-trivial work; if it goes sideways, **stop and re-plan** instead of pushing.
@@ -14,7 +14,7 @@ The plan comes from the spec. In the joint loop (`spec+plan`), the plan is draft
 - Tasks are small, single-purpose, independently compilable/testable, ordered by dependency.
 - Each task names concrete files (Create/Modify) and TDD points (which failing test first).
 - Mark risky steps, rollback approach, and where user approval is needed.
-- For deeper plans the spec/plan loop drafts with `spec-plan-author` and checks with a fresh `spec-plan-critic` (workflow `spec-plan-draft`).
+- For deeper plans the opt-in spec/plan loop drafts with `spec-plan-author` and checks with a fresh `spec-plan-critic` (workflow `spec-plan-draft`).
 - Optionally lock the plan with the built-in **`/goal`** so a fresh evaluator keeps you on the agreed end-state across turns.
 
 ## Forbidden

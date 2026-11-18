@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Change the flow runner's spec/plan path. The main loop now writes spec and plan after a new `intent` step, and the draft/review loop survives only as the opt-in `start --option loop`:
+  - The `intent` step asks the user first, then writes `design.md` (intent, non-goals, approaches, decisions `D<n>` marked `(user)` or `(author's call: <reason>)`). It asks for an explicit "yes" to the design whenever it asked the user anything and a user is there to answer; a clear request with no questions needs none.
+  - A spec is written by `full` and `spec` always, by `feature` only on `start --option spec`, and never by `bugfix`. The `plan` flow uses an approved spec imported with `--spec-file` when there is one.
+  - A plan without a spec carries its own `## Acceptance Criteria` (a bug fix also its `## Bug`) and is stamped `spec: none` plus its flow (`bugfix`, `feature` or `plan`). A feature or plan criterion names its source, `(source: request)` or `(source: D<n>)`; spec criteria also accept `(source: Q<n>)`. The validator code `spec_none_requires_specless_flow` replaces `spec_none_requires_flow_bugfix`, and the validator gains a `design` mode and a `--sources` flag.
+  - One fresh reader (`agents/spec-builder-check.md`, step `spec-check`, `sdlc check-record` and `check-resolve`) reads a spec with only `design.md` and the spec; each question it returns is settled as answered, minor or theirs.
+  - Each document has its own gate (`spec-review`, `plan-review`) and lifecycle, so the gated flows have one or two gates and `approve` re-validates. The light form has no reader and no gate.
+  - Engines: no runtime runs its workflow engine for spec and plan by default. The default on every platform is the runner's own loop; an engine runs only when the user asks for it explicitly and the reason is recorded in the strategy step.
+  - With `--option loop`, a hand edit made after the loop is refused at `approve`; go through a reject so the critic sees it.
+  - Contracts 02 and 03, the README, the plugin and runtime docs, the adapter READMEs and the test map follow.
+- Open points of this path:
+  - No skill, hook or command calls the runner yet (wiring the skills to it is later work), and the new path has had no live run.
+  - `hooks/flow-requirements.json` still requires spec evidence before the first source edit in the `root-cause-fix`, `feature-build` and `agentic-sdlc-pipeline` flows, so a spec-less runner run does not satisfy it yet. Resolving that is later work.
+
 ## 0.7.0 - 2026-11-16
 
 - Add the middleware-chain flow runner, a standard-library Python CLI: `scripts/sdlc.py` with the `scripts/sdlc_runner/` package, and the `flows/` manifests (12 flows, `flows/_shared.json`, the joint spec/plan loop `flows/loops/spec-plan.json` and seven schemas). `sdlc.py start <flow>` opens a work package under `docs/agentic-sdlc/<slug>/`, and `next` prints one card at a time. Approval gates are bound to a fingerprint and a quote. Transitions, test runs, approvals and notes go to hash-chained logs. `run` executes allow-listed test commands without a shell. Every flow starts with a run-once strategy step.

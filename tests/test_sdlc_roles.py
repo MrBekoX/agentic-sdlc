@@ -328,15 +328,21 @@ class TestLastMessage(unittest.TestCase):
 
 
 class TestContracts(unittest.TestCase):
-    def test_contracts_allow_joint_gate_and_bugfix_plan(self):
+    def test_contracts_describe_hybrid_spec_and_plan_path(self):
         spec = read(CONTRACTS / "02-spec-driven-development.md")
-        exception = section(spec, "Bugfix exception", 2)
-        for phrase in ("`flow: bugfix`", "`spec: none`", "`## Bug`", "`## Acceptance Criteria`"):
-            self.assertIn(phrase, exception)
-        self.assertIn("except a bugfix plan", section(spec, "Forbidden", 2))
+        specless = section(spec, "Spec-less plan", 2)
+        for phrase in ("`spec: none`", "`flow: bugfix`", "`flow: feature`", "`flow: plan`",
+                       "`## Bug`", "`## Acceptance Criteria`", "(source: request)", "(source: D<n>)"):
+            self.assertIn(phrase, specless)
+        self.assertNotIn("valid only together with `flow: bugfix`", specless)
+        self.assertIn("spec-less plan section", section(spec, "Forbidden", 2))
+        required = section(spec, "Required", 2)
+        for phrase in ("(source: Q<n>)", "`spec-review`", "opt-in"):
+            self.assertIn(phrase, required)
         plan = read(CONTRACTS / "03-plan-mode.md")
         applied = section(plan, "When applied", 2)
-        for phrase in ("joint loop", "one review gate", "gated form", "A bugfix plan has no spec"):
+        for phrase in ("`plan-review`", "one gate", "two", "light form has no reader and no gate",
+                       "opt-in", "`spec: none`"):
             self.assertIn(phrase, applied)
         self.assertNotIn("After an approved spec", applied)
         refactor = read(CONTRACTS / "07-refactoring.md")

@@ -97,8 +97,11 @@ If a named script is present and workflows are enabled, use
 `spawn_subagent` with author → critic → revise, saved artifacts and
 `scripts/validate_artifacts.py`. Do not call Claude JS `Workflow` on Grok.
 
-The flow runner's spec/plan loop needs no catalog entry. When a work package's
-draft step runs as a Grok workflow, `sdlc next` copies the plugin's
+The flow runner's spec/plan loop needs no catalog entry. The runner writes spec and
+plan in the main loop by default, and its own loop (`start --option loop`) is the
+default loop; the Grok workflow engine runs only when the user asks for it
+explicitly and the reason is recorded. When a work package's draft step runs as
+a Grok workflow, `sdlc next` copies the plugin's
 `workflows/grok/spec-plan-draft.rhai` byte for byte into the package
 (`docs/agentic-sdlc/<slug>/draft/engine/spec-plan-draft.rhai`), records its
 sha256 and prints the launch: the `workflow` tool with
