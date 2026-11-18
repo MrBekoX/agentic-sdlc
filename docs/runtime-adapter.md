@@ -7,7 +7,7 @@ AGENTIC-SDLC packages adapters for **Claude Code**, **Codex**, **Kimi Code**, **
 | Portable capability | Claude Code | Codex | Degraded fallback |
 |---|---|---|---|
 | Load skill instructions | `Skill` tool | activated skill instructions or explicit skill mention | read runtime-local `SKILL.md`; record `Delegation Degraded: skill tool unavailable` |
-| Run spec-plan author/critic | `Workflow` -> `agentic-sdlc:spec-plan-draft` | embedded `agentic-sdlc-pipeline` adapter | main-loop author pass plus main-loop critic pass |
+| Run spec-plan author/critic (0.6.0 pipeline skill; the flow runner `scripts/sdlc.py` writes spec and plan in its own loop and runs an engine only on the user's explicit request, with the reason recorded) | `Workflow` -> `agentic-sdlc:spec-plan-draft` | embedded `agentic-sdlc-pipeline` adapter | main-loop author pass plus main-loop critic pass |
 | Fresh-context specialist | `Agent` / `Task` | Codex subagent when available | main-loop pass marked `Delegation Degraded: fresh context unavailable` |
 | Parallel fan-out | Workflow, agent-team, or multiple agents | subagent fan-out, parallel local tools, or best available native mechanism | sequential execution with explicit degraded note |
 | Task tracking | `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate` ([tools-reference](https://code.claude.com/docs/en/tools-reference), fetched 2026-10-07). `TodoWrite` only when `CLAUDE_CODE_ENABLE_TASKS=0` | `update_plan` or native task tracker | explicit checklist in the response |
