@@ -341,7 +341,8 @@ class TestContracts(unittest.TestCase):
             self.assertIn(phrase, required)
         plan = read(CONTRACTS / "03-plan-mode.md")
         applied = section(plan, "When applied", 2)
-        for phrase in ("`plan-review`", "one gate", "two", "light form has no reader and no gate",
+        for phrase in ("`plan-review`", "the default feature flow has one gate",
+                       "the full flow has two, the spec's and the plan's", "light form has no reader and no gate",
                        "opt-in", "`spec: none`"):
             self.assertIn(phrase, applied)
         self.assertNotIn("After an approved spec", applied)
