@@ -30,7 +30,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from . import checks, engine, logs, manifest, mask, speccheck
+from . import checks, engine, logs, mask, speccheck
 from . import state as state_mod
 from .lock import PackageLock
 from .textio import SdlcError, now_iso, read_json, read_text
@@ -213,12 +213,7 @@ def _writers(ctx, step) -> list:
     steps = ctx.flow["steps"]
     found = []
     for candidate in steps[:steps.index(step)]:
-        outputs = set()
-        for entry in candidate.get("outputs") or []:
-            parsed = manifest.parse_ref(entry)
-            if parsed["path"] is not None:
-                outputs.add(manifest.expand(parsed["path"], ctx.state))
-        if outputs & gated and _applying(ctx, candidate):
+        if checks.step_outputs(ctx, candidate) & gated and _applying(ctx, candidate):
             found.append(candidate)
     return found
 

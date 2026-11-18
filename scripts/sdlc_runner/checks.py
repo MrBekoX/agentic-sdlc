@@ -265,6 +265,16 @@ def gate_fingerprint(ctx, step) -> str:
     return digest.hexdigest()[:16]
 
 
+def step_outputs(ctx, step) -> set:
+    """The package paths `step` names as outputs, expanded; a named set (`@...`) is no path."""
+    found = set()
+    for entry in step.get("outputs") or []:
+        parsed = manifest.parse_ref(entry)
+        if parsed["path"] is not None:
+            found.add(manifest.expand(parsed["path"], ctx.state))
+    return found
+
+
 def gated_artifacts(ctx, step) -> list:
     found = []
     for entry in step.get("inputs") or []:

@@ -170,14 +170,9 @@ def _package_text(ctx, rel):
 
 def _checks_sources(ctx, writer, rel, mode) -> bool:
     """True when `writer` writes `rel` and its validator check of `mode` requires sources."""
-    outputs = set()
-    for entry in writer.get("outputs") or []:
-        parsed = manifest.parse_ref(entry)
-        if parsed["path"] is not None:
-            outputs.add(manifest.expand(parsed["path"], ctx.state))
-    return rel in outputs and any(
-        spec.get("check") == "validator" and spec.get("mode") == mode and spec.get("sources")
-        for spec in writer.get("done_when") or [])
+    return rel in checks.step_outputs(ctx, writer) and any(
+        check.get("check") == "validator" and check.get("mode") == mode and check.get("sources")
+        for check in writer.get("done_when") or [])
 
 
 def _criterion_items(ctx, step) -> list:
