@@ -49,7 +49,9 @@ the request and the decisions need, and no more.
 ## What the check needs
 `done_when=` runs the spec validator with sources:
 - a missing heading fails it;
-- `ac_no_source:<id>`: a criterion without a source tag;
+- `ac_no_source:<id>`: a criterion without a source tag, or an id that is not a top-level bullet
+  of `## Acceptance Criteria` (a sub-heading inside the section is fine; a table row, a heading, a
+  nested bullet or an id in another section is not);
 - `ac_bad_source:<id>:<token>`: a token that is not `request`, `D<n>` or `Q<n>`;
 - `ac_unknown_source:<id>:<token>`: a `D<n>` that `design.md` does not have, or a `Q<n>` that the
   check file does not have.

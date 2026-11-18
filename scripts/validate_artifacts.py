@@ -89,14 +89,19 @@ HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$")
 # coverage note, not a task) and NOT a mid-prose ref ("AC1→T7" in a coverage line) —
 # both over-counted real plans in dogfooding. The task convention is therefore
 # "## Task N" headings or line-leading "TN" markers.
+#
+# Every numbered id this module reads (task `T<n>`, criterion `AC<n>`, decision `D<n>`, question
+# `Q<n>`) has 1 to ID_DIGITS digits. A longer run of digits is no id, so it is reported like any other
+# malformed token instead of reaching int(), which refuses more than 4300 digits.
+ID_DIGITS = 6
 TASK_HEADING_RE = re.compile(r"^\s{0,3}#{2,4}\s*Task\b", re.IGNORECASE)
-TASK_TID_RE = re.compile(r"\bT\d+\b")
-TASK_TID_START_RE = re.compile(r"^[\s>*\-#]*\*{0,2}\s*(T\d+)\b")
+TASK_TID_RE = re.compile(r"\bT\d{1,%d}\b" % ID_DIGITS)
+TASK_TID_START_RE = re.compile(r"^[\s>*\-#]*\*{0,2}\s*(T\d{1,%d})\b" % ID_DIGITS)
 
 # An acceptance-criterion id: `AC1`, `AC-1`, or a grouped `AC-A1` (pipeline specs use all three).
 # `AC1` and `AC-1` name the same criterion, so ids are compared by `_ac_key`, never by spelling.
 # The group letter needs the hyphen, so a word such as `ACE2` is not an id.
-AC_ID_RE = re.compile(r"\bAC(?:-?(\d+)|-([A-Z])(\d+))\b")
+AC_ID_RE = re.compile(r"\bAC(?:-?(\d{1,%d})|-([A-Z])(\d{1,%d}))\b" % (ID_DIGITS, ID_DIGITS))
 
 
 def _ac_key(match):
@@ -368,13 +373,14 @@ def check_frontmatter(text, mode):
 # A decision of `design.md`: a top-level bullet of the Decisions section that starts with `D<n>`
 # (after the bullet mark and any bold or italic marks). Its owner is `(user)` or
 # `(author's call: <reason>)`, with a straight or a typographic apostrophe and a reason in any script.
-DECISION_ID_RE = re.compile(r"^D(\d+)\b")
+DECISION_ID_RE = re.compile(r"^D(\d{1,%d})\b" % ID_DIGITS)
 DECISION_OWNER_RE = re.compile(r"\((?:user|author['\u2019]s call:\s*[^)\s][^)]*)\)", re.IGNORECASE)
 
 # A criterion's origin: `(source: request, D1, Q2)`, searched in the bullet's whole text. A token is
 # `request`, a decision `D<n>` of design.md, or a question `Q<n>` of the spec's check file.
 SOURCE_TAG_RE = re.compile(r"\(source:([^)]*)\)", re.IGNORECASE)
-SOURCE_TOKEN_RE = re.compile(r"^(?:request|([DQ])(\d+))\Z")
+SOURCE_TOKEN_RE = re.compile(r"^(?:request|([DQ])(\d{1,%d}))\Z" % ID_DIGITS)
+CHECK_QUESTION_ID_RE = re.compile(r"^Q(\d{1,%d})\Z" % ID_DIGITS)
 SOURCE_REQUEST = "request"
 
 
@@ -448,13 +454,13 @@ def _check_questions(check_data):
     """The set of question numbers a check file names: `{1, 2}` for ids `Q1`, `Q2`."""
     found = set()
     for question in (check_data or {}).get("questions") or []:
-        match = re.match(r"^Q(\d+)\Z", str(question.get("id", ""))) if isinstance(question, dict) else None
+        match = CHECK_QUESTION_ID_RE.match(str(question.get("id", ""))) if isinstance(question, dict) else None
         if match:
             found.add(int(match.group(1)))
     return found
 
 
-def _source_errors(blocks, decisions, questions):
+def _source_errors(blocks, decisions, questions, counted_text):
     """Errors for the criteria among `blocks` (`_bullet_blocks`) that do not name a known source.
 
     A criterion is a top-level bullet that carries an AC id. The tag is searched in the bullet's
@@ -463,12 +469,19 @@ def _source_errors(blocks, decisions, questions):
     every such token unknown. `ac_no_source` (no tag, or a tag without a token), `ac_bad_source`
     (a token that is none of the three forms), `ac_unknown_source` (a well-formed token that names
     nothing), each followed by the criterion's id as written and, for the last two, the token.
+
+    `counted_text` is the text the plan coverage takes its ids from (`_ac_coverage`). Each id there
+    that is not the id of one of those top-level bullets is `ac_no_source:<id>` too: a criterion under
+    a group bullet, in a table, in a heading or in another section is still one the plan must build,
+    so formatting cannot take it out of the source rule.
     """
     errors = []
+    bullet_keys = set()
     for _index, line, nested, text in blocks:
         match = AC_ID_RE.search(line)
         if nested or not match:
             continue
+        bullet_keys.add(_ac_key(match))
         ac = match.group(0)
         tokens = [token.strip() for tag in SOURCE_TAG_RE.findall(text) for token in tag.split(",")]
         tokens = [token for token in tokens if token]
@@ -482,7 +495,41 @@ def _source_errors(blocks, decisions, questions):
                 errors.append(f"ac_unknown_source:{ac}:{token}")
             elif parsed.group(1) == "Q" and int(parsed.group(2)) not in questions:
                 errors.append(f"ac_unknown_source:{ac}:{token}")
+    counted = {}
+    for match in AC_ID_RE.finditer(counted_text):
+        counted.setdefault(_ac_key(match), match.group(0))
+    errors += [f"ac_no_source:{counted[key]}" for key in sorted(counted) if key not in bullet_keys]
     return errors
+
+
+def _unfenced(text):
+    """`text` without its fenced code lines (see `_fenced_lines`): a bullet in an example is no criterion."""
+    lines = text.splitlines()
+    fenced = _fenced_lines(lines)
+    return "\n".join(line for i, line in enumerate(lines) if i not in fenced)
+
+
+def _criteria_section(text):
+    """The body of the first acceptance-criteria section of a spec body, None when there is none.
+
+    It runs to the next heading of the same or a higher level, so a `### Login` sub-heading stays
+    inside it; headings in code fences do not count. A spec-less plan's section is read the same way
+    (`_own_criteria_sections`).
+    """
+    lines = text.splitlines()
+    fenced = _fenced_lines(lines)
+    headings = []  # (line_index, normalized text, level)
+    for i, line in enumerate(lines):
+        match = HEADING_RE.match(line)
+        if match and i not in fenced:
+            headings.append((i, _normalize_heading(match.group(1)), _heading_level(line)))
+    needle = REQUIRED_SPEC_SECTIONS["acceptance-criteria"]
+    section = next(((i, level) for i, norm, level in headings if needle in norm), None)
+    if section is None:
+        return None
+    at, level = section
+    end = next((i for i, _norm, lvl in headings if i > at and lvl <= level), len(lines))
+    return "\n".join(lines[at + 1:end])
 
 
 def _decision_numbers(design_text):
@@ -502,10 +549,13 @@ def check_spec(text, design_text=None, check_data=None, require_sources=False):
     it cannot check).
 
     With `require_sources`, every criterion (a top-level bullet of the acceptance-criteria section
-    that carries an `AC<n>` id) must name where it came from, `(source: request, D1, Q2)`:
-    `ac_no_source`, `ac_bad_source`, `ac_unknown_source` (see `_source_errors`). `design_text` is the
-    design file's text (what `D<n>` may name) and `check_data` the parsed check file (what `Q<n>` may
-    name); without one, no token of its kind is known. Without `require_sources` the tag is ignored.
+    that carries an `AC<n>` id; the section runs to the next heading of its own level, see
+    `_criteria_section`) must name where it came from, `(source: request, D1, Q2)`: `ac_no_source`,
+    `ac_bad_source`, `ac_unknown_source` (see `_source_errors`). An id anywhere else in the spec body
+    is counted by the plan coverage too, so it is `ac_no_source` unless it is also such a bullet.
+    `design_text` is the design file's text (what `D<n>` may name) and `check_data` the parsed check
+    file (what `Q<n>` may name); without one, no token of its kind is known. Without
+    `require_sources` the tag is ignored.
 
     Only the body after the frontmatter block is read (`_body`).
     """
@@ -539,9 +589,9 @@ def check_spec(text, design_text=None, check_data=None, require_sources=False):
     warnings += [f"ac_missing_id:{index}" for index in _unlabelled_criteria(text)]
 
     if require_sources:
-        section = _section_text(text, REQUIRED_SPEC_SECTIONS["acceptance-criteria"])
-        errors += _source_errors(_bullet_blocks(section or ""), _decision_numbers(design_text),
-                                 _check_questions(check_data))
+        section = _criteria_section(text)
+        errors += _source_errors(_bullet_blocks(_unfenced(section or "")), _decision_numbers(design_text),
+                                 _check_questions(check_data), text)
 
     # Security hand-wave: only when a security section exists AND its short body is
     # nothing but a bare dismissal. A grounded note (which cites an input->sink, or
@@ -788,9 +838,10 @@ def check_plan(text, spec_text, bugfix=False, own_criteria=False, design_text=No
 
     With `require_sources`, each of those own criteria must name where it came from,
     `(source: request, D1)` (`ac_no_source`, `ac_bad_source`, `ac_unknown_source`; see
-    `_source_errors`). `design_text` is what `D<n>` may name; a plan has no questions, so any `Q<n>`
-    is unknown. A plan checked against a spec has no own criteria, so `require_sources` changes
-    nothing for it.
+    `_source_errors`), and every id the coverage counts in that section must be such a criterion: an
+    id in a table, a heading or a nested bullet is `ac_no_source`. `design_text` is what `D<n>` may
+    name; a plan has no questions, so any `Q<n>` is unknown. A plan checked against a spec has no own
+    criteria, so `require_sources` changes nothing for it.
 
     Only the bodies after the frontmatter blocks of the plan and the spec are read
     (`_body`): a task, a section or an id inside a block does not count.
@@ -844,7 +895,7 @@ def check_plan(text, spec_text, bugfix=False, own_criteria=False, design_text=No
             unfenced = "\n".join(line for i, line in enumerate(criteria_lines) if i not in fenced)
             warnings += [f"ac_missing_id:{index}" for index in _unlabelled(_criterion_bullets(unfenced))]
             if require_sources:
-                errors += _source_errors(_bullet_blocks(unfenced), _decision_numbers(design_text), set())
+                errors += _source_errors(_bullet_blocks(unfenced), _decision_numbers(design_text), set(), criteria)
             metrics["plan_ac_covered"] = _ac_coverage(criteria, blocks, warnings)
     elif spec_text is None:
         warnings.append("ac_source_missing")

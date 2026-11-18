@@ -1519,12 +1519,14 @@ class TestCriterionSources(unittest.TestCase):
             "- A detail bullet that carries no id and so is no criterion.\n"
             "  - AC9: a nested bullet is a detail, not a criterion\n")
         result = va.check_spec(spec, DESIGN_OK, self.CHECK, require_sources=True)
-        self.assertEqual(_ac_errors(result), ["ac_no_source:AC2"])
+        # AC9 sits on a nested bullet, so it is no criterion of its own, yet a plan would still have to
+        # cover it: it needs a top-level bullet with a source as well.
+        self.assertEqual(_ac_errors(result), ["ac_no_source:AC2", "ac_no_source:AC9"])
         self.assertNotIn("ac_no_source:AC2", va.check_spec(spec, DESIGN_OK, self.CHECK)["errors"])
         # An empty tag names nothing.
         empty = spec.replace("then the total drops once.\n- A detail", "then the total drops once. (source: )\n- A detail")
         self.assertEqual(_ac_errors(va.check_spec(empty, DESIGN_OK, self.CHECK, require_sources=True)),
-                         ["ac_no_source:AC2"])
+                         ["ac_no_source:AC2", "ac_no_source:AC9"])
 
     def test_spec_source_on_a_wrapped_line_counts(self):
         spec = _spec_with_criteria(
@@ -1591,6 +1593,152 @@ class TestCriterionSources(unittest.TestCase):
         # The plan's own unsourced section is not read when a spec is the source and own_criteria is off.
         self.assertEqual(va.check_plan(BUGFIX_PLAN, spec, require_sources=True),
                          va.check_plan(BUGFIX_PLAN, spec))
+
+
+class TestSourcesCannotBeFormattedAway(unittest.TestCase):
+    """Every id the coverage check counts is a criterion the plan must build, so with sources on each
+    one needs a top-level bullet of the criteria section that names its source. A sub-heading, a group
+    bullet, a table or a heading does not take a criterion out of the source rule."""
+
+    def specless_plan(self, criteria):
+        """FEATURE_PLAN with its criteria section body replaced by `criteria`, tasks unchanged."""
+        return _plan_with_criteria(criteria)
+
+    def run_plan_cli(self, plan):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "plan.md"
+            path.write_bytes(plan.encode("utf-8"))
+            design = Path(tmp) / "design.md"
+            design.write_bytes(DESIGN_OK.encode("utf-8"))
+            return run_cli("--mode", "plan", "--file", str(path), "--strict", "--sources", "--design", str(design))
+
+    def test_spec_criteria_under_sub_headings_need_sources(self):
+        spec = _spec_with_criteria(
+            "### Login\n"
+            "- AC1: Given a refund, when the job runs, then the total drops once. (source: request)\n\n"
+            "### Export\n"
+            "- AC2: Given a replay, when the job runs, then the total drops once.\n"
+            "- AC3: Given an empty file, when the job runs, then it returns an empty ledger. (source: D9)\n")
+        result = va.check_spec(spec, DESIGN_OK, None, require_sources=True)
+        self.assertEqual(_ac_errors(result), ["ac_no_source:AC2", "ac_unknown_source:AC3:D9"])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "spec.md"
+            path.write_bytes(spec.encode("utf-8"))
+            rc, out, err = run_cli("--mode", "spec", "--file", str(path), "--sources")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("error=ac_no_source:AC2", out.splitlines())
+        self.assertIn("error=ac_unknown_source:AC3:D9", out.splitlines())
+        # The section still ends at the next heading of its own level.
+        self.assertNotIn("ac_no_source:AC1", result["errors"])
+
+    def test_spec_criterion_nested_under_a_group_bullet_needs_its_own_bullet(self):
+        spec = _spec_with_criteria(
+            "- Export rules:\n"
+            "  - AC1: Given a refund, when the job runs, then the total drops once. (source: request)\n"
+            "- AC2: Given a replay, when the job runs, then the total drops once. (source: request)\n")
+        self.assertEqual(_ac_errors(va.check_spec(spec, DESIGN_OK, None, require_sources=True)),
+                         ["ac_no_source:AC1"])
+
+    def test_spec_criterion_outside_the_criteria_section_needs_a_source(self):
+        # The plan coverage reads every id of the spec, so an id written under another heading is a
+        # criterion too.
+        spec = _spec_with_criteria(
+            "- AC1: Given a refund, when the job runs, then the total drops once. (source: request)\n")
+        spec = spec.replace("## 4. Edge cases\n", "## 4. Edge cases\n- AC4: Given an empty file, when the job "
+                                                  "runs, then it returns an empty ledger.\n")
+        self.assertEqual(_ac_errors(va.check_spec(spec, DESIGN_OK, None, require_sources=True)),
+                         ["ac_no_source:AC4"])
+
+    def test_specless_plan_criteria_in_a_table_need_sources(self):
+        plan = self.specless_plan(
+            "| Id | Criterion | Source |\n|---|---|---|\n"
+            "| AC1 | Given a report, when the user exports it, then a CSV file returns every row. | request |\n"
+            "| AC2 | Given a large report, when it is exported, then rows are streamed. | D9 |\n")
+        result = va.check_plan(plan, None, own_criteria=True, design_text=DESIGN_OK, require_sources=True)
+        self.assertEqual(_ac_errors(result), ["ac_no_source:AC1", "ac_no_source:AC2"])
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 2)  # coverage still counts both
+        rc, out, err = self.run_plan_cli(plan)
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("error=ac_no_source:AC1", out.splitlines())
+        self.assertIn("artifacts_validation=failed", out.splitlines())
+
+    def test_specless_plan_criteria_as_headings_need_sources(self):
+        plan = self.specless_plan(
+            "### AC1: Given a report, when the user exports it, then a CSV file returns every row. (source: request)\n"
+            "### AC2: Given a large report, when it is exported, then rows are streamed.\n")
+        result = va.check_plan(plan, None, own_criteria=True, design_text=DESIGN_OK, require_sources=True)
+        self.assertEqual(_ac_errors(result), ["ac_no_source:AC1", "ac_no_source:AC2"])
+        rc, out, err = self.run_plan_cli(plan)
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("error=ac_no_source:AC2", out.splitlines())
+
+    def test_specless_plan_criterion_nested_under_a_group_bullet_needs_its_own_bullet(self):
+        plan = self.specless_plan(
+            "- Export:\n"
+            "  - AC1: Given a report, when the user exports it, then a CSV file returns every row. (source: request)\n"
+            "- AC2: Given a large report, when it is exported, then rows are streamed. (source: D2)\n")
+        result = va.check_plan(plan, None, own_criteria=True, design_text=DESIGN_OK, require_sources=True)
+        self.assertEqual(_ac_errors(result), ["ac_no_source:AC1"])
+
+    def test_well_formed_criteria_still_pass(self):
+        self.assertEqual(_ac_errors(va.check_plan(FEATURE_PLAN, None, own_criteria=True, design_text=DESIGN_OK,
+                                                  require_sources=True)), [])
+        rc, out, err = self.run_plan_cli(FEATURE_PLAN)
+        self.assertEqual(rc, 0, out + err)
+        spec = _spec_with_criteria(
+            "- AC1: Given a refund, when the job runs, then the total drops once. (source: request)\n"
+            "- AC2: Given a replay, when the job runs, then it returns the prior result, unlike AC1. (source: D1)\n")
+        self.assertEqual(_ac_errors(va.check_spec(spec, DESIGN_OK, None, require_sources=True)), [])
+
+
+class TestLongIdsAreReportedNotRaised(unittest.TestCase):
+    """An id is 1 to 6 digits. A longer run of digits is no id, so it is reported like any other bad
+    token; int() is never handed thousands of digits (Python refuses more than 4300)."""
+
+    LONG = "1" * 5000
+
+    def test_long_decision_id_is_a_decision_without_an_id(self):
+        design = DESIGN_OK.replace("- D2:", "- D%s:" % self.LONG)
+        self.assertEqual(va.check_design(design)["errors"], ["decision_missing_id:2"])
+        self.assertEqual(va.check_design(DESIGN_OK.replace("- D2:", "- D123456:"))["errors"], [])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "design.md"
+            path.write_bytes(design.encode("utf-8"))
+            rc, out, err = run_cli("--mode", "design", "--file", str(path))
+        self.assertEqual((rc, err), (1, ""), out + err)
+        self.assertIn("error=decision_missing_id:2", out.splitlines())
+
+    def test_long_source_token_is_a_bad_source(self):
+        for kind in ("D", "Q"):
+            with self.subTest(kind=kind):
+                spec = _spec_with_criteria(
+                    "- AC1: Given a refund, when the job runs, then the total drops once. (source: %s%s)\n"
+                    % (kind, self.LONG))
+                errors = _ac_errors(va.check_spec(spec, DESIGN_OK, {"questions": [{"id": "Q1"}]},
+                                                  require_sources=True))
+                self.assertEqual(errors, ["ac_bad_source:AC1:%s%s" % (kind, self.LONG)])
+
+    def test_long_check_question_id_names_no_question(self):
+        check = {"questions": [{"id": "Q" + self.LONG}, {"id": "Q123456"}, {"id": "Q1"}]}
+        self.assertEqual(va._check_questions(check), {1, 123456})
+
+    def test_long_criterion_id_is_no_id(self):
+        spec = _spec_with_criteria(
+            "- AC%s: Given a refund, when the job runs, then the total drops once. (source: request)\n" % self.LONG)
+        result = va.check_spec(spec, DESIGN_OK, None, require_sources=True)
+        self.assertIn("ac_missing_id:1", result["warnings"])
+        plan = ("# Plan\n## Task 1 (AC%s)\nModify `a.py`. TDD: RED first.\nRun: pytest a\n" % self.LONG)
+        result = va.check_plan(plan, spec)
+        self.assertEqual(result["metrics"]["plan_ac_covered"], 0)
+        self.assertIn("ac_source_empty", result["warnings"])
+        self.assertEqual(va.check_plan(plan.replace("AC" + self.LONG, "AC123456"),
+                                       spec.replace("AC" + self.LONG, "AC123456"))["metrics"]["plan_ac_covered"], 1)
+
+    def test_long_task_id_is_no_task_number(self):
+        plan = "# Plan\n## Task T%s\nModify `a.py`. TDD: RED first.\nRun: pytest a\n" % self.LONG
+        result = va.check_plan(plan, None)
+        self.assertEqual(result["metrics"]["plan_tasks"], 1)  # still a `## Task` heading, with no number
+        self.assertEqual(va.check_plan("# Plan\nT%s first\n" % self.LONG, None)["metrics"]["plan_tasks"], 0)
 
 
 class TestSpeclessPlans(unittest.TestCase):

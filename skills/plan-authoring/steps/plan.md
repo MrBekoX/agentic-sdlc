@@ -59,7 +59,8 @@ Read the plan once more as the one who will build it, and fix what you find:
 - `ac_not_covered:<id>`: a criterion no task names. `task_missing_file`, `task_missing_tdd`,
   `task_no_verification`: a task without its files, its RED test or its run.
 - Without a spec: `missing_section:acceptance-criteria`, `ac_section_after_tasks`, and the source
-  codes `ac_no_source:<id>`, `ac_bad_source:<id>:<token>`, `ac_unknown_source:<id>:<token>` (a
+  codes `ac_no_source:<id>` (also an id in the section that is not a top-level bullet: a table row,
+  a heading, a nested bullet), `ac_bad_source:<id>:<token>`, `ac_unknown_source:<id>:<token>` (a
   `D<n>` that `design.md` does not have).
 The failing codes show under `pending_detail` in the data part of the next card.
 
