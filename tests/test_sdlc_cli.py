@@ -469,23 +469,30 @@ class TestCriterionItems(TwoGateCase):
         self.assertTrue(10 < len(listed) < 80, len(listed))
         self.assertLessEqual(sum(len(line.encode("utf-8")) + 1 for line in lines[:-1]), card_mod.DATA_BUDGET)
 
+    def assert_a_criterion_would_show(self, gate, artifacts, slug="demo"):
+        """The pins of a card without criteria can fail: with one criterion item patched in, the same
+        card lists it and its first line names the criteria."""
+        item = ("criterion", {"artifact": "spec/%s.md" % slug, "id": "AC1", "sources": ["request"]})
+        plain = self.card(slug)[1]
+        with mock.patch.object(card_mod, "_criterion_items", return_value=[item]):
+            patched = self.card(slug)[1]
+        self.assertNotEqual(patched, plain)
+        self.assertEqual(parsed(data_lines(patched)), [item])
+        self.assertEqual(gate_line(patched, gate), GATE_LINE % (gate, artifacts, WITH_CRITERIA))
+
     def test_spec_backed_plan_and_loop_cards_list_no_criteria(self):
         self.start()
         code, text = self.advance_to("plan-review")
         self.assertEqual(data_lines(text), [])  # a plan with a spec has no criteria of its own
         self.assertEqual(gate_line(text, "plan-review"), GATE_LINE % ("plan-review", "plan/demo.md", ""))
-        with mock.patch.object(card_mod, "_criterion_items", return_value=[]):
-            unchanged = self.card()[1]
-        self.assertEqual(self.card()[1], unchanged)
+        self.assert_a_criterion_would_show("plan-review", "plan/demo.md")
         # The loop's draft checks no sources, so its one gate lists no criteria and keeps its card.
         self.start("--option", "loop", work_id="loop")
         code, text = self.advance_to("review", slug="loop")
         self.assertEqual(card_fields(text)["state"], "wait-gate", text)
-        self.assertNotIn("criterion=", text)
+        self.assertEqual(data_lines(text), [])
         self.assertEqual(gate_line(text, "review"), GATE_LINE % ("review", "spec/loop.md, plan/loop.md", ""))
-        with mock.patch.object(card_mod, "_criterion_items", return_value=[]):
-            unchanged = self.card("loop")[1]
-        self.assertEqual(self.card("loop")[1], unchanged)
+        self.assert_a_criterion_would_show("review", "spec/loop.md, plan/loop.md", slug="loop")
 
 
 class TestCriterionItemsRealFlows(RealFlowCase):
