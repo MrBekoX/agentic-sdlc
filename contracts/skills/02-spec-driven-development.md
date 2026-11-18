@@ -15,13 +15,13 @@ A spec (the **WHAT**, independent of code) must state:
 - Definition of done.
 - Must-not-change behaviors (regression surface).
 
-For deeper specs, the spec/plan loop drafts the spec with `spec-plan-author` and checks it with a fresh `spec-plan-critic` (workflow `spec-plan-draft`). In a feature flow the same loop drafts the plan from the spec, and both go to one review gate in the gated form (contract 03). Record the spec as a markdown file when the work is substantial.
+The spec follows the intent step: the user's request, the context and a short `design.md` (intent, non-goals, approaches, decisions `D<n>`, each marked `(user)` or `(author's call: <reason>)`). The main loop writes the spec in the spec and full flows, and in the feature flow when the run was started with the spec option. Every criterion names its source as `(source: request)`, `(source: D<n>)` or `(source: Q<n>)`, so a reader can see who asked for it. One fresh reader, a builder who has only `design.md` and the spec, returns the questions it would need answered; each is settled as answered, minor (an author's call) or theirs (the user's answer). The spec is approved at its own gate (`spec-review`). The runner's spec/plan loop (`spec-plan-author`, a fresh `spec-plan-critic`, `spec-plan-draft`) is an opt-in path (contract 03). Record the spec as a markdown file when the work is substantial.
 
-## Bugfix exception
-A bugfix needs no spec. Its plan carries `flow: bugfix` and `spec: none` in its frontmatter, states the bug in a `## Bug` section (expected, actual, reproduction) and its criteria in its own `## Acceptance Criteria` section, both before the first task. Those criteria follow the rules above: testable, with `AC<n>` ids that the tasks cite. `spec: none` is valid only together with `flow: bugfix`.
+## Spec-less plan
+A bugfix, a feature run without the spec option and a plan run with no imported spec need no spec. Their plan carries `spec: none` and its flow (`flow: bugfix`, `flow: feature` or `flow: plan`) in its frontmatter, and its own `## Acceptance Criteria` section before the first task. Those criteria follow the rules above: testable, with `AC<n>` ids that the tasks cite. In a feature or plan flow each criterion names its source, `(source: request)` or `(source: D<n>)`. A bugfix plan also states the bug in a `## Bug` section (expected, actual, reproduction) before the first task, and its criteria carry no sources: the bug report is the source. `spec: none` is valid only together with one of those three flows.
 
 ## Forbidden
-- Large implementation without a spec, except a bugfix plan under the bugfix exception.
+- Large implementation without a spec, except a plan under the spec-less plan section.
 - Leaking the **HOW** (files/tasks/code) into the spec — that belongs in the plan (contract 03).
 - Unfalsifiable acceptance criteria.
 

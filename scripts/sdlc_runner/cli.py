@@ -8,7 +8,8 @@ line. Every command's last line is `state=<state> chain=<12 hex>` (a card's last
 
 Global options `--project <dir>` and `--slug <slug>` are accepted before or after the command.
 Handlers come in two kinds: a command whose parser sets `needs_ctx=True` (`run`, `strategy`, the
-gate, question and note commands, `draft-check`, `loop-record`, `ingest-draft`) is called as
+gate, question and note commands, `draft-check`, `loop-record`, `ingest-draft`, `check-record`,
+`check-resolve`) is called as
 `handler(ctx, args, out=<stdout>, save_state=<red merger>)` with an engine.Context of the
 resolved package and must take the package lock itself; any other
 handler is called as `handler(args)` with `args.out`, `args.root` and `args.project` set. A
@@ -23,7 +24,7 @@ import sys
 from pathlib import Path
 
 from . import card as card_mod
-from . import engine, flowops, gates, logs, loop, manifest, paths, runexec, strategy
+from . import engine, flowops, gates, logs, loop, manifest, paths, runexec, speccheck, strategy
 from . import state as state_mod
 from .lock import PackageLock
 from .textio import SdlcError, utf8_output
@@ -105,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     runexec.register_cli(sub)
     sub.choices["run"].set_defaults(needs_ctx=True)
-    for module in (strategy, gates, loop):
+    for module in (strategy, gates, loop, speccheck):
         module.register_cli(sub)
     for child in sub.choices.values():
         for flag, help_text in (("--project", "project directory"), ("--slug", "work package")):

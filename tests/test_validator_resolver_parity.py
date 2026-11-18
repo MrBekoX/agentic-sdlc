@@ -87,7 +87,18 @@ Modify `src/ledger.py`. TDD: write the failing replay test (RED) first.
 Run: pytest tests/test_ledger.py
 """
 
-SPEC_NONE_ERROR = "spec_none_requires_flow_bugfix"
+SPECLESS_BODY = """
+# Plan
+
+## Acceptance Criteria
+- AC1: Given a replayed refund event, when the job runs, then the total is reduced once. (source: request)
+
+## Task 1 — Deduplicate refund events (AC1)
+Modify `src/ledger.py`. TDD: write the failing replay test (RED) first.
+Run: pytest tests/test_ledger.py
+"""
+
+SPEC_NONE_ERROR = "spec_none_requires_specless_flow"
 SPEC_GIVEN_ERROR = "spec_none_with_spec"
 
 FEATURE_CLOSER = "status: approved\n---\n"
@@ -113,6 +124,8 @@ flow: feature
 KINDS = {
     "feature": ("feat-x", FEATURE_BODY, True),
     "bugfix": ("fix-x", BUGFIX_BODY, False),
+    # A spec-less plan outside bugfix: its own criteria, no `## Bug` section.
+    "specless": ("fix-x", SPECLESS_BODY, False),
     # A bugfix body in a package that holds a spec, given to the validator as the hook does.
     "bugfix-beside-spec": ("feat-x", BUGFIX_BODY, True),
 }
@@ -142,9 +155,18 @@ PARITY_FIXTURES = (
     ("quoted spec none + flow bugfix", "bugfix",
      BUGFIX_FRONTMATTER.replace("spec: none", 'spec: "none"').replace("flow: bugfix", "flow: 'bugfix'"),
      True, None),
+    ("spec none + flow feature", "specless", BUGFIX_FRONTMATTER.replace("flow: bugfix", "flow: feature"),
+     True, None),
+    ("spec none + flow plan", "specless", BUGFIX_FRONTMATTER.replace("flow: bugfix", "flow: plan"),
+     True, None),
+    ("spec none + flow refactor, spec-less body", "specless",
+     BUGFIX_FRONTMATTER.replace("flow: bugfix", "flow: refactor"), False, SPEC_NONE_ERROR),
+    ("spec none beside a package spec, flow feature", "bugfix-beside-spec",
+     BUGFIX_FRONTMATTER.replace("work_id: fix-x", "work_id: feat-x").replace("flow: bugfix", "flow: feature"),
+     False, SPEC_GIVEN_ERROR),
     ("spec none, missing flow", "bugfix", BUGFIX_FRONTMATTER.replace("flow: bugfix\n", ""), False,
      SPEC_NONE_ERROR),
-    ("spec none, another flow", "bugfix", BUGFIX_FRONTMATTER.replace("flow: bugfix", "flow: feature"),
+    ("spec none, another flow", "bugfix", BUGFIX_FRONTMATTER.replace("flow: bugfix", "flow: refactor"),
      False, SPEC_NONE_ERROR),
     # A plan cannot opt out of the spec its package holds by declaring `spec: none`.
     ("spec none beside a package spec", "bugfix-beside-spec",
@@ -228,17 +250,18 @@ class TestValidatorResolverParity(unittest.TestCase):
         self.assertIn("branch", self.validator.FRONTMATTER_REQUIRED["plan"])
 
     def test_bugfix_pair_constants_match(self):
-        for name in ("SPEC_NONE", "BUGFIX_FLOW"):
+        for name in ("SPEC_NONE", "BUGFIX_FLOW", "SPECLESS_FLOWS"):
             with self.subTest(constant=name):
                 self.assertEqual(getattr(self.validator, name), getattr(self.resolver, name))
         self.assertEqual((self.resolver.SPEC_NONE, self.resolver.BUGFIX_FLOW), ("none", "bugfix"))
+        self.assertEqual(self.resolver.SPECLESS_FLOWS, ("bugfix", "feature", "plan"))
 
 
 class TestBehaviouralParity(unittest.TestCase):
     """The same plan gets the same verdict from both command lines."""
 
-    def test_bugfix_plan_spec_none_requires_flow_bugfix(self):
-        for name, flow_line in (("missing flow", ""), ("another flow", "flow: feature\n")):
+    def test_spec_none_requires_a_specless_flow(self):
+        for name, flow_line in (("missing flow", ""), ("another flow", "flow: refactor\n")):
             with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
                 frontmatter = BUGFIX_FRONTMATTER.replace("flow: bugfix\n", flow_line)
                 results = run_both(tmp, "bugfix", frontmatter)

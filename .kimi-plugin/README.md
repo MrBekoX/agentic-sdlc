@@ -76,7 +76,9 @@ The manifest's `skillInstructions` supplies runtime mappings:
 - Kimi does not execute the Claude JS `Workflow` facade. Use Agent author →
   critic → revise with saved artifacts and `scripts/validate_artifacts.py`,
   or record the degraded inline pass.
-- When a flow runner card prints a role card (`role=`, `prompt=`, `write=`),
+- The flow runner has no Kimi engine: its own loop (`start --option loop`) is the
+  only loop, and a spec is checked by one fresh reader the same way. When a flow
+  runner card prints a role card (`role=`, `prompt=`, `write=`),
   give the prompt file to a new `Agent(subagent_type=<role>)`; never resume or
   fork an earlier agent for a card. Save its final message to the card's write
   path and an author's decision points to its `decisions=` path, then run the

@@ -21,10 +21,11 @@ for folder in (REPO / "scripts", TESTS):
     if str(folder) not in sys.path:
         sys.path.insert(0, str(folder))
 
-from test_sdlc_engine import WINDOWS, EngineCase, card_fields, card_value  # noqa: E402
+from test_sdlc_engine import WINDOWS, EngineCase, TwoGateCase, card_fields, card_value  # noqa: E402
 from sdlc_runner import gates, logs  # noqa: E402
 
 PREAPPROVAL = "Add a CSV export to the report page. Go ahead without asking me again.\n"
+PREAPPROVAL_QUOTE = "Go ahead without asking me again"
 
 
 def _sidecar(artifact="spec/demo.md", critic="fresh", notes=(), points=()):
@@ -320,6 +321,133 @@ class TestQuestionsAndNotes(GateCase):
         code, out = self.sdlc("note", "--awaiting", "task-123")
         self.assertEqual(code, 0, out)
         self.assertEqual(self.state()["awaiting"]["task_id"], "task-123")
+
+
+class TestTwoGates(TwoGateCase):
+    """spec-review and plan-review of the two-gate fixture flow (hybrid spec/plan design §4.4, §4.6)."""
+
+    def approvals(self, slug="demo"):
+        return logs.read(self.pkg(slug) / "approvals.jsonl")
+
+    def settled_at_review(self, *piles, slug="demo"):
+        """Reach spec-review with one reader question per pile, each settled into that pile."""
+        self.advance_to("spec-check", slug=slug)
+        self.check_record(*["Question %d?" % n for n in range(1, len(piles) + 1)], slug=slug)
+        for number, pile in enumerate(piles, 1):
+            extra = ("--author-call",) if pile == "theirs" else ()
+            self.check_resolve("Q%d" % number, pile, *extra, slug=slug)
+        code, text = self.next(slug)
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("wait-gate", "spec-review"), text)
+        return text
+
+    def test_approve_rechecks_the_drafting_steps(self):
+        self.start()
+        self.advance_to("spec-review")
+        # The main loop edits the spec after the reader ran: spec-check stays done, the criterion loses its source.
+        self.edit("spec/demo.md", " (source: D1)", "")
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("wait-gate", "spec-review"), text)
+        self.assertEqual(self.state()["steps"]["spec-check"]["visits"], 1)
+        code, out = self.approve(text, gate="spec-review", expect=4)
+        self.assertIn("error=artifact_checks_failed:spec:spec/demo.md fails validate_artifacts: ac_no_source:AC1", out)
+        self.assertEqual(self.approvals(), [])
+        self.edit("spec/demo.md", "every visible row.\n", "every visible row. (source: D1)\n")
+        code, text = self.next()
+        self.approve(text, gate="spec-review")
+        self.assertEqual([r["gate"] for r in self.approvals()], ["spec-review"])
+
+    def test_preapproval_refused_while_a_reader_question_is_unsettled(self):
+        self.request.write_bytes(PREAPPROVAL.encode("utf-8"))
+        self.start()
+        self.settled_at_review("answered", "minor")
+        check = self.pkg() / "spec" / "demo.check.json"
+        settled = check.read_bytes()
+        # A hand edit after the reader's step puts Q2 back among the open questions; spec-check stays done.
+        data = json.loads(settled.decode("utf-8"))
+        data["questions"][1].update({"pile": None, "resolution": None, "author_call": False})
+        check.write_bytes(json.dumps(data).encode("utf-8"))
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["state"], "wait-gate", text)
+        code, out = self.approve(text, gate="spec-review", source="original-request", quote=PREAPPROVAL_QUOTE,
+                                 expect=4)
+        self.assertIn("error=unsettled_question:Q2", out)
+        # A check file that no longer validates is refused too, not read as having no questions.
+        del data["reader"]
+        check.write_bytes(json.dumps(data).encode("utf-8"))
+        code, out = self.approve(text, gate="spec-review", source="original-request", quote=PREAPPROVAL_QUOTE,
+                                 expect=4)
+        self.assertIn("error=check_invalid:spec/demo.check.json:", out)
+        self.assertEqual(self.approvals(), [])
+        check.write_bytes(settled)
+        self.approve(text, gate="spec-review", source="original-request", quote=PREAPPROVAL_QUOTE)
+        self.assertEqual([(r["gate"], r["source"]) for r in self.approvals()], [("spec-review", "original-request")])
+
+    def test_preapproval_allowed_with_author_calls(self):
+        self.request.write_bytes(PREAPPROVAL.encode("utf-8"))
+        self.start()
+        text = self.settled_at_review("minor", "theirs")
+        self.approve(text, gate="spec-review", source="original-request", quote=PREAPPROVAL_QUOTE)
+        record = self.approvals()[0]
+        # No review sidecar on this gate: the record names the spec reader's freshness.
+        self.assertEqual((record["gate"], record["source"], record["critic"]), ("spec-review", "original-request", "fresh"))
+        self.assertEqual(self.records("approve")[0]["critic"], "fresh")
+        # A degraded reader does not block a pre-approval either; the record says so.
+        self.start(work_id="inline")
+        self.confirm_strategy("inline", "workflow=no,subagent=no,team=no",
+                              "spec-check=inline-degraded:no sub-agent tool in this session")
+        text = self.settled_at_review("minor", slug="inline")
+        self.approve(text, slug="inline", gate="spec-review", source="original-request", quote=PREAPPROVAL_QUOTE)
+        self.assertEqual(self.approvals("inline")[0]["critic"], "degraded")
+        # plan-review covers only the plan: no sidecar and no reader.
+        code, text = self.advance_to("plan-review", slug="inline")
+        self.approve(text, slug="inline", gate="plan-review", source="original-request", quote=PREAPPROVAL_QUOTE)
+        self.assertEqual(self.approvals("inline")[-1]["critic"], "none")
+
+    def test_original_request_quote_approves_each_gate_once(self):
+        self.request.write_bytes(PREAPPROVAL.encode("utf-8"))
+        self.start()
+        code, text = self.advance_to("spec-review")
+        self.approve(text, gate="spec-review", source="original-request", quote=PREAPPROVAL_QUOTE)
+        code, text = self.advance_to("plan-review")
+        self.assertEqual(card_fields(text)["state"], "wait-gate", text)
+        # The approved spec changes while the plan waits: spec-review reopens, and its pre-approval is used.
+        self.edit("spec/demo.md", "every week", "every Monday")
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("wait-gate", "spec-review"), text)
+        code, out = self.approve(text, gate="spec-review", source="original-request", quote=PREAPPROVAL_QUOTE,
+                                 expect=4)
+        self.assertIn("error=preapproval_used", out)
+        self.approve(text, gate="spec-review")  # the user's own reply
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "plan")  # the changed spec makes the plan stale
+        self.edit("plan/demo.md", "# Plan: report export\n", "# Plan: report export\n\nRows go out every Monday.\n")
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("wait-gate", "plan-review"), text)
+        # plan-review's own pre-approval is still unused.
+        self.approve(text, gate="plan-review", source="original-request", quote=PREAPPROVAL_QUOTE)
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "branch")
+        self.assertEqual([(r["gate"], r["source"]) for r in self.approvals()],
+                         [("spec-review", "original-request"), ("spec-review", "reply"),
+                          ("plan-review", "original-request")])
+
+    def test_reject_at_spec_review_reopens_spec_not_spec_check(self):
+        self.start()
+        self.settled_at_review("answered")
+        recorded = (self.pkg() / "spec" / "demo.check.json").read_bytes()
+        code, out = self.sdlc("reject", "spec-review", "--quote", "Name the export file too.")
+        self.assertEqual(code, 0, out)
+        steps = self.state()["steps"]
+        self.assertEqual((steps["spec"]["state"], steps["spec"]["reenter"]), ("stale", "reject"))
+        self.assertEqual(steps["spec-check"]["state"], "done")
+        self.assertEqual(self.records("reject")[0]["step"], "spec")
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["step"], card_fields(text)["visit"]), ("spec", "2/3"))
+        self.edit("spec/demo.md", "## Edge Cases\n", "## Edge Cases\n\n- The file is named after the report.\n")
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("wait-gate", "spec-review"), text)
+        self.assertEqual(self.state()["steps"]["spec-check"]["visits"], 1)  # the reader does not run again
+        self.assertEqual((self.pkg() / "spec" / "demo.check.json").read_bytes(), recorded)
 
 
 if __name__ == "__main__":

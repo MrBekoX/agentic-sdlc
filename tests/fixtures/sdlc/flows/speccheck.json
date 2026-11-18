@@ -1,0 +1,53 @@
+{
+  "$comment": "Test fixture for tests/test_sdlc_speccheck.py: an intent step, a spec step, the spec-check step and a closing claim step, whose card hands the spec to one fresh reader (role, role_reads, mechanism_key spec-check) and whose done-check is settled. Its step files live in tests/fixtures/sdlc/steps/ and are copied to skills/fixture/steps/ of a temp plugin root. The spec-check step reads design.md only, so editing the spec after the check does not re-run the reader.",
+  "schema": "agentic-sdlc/flow@1",
+  "id": "speccheck",
+  "entry_skill": "fixture",
+  "forms": ["gated", "light"],
+  "work_types": ["feature", "bugfix"],
+  "loop_mode": null,
+  "steps": [
+    {
+      "id": "strategy",
+      "file": "skills/fixture/steps/strategy.md",
+      "inputs": ["@start"],
+      "outputs": ["strategy.json"],
+      "done_when": [{"check": "strategy_ok"}],
+      "run_once": true,
+      "max_visits": 1
+    },
+    {
+      "id": "intent",
+      "file": "skills/fixture/steps/intent.md",
+      "inputs": ["request.md"],
+      "outputs": ["design.md"],
+      "done_when": [{"check": "exists", "path": "design.md"}],
+      "may_ask": ["design"]
+    },
+    {
+      "id": "spec",
+      "file": "skills/fixture/steps/spec.md",
+      "inputs": ["request.md"],
+      "outputs": ["spec/{work_id}.md"],
+      "done_when": [{"check": "exists", "path": "spec/{work_id}.md"}]
+    },
+    {
+      "id": "spec-check",
+      "file": "skills/fixture/steps/spec-check.md",
+      "inputs": ["design.md"],
+      "outputs": ["spec/{work_id}.check.json"],
+      "done_when": [{"check": "settled"}],
+      "mechanism_key": "spec-check",
+      "role": "spec-builder-check",
+      "role_reads": ["design.md", "spec/{work_id}.md"],
+      "may_ask": ["design"]
+    },
+    {
+      "id": "claim",
+      "file": "skills/fixture/steps/claim.md",
+      "inputs": [],
+      "outputs": ["evidence/{work_id}.claim.md"],
+      "done_when": [{"check": "exists", "path": "evidence/{work_id}.claim.md"}]
+    }
+  ]
+}

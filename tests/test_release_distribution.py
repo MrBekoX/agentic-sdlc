@@ -897,7 +897,7 @@ class TestSkillsOnlyBuild(ScratchTestCase):
         references = "skills/using-agentic-sdlc/references"
         expected = base | {f"{references}/roles/{role}.md" for role in (
             "code-reviewer", "context-analyst", "debugger", "implementation-auditor", "security-reviewer",
-            "software-architect", "spec-plan-author", "spec-plan-critic", "test-engineer")}
+            "software-architect", "spec-builder-check", "spec-plan-author", "spec-plan-critic", "test-engineer")}
         expected |= {f"{references}/docs/{name}.md" for name in (
             "runtime-adapter", "zcode-runtime-adapter", "plugin-readme", "testing", "skill-boundaries", "troubleshooting")}
         expected |= {f"{references}/public-runtime.md", f"{references}/git-safety-check.md"}

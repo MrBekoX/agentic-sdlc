@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import re
+import types
 from pathlib import Path
 
 from . import RUNNER_VERSION, engine, fingerprint, frontmatter, gitinfo, logs, manifest, mask, paths, probes
@@ -24,6 +25,8 @@ from .textio import SdlcError, now_iso, read_text, write_json_atomic, write_text
 _OWNER_RE = re.compile(r"[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*\Z")
 EXTERNAL_STEPS = ("intent", "draft")
 LEXICON_WORD = r"[^\W_]"
+SPEC_STEP = "spec"
+SPEC_OPTION = "spec"
 
 
 def _masked(text) -> str:
@@ -89,14 +92,22 @@ def _lattice_or_error(root, shared) -> None:
 
 # --- start -------------------------------------------------------------------------------------
 
-def _imports(args, flow: dict, st_facts: dict) -> list:
-    """[(package path, text, status)] for the flow's `imports`; refusal when a source's status differs."""
-    found = []
+def _imports(args, flow: dict, st_facts: dict, start_state: dict) -> list:
+    """[(package path, text, status)] for the flow's `imports`; refusal when a source's status differs.
+
+    An import with `"required": false` whose option was not given is left out, unless a step that
+    applies under `start_state` (the facts `start` is about to write) reads its path as a required
+    input: that step could never run, so `start` refuses it as it refuses a missing required import.
+    """
+    found, left_out = [], []
     for item in flow.get("imports") or []:
         option = item["option"]
         source = getattr(args, option.lstrip("-").replace("-", "_"), None)
         if not source:
-            raise SdlcError(2, "import_missing:" + option)
+            if item.get("required", True):
+                raise SdlcError(2, "import_missing:" + option)
+            left_out.append(item)
+            continue
         try:
             text = read_text(source)
         except OSError:
@@ -105,7 +116,21 @@ def _imports(args, flow: dict, st_facts: dict) -> list:
         if status != item["status"]:
             raise SdlcError(4, "import_status:%s:%s (needs %s)" % (option, status or "none", item["status"]))
         found.append((manifest.expand(item["path"], st_facts), text, status))
+    state = dict(start_state, imported=[rel for rel, _text, _status in found])
+    for item in left_out:
+        for step in flow["steps"]:
+            if _reads_required(step, item["path"]) and engine.applies(types.SimpleNamespace(state=state), step)[0]:
+                raise SdlcError(2, "import_missing:" + item["option"])
     return found
+
+
+def _reads_required(step: dict, path: str) -> bool:
+    """Whether `step` lists the package path `path` as a required input (`#body` allowed, `?` not)."""
+    for ref in step.get("inputs") or []:
+        parsed = manifest.parse_ref(ref)
+        if parsed["path"] == path and not parsed["optional"]:
+            return True
+    return False
 
 
 def start(args) -> int:
@@ -142,13 +167,15 @@ def start(args) -> int:
     for option in args.option or []:
         if option not in options:
             options.append(option)
-    imports = _imports(args, flow, {"work_id": args.work_id})
+    found = probes.start_probes(project)
+    start_probes = {key: found.get(key) for key in ("explore_mode", "deps", "toolchain", "errors")}
+    imports = _imports(args, flow, {"work_id": args.work_id},
+                       {"form": args.form, "work_type": args.work_type, "options": options, "probes": start_probes})
     pkg = paths.package_dir(project, slug)
     _refuse_existing(pkg, slug)
     pkg.mkdir(parents=True, exist_ok=True)
     with PackageLock(pkg / ".lock"):
         _refuse_existing(pkg, slug)
-        found = probes.start_probes(project)
         git = found.get("git") or {}
         head = git.get("head") if git.get("repo") and not git.get("unborn") else None
         if head:
@@ -178,7 +205,7 @@ def start(args) -> int:
             request_sha256=hashlib.sha256(masked_request.encode("utf-8")).hexdigest(),
             transition_cap=int(caps.get("transition_cap", 60)), fix_round_cap=int(caps.get("fix_rounds", 3)),
             steps=_steps(flow, shared), loop=_loop_state(root, flow, shared),
-            probes={key: found.get(key) for key in ("explore_mode", "deps", "toolchain", "errors")},
+            probes=start_probes,
             imported=[rel for rel, _text, _status in imports],
             stamps={rel: status for rel, _text, status in imports},
         )
@@ -192,7 +219,8 @@ def start(args) -> int:
         })
         write_json_atomic(pkg / strategy_mod.DEFAULT_FILE,
                           strategy_mod.default_map(flow, shared, st["probes"], args.runtime, options,
-                                                   form=args.form, work_type=args.work_type), within=pkg)
+                                                   form=args.form, work_type=args.work_type,
+                                                   imported=st["imported"]), within=pkg)
         ctx = engine.Context(project, root, pkg, st, flow, shared)
         outcome = engine.advance(ctx, write=True)
     _print(args, outcome.card)
@@ -290,6 +318,25 @@ def _changed_since_start(ctx) -> list:
         return []
 
 
+def _escalated_options(st: dict) -> list:
+    """The start options the escalated run keeps: its own, plus `spec` when its spec step is done.
+
+    Hybrid design §5: a spec run escalated to feature keeps its approved spec, its check and its gate
+    instead of re-deciding them as skipped (the feature flow writes a spec only under `--option spec`).
+    """
+    options = list(st.get("options") or [])
+    spec = (st.get("steps") or {}).get(SPEC_STEP) or {}
+    if spec.get("state") == "done" and SPEC_OPTION not in options:
+        options.append(SPEC_OPTION)
+    return options
+
+
+def _names_option(step: dict, option: str) -> bool:
+    """Whether `step` applies or not by `option` (applies_when option or not_option)."""
+    cond = step.get("applies_when") or {}
+    return option in (cond.get("option"), cond.get("not_option"))
+
+
 def escalate(args) -> int:
     pkg, held = _locked(args)
     with held:
@@ -323,6 +370,8 @@ def escalate(args) -> int:
         old_steps = {step["id"]: step for step in ctx.flow["steps"]}
         caps = ctx.caps()
         changed_source = _changed_since_start(ctx)
+        options = _escalated_options(st)
+        options_changed = options != list(st.get("options") or [])
         new_entries, added = {}, []
         for step in target["steps"]:
             entry = st["steps"].get(step["id"])
@@ -331,9 +380,11 @@ def escalate(args) -> int:
                 new_entries[step["id"]] = state_mod.new_step(engine.default_max_visits(step, caps))
                 continue
             entry = copy.deepcopy(entry)
-            if entry.get("state") == "skipped":  # re-decided under the new form and risk
+            if entry.get("state") == "skipped":  # re-decided under the new form, risk and options
                 entry.update({"state": "pending", "applies": None, "skip_reason": None})
-            elif entry.get("applies") is not None and step.get("applies_when") != old_steps[step["id"]].get("applies_when"):
+            elif entry.get("applies") is not None and (
+                    step.get("applies_when") != old_steps[step["id"]].get("applies_when")
+                    or (options_changed and _names_option(step, SPEC_OPTION))):
                 entry["applies"] = None
             if (entry.get("state") == "done" and not step.get("run_once")
                     and step.get("done_when") != old_steps[step["id"]].get("done_when")):
@@ -355,12 +406,12 @@ def escalate(args) -> int:
             st["loop"]["mode"] = target.get("loop_mode")
         else:
             st["loop"] = loop
-        st.update({"flow": target_id, "form": form, "risk": risk, "work_type": work_type,
+        st.update({"flow": target_id, "form": form, "risk": risk, "work_type": work_type, "options": options,
                    "manifest_sha256": _manifest_sha(ctx.root, target), "waiting": None})
         strategy_added = strategy_mod.amend_for_escalate(ctx, target, st)  # ctx.flow is still the source
         reason = _masked(args.reason)
         ctx.log({"kind": "escalate", "from": source_id, "to": target_id, "reason": reason, "form": form,
-                 "risk": risk, "work_type": work_type, "added": [step["id"] for step in added],
+                 "risk": risk, "work_type": work_type, "options": options, "added": [step["id"] for step in added],
                  "transition_cap": st["transition_cap"], "red_order": st["red"].get("order"),
                  "gate_order": st.get("gate_order"), "strategy_added": strategy_added})
         state_mod.save(pkg, st)

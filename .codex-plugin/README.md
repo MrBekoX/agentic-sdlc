@@ -140,6 +140,8 @@ During Codex pipeline and eval runs, do not run recursive cleanup deletes for ge
 
 `spec-authoring` and `plan-authoring` remain standalone prompt-level skills. They are not internal pipeline substeps.
 
+The flow runner (`scripts/sdlc.py`) is separate and no skill calls it yet. Codex has no workflow engine for it: the runner's main loop writes spec and plan after the intent step, one fresh-context sub-agent reads a spec, and the author/critic loop is the opt-in `start --option loop`. That path has had no live run.
+
 ## How Focused Skills Relate To The Pipeline
 
 Focused skills are independently routable in Codex. Inside a pipeline run none of them is activated; the pipeline uses these instead:

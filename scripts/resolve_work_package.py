@@ -3,8 +3,9 @@
 This is an identity resolver, not a content validator. `validate_artifacts.py`
 still checks the markdown body. This script answers which spec/plan pair
 `implementation-control` should audit and refuses ambiguous choices. A spec-less
-bugfix plan (`flow: bugfix` with `spec: none`) resolves alone and reports `spec=none`,
-unless its per-package directory holds a spec (`spec_none_with_spec`).
+plan (`spec: none` with `flow: bugfix`, `feature` or `plan`) resolves alone and reports
+`spec=none`, unless its per-package directory holds a spec (`spec_none_with_spec`);
+`spec: none` with any other flow is `spec_none_requires_specless_flow`.
 
 Output is sorted `key=value` lines. Exit 1 on failed resolution.
 """
@@ -22,13 +23,16 @@ STATUSES = {"draft", "reviewed", "approved", "in_progress", "ready_for_audit", "
 PLAN_REQUIRED = ("work_id", "spec", "branch", "status")
 SPEC_REQUIRED = ("work_id", "status")
 
-# Spec-less bugfix plans (design §5.19): `spec: none` resolves only together with `flow: bugfix`,
-# and the resolution then has no spec (`spec=none`). A per-package plan whose package holds a spec
-# fails with `spec_none_with_spec`; flat plans are never paired by name, so flat specs do not count.
+# Spec-less plans (design §5.19, outside bugfix since the hybrid spec/plan design): `spec: none`
+# resolves only together with a `flow:` in SPECLESS_FLOWS, and the resolution then has no spec
+# (`spec=none`); any other flow is `spec_none_requires_specless_flow`. A per-package plan whose
+# package holds a spec fails with `spec_none_with_spec`; flat plans are never paired by name, so
+# flat specs do not count.
 # Mirrored in scripts/validate_artifacts.py, which reports the same codes (there: a --spec given for
 # such a plan); tests/test_validator_resolver_parity.py pins the agreement.
 SPEC_NONE = "none"
 BUGFIX_FLOW = "bugfix"
+SPECLESS_FLOWS = (BUGFIX_FLOW, "feature", "plan")
 
 # Per-package layout (BR1/BR2/BR11): docs/agentic-sdlc/<slug>/{spec,plan,evidence}/<work_id>.md.
 # The slug rule is shared; tests/test_procedure_eval.py pins it in lock-step with the
@@ -293,10 +297,10 @@ def _validate_plan(repo, plan_path):
         errors.append("basename_work_id_mismatch")
 
     if meta.get("spec") == SPEC_NONE:
-        # A spec-less bugfix plan: there is no spec to locate, pair or compare work_ids with. A
+        # A spec-less plan: there is no spec to locate, pair or compare work_ids with. A
         # per-package plan cannot opt out of a spec its own package holds by declaring none.
-        if meta.get("flow") != BUGFIX_FLOW:
-            errors.append("spec_none_requires_flow_bugfix")
+        if meta.get("flow") not in SPECLESS_FLOWS:
+            errors.append("spec_none_requires_specless_flow")
         package_specs = _package_specs(repo, slug) if layout == "per-package" else []
         if package_specs:
             errors.append("spec_none_with_spec")
@@ -563,7 +567,7 @@ def fields_for(result, repo):
                 f"layout={result.layout}",
                 f"plan={_rel(repo, result.plan)}",
                 f"resolution_source={result.source}",
-                # A spec-less bugfix plan resolves without a spec.
+                # A spec-less plan resolves without a spec.
                 f"spec={SPEC_NONE if result.spec is None else _rel(repo, result.spec)}",
                 f"status={result.status}",
                 f"work_id={result.work_id}",

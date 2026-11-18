@@ -43,6 +43,9 @@ Under `## Flags`, list every item that holds:
 - residual critic notes in the sidecars;
 - open security findings, open must-fix quality findings, an audit `block-final`.
 
+## Author's calls
+The card's data part lists each decision nobody confirmed as one `author_call=` line: a decision of `design.md` marked `(author's call: ...)`, or a question of the spec check you settled yourself (`minor`, or `theirs` with no user to ask). Under `## Author's calls`, list every one of them, each with its id, where it came from and what was decided, and tell the user each one. Leave none out because it seems small, and never present one as the user's choice. With no `author_call=` line, write `- none`.
+
 ## Status
 - `Status: done`: every statement has its evidence, nothing open contradicts it, and an audit, when there is one, says `allow-final`.
 - `Status: done, partly verified`: the work is done, and `## Not verified` names the parts nothing checked.
@@ -65,6 +68,9 @@ The work id is in the card's `outputs=` path. Write:
 
     ## Flags
     - none
+
+    ## Author's calls
+    - D2 (design.md): rows are streamed, not built in memory
 
 - `# Completion claim` is the first line, exactly.
 - Show commands and output lines verbatim. Mask any secret value as `***MASKED***`.

@@ -6,7 +6,7 @@ lines so the result is diffable, greppable, and stable across runs. It is the
 deterministic counterpart to the adversarial `spec-plan-draft` loop.
 
 Design constraints (from the approved plan):
-- Pure stdlib only (argparse, re, pathlib, sys). No third-party imports.
+- Pure stdlib only (argparse, json, re, pathlib, sys). No third-party imports.
 - Read-only: no file writes, no shell, no path traversal beyond the given file.
 - Secrets are MASKED, never printed — the value that tripped a pattern is
   replaced with ***MASKED*** so the validator can't become a leak channel.
@@ -16,20 +16,32 @@ Output contract:
   `artifacts_validation=passed|failed`.
 - `main()` returns exit 1 if any errors, else 0.
 - `--strict` promotes every `warning=` to `error=` (warnings become gating).
-- `run(mode, file, spec, strict)` returns `(exit_code, fields)`. An artifact it cannot read is an
-  error (`file_unreadable:<reason>`, `spec_unreadable:<reason>`), never an exception, so a caller
-  that imports it gets a failed gate rather than a traceback.
+- `run(mode, file, spec, strict, design_path, check_path, sources)` returns `(exit_code, fields)`. An
+  artifact it cannot read is an error (`file_unreadable:<reason>`, `spec_unreadable:<reason>`,
+  `design_unreadable:<reason>`, `check_unreadable:<reason>`), never an exception, so a caller that
+  imports it gets a failed gate rather than a traceback.
+- Modes: `spec`, `plan`, `all`, and `design` (the intent step's `design.md`: four sections and
+  decisions that carry an id and an owner). `--sources` makes every acceptance criterion of a spec,
+  or of a spec-less plan, name where it came from (`(source: request, D1, Q2)`).
 """
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
 
-# Required spec sections. The key is the canonical slug emitted in messages; the
+# Required spec and design sections. The key is the canonical slug emitted in messages; the
 # value is the substring we look for inside a heading (case-insensitive, after
 # stripping numbering and trailing parentheticals). Order is irrelevant — we
 # report by slug.
+REQUIRED_DESIGN_SECTIONS = {
+    "intent": "intent",
+    "non-goals": "non-goals",
+    "approaches": "approaches",
+    "decisions": "decisions",
+}
+
 REQUIRED_SPEC_SECTIONS = {
     "problem": "problem",
     "business-rules": "business rules",
@@ -77,14 +89,19 @@ HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$")
 # coverage note, not a task) and NOT a mid-prose ref ("AC1→T7" in a coverage line) —
 # both over-counted real plans in dogfooding. The task convention is therefore
 # "## Task N" headings or line-leading "TN" markers.
+#
+# Every numbered id this module reads (task `T<n>`, criterion `AC<n>`, decision `D<n>`, question
+# `Q<n>`) has 1 to ID_DIGITS digits. A longer run of digits is no id, so it is reported like any other
+# malformed token instead of reaching int(), which refuses more than 4300 digits.
+ID_DIGITS = 6
 TASK_HEADING_RE = re.compile(r"^\s{0,3}#{2,4}\s*Task\b", re.IGNORECASE)
-TASK_TID_RE = re.compile(r"\bT\d+\b")
-TASK_TID_START_RE = re.compile(r"^[\s>*\-#]*\*{0,2}\s*(T\d+)\b")
+TASK_TID_RE = re.compile(r"\bT\d{1,%d}\b" % ID_DIGITS)
+TASK_TID_START_RE = re.compile(r"^[\s>*\-#]*\*{0,2}\s*(T\d{1,%d})\b" % ID_DIGITS)
 
 # An acceptance-criterion id: `AC1`, `AC-1`, or a grouped `AC-A1` (pipeline specs use all three).
 # `AC1` and `AC-1` name the same criterion, so ids are compared by `_ac_key`, never by spelling.
 # The group letter needs the hyphen, so a word such as `ACE2` is not an id.
-AC_ID_RE = re.compile(r"\bAC(?:-?(\d+)|-([A-Z])(\d+))\b")
+AC_ID_RE = re.compile(r"\bAC(?:-?(\d{1,%d})|-([A-Z])(\d{1,%d}))\b" % (ID_DIGITS, ID_DIGITS))
 
 
 def _ac_key(match):
@@ -148,20 +165,36 @@ def _section_body(text, start_lineno):
     return "\n".join(body)
 
 
-def _criterion_bullets(body):
-    """[(index, line, nested)] for each bullet of a criteria section body.
+def _bullet_blocks(body):
+    """[(index, line, nested, text)] for each bullet of a section body.
 
     The index is the bullet's 1-based position: `untestable_criterion:<n>` and
     `ac_missing_id:<n>` name the same bullet by it. `nested` is True for a bullet indented
-    under another one.
+    under another one. `line` is the bullet's first line; `text` adds the indented lines that
+    continue it (a blank line does not end a bullet, an unindented line of prose does), so a tag
+    wrapped onto the next line still belongs to its bullet. A nested bullet is a block of its own
+    and never adds to the bullet above it.
     """
-    criteria = []
+    blocks = []
+    current = None
     for line in body.splitlines():
         stripped = line.strip()
+        if not stripped:
+            continue
+        indent = line[:len(line) - len(line.lstrip())]
         if stripped.startswith(("-", "*")) or re.match(r"^\d+\.", stripped):
-            indent = line[:len(line) - len(line.lstrip())]
-            criteria.append((len(criteria) + 1, stripped, "\t" in indent or len(indent) >= 2))
-    return criteria
+            blocks.append([len(blocks) + 1, stripped, "\t" in indent or len(indent) >= 2, stripped])
+            current = blocks[-1]
+        elif indent and current is not None:
+            current[3] += "\n" + stripped
+        else:
+            current = None
+    return [tuple(block) for block in blocks]
+
+
+def _criterion_bullets(body):
+    """[(index, line, nested)] for each bullet of a criteria section body (see `_bullet_blocks`)."""
+    return [(index, line, nested) for index, line, nested, _text in _bullet_blocks(body)]
 
 
 def _acceptance_criteria(text):
@@ -183,7 +216,7 @@ def _unlabelled(criteria):
     Real pipeline specs put a bold group heading, or a nested "Guards:"/"Variant:" line, inside the
     section. Neither is a criterion of its own, so neither is reported here. A top-level detail
     bullet that happens to say "when" still is, which is why only the criteria sources use this:
-    the spec check, and a spec-less bugfix plan's own section (no spec check runs there).
+    the spec check, and a spec-less plan's own section (no spec check runs there).
     """
     return [index for index, line, nested in criteria
             if not nested and TESTABLE_MARKERS.search(line) and not AC_ID_RE.search(line)]
@@ -215,14 +248,17 @@ FRONTMATTER_REQUIRED = {
 }
 FRONTMATTER_STATUSES = {"draft", "reviewed", "approved", "in_progress", "ready_for_audit", "complete"}
 
-# Spec-less bugfix plans (design §5.19). A plan is one only when its frontmatter carries BOTH
-# `flow: bugfix` and `spec: none`; `spec: none` without `flow: bugfix` is an error, so a feature
-# plan cannot drop its spec by writing `none`. A spec-less plan given a spec anyway is an error too
-# (`spec_none_with_spec`): the artifact under test must not decide whether the caller's spec is
-# checked. Mirrored in scripts/resolve_work_package.py, which reports the same codes (there: a spec
-# file in the plan's package); tests/test_validator_resolver_parity.py runs both on one fixture set.
+# Spec-less plans (design §5.19; a plan outside bugfix since the hybrid spec/plan design). A plan is
+# one only when its frontmatter carries BOTH `spec: none` and a `flow:` in SPECLESS_FLOWS;
+# `spec: none` with any other flow is an error (`spec_none_requires_specless_flow`), so a refactor
+# plan cannot drop its spec by writing `none`. Only a bugfix plan also needs a `## Bug` section. A
+# spec-less plan given a spec anyway is an error too (`spec_none_with_spec`): the artifact under
+# test must not decide whether the caller's spec is checked. Mirrored in
+# scripts/resolve_work_package.py, which reports the same codes (there: a spec file in the plan's
+# package); tests/test_validator_resolver_parity.py runs both on one fixture set.
 SPEC_NONE = "none"
 BUGFIX_FLOW = "bugfix"
+SPECLESS_FLOWS = (BUGFIX_FLOW, "feature", "plan")
 
 # A frontmatter value is echoed in an error only when it is a short lowercase word, the shape of a
 # status. Anything else could be a pasted credential, so it is printed masked. A word may use any
@@ -305,10 +341,15 @@ def is_bugfix_plan(meta):
     return meta.get("spec") == SPEC_NONE and meta.get("flow") == BUGFIX_FLOW
 
 
+def is_specless_plan(meta):
+    """True for a plan that carries its own criteria: `spec: none` with a `flow:` in SPECLESS_FLOWS."""
+    return meta.get("spec") == SPEC_NONE and meta.get("flow") in SPECLESS_FLOWS
+
+
 def check_plan_kind(meta):
-    """`spec: none` is accepted only with `flow: bugfix`; the resolver reports the same code."""
-    if meta.get("spec") == SPEC_NONE and meta.get("flow") != BUGFIX_FLOW:
-        return ["spec_none_requires_flow_bugfix"]
+    """`spec: none` is accepted only with a spec-less flow; the resolver reports the same code."""
+    if meta.get("spec") == SPEC_NONE and meta.get("flow") not in SPECLESS_FLOWS:
+        return ["spec_none_requires_specless_flow"]
     return []
 
 
@@ -329,7 +370,176 @@ def check_frontmatter(text, mode):
     return errors
 
 
-def check_spec(text):
+# A decision of `design.md`: a top-level bullet of the Decisions section that starts with `D<n>`
+# (after the bullet mark and any bold or italic marks). Its owner is `(user)` or
+# `(author's call: <reason>)`, with a straight or a typographic apostrophe and a reason in any script.
+DECISION_ID_RE = re.compile(r"^D(\d{1,%d})\b" % ID_DIGITS)
+DECISION_OWNER_RE = re.compile(r"\((?:user|author['\u2019]s call:\s*[^)\s][^)]*)\)", re.IGNORECASE)
+
+# A criterion's origin: `(source: request, D1, Q2)`, searched in the bullet's whole text. A token is
+# `request`, a decision `D<n>` of design.md, or a question `Q<n>` of the spec's check file.
+SOURCE_TAG_RE = re.compile(r"\(source:([^)]*)\)", re.IGNORECASE)
+SOURCE_TOKEN_RE = re.compile(r"^(?:request|([DQ])(\d{1,%d}))\Z" % ID_DIGITS)
+CHECK_QUESTION_ID_RE = re.compile(r"^Q(\d{1,%d})\Z" % ID_DIGITS)
+SOURCE_REQUEST = "request"
+
+
+def _clean_text(text):
+    """`text` without a leading byte-order mark (a file saved by an editor that adds one)."""
+    return text[1:] if text.startswith("\ufeff") else text
+
+
+def _section_text(text, needle):
+    """The body of the first section whose heading holds `needle`; None when there is none."""
+    for lineno, _raw, norm in _iter_headings(text):
+        if needle in norm:
+            return _section_body(text, lineno)
+    return None
+
+
+def _design_decisions(design_text):
+    """[(index, id or None, text)] for each top-level bullet of the Decisions section of a design.
+
+    `id` is the id as written (`D1`, `D01`); it is None for a bullet that does not start with one.
+    No Decisions section means no decisions.
+    """
+    body = _section_text(_body(_clean_text(design_text)), REQUIRED_DESIGN_SECTIONS["decisions"])
+    decisions = []
+    for index, line, nested, text in _bullet_blocks(body or ""):
+        if nested:
+            continue
+        label = re.sub(r"^(?:[-*]|\d+\.)\s*", "", line).lstrip("*_` ")
+        match = DECISION_ID_RE.match(label)
+        decisions.append((index, match.group(0) if match else None, text))
+    return decisions
+
+
+def _decision_key(decision_id):
+    """`D1` and `D01` name the same decision."""
+    return int(decision_id[1:])
+
+
+def check_design(text):
+    """Validate a `design.md`. Returns {'errors': [...], 'warnings': [...]}.
+
+    Errors: a required section is absent (`missing_section:<slug>`: intent, non-goals,
+    approaches, decisions); a top-level bullet of Decisions does not start with `D<n>`
+    (`decision_missing_id:<index>`, the bullet's 1-based position among the section's bullets); two
+    decisions share an id (`decision_duplicate_id:D<n>`, `D01` and `D1` being the same id); a
+    decision carries neither `(user)` nor `(author's call: <reason>)` anywhere in its text
+    (`decision_missing_owner:D<n>`).
+
+    A byte-order mark and CRLF line ends are tolerated. Only the body after the frontmatter block
+    is read (`_body`).
+    """
+    errors = []
+    text = _body(_clean_text(text))
+    for slug, needle in REQUIRED_DESIGN_SECTIONS.items():
+        if _section_text(text, needle) is None:
+            errors.append(f"missing_section:{slug}")
+    seen = set()
+    for index, decision_id, decision_text in _design_decisions(text):
+        if decision_id is None:
+            errors.append(f"decision_missing_id:{index}")
+            continue
+        if _decision_key(decision_id) in seen:
+            errors.append(f"decision_duplicate_id:{decision_id}")
+        seen.add(_decision_key(decision_id))
+        if not DECISION_OWNER_RE.search(decision_text):
+            errors.append(f"decision_missing_owner:{decision_id}")
+    return {"errors": errors, "warnings": []}
+
+
+def _check_questions(check_data):
+    """The set of question numbers a check file names: `{1, 2}` for ids `Q1`, `Q2`."""
+    found = set()
+    for question in (check_data or {}).get("questions") or []:
+        match = CHECK_QUESTION_ID_RE.match(str(question.get("id", ""))) if isinstance(question, dict) else None
+        if match:
+            found.add(int(match.group(1)))
+    return found
+
+
+def _source_errors(blocks, decisions, questions, counted_text):
+    """Errors for the criteria among `blocks` (`_bullet_blocks`) that do not name a known source.
+
+    A criterion is a top-level bullet that carries an AC id. The tag is searched in the bullet's
+    whole text (its first line and its indented continuation lines, not nested bullets).
+    `decisions` and `questions` are the numbers a token `D<n>` / `Q<n>` may name; an empty set makes
+    every such token unknown. `ac_no_source` (no tag, or a tag without a token), `ac_bad_source`
+    (a token that is none of the three forms), `ac_unknown_source` (a well-formed token that names
+    nothing), each followed by the criterion's id as written and, for the last two, the token.
+
+    `counted_text` is the text the plan coverage takes its ids from (`_ac_coverage`). Each id there
+    that is not the id of one of those top-level bullets is `ac_no_source:<id>` too: a criterion under
+    a group bullet, in a table, in a heading or in another section is still one the plan must build,
+    so formatting cannot take it out of the source rule.
+    """
+    errors = []
+    bullet_keys = set()
+    for _index, line, nested, text in blocks:
+        match = AC_ID_RE.search(line)
+        if nested or not match:
+            continue
+        bullet_keys.add(_ac_key(match))
+        ac = match.group(0)
+        tokens = [token.strip() for tag in SOURCE_TAG_RE.findall(text) for token in tag.split(",")]
+        tokens = [token for token in tokens if token]
+        if not tokens:
+            errors.append(f"ac_no_source:{ac}")
+        for token in tokens:
+            parsed = SOURCE_TOKEN_RE.match(token)
+            if not parsed:
+                errors.append(f"ac_bad_source:{ac}:{token}")
+            elif parsed.group(1) == "D" and int(parsed.group(2)) not in decisions:
+                errors.append(f"ac_unknown_source:{ac}:{token}")
+            elif parsed.group(1) == "Q" and int(parsed.group(2)) not in questions:
+                errors.append(f"ac_unknown_source:{ac}:{token}")
+    counted = {}
+    for match in AC_ID_RE.finditer(counted_text):
+        counted.setdefault(_ac_key(match), match.group(0))
+    errors += [f"ac_no_source:{counted[key]}" for key in sorted(counted) if key not in bullet_keys]
+    return errors
+
+
+def _unfenced(text):
+    """`text` without its fenced code lines (see `_fenced_lines`): a bullet in an example is no criterion."""
+    lines = text.splitlines()
+    fenced = _fenced_lines(lines)
+    return "\n".join(line for i, line in enumerate(lines) if i not in fenced)
+
+
+def _criteria_section(text):
+    """The body of the first acceptance-criteria section of a spec body, None when there is none.
+
+    It runs to the next heading of the same or a higher level, so a `### Login` sub-heading stays
+    inside it; headings in code fences do not count. A spec-less plan's section is read the same way
+    (`_own_criteria_sections`).
+    """
+    lines = text.splitlines()
+    fenced = _fenced_lines(lines)
+    headings = []  # (line_index, normalized text, level)
+    for i, line in enumerate(lines):
+        match = HEADING_RE.match(line)
+        if match and i not in fenced:
+            headings.append((i, _normalize_heading(match.group(1)), _heading_level(line)))
+    needle = REQUIRED_SPEC_SECTIONS["acceptance-criteria"]
+    section = next(((i, level) for i, norm, level in headings if needle in norm), None)
+    if section is None:
+        return None
+    at, level = section
+    end = next((i for i, _norm, lvl in headings if i > at and lvl <= level), len(lines))
+    return "\n".join(lines[at + 1:end])
+
+
+def _decision_numbers(design_text):
+    """The decision numbers a design names; none without a design."""
+    if design_text is None:
+        return set()
+    return {_decision_key(decision_id) for _index, decision_id, _text in _design_decisions(design_text) if decision_id}
+
+
+def check_spec(text, design_text=None, check_data=None, require_sources=False):
     """Validate a spec artifact. Returns {'errors': [...], 'warnings': [...]}.
 
     Errors: a required section is absent.
@@ -337,6 +547,15 @@ def check_spec(text):
     heading); an acceptance-criteria bullet lacks a testable marker or an `AC<n>`
     id (the plan gate checks coverage by id, so an unlabelled criterion is one
     it cannot check).
+
+    With `require_sources`, every criterion (a top-level bullet of the acceptance-criteria section
+    that carries an `AC<n>` id; the section runs to the next heading of its own level, see
+    `_criteria_section`) must name where it came from, `(source: request, D1, Q2)`: `ac_no_source`,
+    `ac_bad_source`, `ac_unknown_source` (see `_source_errors`). An id anywhere else in the spec body
+    is counted by the plan coverage too, so it is `ac_no_source` unless it is also such a bullet.
+    `design_text` is the design file's text (what `D<n>` may name) and `check_data` the parsed check
+    file (what `Q<n>` may name); without one, no token of its kind is known. Without
+    `require_sources` the tag is ignored.
 
     Only the body after the frontmatter block is read (`_body`).
     """
@@ -368,6 +587,11 @@ def check_spec(text):
         if not TESTABLE_MARKERS.search(criterion):
             warnings.append(f"untestable_criterion:{index}")
     warnings += [f"ac_missing_id:{index}" for index in _unlabelled_criteria(text)]
+
+    if require_sources:
+        section = _criteria_section(text)
+        errors += _source_errors(_bullet_blocks(_unfenced(section or "")), _decision_numbers(design_text),
+                                 _check_questions(check_data), text)
 
     # Security hand-wave: only when a security section exists AND its short body is
     # nothing but a bare dismissal. A grounded note (which cites an input->sink, or
@@ -513,21 +737,23 @@ def _heading_level(line):
     return len(stripped) - len(stripped.lstrip("#"))
 
 
-def _bugfix_sections(text):
-    """(criteria_text or None, errors, warnings) for a spec-less bugfix plan.
+def _own_criteria_sections(text, bugfix=True):
+    """(criteria_text or None, errors, warnings) for a spec-less plan.
 
     Headings are read outside code fences (a `# comment` in a shell snippet is not a heading), and
     task headings are never taken for either section. A section runs from its heading to the next
     heading of the same or a higher level, and never past the first task block.
 
-    - The bug report is the first heading at level 2 or deeper, before the first task block, whose
-      text starts with "Bug". The document title (level 1), a sub-heading inside a task and a
-      section after the tasks are not the bug report (`missing_section:bug`). Design §5.19 has it
-      carry expected, actual and reproduction, so a body under THIN_SECTION_CHARS non-blank
-      characters warns `thin_section:bug`, as a thin spec section does.
+    - Only a bugfix plan (`bugfix=True`) has a bug report. It is the first heading at level 2 or
+      deeper, before the first task block, whose text starts with "Bug". The document title
+      (level 1), a sub-heading inside a task and a section after the tasks are not the bug report
+      (`missing_section:bug`). Design §5.19 has it carry expected, actual and reproduction, so a
+      body under THIN_SECTION_CHARS non-blank characters warns `thin_section:bug`, as a thin spec
+      section does.
     - The criteria are the body of the plan's own acceptance-criteria section. It must come before
-      the first task block (`bugfix_ac_section_after_tasks`); one inside a task block would be
-      "covered" by the very block that holds it.
+      the first task block (`bugfix_ac_section_after_tasks` for a bugfix plan,
+      `ac_section_after_tasks` for another one); one inside a task block would be "covered" by the
+      very block that holds it.
     """
     lines = text.splitlines()
     fenced = _fenced_lines(lines)
@@ -545,14 +771,15 @@ def _bugfix_sections(text):
 
     errors = []
     warnings = []
-    bug = next(((i, level) for i, norm, level in headings
-                if i < first_task and level >= 2 and BUG_HEADING_RE.match(norm)), None)
-    if bug is None:
-        errors.append("missing_section:bug")
-    else:
-        bug_body = "\n".join(lines[bug[0] + 1:section_end(*bug)])
-        if len("".join(bug_body.split())) < THIN_SECTION_CHARS:
-            warnings.append("thin_section:bug")
+    if bugfix:
+        bug = next(((i, level) for i, norm, level in headings
+                    if i < first_task and level >= 2 and BUG_HEADING_RE.match(norm)), None)
+        if bug is None:
+            errors.append("missing_section:bug")
+        else:
+            bug_body = "\n".join(lines[bug[0] + 1:section_end(*bug)])
+            if len("".join(bug_body.split())) < THIN_SECTION_CHARS:
+                warnings.append("thin_section:bug")
     needle = REQUIRED_SPEC_SECTIONS["acceptance-criteria"]
     section = next(((i, level) for i, norm, level in headings if needle in norm), None)
     if section is None:
@@ -560,7 +787,7 @@ def _bugfix_sections(text):
         return None, errors, warnings
     at, level = section
     if at > first_task:
-        errors.append("bugfix_ac_section_after_tasks")
+        errors.append("bugfix_ac_section_after_tasks" if bugfix else "ac_section_after_tasks")
         return None, errors, warnings
     return "\n".join(lines[at + 1:section_end(at, level)]), errors, warnings
 
@@ -585,7 +812,7 @@ def _ac_coverage(source_text, blocks, warnings):
     return covered
 
 
-def check_plan(text, spec_text, bugfix=False):
+def check_plan(text, spec_text, bugfix=False, own_criteria=False, design_text=None, require_sources=False):
     """Validate a plan artifact against the spec's acceptance criteria.
 
     AC ids are sourced from `spec_text` ONLY (DP-2): no mining from the plan body,
@@ -598,15 +825,23 @@ def check_plan(text, spec_text, bugfix=False):
     (`ac_missing_id:<n>`), not here: telling a criterion bullet from a detail
     bullet is a heuristic, and this check is the strict plan gate.
 
-    `bugfix=True` is the one exception to DP-2 (design §5.19): a spec-less bugfix plan
-    has no spec, so `spec_text` is ignored and the ids come from the plan's own
+    `bugfix=True` or `own_criteria=True` is the one exception to DP-2 (design §5.19): a spec-less
+    plan has no spec, so `spec_text` is ignored and the ids come from the plan's own
     acceptance-criteria section, which must come before the first task block
-    (`bugfix_ac_section_after_tasks`). Both that section and a `## Bug` section are
-    required (`missing_section:acceptance-criteria`, `missing_section:bug`; see
-    `_bugfix_sections`). Coverage is then judged exactly as against a spec. No spec
+    (`bugfix_ac_section_after_tasks` for a bugfix plan, `ac_section_after_tasks` for another one).
+    That section is required (`missing_section:acceptance-criteria`), and so is a `## Bug` section
+    for a bugfix plan only (`missing_section:bug`); see `_own_criteria_sections`. `bugfix=True`
+    implies own criteria. Coverage is then judged exactly as against a spec. No spec
     check runs on that section, so its criteria without an id are reported here
     (`ac_missing_id:<n>`, fenced lines aside); otherwise they would drop out of the
     gate in silence.
+
+    With `require_sources`, each of those own criteria must name where it came from,
+    `(source: request, D1)` (`ac_no_source`, `ac_bad_source`, `ac_unknown_source`; see
+    `_source_errors`), and every id the coverage counts in that section must be such a criterion: an
+    id in a table, a heading or a nested bullet is `ac_no_source`. `design_text` is what `D<n>` may
+    name; a plan has no questions, so any `Q<n>` is unknown. A plan checked against a spec has no own
+    criteria, so `require_sources` changes nothing for it.
 
     Only the bodies after the frontmatter blocks of the plan and the spec are read
     (`_body`): a task, a section or an id inside a block does not count.
@@ -647,9 +882,9 @@ def check_plan(text, spec_text, bugfix=False):
     if any(b <= a for a, b in zip(numbers, numbers[1:])):
         warnings.append("tasks_unordered")
 
-    # AC coverage — only when we have a canonical source: the spec, or a bugfix plan's own section.
-    if bugfix:
-        criteria, criteria_errors, criteria_warnings = _bugfix_sections(text)
+    # AC coverage — only when we have a canonical source: the spec, or a spec-less plan's own section.
+    if bugfix or own_criteria:
+        criteria, criteria_errors, criteria_warnings = _own_criteria_sections(text, bugfix)
         errors += criteria_errors
         warnings += criteria_warnings
         if criteria is None:
@@ -659,6 +894,8 @@ def check_plan(text, spec_text, bugfix=False):
             fenced = _fenced_lines(criteria_lines)
             unfenced = "\n".join(line for i, line in enumerate(criteria_lines) if i not in fenced)
             warnings += [f"ac_missing_id:{index}" for index in _unlabelled(_criterion_bullets(unfenced))]
+            if require_sources:
+                errors += _source_errors(_bullet_blocks(unfenced), _decision_numbers(design_text), set(), criteria)
             metrics["plan_ac_covered"] = _ac_coverage(criteria, blocks, warnings)
     elif spec_text is None:
         warnings.append("ac_source_missing")
@@ -713,12 +950,35 @@ def _fields(mode, metrics, warnings, errors):
     return fields
 
 
-def run(mode, file_path, spec_path, strict):
+def _read_check(path):
+    """(check_data, None), or (None, reason): missing | not_utf8 | error | invalid_json | invalid_shape.
+
+    The check file is JSON with `"questions": [{"id": "Q1", ...}, ...]`; a file without the key
+    names no question.
+    """
+    text, unreadable = _read_artifact(path)
+    if unreadable:
+        return None, unreadable
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None, "invalid_json"
+    if not isinstance(data, dict) or not isinstance(data.get("questions", []), list):
+        return None, "invalid_shape"
+    return data, None
+
+
+def run(mode, file_path, spec_path, strict, design_path=None, check_path=None, sources=False):
     """Run the requested checks and return (exit_code, fields_dict).
 
     Kept separate from main() so callers/tests can drive it without argparse. The gate passes when
-    the exit code (`run(...)[0]`) is 0. An unreadable artifact or spec is a failed gate with a
-    named reason, never an exception.
+    the exit code (`run(...)[0]`) is 0. An unreadable artifact, spec, design or check file is a
+    failed gate with a named reason, never an exception.
+
+    `sources` makes every criterion of a spec, or of a spec-less plan, name where it came from.
+    `design_path` (the design file, what `D<n>` may name) and `check_path` (the spec's check file,
+    what `Q<n>` may name) are read only then; a path that is None names nothing, so its tokens are
+    unknown, while a path that cannot be read is an error.
     """
     errors = []
     warnings = []
@@ -728,6 +988,17 @@ def run(mode, file_path, spec_path, strict):
     if unreadable:
         return 1, _fields(mode, metrics, warnings, [f"file_unreadable:{unreadable}"])
 
+    design_text = None
+    check_data = None
+    if sources and design_path:
+        design_text, unreadable = _read_artifact(design_path)
+        if unreadable:
+            errors.append(f"design_unreadable:{unreadable}")
+    if sources and check_path:
+        check_data, unreadable = _read_check(check_path)
+        if unreadable:
+            errors.append(f"check_unreadable:{unreadable}")
+
     # The placeholder/secret scan runs in every mode, on the artifact under test.
     scan = scan_placeholders_and_secrets(file_text)
     errors += scan["errors"]
@@ -736,27 +1007,34 @@ def run(mode, file_path, spec_path, strict):
     # Frontmatter first: it is the cheapest check and the one the resolver will apply later.
     errors += check_frontmatter(file_text, mode)
 
+    if mode == "design":
+        design_res = check_design(file_text)
+        errors += design_res["errors"]
+        warnings += design_res["warnings"]
+
     if mode in ("spec", "all"):
-        spec_res = check_spec(file_text)
+        spec_res = check_spec(file_text, design_text, check_data, sources)
         errors += spec_res["errors"]
         warnings += spec_res["warnings"]
 
     if mode in ("plan", "all"):
-        # The plan's own frontmatter decides its kind. A spec-less bugfix plan is checked against
-        # its own criteria. A --spec given for it anyway means the caller and the artifact disagree
-        # about whether there is a spec; the artifact under test must not settle that by switching
-        # the caller's spec off, so the gate fails (`spec_none_with_spec`) and the spec is not read.
+        # The plan's own frontmatter decides its kind. A spec-less plan is checked against its own
+        # criteria. A --spec given for it anyway means the caller and the artifact disagree about
+        # whether there is a spec; the artifact under test must not settle that by switching the
+        # caller's spec off, so the gate fails (`spec_none_with_spec`) and the spec is not read.
         meta = parse_frontmatter(file_text)
         errors += check_plan_kind(meta)
         bugfix = is_bugfix_plan(meta)
+        specless = is_specless_plan(meta)
         spec_text = None
-        if spec_path and bugfix:
+        if spec_path and specless:
             errors.append("spec_none_with_spec")
         elif spec_path:
             spec_text, unreadable = _read_artifact(spec_path)
             if unreadable:
                 errors.append(f"spec_unreadable:{unreadable}")
-        plan_res = check_plan(file_text, spec_text, bugfix=bugfix)
+        plan_res = check_plan(file_text, spec_text, bugfix=bugfix, own_criteria=specless,
+                              design_text=design_text, require_sources=sources)
         errors += plan_res["errors"]
         warnings += plan_res["warnings"]
         metrics.update(plan_res["metrics"])
@@ -773,19 +1051,31 @@ def build_parser():
     p = argparse.ArgumentParser(
         description="Deterministic spec/plan artifact validator (stdlib only)."
     )
-    p.add_argument("--mode", choices=["spec", "plan", "all"], required=True)
+    p.add_argument("--mode", choices=["spec", "plan", "all", "design"], required=True)
     p.add_argument("--file", required=True, help="artifact under test")
     p.add_argument(
         "--spec",
         default=None,
-        help="canonical acceptance-criteria source for plan/all mode (DP-2); a spec-less bugfix "
-             "plan (`flow: bugfix` with `spec: none`) takes none, and fails with "
+        help="canonical acceptance-criteria source for plan/all mode (DP-2); a spec-less plan "
+             "(`spec: none` with `flow: bugfix`, `feature` or `plan`) takes none, and fails with "
              "`spec_none_with_spec` when one is given",
     )
     p.add_argument(
         "--strict",
         action="store_true",
         help="promote every warning to an error",
+    )
+    p.add_argument(
+        "--sources",
+        action="store_true",
+        help="require every criterion of a spec, or of a spec-less plan, to carry "
+             "`(source: request, D<n>, Q<n>)`",
+    )
+    p.add_argument("--design", default=None, help="design.md, what a source `D<n>` may name (with --sources)")
+    p.add_argument(
+        "--check",
+        default=None,
+        help="the spec's check file (JSON with `questions`), what a source `Q<n>` may name (with --sources)",
     )
     return p
 
@@ -802,7 +1092,8 @@ def _utf8_output():
 def main(argv=None):
     _utf8_output()
     args = build_parser().parse_args(argv)
-    code, fields = run(args.mode, args.file, args.spec, args.strict)
+    code, fields = run(args.mode, args.file, args.spec, args.strict,
+                       design_path=args.design, check_path=args.check, sources=args.sources)
     emit(fields)
     return code
 

@@ -234,7 +234,7 @@ Standalone `spec-authoring` / `plan-authoring` may still use `spec-plan-draft` a
 | `hooks/` | Deterministic runtime enforcement and warnings (secret scan, branch guard, destructive-command guard, session start, completion claim, active-flow evidence guards). |
 | `skills/` | Procedure and agentic workflow surface; one directory per skill. |
 | `agents/` | Fresh-context specialist roles (context-analyst, code-reviewer, security-reviewer, implementation-auditor, spec-plan-author, spec-plan-critic, …). |
-| `workflows/` | Claude Code deterministic multi-agent loops: `spec-plan-draft.js`, `skill-draft.js`, and higher-rigor `multi-lens-review.js`. |
+| `workflows/` | Claude Code deterministic multi-agent loops: `spec-plan-draft.js`, `skill-draft.js`, and higher-rigor `multi-lens-review.js`. The flow runner uses `spec-plan-draft.js` only when the user asks for an engine explicitly. |
 | `.grok/workflows/` | Grok CLI project-catalog Rhai ports of those three loops (not a plugin component). |
 | `commands/` | Explicit manual checks such as `/agentic-sdlc:git-safety-check`. |
 | `scripts/` | Machine-checkable helpers (`check_all.py`, `validate_artifacts.py`, `detect_context.py`, eval runners, packaging tools). |

@@ -29,7 +29,7 @@ for folder in (REPO / "scripts", TESTS):
     if str(folder) not in sys.path:
         sys.path.insert(0, str(folder))
 
-from test_sdlc_loop import LoopCase  # noqa: E402
+from test_sdlc_loop import ENGINE_OVERRIDES, LoopCase  # noqa: E402
 from test_sdlc_engine import PLAN_BODY, SPEC_BODY, card_fields, card_value  # noqa: E402
 from sdlc_runner import loop  # noqa: E402
 
@@ -539,7 +539,8 @@ class TestEngineAgainstTheRunner(LoopCase):
     runs scripts/sdlc.py, and the runner ingests what the engine claims only if its files back it."""
 
     def launch(self, slug="demo"):
-        text = self.to_draft(runtime="claude", capabilities="workflow=yes,subagent=yes,team=no", slug=slug)
+        text = self.to_draft(runtime="claude", capabilities="workflow=yes,subagent=yes,team=no", slug=slug,
+                             overrides=ENGINE_OVERRIDES)
         launch = card_value(text, "launch")
         self.assertTrue(launch and launch.startswith("Workflow "), text)
         call = json.loads(launch[len("Workflow "):])

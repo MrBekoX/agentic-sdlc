@@ -12,8 +12,9 @@ this session and confirms or overrides each entry with a reason in one command:
   `draft` and `draft.critic`);
 - every override has a reason;
 - every mechanism is within the declared capabilities (`subagent` and `runner-loop` need
-  subagent=yes, `workflow` workflow=yes and a runtime with an engine, `team` team=yes); a
-  runtime whose workflow is `explicit-request` gets `workflow` only as an override;
+  subagent=yes, `workflow` workflow=yes and a runtime with an engine, `team` team=yes); the
+  spec/plan keys (`draft`, `draft.critic`) get `workflow` only as an override, on every runtime,
+  and on a runtime whose engine runs only on request (`workflow: explicit-request`) every key does;
 - the mandated fresh-context keys (draft.critic, security, audit, quality-review) are never `main`
   (or `team`, `parallel-runs`): `workflow`, `subagent`, `runner-loop` (draft.critic only), or
   `inline-degraded`/`runner-loop-inline` with subagent declared no or denied;
@@ -46,8 +47,9 @@ FRESH_ALLOWED = ("workflow", "subagent", "runner-loop") + DEGRADED
 
 # --- applicability -----------------------------------------------------------------------------
 
-def _facts(probes, options, form=None, work_type=None) -> dict:
-    return {"probes": dict(probes or {}), "options": list(options or []), "form": form, "work_type": work_type}
+def _facts(probes, options, form=None, work_type=None, imported=None) -> dict:
+    return {"probes": dict(probes or {}), "options": list(options or []), "form": form, "work_type": work_type,
+            "imported": list(imported or [])}
 
 
 def _applies(step, facts) -> bool:
@@ -91,7 +93,8 @@ def applicable_keys(flow, facts) -> list:
 
 
 def _state_facts(state) -> dict:
-    return _facts(state.get("probes"), state.get("options"), state.get("form"), state.get("work_type"))
+    return _facts(state.get("probes"), state.get("options"), state.get("form"), state.get("work_type"),
+                  state.get("imported"))
 
 
 # --- the rule table ----------------------------------------------------------------------------
@@ -104,17 +107,14 @@ def runtime_row(shared, runtime) -> dict:
 def _rule(key, row, probes) -> tuple:
     """(mechanism, reason) of `key` under the runtime row and the probes (design §5.7)."""
     sub = row.get("subagent") == "yes"
-    workflow = row.get("workflow")
     if key == "context":
         if probes.get("explore_mode") == "parallel" and sub:
             return "subagent", "explore mode parallel: one analyst sub-agent per layer"
         return "main", "one layer to explore: the main loop reads it"
     if key in DRAFT_KEYS:
-        if workflow in ("native", "staged"):
-            return "workflow", "the runtime's own workflow engine runs the spec/plan loop (%s)" % workflow
         if sub:
-            return "runner-loop", "no workflow engine: the runner drives the loop, each role a fresh sub-agent"
-        return "runner-loop-inline", "no workflow engine and no sub-agents: the runner drives the loop inline"
+            return "runner-loop", "the runner drives the loop, each role a fresh sub-agent"
+        return "runner-loop-inline", "no sub-agents: the runner drives the loop inline"
     if key in manifest.MANDATED_FRESH_KEYS:
         if sub:
             return "subagent", "a fresh-context gate: a fresh sub-agent"
@@ -126,10 +126,10 @@ def _rule(key, row, probes) -> tuple:
     return "main", "the main loop does it"
 
 
-def default_map(flow, shared, probes, runtime, options, *, form=None, work_type=None) -> dict:
+def default_map(flow, shared, probes, runtime, options, *, form=None, work_type=None, imported=None) -> dict:
     """strategy.default.json: one default entry per applicable key, from the runtime's row."""
     row = runtime_row(shared, runtime)
-    facts = _facts(probes, options, form, work_type)
+    facts = _facts(probes, options, form, work_type, imported)
     entries = {}
     for key in applicable_keys(flow, facts):
         mechanism, reason = _rule(key, row, facts["probes"])
@@ -163,9 +163,9 @@ def _entry_errors(key, entry, capabilities, row) -> list:
     if mechanism == "workflow":
         if row.get("workflow") == "none":
             errors.append("%s: no workflow engine on this runtime" % at)
-        elif row.get("workflow") == "explicit-request" and entry.get("source") != "override":
-            errors.append("%s: this runtime's workflow runs only on the user's explicit request (an override "
-                          "with a reason)" % at)
+        elif ((key in DRAFT_KEYS or row.get("workflow") == "explicit-request")
+              and entry.get("source") != "override"):  # a draft key anywhere; any key on an explicit-request row
+            errors.append("%s: an engine runs only on the user's explicit request (an override with a reason)" % at)
     if mechanism in LOOP_MECHANISMS and key not in DRAFT_KEYS:
         errors.append("%s: %s drives the spec/plan loop only" % (at, mechanism))
     if mechanism in DEGRADED and capabilities.get("subagent") not in ("no", "denied"):
@@ -260,7 +260,8 @@ def default_lines(ctx) -> list:
 
     data = load_default(ctx.pkg) or default_map(ctx.flow, ctx.shared, ctx.state.get("probes"), ctx.state.get("runtime"),
                                                 ctx.state.get("options"), form=ctx.state.get("form"),
-                                                work_type=ctx.state.get("work_type"))
+                                                work_type=ctx.state.get("work_type"),
+                                                imported=ctx.state.get("imported"))
     shown = ",".join("%s:%s" % (key, entry.get("mechanism")) for key, entry in (data.get("entries") or {}).items())
     command = runner_command("strategy", "confirm", "--slug", ctx.state["slug"], "--capabilities")
     return ["default=" + (shown or "none"),
@@ -305,7 +306,7 @@ def confirm(ctx, capabilities: dict, overrides: list) -> int:
         raise SdlcError(4, "strategy_already_confirmed (the strategy step runs once; the card is read-only)")
     st = ctx.state
     base = default_map(ctx.flow, ctx.shared, st.get("probes"), st.get("runtime"), st.get("options"),
-                       form=st.get("form"), work_type=st.get("work_type"))
+                       form=st.get("form"), work_type=st.get("work_type"), imported=st.get("imported"))
     entries = copy.deepcopy(base["entries"])
     applied = []
     for key, mechanism, reason in overrides:

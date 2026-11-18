@@ -26,7 +26,7 @@ RUNTIME_HELPERS = {
 RUNNER_MODULES = {f"scripts/sdlc_runner/{name}.py" for name in (
     "__init__", "textio", "paths", "lock", "logs", "frontmatter", "gitinfo", "fingerprint", "mask",
     "schema", "manifest", "state", "probes", "checks", "engine", "card", "strategy", "loop",
-    "runexec", "gates", "flowops", "cli",
+    "runexec", "gates", "flowops", "cli", "speccheck",
 )}
 
 

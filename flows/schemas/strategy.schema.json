@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "agentic-sdlc/strategy@1",
   "title": "Confirmed strategy map (strategy.json)",
-  "description": "Written by `sdlc strategy confirm` (contract §9). capabilities is what the model declared for this session; entries holds one mechanism per mechanism-bearing key that applies in the flow (strategy_ok checks coverage, override reasons, declared capabilities and the mandated fresh keys draft.critic, security, audit, quality-review); degraded lists each key that runs inline because a capability is no or denied.",
+  "description": "Written by `sdlc strategy confirm` (contract §9). capabilities is what the model declared for this session; entries holds one mechanism per mechanism-bearing key that applies in the flow (strategy_ok checks coverage, override reasons, declared capabilities and the mandated fresh keys draft.critic, spec-check, security, audit, quality-review); degraded lists each key that runs inline because a capability is no or denied.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "runtime", "capabilities", "entries", "degraded"],
@@ -26,6 +26,7 @@
         "context": {"type": "object", "additionalProperties": false, "required": ["mechanism", "reason", "source"], "properties": {"mechanism": {"enum": ["main", "subagent", "workflow", "team", "runner-loop", "runner-loop-inline", "inline-degraded", "parallel-runs"]}, "reason": {"type": "string"}, "source": {"enum": ["default", "override"]}}},
         "draft": {"type": "object", "additionalProperties": false, "required": ["mechanism", "reason", "source"], "properties": {"mechanism": {"enum": ["main", "subagent", "workflow", "team", "runner-loop", "runner-loop-inline", "inline-degraded", "parallel-runs"]}, "reason": {"type": "string"}, "source": {"enum": ["default", "override"]}}},
         "draft.critic": {"type": "object", "additionalProperties": false, "required": ["mechanism", "reason", "source"], "properties": {"mechanism": {"enum": ["main", "subagent", "workflow", "team", "runner-loop", "runner-loop-inline", "inline-degraded", "parallel-runs"]}, "reason": {"type": "string"}, "source": {"enum": ["default", "override"]}}},
+        "spec-check": {"type": "object", "additionalProperties": false, "required": ["mechanism", "reason", "source"], "properties": {"mechanism": {"enum": ["main", "subagent", "workflow", "team", "runner-loop", "runner-loop-inline", "inline-degraded", "parallel-runs"]}, "reason": {"type": "string"}, "source": {"enum": ["default", "override"]}}},
         "implement": {"type": "object", "additionalProperties": false, "required": ["mechanism", "reason", "source"], "properties": {"mechanism": {"enum": ["main", "subagent", "workflow", "team", "runner-loop", "runner-loop-inline", "inline-degraded", "parallel-runs"]}, "reason": {"type": "string"}, "source": {"enum": ["default", "override"]}}},
         "security": {"type": "object", "additionalProperties": false, "required": ["mechanism", "reason", "source"], "properties": {"mechanism": {"enum": ["main", "subagent", "workflow", "team", "runner-loop", "runner-loop-inline", "inline-degraded", "parallel-runs"]}, "reason": {"type": "string"}, "source": {"enum": ["default", "override"]}}},
         "quality-gates": {"type": "object", "additionalProperties": false, "required": ["mechanism", "reason", "source"], "properties": {"mechanism": {"enum": ["main", "subagent", "workflow", "team", "runner-loop", "runner-loop-inline", "inline-degraded", "parallel-runs"]}, "reason": {"type": "string"}, "source": {"enum": ["default", "override"]}}},
@@ -41,7 +42,7 @@
         "additionalProperties": false,
         "required": ["key", "capability", "reason"],
         "properties": {
-          "key": {"enum": ["context", "draft", "draft.critic", "implement", "security", "quality-gates", "quality-review", "audit", "docs-check"]},
+          "key": {"enum": ["context", "draft", "draft.critic", "spec-check", "implement", "security", "quality-gates", "quality-review", "audit", "docs-check"]},
           "capability": {"enum": ["workflow", "subagent", "team"]},
           "reason": {"type": "string", "minLength": 1}
         }

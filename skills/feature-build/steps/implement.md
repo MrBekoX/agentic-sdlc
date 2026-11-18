@@ -1,12 +1,12 @@
 # Implement: feature work
 
-Build the feature test-first, to the approved spec and plan, and ship only the agreed scope.
-The runner records every test run; the evidence file explains them.
+Build the feature test-first, to the approved plan and, when the package has one, the spec;
+ship only the agreed scope. The runner records every test run; the evidence file explains them.
 
 ## Read first
-- The files on the card's `inputs=` line, inside the `package=` folder: the spec
-  (acceptance criteria, edge cases, behavior that must not change) and the plan (tasks,
-  files, test points).
+- The files on the card's `inputs=` line, inside the `package=` folder: the plan (tasks, files,
+  test points) and the spec when the package has one (acceptance criteria, edge cases, behavior
+  that must not change). A plan with `spec: none` holds its own `## Acceptance Criteria`.
 - The card's `mechanism=` line says who edits: `main` is you, in this session. Any other
   value: hand the edits out that way, one writer per file, all in this checkout (never an isolated worktree: the runner reads only this one). You still run the commands
   below and write the evidence file.

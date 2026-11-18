@@ -1,12 +1,12 @@
 {
-  "$comment": "Design §5.15 one-step flow: strategy -> context -> draft(plan, from the approved spec) -> review(gate) -> claim. No step writes the spec: start imports it (imports), refusing a source whose frontmatter status is not approved.",
+  "$comment": "Hybrid spec/plan design §3: strategy -> context -> {no import} intent -> plan -> plan-review -> claim. No step writes the spec: start imports it when --spec-file is given (imports, required false), refusing a source whose frontmatter status is not approved; without it the intent step runs and the plan carries its own sourced criteria. Gated only, so no step carries a form. Under start --option loop the loop's draft(plan, from the approved spec) -> review run in place of plan and plan-review, and start refuses a loop run without --spec-file.",
   "schema": "agentic-sdlc/flow@1",
   "id": "plan",
   "entry_skill": "plan-authoring",
   "forms": ["gated"],
   "work_types": ["feature", "bugfix", "refactor", "test"],
   "loop_mode": "plan",
-  "imports": [{"path": "spec/{work_id}.md", "option": "--spec-file", "status": "approved"}],
+  "imports": [{"path": "spec/{work_id}.md", "option": "--spec-file", "status": "approved", "required": false}],
   "steps": [
     {
       "id": "strategy",
@@ -26,15 +26,25 @@
       "mechanism_key": "context"
     },
     {
+      "id": "intent",
+      "file": "skills/mind-spark/steps/intent.md",
+      "inputs": ["request.md", "context.md"],
+      "outputs": ["design.md"],
+      "done_when": [{"check": "validator", "mode": "design"}],
+      "applies_when": {"imported": false},
+      "may_ask": ["design"]
+    },
+    {
       "id": "draft",
       "file": "skills/plan-authoring/steps/draft.md",
-      "inputs": ["request.md", "context.md", "spec/{work_id}.md#body", "feedback.jsonl?"],
+      "inputs": ["request.md", "context.md", "design.md?", "spec/{work_id}.md#body", "feedback.jsonl?"],
       "outputs": ["plan/{work_id}.md", "plan/{work_id}.review.json"],
       "done_when": [
         {"check": "loop_done"},
         {"check": "validator", "mode": "plan", "strict": true},
         {"check": "sidecar_ok", "artifact": "plan"}
       ],
+      "applies_when": {"option": "loop"},
       "mechanism_key": "draft",
       "loop": "spec-plan"
     },
@@ -44,7 +54,25 @@
       "inputs": ["plan/{work_id}.md#body"],
       "outputs": [],
       "done_when": [{"check": "approval", "gate": "review"}],
-      "gate": "review"
+      "gate": "review",
+      "applies_when": {"option": "loop"}
+    },
+    {
+      "id": "plan",
+      "file": "skills/plan-authoring/steps/plan.md",
+      "inputs": ["request.md", "context.md", "design.md?", "spec/{work_id}.md#body?"],
+      "outputs": ["plan/{work_id}.md"],
+      "done_when": [{"check": "validator", "mode": "plan", "strict": true, "sources": true}],
+      "applies_when": {"not_option": "loop"}
+    },
+    {
+      "id": "plan-review",
+      "file": "skills/agentic-sdlc-pipeline/steps/plan-review.md",
+      "inputs": ["plan/{work_id}.md#body"],
+      "outputs": [],
+      "done_when": [{"check": "approval", "gate": "plan-review"}],
+      "gate": "plan-review",
+      "applies_when": {"not_option": "loop"}
     },
     {
       "id": "claim",

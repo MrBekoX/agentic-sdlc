@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agentic-sdlc/check@1",
+  "title": "Spec check (spec/<id>.check.json)",
+  "description": "Written by `sdlc check-record` after the fresh reader of the spec-check step answered, and updated by `sdlc check-resolve` (design 4.3). body_fingerprint is the spec body the reader read (fingerprint.body_fp); the settled check does not compare it with the current spec, so editing the spec after the check does not re-run the reader. reader says whether the reader ran fresh or degraded (inline). visit, when present, is the spec-check visit of the latest record. A new visit (a changed design.md) keeps every settled question of an earlier visit with its settlement, drops the ones still open, and numbers its own questions after issued, the highest question number the file ever held, so an id never names two questions (a file without issued counts its highest id). A question's own visit is the visit that recorded it (without one, the file's visit). Each question is settled by a pile: answered (the answer went into the spec), minor (the main loop decided; author_call is true) or theirs (the user answered, answer_seq names that answer record in questions.jsonl, or the author decided with no user to ask; author_call is true; exactly one of the two). A settled question has a non-empty resolution. Those settlement rules are checked by the runner (checks.check_problems), not by this schema. The settled check passes when every question has a pile; an empty questions list is settled.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "artifact", "body_fingerprint", "reader", "questions"],
+  "properties": {
+    "schema": {"const": "agentic-sdlc/check@1"},
+    "artifact": {"const": "spec"},
+    "body_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reader": {"enum": ["fresh", "degraded"]},
+    "visit": {"type": "integer", "minimum": 1},
+    "issued": {"type": "integer", "minimum": 0, "maximum": 999999},
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "why", "pile", "resolution", "answer_seq", "author_call"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^Q[1-9][0-9]{0,5}$"},
+          "question": {"type": "string", "minLength": 1},
+          "why": {"type": "string", "minLength": 1},
+          "pile": {"enum": [null, "answered", "minor", "theirs"]},
+          "resolution": {"type": ["string", "null"]},
+          "answer_seq": {"type": ["integer", "null"], "minimum": 1},
+          "author_call": {"type": "boolean"},
+          "visit": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}

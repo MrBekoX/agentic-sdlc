@@ -11,7 +11,8 @@ instead of in a live run:
   the validator's blocking findings, and its last message is only the JSON the schema describes.
 - `agents/draft-scribe.md` writes files and runs the loop's runner commands for the native
   engines, with exactly Read, Write, Bash and PowerShell; the author and the critic stay read-only.
-- `agents/implementation-auditor.md` grades a spec-less bugfix against its plan's criteria.
+- `agents/implementation-auditor.md` grades a spec-less plan of a bugfix, feature or plan run against
+  the plan's own criteria, and only a bugfix plan against a `## Bug` section.
 - Contracts 02, 03 and 07 allow the joint loop, its one review gate and the spec-less bugfix plan.
 """
 import argparse
@@ -246,14 +247,36 @@ class TestBugfixPlan(unittest.TestCase):
         self.assertIn("invents WHAT", bugfix, "the critic must say the plan-invents-WHAT blocker reads the plan's "
                                               "own criteria in bugfix-plan mode")
 
+    def specless_path(self, path=AUDITOR):
+        bullet = next((line for line in read(path).splitlines() if line.startswith("- **Spec-less path")), None)
+        self.assertIsNotNone(bullet, "the auditor has no spec-less path")
+        return bullet
+
     def test_auditor_reads_bugfix_criteria_from_the_plan(self):
-        text = read(AUDITOR)
-        bullet = next((line for line in text.splitlines() if line.startswith("- **Bugfix path")), None)
-        self.assertIsNotNone(bullet, "the auditor has no bugfix path")
-        for phrase in ("`spec=none`", "`flow: bugfix`", "`## Bug`", "`## Acceptance Criteria`",
-                       "`N/A (bugfix: criteria in the plan)`", "against the plan's own criteria",
+        bullet = self.specless_path()
+        for phrase in ("`spec=none`", "`spec: none`", "`flow: bugfix`", "`## Bug`", "`## Acceptance Criteria`",
+                       "`N/A (criteria in the plan)`", "against the plan's own criteria",
                        '"Spec produced?"', "reproduces the bug", "is FAIL"):
             self.assertIn(phrase, bullet)
+
+    def test_auditor_role_accepts_specless_feature_plans(self):
+        # Hybrid design §5: a feature or plan run without a spec carries its criteria in the plan; the fresh
+        # auditor grades it the bugfix way, and only a bugfix plan states a bug.
+        bullet = self.specless_path()
+        for phrase in ("`flow:` `bugfix`, `feature` or `plan`", "only a bugfix plan has one",
+                       "`spec: none` with any other flow is not this path"):
+            self.assertIn(phrase, bullet)
+        light = next(line for line in read(AUDITOR).splitlines() if line.startswith("- **Light-flow path"))
+        self.assertIn("except the spec-less path below", light)
+        self.assertNotIn("Bugfix path", read(AUDITOR))
+        # The Cursor mirror carries the same role text.
+        self.assertEqual(self.specless_path(REPO / "cursor" / "agents" / "implementation-auditor.md"), bullet)
+        # The step file that gathers the audit's rows names the same path and Spec row.
+        audit = read(REPO / "skills" / "implementation-control" / "steps" / "audit.md")
+        self.assertIn("`N/A (criteria in the plan)`", audit)
+        self.assertNotIn("N/A (bugfix:", audit)
+        for row in ("intent:", "spec:", "spec-check:", "spec-review:", "plan:", "plan-review:"):
+            self.assertIn(row, audit)
 
 
 class TestScribeAndReadOnlyRoles(unittest.TestCase):
@@ -305,15 +328,22 @@ class TestLastMessage(unittest.TestCase):
 
 
 class TestContracts(unittest.TestCase):
-    def test_contracts_allow_joint_gate_and_bugfix_plan(self):
+    def test_contracts_describe_hybrid_spec_and_plan_path(self):
         spec = read(CONTRACTS / "02-spec-driven-development.md")
-        exception = section(spec, "Bugfix exception", 2)
-        for phrase in ("`flow: bugfix`", "`spec: none`", "`## Bug`", "`## Acceptance Criteria`"):
-            self.assertIn(phrase, exception)
-        self.assertIn("except a bugfix plan", section(spec, "Forbidden", 2))
+        specless = section(spec, "Spec-less plan", 2)
+        for phrase in ("`spec: none`", "`flow: bugfix`", "`flow: feature`", "`flow: plan`",
+                       "`## Bug`", "`## Acceptance Criteria`", "(source: request)", "(source: D<n>)"):
+            self.assertIn(phrase, specless)
+        self.assertNotIn("valid only together with `flow: bugfix`", specless)
+        self.assertIn("spec-less plan section", section(spec, "Forbidden", 2))
+        required = section(spec, "Required", 2)
+        for phrase in ("(source: Q<n>)", "`spec-review`", "opt-in"):
+            self.assertIn(phrase, required)
         plan = read(CONTRACTS / "03-plan-mode.md")
         applied = section(plan, "When applied", 2)
-        for phrase in ("joint loop", "one review gate", "gated form", "A bugfix plan has no spec"):
+        for phrase in ("`plan-review`", "the default feature flow has one gate",
+                       "the full flow has two, the spec's and the plan's", "light form has no reader and no gate",
+                       "opt-in", "`spec: none`"):
             self.assertIn(phrase, applied)
         self.assertNotIn("After an approved spec", applied)
         refactor = read(CONTRACTS / "07-refactoring.md")

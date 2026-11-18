@@ -27,12 +27,12 @@ from .textio import SdlcError, read_text
 FLOW_SCHEMA_ID = "agentic-sdlc/flow@1"
 SHARED_SCHEMA_ID = "agentic-sdlc/shared@1"
 LOOP_SCHEMA_ID = "agentic-sdlc/loop-def@1"
-SCHEMA_NAMES = ("flow", "shared", "loop", "critic", "draft-result", "sidecar", "strategy")
+SCHEMA_NAMES = ("flow", "shared", "loop", "critic", "draft-result", "sidecar", "strategy", "check")
 
 # Contract §7: check name -> (required parameters, optional parameters).
 CHECK_PARAMS = {
     "exists": (("path",), ()),
-    "validator": (("mode",), ("strict",)),
+    "validator": (("mode",), ("strict", "sources")),
     "sidecar_ok": (("artifact",), ()),
     "report": (("path", "header"), ("verdict", "fresh")),
     "run_recorded": (("expect",), ("label",)),
@@ -42,6 +42,7 @@ CHECK_PARAMS = {
     "strategy_ok": ((), ()),
     "unchanged": (("set",), ()),
     "loop_done": ((), ()),
+    "settled": ((), ()),
 }
 CHECK_TYPES = frozenset(CHECK_PARAMS)
 # Parameters every check may carry: work_types limits it to those work types (it passes for others).
@@ -55,7 +56,7 @@ NAMED_SETS = ("@source", "@tests", "@diff", "@start")
 PLACEHOLDERS = ("work_id",)
 FORMS = ("gated", "light")
 WORK_TYPES = ("feature", "bugfix", "refactor", "test")
-OPTIONS = ("intent", "quality-review")
+OPTIONS = ("quality-review", "loop", "spec")
 ASK_KINDS = ("consent", "design")
 # start_probes() values (probes.py); "error" always means "the step applies" and is never listed.
 PROBE_VALUES = {
@@ -64,15 +65,23 @@ PROBE_VALUES = {
     "toolchain": ("present", "absent"),
 }
 # Contract §9.
-MECHANISM_KEYS = ("context", "draft", "draft.critic", "implement", "security", "quality-gates",
+MECHANISM_KEYS = ("context", "draft", "draft.critic", "spec-check", "implement", "security", "quality-gates",
                   "quality-review", "audit", "docs-check")
-MANDATED_FRESH_KEYS = ("draft.critic", "security", "audit", "quality-review")
+MANDATED_FRESH_KEYS = ("draft.critic", "spec-check", "security", "audit", "quality-review")
 MECHANISMS = ("main", "subagent", "workflow", "team", "runner-loop", "runner-loop-inline",
               "inline-degraded", "parallel-runs")
 RUNTIMES = ("claude", "codex", "kimi", "grok", "zcode", "cursor", "antigravity", "other")
 LOOP_MODES = ("spec+plan", "spec", "plan", "bugfix-plan")
 STRATEGY_STEP = "strategy"
 IMPLEMENT_STEP = "implement"
+# The steps that write, read or approve the spec and the plan (hybrid spec/plan design §5). A gate
+# whose artifacts change while only these ran after it waits again; once a later step outside them
+# started, it halts with `reapproval needed` (engine._reopened_after_start).
+DRAFTING_STEPS = ("intent", "spec", "spec-check", "spec-review", "plan", "plan-review", "draft", "review")
+# The flows whose plan may carry its own criteria (`spec: none`); the runner stamps `spec: none` on a
+# plan of one of them whose package has no spec. Mirrors SPECLESS_FLOWS of scripts/validate_artifacts.py
+# and scripts/resolve_work_package.py; tests/test_sdlc_engine.py pins the agreement.
+SPECLESS_FLOWS = ("bugfix", "feature", "plan")
 
 _ID_RE = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
 _STEP_FILE_RE = re.compile(r"skills/[a-z0-9][a-z0-9-]*/steps/[a-z0-9][a-z0-9.-]*\.md\Z")
@@ -377,6 +386,7 @@ def validate_flow(flow, root, check_files: bool) -> list:
             else:
                 gates[gate] = index
         _check_file(out, at, step, work_types, root, check_files)
+        _check_role(out, at, step, root, check_files)
         _check_refs(out, at, step)
         _check_producers(out, at, step, produced)
         produced |= _ref_paths(step.get("outputs"))
@@ -477,6 +487,28 @@ def _check_file(out: _Errors, at: str, step: dict, work_types: list, root, check
     for pointer, rel in files:
         if _STEP_FILE_RE.match(rel) and not _exists_exact(root, rel):
             out.add(pointer, "missing step file %s" % rel)
+
+
+def _check_role(out: _Errors, at: str, step: dict, root, check_files: bool) -> None:
+    """A step's `role` names an agent file; `role_reads` (package paths) belong to a role."""
+    role, reads = step.get("role"), step.get("role_reads")
+    if isinstance(reads, list):
+        if "role" not in step:
+            out.add(at + "/role_reads", "role_reads names what the step's role reads; the step has no role")
+        _unique(out, at + "/role_reads", reads, "role read")
+        for index, ref in enumerate(reads):
+            if not isinstance(ref, str):
+                continue
+            try:
+                parsed = parse_ref(ref)
+            except ValueError as exc:
+                out.add("%s/role_reads/%d" % (at, index), str(exc))
+                continue
+            if parsed["set"] or parsed["body"] or parsed["optional"]:
+                out.add("%s/role_reads/%d" % (at, index), "a role reads plain package paths")
+    if check_files and isinstance(role, str) and _ID_RE.match(role):
+        if not _exists_exact(root, "agents/%s.md" % role):
+            out.add(at + "/role", "role_file_missing:%s" % role)
 
 
 def _check_refs(out: _Errors, at: str, step: dict) -> None:

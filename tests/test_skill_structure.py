@@ -104,7 +104,7 @@ class TestAgentStructure(unittest.TestCase):
     def test_expected_agents_present(self):
         expected = {
             "code-reviewer", "context-analyst", "debugger", "draft-scribe", "implementation-auditor",
-            "security-reviewer", "software-architect", "spec-plan-author",
+            "security-reviewer", "software-architect", "spec-builder-check", "spec-plan-author",
             "spec-plan-critic", "test-engineer",
         }
         self.assertEqual(expected, h.agent_names())

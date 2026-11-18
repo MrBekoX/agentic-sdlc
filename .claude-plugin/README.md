@@ -94,6 +94,8 @@ The flow hooks match the pipeline's dispatch, security and control steps by exac
 
 `spec-authoring` and `plan-authoring` remain standalone prompt-level skills. They are not internal pipeline substeps.
 
+The table and the list above describe the 0.6.0 pipeline skill. The flow runner (`scripts/sdlc.py`) is separate and no skill calls it yet. In the runner the main loop writes spec and plan after the intent step, and the `spec-plan-draft` workflow is not the default: the runner's own loop (`start --option loop`) is, and the workflow engine runs only when the user asks for it explicitly and the reason is recorded. That path has had no live run.
+
 ## Hooks In Claude Code
 
 Claude Code wires the full hook surface in `hooks/hooks-claude.json`:

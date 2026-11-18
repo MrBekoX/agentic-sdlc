@@ -149,7 +149,7 @@ class TestMarketplacePreparation(unittest.TestCase):
         self.assertFalse((gp / "hooks/hooks.json").exists())
         self.assertEqual(len(list((gp / "skills").glob("*/SKILL.md"))), 16)
         self.assertEqual(len(list((gp / "commands").glob("*.md"))), 1)
-        self.assertEqual(len(list((gp / "agents").glob("*.md"))), 10)
+        self.assertEqual(len(list((gp / "agents").glob("*.md"))), 11)
         # The runner stages its Grok engine from the installed plugin root.
         self.assertEqual((gp / "workflows/grok/spec-plan-draft.rhai").read_bytes(),
                          (REPO / "workflows/grok/spec-plan-draft.rhai").read_bytes())

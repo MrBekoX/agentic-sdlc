@@ -317,28 +317,33 @@ Important boundary: `spec-authoring` and `plan-authoring` are standalone prompt-
 
 ### Flow runner (preview)
 
-0.7.0 adds a deterministic flow runner, the base for moving the skills off prose orchestration. It is a standard-library Python CLI, `scripts/sdlc.py`, with its package `scripts/sdlc_runner/` and the JSON flows in [`flows/`](flows/). No skill, hook or command calls it yet: the skills above still run their 0.6.0 procedures. A `feature` or `bugfix` run takes these steps:
+0.7.0 adds a deterministic flow runner, the base for moving the skills off prose orchestration. It is a standard-library Python CLI, `scripts/sdlc.py`, with its package `scripts/sdlc_runner/` and the JSON flows in [`flows/`](flows/). No skill, hook or command calls it yet: the skills above still run their 0.6.0 procedures, and wiring the skills to the runner is later work. The spec/plan path described here has had no live run. A `feature` run takes these steps:
 
 ```text
 sdlc.py start <flow>   opens docs/agentic-sdlc/<slug>/: request, state, hash-chained logs
   strategy             once per run: main loop, sub-agent, workflow or team for each step
-  draft                joint spec/plan loop: authors -> fresh critic -> revise, at most 3 rounds
-  review               one gate for spec and plan (gated form), bound to a fingerprint and a quote
+  context              what the code is and where the change goes
+  intent               asks first, then design.md; an explicit "yes" when the user was asked anything
+  spec                 only with `start --option spec`; checked by one fresh reader, then its own gate
+  plan                 the main loop writes it; its own gate (gated form)
   branch -> implement -> security -> audit -> claim
 sdlc.py next           prints the next card; its step text comes from skills/<skill>/steps/
 ```
 
-- **Flows:** `feature`, `bugfix`, `refactor`, `test`, `full`, `spec` and `plan`, and the one-step `design`, `code-review`, `security-review`, `audit` and `feedback`. Bugfix runs the loop in plan-only mode, `refactor` characterizes the current behaviour instead of drafting, `test` has no draft step, and `full` (gated only) adds intent, docs, quality-gate, diff-review and quality-review steps. `approve`, `run` (allow-listed test commands, no shell), `halt`, `resume` and `escalate` move a run on; `status` reads it.
-- **Loop engines:**
+- **Flows:** `feature`, `bugfix`, `refactor`, `test`, `full`, `spec` and `plan`, and the one-step `design`, `code-review`, `security-review`, `audit` and `feedback`. `refactor` characterizes the current behaviour instead of writing a plan, `test` has no spec or plan step, and `full` (gated only) always writes a spec and adds docs, quality-gate, diff-review and quality-review steps. `approve`, `run` (allow-listed test commands, no shell), `halt`, `resume` and `escalate` move a run on; `status` reads it.
+- **Who writes spec and plan:** the main loop, after the intent step. `feature` writes no spec by default and a spec on `start --option spec`; `full` and `spec` always write one; `bugfix` never does. `plan` uses an approved spec when one is imported with `--spec-file`; without one, a `feature`, `bugfix` or `plan` plan carries its own `## Acceptance Criteria` (a bug fix also its `## Bug`) and is stamped `spec: none` with its flow name. A feature or plan criterion names its source, `(source: request)` or `(source: D<n>)`.
+- **Review:** one fresh reader (`agents/spec-builder-check.md`, step `spec-check`) reads a spec with only `design.md` and the spec in hand, and each question it returns is settled. Each document has its own gate, so the gated `feature` and `bugfix` flows have one gate (the plan), while `full` and a gated `feature` started with `--option spec` have two (spec, then plan); the light form has no reader and no gate. `approve` re-validates the document.
+- **Loop option:** `start --option loop` runs the older joint loop in place of those steps: `spec-plan-author`, a fresh `spec-plan-critic`, at most 3 rounds, then one review gate. A hand edit made after the loop is refused at `approve`; go through a reject so the critic sees it.
+- **Loop engines (on request only):** no runtime runs a workflow engine for spec and plan by default. The runner's own loop is the default on every platform; an engine runs only when the user asks for it explicitly and the reason is recorded in the strategy step.
 
-  | Runtime | Engine for the joint spec/plan loop |
+  | Runtime | Engine, when the user asks for it |
   |---|---|
   | Claude Code | `workflows/spec-plan-draft.js` through the Workflow tool; the `draft-scribe` agent writes the round files |
   | Grok Build | `workflows/grok/spec-plan-draft.rhai`, which the runner stages into the work package and launches by `script_path` |
-  | ZCode | the runner loop; on an explicit workflow request, `workflows/zcode/spec-plan-draft.dwf.ts` drives it |
-  | Codex, Kimi Code, Cursor, Google Antigravity | the runner loop: author, critic and revise role cards, each handed to a new sub-agent (Cursor's role files are in `cursor/agents/`) |
+  | ZCode | `workflows/zcode/spec-plan-draft.dwf.ts` drives the loop |
+  | Codex, Kimi Code, Cursor, Google Antigravity | none; the runner loop (author, critic and revise role cards, each handed to a new sub-agent) is the only path (Cursor's role files are in `cursor/agents/`) |
 
-- **Status:** every runtime row in `flows/_shared.json` is `verified: false`, and no engine has a live run. The staged Antigravity folder has no role files, so its runner loop stops with `role_file_missing`.
+- **Status:** every runtime row in `flows/_shared.json` is `verified: false`, and neither the new path nor any engine has a live run. The staged Antigravity folder has no role files, so its runner loop stops with `role_file_missing`.
 
 ## Repository Layout
 
