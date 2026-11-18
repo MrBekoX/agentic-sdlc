@@ -16,13 +16,14 @@ Output contract:
   `artifacts_validation=passed|failed`.
 - `main()` returns exit 1 if any errors, else 0.
 - `--strict` promotes every `warning=` to `error=` (warnings become gating).
-- `run(mode, file, spec, strict, design_path, check_path, sources)` returns `(exit_code, fields)`. An
-  artifact it cannot read is an error (`file_unreadable:<reason>`, `spec_unreadable:<reason>`,
-  `design_unreadable:<reason>`, `check_unreadable:<reason>`), never an exception, so a caller that
-  imports it gets a failed gate rather than a traceback.
+- `run(mode, file, spec, strict, design_path, check_path, sources, feedback_path, feedback_gates)`
+  returns `(exit_code, fields)`. An artifact it cannot read is an error (`file_unreadable:<reason>`,
+  `spec_unreadable:<reason>`, `design_unreadable:<reason>`, `check_unreadable:<reason>`), never an
+  exception, so a caller that imports it gets a failed gate rather than a traceback. A feedback log
+  it cannot read names no record, so each `F<n>` token is then an unknown source.
 - Modes: `spec`, `plan`, `all`, and `design` (the intent step's `design.md`: four sections and
   decisions that carry an id and an owner). `--sources` makes every acceptance criterion of a spec,
-  or of a spec-less plan, name where it came from (`(source: request, D1, Q2)`).
+  or of a spec-less plan, name where it came from (`(source: request, D1, Q2, F3)`).
 """
 
 import argparse
@@ -91,8 +92,8 @@ HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$")
 # "## Task N" headings or line-leading "TN" markers.
 #
 # Every numbered id this module reads (task `T<n>`, criterion `AC<n>`, decision `D<n>`, question
-# `Q<n>`) has 1 to ID_DIGITS digits. A longer run of digits is no id, so it is reported like any other
-# malformed token instead of reaching int(), which refuses more than 4300 digits.
+# `Q<n>`, feedback record `F<n>`) has 1 to ID_DIGITS digits. A longer run of digits is no id, so it is
+# reported like any other malformed token instead of reaching int(), which refuses more than 4300 digits.
 ID_DIGITS = 6
 TASK_HEADING_RE = re.compile(r"^\s{0,3}#{2,4}\s*Task\b", re.IGNORECASE)
 TASK_TID_RE = re.compile(r"\bT\d{1,%d}\b" % ID_DIGITS)
@@ -376,12 +377,15 @@ def check_frontmatter(text, mode):
 DECISION_ID_RE = re.compile(r"^D(\d{1,%d})\b" % ID_DIGITS)
 DECISION_OWNER_RE = re.compile(r"\((?:user|author['\u2019]s call:\s*[^)\s][^)]*)\)", re.IGNORECASE)
 
-# A criterion's origin: `(source: request, D1, Q2)`, searched in the bullet's whole text. A token is
-# `request`, a decision `D<n>` of design.md, or a question `Q<n>` of the spec's check file.
+# A criterion's origin: `(source: request, D1, Q2, F3)`, searched in the bullet's whole text. A token
+# is `request`, a decision `D<n>` of design.md, a question `Q<n>` of the spec's check file, or a
+# feedback record `F<n>`: the user's change request at a gate, the `reject` record whose `seq` is n in
+# the package's feedback.jsonl.
 SOURCE_TAG_RE = re.compile(r"\(source:([^)]*)\)", re.IGNORECASE)
-SOURCE_TOKEN_RE = re.compile(r"^(?:request|([DQ])(\d{1,%d}))\Z" % ID_DIGITS)
+SOURCE_TOKEN_RE = re.compile(r"^(?:request|([DQF])(\d{1,%d}))\Z" % ID_DIGITS)
 CHECK_QUESTION_ID_RE = re.compile(r"^Q(\d{1,%d})\Z" % ID_DIGITS)
 SOURCE_REQUEST = "request"
+FEEDBACK_REJECT = "reject"
 
 
 def _clean_text(text):
@@ -460,15 +464,59 @@ def _check_questions(check_data):
     return found
 
 
-def _source_errors(blocks, decisions, questions, counted_text):
+def _feedback_numbers(feedback_text, gates=None):
+    """The `seq` numbers a token `F<n>` may name: each `reject` record of a feedback log whose `gate`
+    is one of `gates` (any gate when `gates` is empty or None).
+
+    The log is JSON Lines, as the runner writes it. A line that is not a JSON object, and a record whose
+    `seq` is not an integer, names nothing: the runner's own log checks guard the hash chain, so this
+    reader skips what it cannot use and never raises. No text (no log, or one that could not be read)
+    names nothing.
+    """
+    allowed = set(gates or ())
+    found = set()
+    for line in _clean_text(feedback_text or "").splitlines():
+        try:
+            record = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        if not isinstance(record, dict) or record.get("kind") != FEEDBACK_REJECT:
+            continue
+        gate = record.get("gate")
+        if allowed and not (isinstance(gate, str) and gate in allowed):
+            continue
+        seq = record.get("seq")
+        if isinstance(seq, int) and not isinstance(seq, bool):
+            found.add(seq)
+    return found
+
+
+def _sourced_criteria(blocks):
+    """[(id match, tokens)] for each criterion among `blocks` (`_bullet_blocks`).
+
+    A criterion is a top-level bullet that carries an AC id. Its tag is searched in the bullet's whole
+    text (its first line and its indented continuation lines, not nested bullets); the tokens are the
+    comma-separated parts of every tag, stripped, empty ones left out. The source check and the
+    runner's gate card (`criterion_sources`) both read the criteria through here.
+    """
+    found = []
+    for _index, line, nested, text in blocks:
+        match = AC_ID_RE.search(line)
+        if nested or not match:
+            continue
+        tokens = [token.strip() for tag in SOURCE_TAG_RE.findall(text) for token in tag.split(",")]
+        found.append((match, [token for token in tokens if token]))
+    return found
+
+
+def _source_errors(blocks, decisions, questions, counted_text, feedback=frozenset()):
     """Errors for the criteria among `blocks` (`_bullet_blocks`) that do not name a known source.
 
-    A criterion is a top-level bullet that carries an AC id. The tag is searched in the bullet's
-    whole text (its first line and its indented continuation lines, not nested bullets).
-    `decisions` and `questions` are the numbers a token `D<n>` / `Q<n>` may name; an empty set makes
-    every such token unknown. `ac_no_source` (no tag, or a tag without a token), `ac_bad_source`
-    (a token that is none of the three forms), `ac_unknown_source` (a well-formed token that names
-    nothing), each followed by the criterion's id as written and, for the last two, the token.
+    The criteria and their tokens are those of `_sourced_criteria`. `decisions`, `questions` and
+    `feedback` are the numbers a token `D<n>` / `Q<n>` / `F<n>` may name; an empty set makes every
+    such token unknown. `ac_no_source` (no tag, or a tag without a token), `ac_bad_source` (a token
+    that is none of the four forms), `ac_unknown_source` (a well-formed token that names nothing),
+    each followed by the criterion's id as written and, for the last two, the token.
 
     `counted_text` is the text the plan coverage takes its ids from (`_ac_coverage`). Each id there
     that is not the id of one of those top-level bullets is `ac_no_source:<id>` too: a criterion under
@@ -477,23 +525,17 @@ def _source_errors(blocks, decisions, questions, counted_text):
     """
     errors = []
     bullet_keys = set()
-    for _index, line, nested, text in blocks:
-        match = AC_ID_RE.search(line)
-        if nested or not match:
-            continue
+    known = {"D": decisions, "Q": questions, "F": feedback}
+    for match, tokens in _sourced_criteria(blocks):
         bullet_keys.add(_ac_key(match))
         ac = match.group(0)
-        tokens = [token.strip() for tag in SOURCE_TAG_RE.findall(text) for token in tag.split(",")]
-        tokens = [token for token in tokens if token]
         if not tokens:
             errors.append(f"ac_no_source:{ac}")
         for token in tokens:
             parsed = SOURCE_TOKEN_RE.match(token)
             if not parsed:
                 errors.append(f"ac_bad_source:{ac}:{token}")
-            elif parsed.group(1) == "D" and int(parsed.group(2)) not in decisions:
-                errors.append(f"ac_unknown_source:{ac}:{token}")
-            elif parsed.group(1) == "Q" and int(parsed.group(2)) not in questions:
+            elif parsed.group(1) and int(parsed.group(2)) not in known[parsed.group(1)]:
                 errors.append(f"ac_unknown_source:{ac}:{token}")
     counted = {}
     for match in AC_ID_RE.finditer(counted_text):
@@ -539,7 +581,31 @@ def _decision_numbers(design_text):
     return {_decision_key(decision_id) for _index, decision_id, _text in _design_decisions(design_text) if decision_id}
 
 
-def check_spec(text, design_text=None, check_data=None, require_sources=False):
+def criterion_sources(text, mode):
+    """[(id, [token, ...])] for each criterion the source check reads in an artifact, the id and the
+    tokens as written; a criterion without a tag has no token.
+
+    `mode` `spec`: the top-level bullets of the spec's acceptance-criteria section (`_criteria_section`).
+    `plan`: those of a spec-less plan's own section (`_own_criteria_sections`); a plan checked against a
+    spec has no criteria of its own, so it has none. Any other mode has none. The criteria and their
+    tokens come from `_sourced_criteria`, as the check's do. The runner's gate card lists them.
+    """
+    text = _clean_text(text)
+    if mode == "spec":
+        section = _criteria_section(_body(text))
+    elif mode == "plan":
+        meta = parse_frontmatter(text)
+        if not is_specless_plan(meta):
+            return []
+        section = _own_criteria_sections(_body(text), is_bugfix_plan(meta))[0]
+    else:
+        return []
+    blocks = _bullet_blocks(_unfenced(section or ""))
+    return [(match.group(0), tokens) for match, tokens in _sourced_criteria(blocks)]
+
+
+def check_spec(text, design_text=None, check_data=None, require_sources=False, feedback_text=None,
+               feedback_gates=None):
     """Validate a spec artifact. Returns {'errors': [...], 'warnings': [...]}.
 
     Errors: a required section is absent.
@@ -550,12 +616,14 @@ def check_spec(text, design_text=None, check_data=None, require_sources=False):
 
     With `require_sources`, every criterion (a top-level bullet of the acceptance-criteria section
     that carries an `AC<n>` id; the section runs to the next heading of its own level, see
-    `_criteria_section`) must name where it came from, `(source: request, D1, Q2)`: `ac_no_source`,
+    `_criteria_section`) must name where it came from, `(source: request, D1, Q2, F3)`: `ac_no_source`,
     `ac_bad_source`, `ac_unknown_source` (see `_source_errors`). An id anywhere else in the spec body
     is counted by the plan coverage too, so it is `ac_no_source` unless it is also such a bullet.
-    `design_text` is the design file's text (what `D<n>` may name) and `check_data` the parsed check
-    file (what `Q<n>` may name); without one, no token of its kind is known. Without
-    `require_sources` the tag is ignored.
+    `design_text` is the design file's text (what `D<n>` may name), `check_data` the parsed check
+    file (what `Q<n>` may name), and `feedback_text` the package's feedback log (what `F<n>` may name:
+    a `reject` record at one of `feedback_gates`, any gate when none is given; see
+    `_feedback_numbers`); without one, no token of its kind is known. Without `require_sources` the
+    tag is ignored.
 
     Only the body after the frontmatter block is read (`_body`).
     """
@@ -591,7 +659,8 @@ def check_spec(text, design_text=None, check_data=None, require_sources=False):
     if require_sources:
         section = _criteria_section(text)
         errors += _source_errors(_bullet_blocks(_unfenced(section or "")), _decision_numbers(design_text),
-                                 _check_questions(check_data), text)
+                                 _check_questions(check_data), text,
+                                 _feedback_numbers(feedback_text, feedback_gates))
 
     # Security hand-wave: only when a security section exists AND its short body is
     # nothing but a bare dismissal. A grounded note (which cites an input->sink, or
@@ -812,7 +881,8 @@ def _ac_coverage(source_text, blocks, warnings):
     return covered
 
 
-def check_plan(text, spec_text, bugfix=False, own_criteria=False, design_text=None, require_sources=False):
+def check_plan(text, spec_text, bugfix=False, own_criteria=False, design_text=None, require_sources=False,
+               feedback_text=None, feedback_gates=None):
     """Validate a plan artifact against the spec's acceptance criteria.
 
     AC ids are sourced from `spec_text` ONLY (DP-2): no mining from the plan body,
@@ -837,11 +907,12 @@ def check_plan(text, spec_text, bugfix=False, own_criteria=False, design_text=No
     gate in silence.
 
     With `require_sources`, each of those own criteria must name where it came from,
-    `(source: request, D1)` (`ac_no_source`, `ac_bad_source`, `ac_unknown_source`; see
+    `(source: request, D1, F2)` (`ac_no_source`, `ac_bad_source`, `ac_unknown_source`; see
     `_source_errors`), and every id the coverage counts in that section must be such a criterion: an
     id in a table, a heading or a nested bullet is `ac_no_source`. `design_text` is what `D<n>` may
-    name; a plan has no questions, so any `Q<n>` is unknown. A plan checked against a spec has no own
-    criteria, so `require_sources` changes nothing for it.
+    name and `feedback_text` with `feedback_gates` what `F<n>` may name (as for a spec); a plan has no
+    questions, so any `Q<n>` is unknown. A plan checked against a spec has no own criteria, so
+    `require_sources` changes nothing for it.
 
     Only the bodies after the frontmatter blocks of the plan and the spec are read
     (`_body`): a task, a section or an id inside a block does not count.
@@ -895,7 +966,8 @@ def check_plan(text, spec_text, bugfix=False, own_criteria=False, design_text=No
             unfenced = "\n".join(line for i, line in enumerate(criteria_lines) if i not in fenced)
             warnings += [f"ac_missing_id:{index}" for index in _unlabelled(_criterion_bullets(unfenced))]
             if require_sources:
-                errors += _source_errors(_bullet_blocks(unfenced), _decision_numbers(design_text), set(), criteria)
+                errors += _source_errors(_bullet_blocks(unfenced), _decision_numbers(design_text), set(), criteria,
+                                         _feedback_numbers(feedback_text, feedback_gates))
             metrics["plan_ac_covered"] = _ac_coverage(criteria, blocks, warnings)
     elif spec_text is None:
         warnings.append("ac_source_missing")
@@ -968,7 +1040,8 @@ def _read_check(path):
     return data, None
 
 
-def run(mode, file_path, spec_path, strict, design_path=None, check_path=None, sources=False):
+def run(mode, file_path, spec_path, strict, design_path=None, check_path=None, sources=False,
+        feedback_path=None, feedback_gates=None):
     """Run the requested checks and return (exit_code, fields_dict).
 
     Kept separate from main() so callers/tests can drive it without argparse. The gate passes when
@@ -976,9 +1049,11 @@ def run(mode, file_path, spec_path, strict, design_path=None, check_path=None, s
     failed gate with a named reason, never an exception.
 
     `sources` makes every criterion of a spec, or of a spec-less plan, name where it came from.
-    `design_path` (the design file, what `D<n>` may name) and `check_path` (the spec's check file,
-    what `Q<n>` may name) are read only then; a path that is None names nothing, so its tokens are
-    unknown, while a path that cannot be read is an error.
+    `design_path` (the design file, what `D<n>` may name), `check_path` (the spec's check file,
+    what `Q<n>` may name) and `feedback_path` (the package's feedback.jsonl, what `F<n>` may name: a
+    `reject` record at one of `feedback_gates`, any gate when none is given) are read only then. A
+    path that is None names nothing, so its tokens are unknown. A design or check file that cannot be
+    read is an error; a feedback log that cannot be read names no record, like a missing one.
     """
     errors = []
     warnings = []
@@ -998,6 +1073,9 @@ def run(mode, file_path, spec_path, strict, design_path=None, check_path=None, s
         check_data, unreadable = _read_check(check_path)
         if unreadable:
             errors.append(f"check_unreadable:{unreadable}")
+    feedback_text = None
+    if sources and feedback_path:
+        feedback_text, _unreadable = _read_artifact(feedback_path)
 
     # The placeholder/secret scan runs in every mode, on the artifact under test.
     scan = scan_placeholders_and_secrets(file_text)
@@ -1013,7 +1091,7 @@ def run(mode, file_path, spec_path, strict, design_path=None, check_path=None, s
         warnings += design_res["warnings"]
 
     if mode in ("spec", "all"):
-        spec_res = check_spec(file_text, design_text, check_data, sources)
+        spec_res = check_spec(file_text, design_text, check_data, sources, feedback_text, feedback_gates)
         errors += spec_res["errors"]
         warnings += spec_res["warnings"]
 
@@ -1034,7 +1112,8 @@ def run(mode, file_path, spec_path, strict, design_path=None, check_path=None, s
             if unreadable:
                 errors.append(f"spec_unreadable:{unreadable}")
         plan_res = check_plan(file_text, spec_text, bugfix=bugfix, own_criteria=specless,
-                              design_text=design_text, require_sources=sources)
+                              design_text=design_text, require_sources=sources,
+                              feedback_text=feedback_text, feedback_gates=feedback_gates)
         errors += plan_res["errors"]
         warnings += plan_res["warnings"]
         metrics.update(plan_res["metrics"])
@@ -1069,13 +1148,26 @@ def build_parser():
         "--sources",
         action="store_true",
         help="require every criterion of a spec, or of a spec-less plan, to carry "
-             "`(source: request, D<n>, Q<n>)`",
+             "`(source: request, D<n>, Q<n>, F<n>)`",
     )
     p.add_argument("--design", default=None, help="design.md, what a source `D<n>` may name (with --sources)")
     p.add_argument(
         "--check",
         default=None,
         help="the spec's check file (JSON with `questions`), what a source `Q<n>` may name (with --sources)",
+    )
+    p.add_argument(
+        "--feedback",
+        default=None,
+        help="the package's feedback.jsonl, what a source `F<n>` may name: the `reject` record whose "
+             "`seq` is n (with --sources; a missing or unreadable file names no record)",
+    )
+    p.add_argument(
+        "--feedback-gate",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help="a gate whose reject records `F<n>` may name; repeatable; none given: any gate (with --sources)",
     )
     return p
 
@@ -1093,7 +1185,8 @@ def main(argv=None):
     _utf8_output()
     args = build_parser().parse_args(argv)
     code, fields = run(args.mode, args.file, args.spec, args.strict,
-                       design_path=args.design, check_path=args.check, sources=args.sources)
+                       design_path=args.design, check_path=args.check, sources=args.sources,
+                       feedback_path=args.feedback, feedback_gates=args.feedback_gate)
     emit(fields)
     return code
 
