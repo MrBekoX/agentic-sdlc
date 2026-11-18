@@ -12,7 +12,9 @@
   A degraded critic or reader does not block a pre-approval; the record says `critic=degraded`
   (with no review sidecar, `critic` is the freshness of the spec's reader).
 - `reject <gate> --quote ...` appends the user's change request to feedback.jsonl and reopens
-  the step that drafted the gated artifacts (it re-enters with cause `reject`).
+  the step that drafted the gated artifacts (it re-enters with cause `reject`). Its output names the
+  record after the `rejected=<gate>` line, `feedback=F<n>` with n the record's `seq`: a criterion
+  added or changed for the request cites it as `(source: F<n>)`.
 - `ask --kind consent|design --question T` (the kind must be in the current step's `may_ask`)
   makes `next` wait (`state=wait-answer`) until `answer --quote ...` records the reply.
 - `note --degraded <capability> --reason missing|denied|unavailable [--step S]` and
@@ -34,7 +36,7 @@ from .lock import PackageLock
 from .textio import SdlcError, now_iso, read_json, read_text
 
 APPROVALS_LOG = "approvals.jsonl"
-FEEDBACK_LOG = "feedback.jsonl"
+FEEDBACK_LOG = checks.FEEDBACK_LOG
 QUESTIONS_LOG = "questions.jsonl"
 NOTES_LOG = "notes.jsonl"
 SOURCES = ("reply", "original-request")
@@ -332,8 +334,8 @@ def reject(ctx, gate, quote, out=None) -> int:
     step = _gate_step(ctx, gate)
     _waiting_at(ctx, step)
     fingerprint = checks.gate_fingerprint(ctx, step)
-    logs.append(Path(ctx.pkg) / FEEDBACK_LOG, {"kind": "reject", "gate": gate, "quote": quote,
-                                                "fingerprint": fingerprint})
+    record = logs.append(Path(ctx.pkg) / FEEDBACK_LOG, {"kind": "reject", "gate": gate, "quote": quote,
+                                                         "fingerprint": fingerprint})
     drafting = _drafting_step(ctx, step)
     if drafting is not None:
         entry = engine._entry(ctx, drafting)
@@ -342,7 +344,7 @@ def reject(ctx, gate, quote, out=None) -> int:
     ctx.state["waiting"] = None
     ctx.log({"kind": "reject", "gate": gate, "fingerprint": fingerprint,
              "step": drafting["id"] if drafting else None})
-    return _finish(ctx, out, "rejected=%s" % gate)
+    return _finish(ctx, out, "rejected=%s\nfeedback=F%d" % (gate, record["seq"]))
 
 
 # --- ask / answer ------------------------------------------------------------------------------

@@ -24,6 +24,7 @@ from .textio import SdlcError, read_json, read_text
 CheckResult = collections.namedtuple("CheckResult", "ok detail")
 
 APPROVALS_LOG = "approvals.jsonl"
+FEEDBACK_LOG = "feedback.jsonl"
 RUNS_LOG = "runs.jsonl"
 PROTECTED_BRANCHES = ("main", "master")
 _VALIDATOR = []
@@ -114,13 +115,21 @@ def check_exists(ctx, step, path):
     return CheckResult(True, "%s exists" % rel)
 
 
+def feedback_gates(ctx, rel) -> list:
+    """The gates of the flow whose gated artifacts hold `rel`, in flow order: the reject records a
+    criterion of `rel` may cite as `F<n>` are those at one of these gates."""
+    return [step["gate"] for step in ctx.flow.get("steps", [])
+            if step.get("gate") and rel in gated_artifacts(ctx, step)]
+
+
 def check_validator(ctx, step, mode, strict=False, sources=False):
     """validate_artifacts on the spec, the plan, or (`design`) design.md at the package root.
 
     `sources` makes the criteria of a spec, or of a spec-less plan, name their origin; the check
-    then hands the validator design.md and, for the spec, `spec/<work_id>.check.json`, each only
-    when it exists (a token that names a file that is not there is unknown, which the validator
-    reports).
+    then hands the validator design.md, for the spec `spec/<work_id>.check.json`, and feedback.jsonl
+    with the gates over the checked file (`feedback_gates`), each only when it exists (a token that
+    names a file that is not there is unknown, which the validator reports). A file no gate covers
+    gets no feedback log, so none of its `F<n>` tokens is known: no change request was about it.
     """
     if mode not in ("spec", "plan", "design"):
         return CheckResult(False, "unknown_validator_mode:%s" % mode)
@@ -139,17 +148,22 @@ def check_validator(ctx, step, mode, strict=False, sources=False):
     with contextlib.ExitStack() as stack:
         artifact = stack.enter_context(_Materialised(ctx, rel))
         spec_path = stack.enter_context(_Materialised(ctx, spec_rel)) if has_spec else None
-        design_path = check_path = None
+        design_path = check_path = feedback_path = None
+        over = []
         if sources and mode != "design":
             if present(DESIGN_REL):
                 design_path = stack.enter_context(_Materialised(ctx, DESIGN_REL))
             if mode == "spec" and present(check_file_rel(ctx)):
                 check_path = stack.enter_context(_Materialised(ctx, check_file_rel(ctx)))
+            over = feedback_gates(ctx, rel)
+            if over and present(FEEDBACK_LOG):
+                feedback_path = stack.enter_context(_Materialised(ctx, FEEDBACK_LOG))
         code, fields = _validator().run(
             mode, str(artifact), None if spec_path is None else str(spec_path), bool(strict),
             design_path=None if design_path is None else str(design_path),
             check_path=None if check_path is None else str(check_path),
-            sources=bool(sources) and mode != "design")
+            sources=bool(sources) and mode != "design",
+            feedback_path=None if feedback_path is None else str(feedback_path), feedback_gates=over)
     if code == 0:
         return CheckResult(True, "%s passes validate_artifacts (%s%s%s)" % (
             rel, mode, ", strict" if strict else "", ", sources" if sources and mode != "design" else ""))
