@@ -21,7 +21,8 @@ for folder in (REPO / "scripts", TESTS):
     if str(folder) not in sys.path:
         sys.path.insert(0, str(folder))
 
-from test_sdlc_engine import WINDOWS, EngineCase, TwoGateCase, card_fields, card_value  # noqa: E402
+from test_sdlc_engine import (DESIGN_BODY, SPECLESS_PLAN, TWOGATE_SPEC, WINDOWS, EngineCase,  # noqa: E402
+                              RealFlowCase, TwoGateCase, card_fields, card_value)
 from sdlc_runner import gates, logs  # noqa: E402
 
 PREAPPROVAL = "Add a CSV export to the report page. Go ahead without asking me again.\n"
@@ -448,6 +449,132 @@ class TestTwoGates(TwoGateCase):
         self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("wait-gate", "spec-review"), text)
         self.assertEqual(self.state()["steps"]["spec-check"]["visits"], 1)  # the reader does not run again
         self.assertEqual((self.pkg() / "spec" / "demo.check.json").read_bytes(), recorded)
+
+
+# A criterion the user's change request at a gate asks for, sourced from that request's feedback record.
+FEEDBACK_AC = "\n- AC%d: Given a report, when the user exports it, then the file is named after it. (source: %s)"
+SPEC_AC1 = "every visible row. (source: D1)"
+PLAN_AC1 = "every row. (source: D2)"
+
+
+class TestFeedbackSources(RealFlowCase):
+    """`F<n>` on the real flows: `reject` prints the feedback record it wrote, and a criterion added on that
+    change request cites it; the spec and plan checks know only the reject records of the gates over
+    their file (hybrid design, gate feedback as a source)."""
+
+    def reject(self, gate, quote, slug="demo"):
+        code, out = self.sdlc("reject", gate, "--slug", slug, "--quote", quote)
+        self.assertEqual(code, 0, out)
+        return out
+
+    def at(self, text, state, step):
+        fields = card_fields(text)
+        self.assertEqual((fields["state"], fields["step"]), (state, step), text)
+        return fields
+
+    def test_reject_prints_its_feedback_record_and_the_spec_cites_it(self):
+        self.start("--option", "spec")
+        code, text = self.advance_to("spec-review")
+        out = self.reject("spec-review", "Name the export file too.")
+        self.assertEqual(out.splitlines()[:2], ["rejected=spec-review", "feedback=F1"])
+        code, text = self.next()
+        self.at(text, "do", "spec")
+        self.assertEqual(self.steps()["spec"]["visit_cause"], "reject")
+        self.edit("spec/demo.md", SPEC_AC1, SPEC_AC1 + FEEDBACK_AC % (2, "F1"))
+        code, text = self.next()
+        self.at(text, "wait-gate", "spec-review")
+        # A second change request is the next record of the log.
+        out = self.reject("spec-review", "And say where the file goes.")
+        self.assertEqual(out.splitlines()[:2], ["rejected=spec-review", "feedback=F2"])
+        self.assertEqual([(r["seq"], r["gate"]) for r in logs.read(self.pkg() / "feedback.jsonl")],
+                         [(1, "spec-review"), (2, "spec-review")])
+        self.next()
+        self.edit("spec/demo.md", SPEC_AC1, SPEC_AC1 + FEEDBACK_AC % (3, "F2"))
+        code, text = self.next()
+        self.at(text, "wait-gate", "spec-review")
+        self.approve(text, gate="spec-review")
+        code, text = self.next()
+        self.at(text, "do", "plan")
+
+    def test_an_unknown_feedback_record_fails_the_spec_and_its_approval(self):
+        self.start("--option", "spec")
+        self.advance_to("spec-review")
+        self.reject("spec-review", "Name the export file too.")
+        self.next()
+        self.edit("spec/demo.md", SPEC_AC1, SPEC_AC1 + FEEDBACK_AC % (2, "F9"))
+        code, text = self.next()
+        self.assertEqual(self.at(text, "do", "spec")["pending"], "validator")
+        self.assertIn("ac_unknown_source:AC2:F9", text)
+        self.edit("spec/demo.md", "(source: F9)", "(source: F1)")
+        code, text = self.next()
+        self.at(text, "wait-gate", "spec-review")
+        # Edited at the gate: it waits at the new fingerprint, and approve runs the spec's check again.
+        self.edit("spec/demo.md", "(source: F1)", "(source: F9)")
+        code, text = self.next()
+        self.at(text, "wait-gate", "spec-review")
+        code, out = self.approve(text, gate="spec-review", expect=4)
+        self.assertIn("error=artifact_checks_failed:spec:spec/demo.md fails validate_artifacts: "
+                      "ac_unknown_source:AC2:F9", out)
+        self.assertEqual(logs.read(self.pkg() / "approvals.jsonl"), [])
+
+    def test_specless_plan_criterion_cites_the_reject_at_plan_review(self):
+        self.start(flow="plan")
+        code, text = self.advance_to("plan-review")
+        out = self.reject("plan-review", "Export the hidden rows too.")
+        self.assertEqual(out.splitlines()[:2], ["rejected=plan-review", "feedback=F1"])
+        code, text = self.next()
+        self.at(text, "do", "plan")
+        self.assertEqual(self.steps()["plan"]["visit_cause"], "reject")
+        self.edit("plan/demo.md", PLAN_AC1, PLAN_AC1 + FEEDBACK_AC % (2, "F9"))
+        self.edit("plan/demo.md", "## Task 1: CSV export (AC1)", "## Task 1: CSV export (AC1, AC2)")
+        code, text = self.next()
+        self.assertEqual(self.at(text, "do", "plan")["pending"], "validator")
+        self.assertIn("ac_unknown_source:AC2:F9", text)
+        self.edit("plan/demo.md", "(source: F9)", "(source: F1)")
+        code, text = self.next()
+        self.at(text, "wait-gate", "plan-review")
+        self.approve(text, gate="plan-review")
+        code, text = self.next()
+        self.at(text, "do", "claim")
+
+    def test_the_checks_know_only_the_reject_records_of_the_gates_over_their_file(self):
+        from sdlc_runner import checks, engine
+
+        self.start()
+        ctx = engine.load_context(self.project, self.root, "demo")
+        self.assertEqual(checks.feedback_gates(ctx, "spec/demo.md"), ["review", "spec-review"])
+        self.assertEqual(checks.feedback_gates(ctx, "plan/demo.md"), ["review", "plan-review"])
+        self.assertEqual(checks.feedback_gates(ctx, "context.md"), [])
+        self.put("design.md", DESIGN_BODY)
+        spec_check = {"check": "validator", "mode": "spec", "sources": True}
+        plan_check = {"check": "validator", "mode": "plan", "strict": True, "sources": True}
+
+        def spec_cites(token):
+            self.put("spec/demo.md", "---\nwork_id: demo\nstatus: draft\n---\n" +
+                     TWOGATE_SPEC.replace(SPEC_AC1, SPEC_AC1 + FEEDBACK_AC % (2, token)))
+            return checks.run_check(ctx, spec_check)
+
+        def plan_cites(token):
+            self.put("plan/demo.md", SPECLESS_PLAN.replace(PLAN_AC1, "every row. (source: D2, %s)" % token))
+            return checks.run_check(ctx, plan_check)
+
+        # No feedback.jsonl: no record is known.
+        self.assertIn("ac_unknown_source:AC2:F1", spec_cites("F1").detail)
+        for record in ({"kind": "reject", "gate": "plan-review", "quote": "Split the task."},
+                       {"kind": "reject", "gate": "spec-review", "quote": "Name the file."},
+                       {"kind": "note", "gate": "spec-review", "quote": "Not a change request."}):
+            logs.append(self.pkg() / "feedback.jsonl", record)
+        result = spec_cites("F2")
+        self.assertTrue(result.ok, result.detail)
+        for token in ("F1", "F3", "F4"):
+            with self.subTest(artifact="spec", token=token):
+                self.assertIn("ac_unknown_source:AC2:%s" % token, spec_cites(token).detail)
+        (self.pkg() / "spec" / "demo.md").unlink()
+        result = plan_cites("F1")
+        self.assertTrue(result.ok, result.detail)
+        for token in ("F2", "F3"):
+            with self.subTest(artifact="plan", token=token):
+                self.assertIn("ac_unknown_source:AC1:%s" % token, plan_cites(token).detail)
 
 
 if __name__ == "__main__":

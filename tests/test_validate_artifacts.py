@@ -9,6 +9,7 @@ We import it by path so the test suite stays independent of cwd / sys.path setup
 """
 
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -1739,6 +1740,223 @@ class TestLongIdsAreReportedNotRaised(unittest.TestCase):
         result = va.check_plan(plan, None)
         self.assertEqual(result["metrics"]["plan_tasks"], 1)  # still a `## Task` heading, with no number
         self.assertEqual(va.check_plan("# Plan\nT%s first\n" % self.LONG, None)["metrics"]["plan_tasks"], 0)
+
+
+def _feedback(*records):
+    """A feedback.jsonl body: a dict is one JSON line, a string is written as it is (a malformed line)."""
+    return "".join((record if isinstance(record, str) else json.dumps(record)) + "\n" for record in records)
+
+
+# What `sdlc reject` leaves in a package: a change request at the spec gate, one at the plan gate, then a
+# record of another kind.
+FEEDBACK = _feedback(
+    {"seq": 1, "kind": "reject", "gate": "spec-review", "quote": "Name the export file too."},
+    {"seq": 2, "kind": "reject", "gate": "plan-review", "quote": "Split the task in two."},
+    {"seq": 3, "kind": "note", "gate": "spec-review", "quote": "Not a change request."},
+)
+
+
+class TestFeedbackSources(unittest.TestCase):
+    """`F<n>` names the reject record whose `seq` is n in the package's feedback.jsonl, at one of the
+    gates given (any gate when none is): a criterion added or changed on the user's change request at a
+    gate cites it. Every other F number is an unknown source; the reader never raises."""
+
+    GATES = ["spec-review"]
+
+    def spec(self, tag):
+        return _spec_with_criteria(
+            "- AC1: Given a refund, when the job runs, then the total drops once. (source: request)\n"
+            "- AC2: Given a replay, when the job runs, then the export file is named. (source: %s)\n" % tag)
+
+    def errors(self, tag, feedback=FEEDBACK, gates=GATES):
+        return _ac_errors(va.check_spec(self.spec(tag), DESIGN_OK, None, require_sources=True,
+                                        feedback_text=feedback, feedback_gates=gates))
+
+    def run_spec(self, tmp, tag, feedback_path, gates=GATES):
+        spec = Path(tmp) / "spec.md"
+        spec.write_bytes(self.spec(tag).encode("utf-8"))
+        code, fields = va.run("spec", str(spec), None, False, sources=True, feedback_path=feedback_path,
+                              feedback_gates=gates)
+        return code, sorted(key for key in fields if key.startswith("error="))
+
+    def test_a_reject_record_of_the_gate_is_a_source(self):
+        self.assertEqual(self.errors("F1"), [])
+        self.assertEqual(self.errors("request, F01"), [])  # F01 and F1 name the same record
+        self.assertEqual(self.errors("f1, F"), ["ac_bad_source:AC2:f1", "ac_bad_source:AC2:F"])
+        # Without the flag the tag is not read at all.
+        self.assertEqual(_ac_errors(va.check_spec(self.spec("F9"), feedback_text=FEEDBACK)), [])
+
+    def test_an_unknown_seq_is_an_unknown_source(self):
+        self.assertEqual(self.errors("F9"), ["ac_unknown_source:AC2:F9"])
+        self.assertEqual(self.errors("F1, F4"), ["ac_unknown_source:AC2:F4"])
+
+    def test_a_reject_record_at_another_gate_is_unknown(self):
+        self.assertEqual(self.errors("F2"), ["ac_unknown_source:AC2:F2"])
+        self.assertEqual(self.errors("F2", gates=["plan-review"]), [])
+        self.assertEqual(self.errors("F1", gates=["plan-review"]), ["ac_unknown_source:AC2:F1"])
+        self.assertEqual(self.errors("F1, F2", gates=["spec-review", "plan-review"]), [])
+        # No gate given: a reject record at any gate counts.
+        self.assertEqual(self.errors("F1, F2", gates=None), [])
+        self.assertEqual(self.errors("F1, F2", gates=[]), [])
+
+    def test_a_record_of_another_kind_is_unknown(self):
+        self.assertEqual(self.errors("F3"), ["ac_unknown_source:AC2:F3"])
+        self.assertEqual(self.errors("F3", gates=None), ["ac_unknown_source:AC2:F3"])
+
+    def test_a_missing_or_unreadable_feedback_file_names_no_record(self):
+        self.assertEqual(self.errors("F1", feedback=None), ["ac_unknown_source:AC2:F1"])
+        self.assertEqual(self.errors("F1", feedback=""), ["ac_unknown_source:AC2:F1"])
+        with tempfile.TemporaryDirectory() as tmp:
+            good = Path(tmp) / "feedback.jsonl"
+            good.write_bytes(FEEDBACK.encode("utf-8"))
+            self.assertEqual(self.run_spec(tmp, "F1", str(good)), (0, []))
+            not_utf8 = Path(tmp) / "not-utf8.jsonl"
+            not_utf8.write_bytes(b"\xff\xfe" + FEEDBACK.encode("utf-8"))
+            # A folder cannot be read as a file. None of these is an error of its own: the token is unknown.
+            for name, path in (("missing", str(Path(tmp) / "absent.jsonl")), ("folder", tmp),
+                               ("not utf-8", str(not_utf8)), ("not given", None)):
+                with self.subTest(feedback=name):
+                    self.assertEqual(self.run_spec(tmp, "F1", path), (1, ["error=ac_unknown_source:AC2:F1"]))
+
+    def test_a_quote_with_unicode_line_breaks_keeps_its_record(self):
+        # The runner stores a quote as it is (UTF-8, no ASCII escapes) and reads its logs split on LF
+        # only, so U+2028, U+2029 and U+0085 inside a quote do not end the record's line.
+        scripts = str(SCRIPT.parent)
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        from sdlc_runner import logs
+
+        quote = ("Name the export file" + chr(0x2028) + "and say" + chr(0x2029) + "where it goes" + chr(0x85)
+                 + "too.")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "feedback.jsonl"
+            for text in (quote, "And the date."):
+                logs.append(path, {"kind": "reject", "gate": "spec-review", "quote": text, "fingerprint": "0" * 16})
+            raw = path.read_bytes()
+            for char in (chr(0x2028), chr(0x2029), chr(0x85)):
+                self.assertIn(char.encode("utf-8"), raw)  # written raw, as the runner writes it
+            self.assertEqual([record["quote"] for record in logs.read(path)], [quote, "And the date."])
+            self.assertEqual(va._feedback_numbers(raw.decode("utf-8"), self.GATES), {1, 2})
+            self.assertEqual(self.run_spec(tmp, "F1, F2", str(path)), (0, []))
+
+    def test_a_malformed_line_is_skipped(self):
+        feedback = _feedback(
+            "not json",
+            '{"seq": 4, "kind": "reject", "gate": "spec-review"',
+            "[1, 2]",
+            '"a string"',
+            "",
+            {"seq": True, "kind": "reject", "gate": "spec-review"},
+            {"seq": "5", "kind": "reject", "gate": "spec-review"},
+            {"seq": 6.0, "kind": "reject", "gate": "spec-review"},
+            {"seq": 7, "kind": "reject", "gate": ["spec-review"]},
+            {"kind": "reject", "gate": "spec-review"},
+            '{"seq": %s, "kind": "reject", "gate": "spec-review"}' % ("9" * 5000),
+            "[" * 100000 + "]" * 100000,
+            {"seq": 8, "kind": "reject", "gate": "spec-review"},
+        )
+        self.assertEqual(va._feedback_numbers(feedback, ["spec-review"]), {8})
+        self.assertEqual(self.errors("F8", feedback=feedback), [])
+        for seq in (1, 4, 5, 6, 7):
+            with self.subTest(seq=seq):
+                self.assertEqual(self.errors("F%d" % seq, feedback=feedback), ["ac_unknown_source:AC2:F%d" % seq])
+        # CRLF line ends and a byte-order mark are the same log.
+        self.assertEqual(va._feedback_numbers(chr(0xFEFF) + FEEDBACK.replace("\n", "\r\n"), None), {1, 2})
+
+    def test_a_long_digit_run_is_reported_not_raised(self):
+        long = "F" + "1" * 5000
+        self.assertEqual(self.errors(long), ["ac_bad_source:AC2:%s" % long])
+        self.assertEqual(self.errors("F1234567"), ["ac_bad_source:AC2:F1234567"])
+        six = _feedback({"seq": 123456, "kind": "reject", "gate": "spec-review"})
+        self.assertEqual(self.errors("F123456", feedback=six), [])
+
+    def test_cli_feedback_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "spec.md"
+            spec.write_bytes(self.spec("F1, F2").encode("utf-8"))
+            feedback = Path(tmp) / "feedback.jsonl"
+            feedback.write_bytes(FEEDBACK.encode("utf-8"))
+            base = ("--mode", "spec", "--file", str(spec), "--sources", "--feedback", str(feedback))
+            rc, out, err = run_cli(*base)  # no gate given: any gate counts
+            self.assertEqual(rc, 0, out + err)
+            rc, out, err = run_cli(*base, "--feedback-gate", "spec-review")
+            self.assertEqual(rc, 1, out + err)
+            self.assertEqual([line for line in out.splitlines() if line.startswith("error=")],
+                             ["error=ac_unknown_source:AC2:F2"])
+            rc, out, err = run_cli(*base, "--feedback-gate", "spec-review", "--feedback-gate", "plan-review")
+            self.assertEqual(rc, 0, out + err)
+            # Without --feedback no record is known.
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec), "--sources")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=ac_unknown_source:AC2:F1", out.splitlines())
+            # Without --sources both flags are ignored, as --design and --check are.
+            rc, out, err = run_cli("--mode", "spec", "--file", str(spec), "--feedback", str(Path(tmp) / "absent.jsonl"),
+                                   "--feedback-gate", "spec-review")
+            self.assertEqual(rc, 0, out + err)
+            self.assertNotIn("error=", out)
+
+    def test_a_specless_plan_cites_a_feedback_record(self):
+        plan = _plan_with_criteria(
+            "- AC1: Given a report, when the user exports it, then a CSV file returns every visible row. "
+            "(source: request)\n"
+            "- AC2: Given a large report, when it is exported, then rows are streamed. (source: D2, F2)\n")
+        result = va.check_plan(plan, None, own_criteria=True, design_text=DESIGN_OK, require_sources=True,
+                               feedback_text=FEEDBACK, feedback_gates=["plan-review"])
+        self.assertEqual(_ac_errors(result), [])
+        result = va.check_plan(plan, None, own_criteria=True, design_text=DESIGN_OK, require_sources=True,
+                               feedback_text=FEEDBACK, feedback_gates=["spec-review"])
+        self.assertEqual(_ac_errors(result), ["ac_unknown_source:AC2:F2"])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "plan.md"
+            path.write_bytes(plan.encode("utf-8"))
+            design = Path(tmp) / "design.md"
+            design.write_bytes(DESIGN_OK.encode("utf-8"))
+            feedback = Path(tmp) / "feedback.jsonl"
+            feedback.write_bytes(FEEDBACK.encode("utf-8"))
+            base = ("--mode", "plan", "--file", str(path), "--strict", "--sources", "--design", str(design),
+                    "--feedback", str(feedback))
+            rc, out, err = run_cli(*base, "--feedback-gate", "plan-review")
+            self.assertEqual(rc, 0, out + err)
+            rc, out, err = run_cli(*base, "--feedback-gate", "spec-review")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("error=ac_unknown_source:AC2:F2", out.splitlines())
+
+
+class TestCriterionSourcesList(unittest.TestCase):
+    """`criterion_sources` lists the criteria the source check reads, each with its tokens as written:
+    the runner's gate card shows them to the user (hybrid design §4.4)."""
+
+    def test_spec_criteria_with_their_sources(self):
+        spec = _spec_with_criteria(
+            "### Export\n"
+            "- AC1: Given a refund, when the job runs, then the total drops once. (source: request,  D2 )\n"
+            "- AC-A2: Given a replay, when the job runs, then the total\n"
+            "  drops once. (source: F1)\n"
+            "  - AC9: a nested bullet is a detail, not a criterion (source: D1)\n"
+            "- AC3: Given an empty file, when the job runs, then it returns an empty ledger.\n"
+            "- AC4: Given a refund twice, when the job runs, then it counts once. (source: guess, )\n"
+            "- A detail bullet without an id.\n"
+            "```\n- AC7: Given an example in a fence, then nothing. (source: request)\n```\n")
+        expected = [("AC1", ["request", "D2"]), ("AC-A2", ["F1"]), ("AC3", []), ("AC4", ["guess"])]
+        self.assertEqual(va.criterion_sources(spec, "spec"), expected)
+        self.assertEqual(va.criterion_sources(chr(0xFEFF) + spec.replace("\n", "\r\n"), "spec"), expected)
+        # The criteria are those the source check reads. The nested and the fenced id are no criterion,
+        # so the check reports them as ids without a criterion bullet of their own.
+        self.assertEqual(_ac_errors(va.check_spec(spec, DESIGN_OK, None, require_sources=True,
+                                                  feedback_text=FEEDBACK, feedback_gates=["spec-review"])),
+                         ["ac_no_source:AC3", "ac_bad_source:AC4:guess", "ac_no_source:AC7", "ac_no_source:AC9"])
+        self.assertEqual(va.criterion_sources(COMPLETE_SPEC.replace("## 3. Acceptance criteria", "## 3. Rules"),
+                                              "spec"), [])
+
+    def test_plan_criteria_only_for_a_specless_plan(self):
+        self.assertEqual(va.criterion_sources(FEATURE_PLAN, "plan"), [("AC1", ["request"]), ("AC2", ["D2"])])
+        # A plan checked against a spec has no criteria of its own.
+        with_spec = FEATURE_PLAN.replace("spec: none", "spec: ../spec/feat-export.md")
+        self.assertEqual(va.criterion_sources(with_spec, "plan"), [])
+        # A section after the tasks is not read, as the source check does not read it.
+        late = FEATURE_PLAN.replace(FEATURE_PLAN_AC_SECTION, "") + "\n" + FEATURE_PLAN_AC_SECTION
+        self.assertEqual(va.criterion_sources(late, "plan"), [])
+        self.assertEqual(va.criterion_sources(DESIGN_OK, "design"), [])
 
 
 class TestSpeclessPlans(unittest.TestCase):

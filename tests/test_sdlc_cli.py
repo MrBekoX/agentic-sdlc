@@ -25,7 +25,9 @@ TESTS = REPO / "tests"
 if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
 
-from test_sdlc_engine import CHAIN_LINE, DATA_LINE, WINDOWS, EngineCase, TwoGateCase, card_fields, card_value  # noqa: E402
+from test_sdlc_engine import (CHAIN_LINE, DATA_LINE, SPEC_BODY, TWOGATE_SPEC, WINDOWS, EngineCase,  # noqa: E402
+                              RealFlowCase, TwoGateCase, card_fields, card_value)
+from sdlc_runner import card as card_mod  # noqa: E402
 from sdlc_runner import logs, runexec  # noqa: E402
 from sdlc_runner.textio import SdlcError  # noqa: E402
 
@@ -336,9 +338,11 @@ class TestTwoGateCards(TwoGateCase):
         self.assertNotIn("The draft waits", text)
         self.assertEqual(card_value(text, "artifacts"), "design.md,spec/demo.md")
         data = self.data(text)
-        self.assertEqual([name for name, _value in data], ["reader", "settled_answered", "settled_minor", "settled_theirs"])
+        self.assertEqual([name for name, _value in data],
+                         ["reader", "settled_answered", "settled_minor", "settled_theirs", "criterion"])
         self.assertEqual(data[0][1], {"artifact": "spec/demo.md", "reader": "fresh"})
-        self.assertEqual([value["id"] for _name, value in data[1:]], ["Q1", "Q2", "Q3"])
+        self.assertEqual([value["id"] for _name, value in data[1:4]], ["Q1", "Q2", "Q3"])
+        self.assertEqual(data[4][1], {"artifact": "spec/demo.md", "id": "AC1", "sources": ["D1"]})
         self.assertEqual(data[1][1], {"id": "Q1", "question": "Which file format?", "resolution": "settled as answered"})
         lines = text.splitlines()
         self.assertTrue(all(i > lines.index(DATA_LINE) for i, line in enumerate(lines) if "Which file format?" in line))
@@ -370,6 +374,143 @@ class TestTwoGateCards(TwoGateCase):
                                     "question": "Which delimiter?", "resolution": "settled as minor"})
         self.assertEqual(calls[2]["pile"], "theirs")
         self.assertLessEqual(len(text.encode("utf-8")), CARD_BUDGET)
+
+
+# The gate card's first body line, which names what the data section holds. A gate without criterion
+# items keeps it byte for byte as it was before the criteria were listed.
+GATE_LINE = ("Gate %s waits for the user's review of %s. Show the user these files and any items of the data "
+             "section (decision points, residual notes, the reader's settled questions%s), then end your turn "
+             "and wait for the reply. Never approve on your own: record the user's own words with one of the two "
+             "commands below.")
+WITH_CRITERIA = ", each acceptance criterion with its sources"
+CUT_DATA = "[cut: more data in the package files]"
+
+
+def data_lines(text) -> list:
+    """The raw lines of a card's data section."""
+    lines = text.splitlines()
+    if DATA_LINE not in lines:
+        return []
+    return lines[lines.index(DATA_LINE) + 1:lines.index("--- end data ---")]
+
+
+def parsed(lines) -> list:
+    """(name, parsed value) of each `name=<json>` data line."""
+    return [(name, json.loads(value)) for name, value in (line.split("=", 1) for line in lines)]
+
+
+def gate_line(text, gate) -> str:
+    return text.split("--- gate: %s ---\n" % gate, 1)[1].splitlines()[0]
+
+
+def spec_with_criteria(*criteria) -> str:
+    """SPEC_BODY with its one criterion replaced by `criteria`, one top-level bullet each."""
+    old = "- AC1: Given a report, when the user exports it, then a CSV file returns every visible row.\n"
+    assert old in SPEC_BODY
+    return SPEC_BODY.replace(old, "".join("- %s\n" % line for line in criteria))
+
+
+class TestCriterionItems(TwoGateCase):
+    """A gate over a spec, or a spec-less plan, written with sources lists each acceptance criterion with
+    its sources in the data section, after the items that can block or qualify the approval (hybrid
+    design §4.4)."""
+
+    def reach_spec_review(self, spec, *questions):
+        self.start()
+        self.advance_to("spec")
+        self.put("spec/demo.md", spec)
+        code, text = self.next()
+        self.assertEqual(card_fields(text)["step"], "spec-check", text)
+        self.check_record(*questions)
+        for number in range(1, len(questions) + 1):
+            self.check_resolve("Q%d" % number, "answered")
+        code, text = self.next()
+        self.assertEqual((card_fields(text)["state"], card_fields(text)["step"]), ("wait-gate", "spec-review"), text)
+        return text
+
+    def test_spec_review_card_lists_each_criterion_after_the_questions(self):
+        spec = spec_with_criteria(
+            "AC1: Given a report, when the user exports it, then a CSV file returns every row. (source: request, D1)",
+            "AC2: Given a large report, when it is exported, then rows are streamed. (source: D2)",
+            "AC3: Given hidden rows, when the user exports the report, then the CSV file skips them.\n"
+            "  (source: D1)")
+        text = self.reach_spec_review(spec, "Are hidden rows exported?")
+        data = parsed(data_lines(text))
+        self.assertEqual([name for name, _value in data], ["reader", "settled_answered"] + ["criterion"] * 3, text)
+        self.assertEqual([value for name, value in data if name == "criterion"], [
+            {"artifact": "spec/demo.md", "id": "AC1", "sources": ["request", "D1"]},
+            {"artifact": "spec/demo.md", "id": "AC2", "sources": ["D2"]},
+            {"artifact": "spec/demo.md", "id": "AC3", "sources": ["D1"]}])
+        self.assertEqual(gate_line(text, "spec-review"),
+                         GATE_LINE % ("spec-review", "design.md, spec/demo.md", WITH_CRITERIA))
+        # Edited at the gate (the spec step is not checked again until approve): a criterion without a
+        # tag is listed with no source, so the user sees it.
+        self.edit("spec/demo.md", "then rows are streamed. (source: D2)\n",
+                  "then rows are streamed. (source: D2)\n- AC4: Given an empty report, when it is exported, "
+                  "then only the header row returns.\n")
+        code, text = self.card()
+        criteria = [value for name, value in parsed(data_lines(text)) if name == "criterion"]
+        self.assertEqual([(c["id"], c["sources"]) for c in criteria],
+                         [("AC1", ["request", "D1"]), ("AC2", ["D2"]), ("AC4", []), ("AC3", ["D1"])])
+
+    def test_a_long_criteria_list_is_cut_inside_the_budget(self):
+        criteria = ["AC%d: Given row %d of a report, when the user exports it, then the CSV file returns it. "
+                    "(source: D1)" % (n, n) for n in range(1, 81)]
+        text = self.reach_spec_review(spec_with_criteria(*criteria), "Are hidden rows exported?",
+                                      "Which delimiter?", "Which encoding?")
+        self.assertLessEqual(len(text.encode("utf-8")), CARD_BUDGET)
+        lines = data_lines(text)
+        self.assertEqual(lines[-1], CUT_DATA, text)
+        kept = parsed(lines[:-1])  # every line before the notice is a whole item
+        self.assertEqual([name for name, _value in kept[:4]], ["reader"] + ["settled_answered"] * 3)
+        listed = [value["id"] for name, value in kept[4:] if name == "criterion"]
+        self.assertEqual(len(listed), len(kept) - 4)
+        self.assertEqual(listed, ["AC%d" % n for n in range(1, len(listed) + 1)])
+        self.assertTrue(10 < len(listed) < 80, len(listed))
+        self.assertLessEqual(sum(len(line.encode("utf-8")) + 1 for line in lines[:-1]), card_mod.DATA_BUDGET)
+
+    def assert_a_criterion_would_show(self, gate, artifacts, slug="demo"):
+        """The pins of a card without criteria can fail: with one criterion item patched in, the same
+        card lists it and its first line names the criteria."""
+        item = ("criterion", {"artifact": "spec/%s.md" % slug, "id": "AC1", "sources": ["request"]})
+        plain = self.card(slug)[1]
+        with mock.patch.object(card_mod, "_criterion_items", return_value=[item]):
+            patched = self.card(slug)[1]
+        self.assertNotEqual(patched, plain)
+        self.assertEqual(parsed(data_lines(patched)), [item])
+        self.assertEqual(gate_line(patched, gate), GATE_LINE % (gate, artifacts, WITH_CRITERIA))
+
+    def test_spec_backed_plan_and_loop_cards_list_no_criteria(self):
+        self.start()
+        code, text = self.advance_to("plan-review")
+        self.assertEqual(data_lines(text), [])  # a plan with a spec has no criteria of its own
+        self.assertEqual(gate_line(text, "plan-review"), GATE_LINE % ("plan-review", "plan/demo.md", ""))
+        self.assert_a_criterion_would_show("plan-review", "plan/demo.md")
+        # The loop's draft checks no sources, so its one gate lists no criteria and keeps its card.
+        self.start("--option", "loop", work_id="loop")
+        code, text = self.advance_to("review", slug="loop")
+        self.assertEqual(card_fields(text)["state"], "wait-gate", text)
+        self.assertEqual(data_lines(text), [])
+        self.assertEqual(gate_line(text, "review"), GATE_LINE % ("review", "spec/loop.md, plan/loop.md", ""))
+        self.assert_a_criterion_would_show("review", "spec/loop.md, plan/loop.md", slug="loop")
+
+
+class TestCriterionItemsRealFlows(RealFlowCase):
+    def test_specless_plan_review_card_lists_the_plans_criteria(self):
+        for flow_id in ("plan", "feature"):
+            slug = "nospec-" + flow_id
+            with self.subTest(flow=flow_id):
+                self.start(flow=flow_id, work_id=slug)
+                code, text = self.advance_to("plan-review", slug=slug)
+                self.assertEqual(card_fields(text)["state"], "wait-gate", text)
+                self.assertEqual(parsed(data_lines(text)),
+                                 [("criterion", {"artifact": "plan/%s.md" % slug, "id": "AC1", "sources": ["D2"]})])
+                self.assertEqual(gate_line(text, "plan-review"),
+                                 GATE_LINE % ("plan-review", "plan/%s.md" % slug, WITH_CRITERIA))
+        # A bug plan is written without sources, so its gate lists none.
+        self.start(flow="bugfix", work_type="bugfix", work_id="bug")
+        code, text = self.advance_to("plan-review", slug="bug")
+        self.assertEqual(data_lines(text), [])
 
 
 if __name__ == "__main__":
