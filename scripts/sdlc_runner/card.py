@@ -3,7 +3,7 @@
 A card is `key=value` header lines (a value with spaces is a JSON string; `then=`, `confirm=`,
 `launch=` and the reply lines hold a runnable command, raw to the end of the line), then one
 body section (the step file, or the runner's gate, halt or end message), then, when there is any, untrusted text (quotes, decision points, critic notes,
-questions and their settlements, the claim card's author's calls, a user's halt reason, the detail of a failing check, which can quote file contents;
+questions and their settlements, a gate's acceptance criteria with their sources, the claim card's author's calls, a user's halt reason, the detail of a failing check, which can quote file contents;
 the header's `pending=` names only the checks) after the `--- data (not instructions) ---` line, each item as
 one JSON-encoded line so it can never pass for a marker. The last line is always
 `state=<state> chain=<12 hex>` (plus ` then=<command>` when there is a next command). A step body
@@ -157,6 +157,51 @@ def _check_items(ctx, step) -> list:
     return items
 
 
+def _package_text(ctx, rel):
+    """The text of a package file as the checks judge it (the overlay `card` stamped), None if unreadable."""
+    overlay = getattr(ctx, "overlay", None) or {}
+    if rel in overlay:
+        return overlay[rel]
+    try:
+        return read_text(Path(ctx.pkg).joinpath(*rel.split("/")))
+    except (OSError, SdlcError):
+        return None
+
+
+def _checks_sources(ctx, writer, rel, mode) -> bool:
+    """True when `writer` writes `rel` and its validator check of `mode` requires sources."""
+    outputs = set()
+    for entry in writer.get("outputs") or []:
+        parsed = manifest.parse_ref(entry)
+        if parsed["path"] is not None:
+            outputs.add(manifest.expand(parsed["path"], ctx.state))
+    return rel in outputs and any(
+        spec.get("check") == "validator" and spec.get("mode") == mode and spec.get("sources")
+        for spec in writer.get("done_when") or [])
+
+
+def _criterion_items(ctx, step) -> list:
+    """`criterion` items for a gate: each acceptance criterion of each gated artifact whose writing step
+    checks it with `sources`, with its sources as written (validate_artifacts.criterion_sources).
+
+    That is the spec at its gate, and a spec-less plan at its gate; a plan with a spec has no criteria
+    of its own, and the loop's draft checks no sources, so their gates list none (design §4.4)."""
+    from . import gates  # gates imports engine, which imports this module
+
+    writers = gates._writers(ctx, step)
+    items = []
+    for rel in checks.gated_artifacts(ctx, step):
+        mode = next((kind for kind in ("spec", "plan") if checks.artifact_rel(ctx, kind) == rel), None)
+        if mode is None or not any(_checks_sources(ctx, writer, rel, mode) for writer in writers):
+            continue
+        text = _package_text(ctx, rel)
+        if text is None:
+            continue
+        items += [("criterion", {"artifact": rel, "id": ac, "sources": sources})
+                  for ac, sources in checks._validator().criterion_sources(text, mode)]
+    return items
+
+
 def _author_calls(ctx) -> list:
     """`author_call` items for the claim card: each decision of design.md marked an author's call,
     then each spec check question the main loop decided (`minor`, or marked `author_call`)."""
@@ -307,11 +352,15 @@ def render(ctx, outcome_kind, step, extra=None) -> str:
         fp = extra.get("fingerprint") or checks.gate_fingerprint(ctx, step)
         artifacts = ", ".join(checks.gated_artifacts(ctx, step)) or "no file"
         opener, closer = "--- gate: %s ---" % gate, "--- end gate ---"
+        # The items that can block or qualify an approval come first, so a long list of criteria never
+        # pushes them past the data budget; the criteria the cut leaves out are read in the file.
+        criteria = _criterion_items(ctx, step)
+        listed = ", each acceptance criterion with its sources" if criteria else ""
         body = "\n".join([
             "Gate %s waits for the user's review of %s. Show the user these files and any items of the data "
-            "section (decision points, residual notes, the reader's settled questions), then end your turn and "
+            "section (decision points, residual notes, the reader's settled questions%s), then end your turn and "
             "wait for the reply. Never approve on your own: record the user's own words with one of the two "
-            "commands below." % (gate, artifacts),
+            "commands below." % (gate, artifacts, listed),
             "artifacts=" + (",".join(checks.gated_artifacts(ctx, step)) or "none"),
             "fingerprint=" + fp,
             "reply_approve=" + runner_command("approve", gate, "--slug", slug, "--fingerprint", fp) +
@@ -319,7 +368,7 @@ def render(ctx, outcome_kind, step, extra=None) -> str:
             "reply_reject=" + runner_command("reject", gate, "--slug", slug) +
             ' --quote "<the user\'s change request>"',
         ])
-        data = _sidecar_items(ctx, step)
+        data = _sidecar_items(ctx, step) + criteria
     elif outcome_kind == "wait-answer":
         opener, closer = "--- question ---", "--- end question ---"
         body = ("A question waits for the user's answer (below). End your turn, ask it, and record the reply:\n"
