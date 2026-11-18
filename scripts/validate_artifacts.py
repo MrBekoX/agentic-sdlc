@@ -468,14 +468,18 @@ def _feedback_numbers(feedback_text, gates=None):
     """The `seq` numbers a token `F<n>` may name: each `reject` record of a feedback log whose `gate`
     is one of `gates` (any gate when `gates` is empty or None).
 
-    The log is JSON Lines, as the runner writes it. A line that is not a JSON object, and a record whose
-    `seq` is not an integer, names nothing: the runner's own log checks guard the hash chain, so this
-    reader skips what it cannot use and never raises. No text (no log, or one that could not be read)
-    names nothing.
+    The log is JSON Lines, as the runner writes it, split the way the runner reads it (sdlc_runner/logs):
+    on LF only, one trailing CR dropped. A quote is stored as it is, so a Unicode line break inside it
+    (U+2028, U+2029, U+0085) is part of its record, never the end of a line. A line that is not a JSON
+    object, and a record whose `seq` is not an integer, names nothing: the runner's own log checks guard
+    the hash chain, so this reader skips what it cannot use and never raises. No text (no log, or one
+    that could not be read) names nothing.
     """
     allowed = set(gates or ())
     found = set()
-    for line in _clean_text(feedback_text or "").splitlines():
+    for line in _clean_text(feedback_text or "").split("\n"):
+        if line.endswith("\r"):
+            line = line[:-1]
         try:
             record = json.loads(line)
         except (ValueError, RecursionError):

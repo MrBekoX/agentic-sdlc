@@ -1818,6 +1818,27 @@ class TestFeedbackSources(unittest.TestCase):
                 with self.subTest(feedback=name):
                     self.assertEqual(self.run_spec(tmp, "F1", path), (1, ["error=ac_unknown_source:AC2:F1"]))
 
+    def test_a_quote_with_unicode_line_breaks_keeps_its_record(self):
+        # The runner stores a quote as it is (UTF-8, no ASCII escapes) and reads its logs split on LF
+        # only, so U+2028, U+2029 and U+0085 inside a quote do not end the record's line.
+        scripts = str(SCRIPT.parent)
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        from sdlc_runner import logs
+
+        quote = ("Name the export file" + chr(0x2028) + "and say" + chr(0x2029) + "where it goes" + chr(0x85)
+                 + "too.")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "feedback.jsonl"
+            for text in (quote, "And the date."):
+                logs.append(path, {"kind": "reject", "gate": "spec-review", "quote": text, "fingerprint": "0" * 16})
+            raw = path.read_bytes()
+            for char in (chr(0x2028), chr(0x2029), chr(0x85)):
+                self.assertIn(char.encode("utf-8"), raw)  # written raw, as the runner writes it
+            self.assertEqual([record["quote"] for record in logs.read(path)], [quote, "And the date."])
+            self.assertEqual(va._feedback_numbers(raw.decode("utf-8"), self.GATES), {1, 2})
+            self.assertEqual(self.run_spec(tmp, "F1, F2", str(path)), (0, []))
+
     def test_a_malformed_line_is_skipped(self):
         feedback = _feedback(
             "not json",
