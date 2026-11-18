@@ -20,6 +20,28 @@ Each entry includes:
 
 ---
 
+## 2026-11-18 — Before pushing, run the version check CI runs, not only the local gate's weaker one
+
+- **Date:** 2026-11-18
+- **Task / context:** PR #29, the runner's hybrid spec/plan path. The branch passed the four local gate commands on a fresh WSL clone and on Windows, and was then pushed and opened as a pull request.
+- **Symptom:** CI failed on all three OS jobs at its first step, `Version consistency`, with `release_check=failed:nonempty_unreleased`. On the same tree, run locally, `bump_version.py --check` prints `version_check=passed` and `bump_version.py --release-check` prints `release_check=failed:nonempty_unreleased`.
+- **Root cause:**
+  - The local gate in `AGENTS.md` and the pre-push checklist in `docs/testing.md` both run `bump_version.py --check`. CI runs `--release-check` on every pull request. That mode also fails while the `## Unreleased` section of `CHANGELOG.md` has any content.
+  - The branch's plan had its docs task write release notes and open points under `## Unreleased`. Feature pull requests leave `CHANGELOG.md` to the release pull request, which writes the version section. Neither local list says so.
+- **Correct fix:**
+  - `CHANGELOG.md` went back to main's text, with an empty `## Unreleased`.
+  - The notes moved verbatim into the pull request description, for the next release pull request to write.
+  - `--release-check` then passed locally, and the CI re-run was green.
+- **Preventive rule / automated check:**
+  - Before pushing, run `python3 scripts/bump_version.py --release-check` as well as the four gate commands, so the local run includes the CI version step.
+  - A feature branch leaves `## Unreleased` empty. Its release notes and open points go in the pull request body. A plan's docs task does not add `CHANGELOG.md` entries outside a release pull request.
+  - This rule is not enforced yet. Both local lists still name `--check`. To enforce it, make them name the version command that `.github/workflows/ci.yml` runs, and pin that with a test.
+- **Related files & tests:**
+  - Files: `scripts/bump_version.py` (`check(release=True)`), `.github/workflows/ci.yml` (`Version consistency`), `AGENTS.md` (Build & test commands), `docs/testing.md` (Pre-push checklist), `CHANGELOG.md`.
+  - Tests: `tests/test_packaging_metadata.py::test_all_declarations_match_passes` covers only the passing release check. No test covers `nonempty_unreleased`.
+
+---
+
 ## 2026-10-22 — A role file and the validator it feeds must share one vocabulary, pinned by a test
 
 - **Date:** 2026-10-22
