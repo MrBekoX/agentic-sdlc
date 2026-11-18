@@ -51,6 +51,8 @@ docs/agentic-sdlc/evidence/*
 audit-docs/
 # Maintainer prompt and plan inputs for agent sessions; local only, never distributed.
 agentic-sdlc-prompts/
+# Session reports that agent sessions write for the maintainer; local only, never distributed.
+session-reports/
 # Contract test for a prompt in agentic-sdlc-prompts/; it reads that folder, so it can only
 # run where the folder exists and must stay out of clean clones and CI.
 tests/test_superpowers_referenced_eval_prompt.py
