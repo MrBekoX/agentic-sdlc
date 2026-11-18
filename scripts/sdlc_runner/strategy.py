@@ -13,7 +13,8 @@ this session and confirms or overrides each entry with a reason in one command:
 - every override has a reason;
 - every mechanism is within the declared capabilities (`subagent` and `runner-loop` need
   subagent=yes, `workflow` workflow=yes and a runtime with an engine, `team` team=yes); the
-  spec/plan keys (`draft`, `draft.critic`) get `workflow` only as an override, on every runtime;
+  spec/plan keys (`draft`, `draft.critic`) get `workflow` only as an override, on every runtime,
+  and on a runtime whose engine runs only on request (`workflow: explicit-request`) every key does;
 - the mandated fresh-context keys (draft.critic, security, audit, quality-review) are never `main`
   (or `team`, `parallel-runs`): `workflow`, `subagent`, `runner-loop` (draft.critic only), or
   `inline-degraded`/`runner-loop-inline` with subagent declared no or denied;
@@ -162,7 +163,8 @@ def _entry_errors(key, entry, capabilities, row) -> list:
     if mechanism == "workflow":
         if row.get("workflow") == "none":
             errors.append("%s: no workflow engine on this runtime" % at)
-        elif key in DRAFT_KEYS and entry.get("source") != "override":
+        elif ((key in DRAFT_KEYS or row.get("workflow") == "explicit-request")
+              and entry.get("source") != "override"):  # a draft key anywhere; any key on an explicit-request row
             errors.append("%s: an engine runs only on the user's explicit request (an override with a reason)" % at)
     if mechanism in LOOP_MECHANISMS and key not in DRAFT_KEYS:
         errors.append("%s: %s drives the spec/plan loop only" % (at, mechanism))

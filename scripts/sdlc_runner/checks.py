@@ -360,8 +360,34 @@ def check_loop_done(ctx, step):
     return CheckResult(True, "the loop stopped: %s" % loop["stop_reason"])
 
 
+def check_problems(data) -> list:
+    """The schema errors of a check file, then the settlement rules the schema subset cannot state.
+
+    The rules are the shape `sdlc check-resolve` records: a question with a pile has a non-empty
+    resolution; `theirs` has exactly one of an answer (`answer_seq`) and an author's call; `minor` is
+    an author's call. A hand-edited file that breaks one would pass `settled` and leave the claim's
+    author's calls, so it is refused instead.
+    """
+    errors = schema.validate(data, manifest.load_schema("check"))
+    if errors:
+        return errors
+    for index, question in enumerate(data["questions"]):
+        at = "/questions/%d" % index
+        pile = question["pile"]
+        if pile is None:
+            continue
+        if not (question["resolution"] or "").strip():
+            errors.append("%s: a settled question needs a resolution" % at)
+        if pile == "theirs" and (question["answer_seq"] is None) == (not question["author_call"]):
+            errors.append("%s: theirs needs exactly one of answer_seq and author_call" % at)
+        if pile == "minor" and not question["author_call"]:
+            errors.append("%s: minor is an author's call (author_call must be true)" % at)
+    return errors
+
+
 def read_check(ctx) -> tuple:
-    """(data, None) when the spec check file validates and is the spec's, else (None, why not).
+    """(data, None) when the spec check file validates (check_problems) and is the spec's, else
+    (None, why not).
 
     The `settled` check, the gates and the cards read the check file through here.
     """
@@ -372,7 +398,7 @@ def read_check(ctx) -> tuple:
         return None, "%s is missing" % rel
     except (OSError, ValueError, SdlcError):
         return None, "%s is not readable JSON" % rel
-    errors = schema.validate(data, manifest.load_schema("check"))
+    errors = check_problems(data)
     if errors:
         return None, "%s: %s" % (rel, errors[0])
     if data.get("artifact") != "spec":

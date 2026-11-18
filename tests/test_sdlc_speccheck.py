@@ -171,7 +171,8 @@ class TestRecord(SpecCheckCase):
         other.write_text(reader("One", "Two"), encoding="utf-8")
         code, out = self.sdlc("check-record", "--slug", "demo", "--from", str(other))
         self.assertEqual(code, 0, out)
-        self.assertEqual([q["id"] for q in self.check_file()["questions"]], ["Q1", "Q2"])
+        # The replacing record goes on from the highest id the file held: Q1 never names another question.
+        self.assertEqual([q["id"] for q in self.check_file()["questions"]], ["Q2", "Q3"])
 
     def test_record_refused_outside_the_spec_check_step(self):
         self.start(flow="speccheck")
@@ -229,27 +230,91 @@ class TestRecord(SpecCheckCase):
         self.reach()
         self.record("First?")
         self.record("Second?", "Third?")
-        self.assertEqual([q["question"] for q in self.check_file()["questions"]], ["Second?", "Third?"])
-        self.resolve("Q1")
+        data = self.check_file()
+        self.assertEqual([(q["id"], q["question"]) for q in data["questions"]], [("Q2", "Second?"), ("Q3", "Third?")])
+        self.assertEqual(data["issued"], 3)
+        self.resolve("Q2")
         out = self.record("Fourth?", expect=4)
         self.assertIn("error=check_already_resolving", out)
         self.assertEqual([q["question"] for q in self.check_file()["questions"]], ["Second?", "Third?"])
 
-    def test_a_changed_design_starts_a_new_record(self):
-        self.reach()
-        self.record("Which file format?")
-        self.resolve("Q1")
+    def change_design(self, line):
+        """A changed design.md after the check settled: the claim card, then spec-check again."""
         self.assertEqual(card_fields(self.next()[1])["step"], "claim")
-        self.put("design.md", DESIGN + "\n## Non-goals\n\nNo scheduled exports.\n")
+        self.put("design.md", DESIGN + "\n## Non-goals\n\n%s\n" % line)
         code, text = self.next()
         fields = card_fields(text)
         self.assertEqual((fields["state"], fields["step"]), ("do", "spec-check"), text)
+        return fields
+
+    def test_a_changed_design_carries_the_settled_questions(self):
+        self.reach()
+        self.record("Which file format?")
+        self.resolve("Q1", "answered", "CSV")
+        fields = self.change_design("No scheduled exports.")
         self.assertEqual(fields["visit"], "2/3")
-        self.record("Which time zone?")  # the old record was resolved, the new visit may replace it
+        self.record("Which time zone?")  # the new visit records its reader; the settled Q1 stays as it was
         data = self.check_file()
-        self.assertEqual([(q["question"], q["pile"]) for q in data["questions"]], [("Which time zone?", None)])
-        self.resolve("Q1")
+        self.assertEqual([(q["id"], q["question"], q["pile"], q["resolution"], q["visit"]) for q in data["questions"]],
+                         [("Q1", "Which file format?", "answered", "CSV", 1), ("Q2", "Which time zone?", None, None, 2)])
+        self.assertEqual((data["visit"], data["issued"]), (2, 2))
+        result = self.settled()
+        self.assertFalse(result.ok)
+        self.assertIn("Q2", result.detail)
+        self.assertNotIn("Q1", result.detail)  # the carried question is settled
+        out = self.resolve("Q1", "minor", "XLSX", expect=4)
+        self.assertIn("error=already_settled:Q1", out)
+        self.resolve("Q2", "minor", "UTC")
         self.assertEqual(card_fields(self.next()[1])["step"], "claim")
+
+    def test_a_new_visit_may_replace_its_own_record_but_keeps_the_carried_one(self):
+        self.reach()
+        self.record("Which file format?")
+        self.resolve("Q1", "answered", "CSV")
+        self.change_design("No scheduled exports.")
+        self.record("Which time zone?")
+        self.record("Which locale?", "Which encoding?")  # the carried, settled Q1 does not block a replace
+        data = self.check_file()
+        self.assertEqual([(q["id"], q["pile"]) for q in data["questions"]],
+                         [("Q1", "answered"), ("Q3", None), ("Q4", None)])
+        self.resolve("Q3", "minor", "en-GB")
+        out = self.record("Anything else?", expect=4)
+        self.assertIn("error=check_already_resolving", out)
+
+    def test_an_empty_visit_keeps_the_issued_ids(self):
+        self.reach()
+        self.record("Which file format?", "Which delimiter?")
+        self.resolve("Q1", "answered", "CSV")
+        self.resolve("Q2", "minor", "comma")
+        self.change_design("No scheduled exports.")
+        self.record(text='{"questions": []}')
+        self.assertEqual(self.check_file()["issued"], 2)
+        fields = self.change_design("No scheduled exports, and no PDF.")
+        self.assertEqual(fields["visit"], "3/3")
+        self.record("Which time zone?")
+        self.assertEqual([q["id"] for q in self.check_file()["questions"]], ["Q1", "Q2", "Q3"])
+
+    def test_a_check_file_written_before_issued_and_visit_still_reads(self):
+        # A file written before the question records carried `issued` and per-question `visit` has
+        # neither: it validates, settles, and a new visit numbers after its highest id.
+        self.reach()
+        self.record("Which file format?", "Which delimiter?")
+        self.resolve("Q1", "answered", "CSV")
+        self.resolve("Q2", "minor", "comma")
+        data = self.check_file()
+        data.pop("issued", None)
+        for question in data["questions"]:
+            question.pop("visit", None)
+        self.put("spec/demo.check.json", json.dumps(data))
+        self.assertEqual(schema.validate(data, manifest.load_schema("check")), [])
+        self.assertEqual(checks.read_check(self.context()), (data, None))
+        self.assertTrue(self.settled().ok)
+        self.change_design("No scheduled exports.")
+        self.record("Which time zone?")
+        data = self.check_file()
+        self.assertEqual([(q["id"], q["pile"], q["visit"]) for q in data["questions"]],
+                         [("Q1", "answered", 1), ("Q2", "minor", 1), ("Q3", None, 2)])
+        self.assertEqual(data["issued"], 3)
 
     def test_a_new_visit_with_the_same_empty_answer_still_makes_progress(self):
         self.reach()
@@ -399,6 +464,73 @@ class TestResolve(SpecCheckCase):
         self.put("spec/demo.check.json", "not json")
         out = self.resolve("Q1", expect=4)
         self.assertIn("error=check_invalid", out)
+
+
+class TestSettlementRules(SpecCheckCase):
+    """A hand-edited check file must keep the settlement `check-resolve` records: a pile with its
+    resolution, `theirs` with exactly one of an answer and an author's call, `minor` as an author's
+    call. The schema subset cannot state these, so `checks.read_check` does (`check_invalid:<problem>`)."""
+
+    BAD = {
+        "a pile with no resolution": ({"pile": "answered", "resolution": None}, "needs a resolution"),
+        "a pile with a blank resolution": ({"pile": "answered", "resolution": "  "}, "needs a resolution"),
+        "theirs with neither": ({"pile": "theirs", "resolution": "UTF-8", "answer_seq": None, "author_call": False},
+                                "exactly one of answer_seq and author_call"),
+        "theirs with both": ({"pile": "theirs", "resolution": "UTF-8", "answer_seq": 3, "author_call": True},
+                             "exactly one of answer_seq and author_call"),
+        "minor that is no author's call": ({"pile": "minor", "resolution": "comma", "author_call": False},
+                                           "minor is an author's call"),
+    }
+
+    def test_each_rule_is_a_check_invalid_problem(self):
+        self.reach()
+        self.record("Which encoding?", "Which delimiter?")
+        good = self.check_file()
+        for name, (change, problem) in self.BAD.items():
+            with self.subTest(case=name):
+                data = json.loads(json.dumps(good))
+                data["questions"][0].update(change)
+                self.assertEqual(schema.validate(data, manifest.load_schema("check")), [])  # the schema allows it
+                self.put("spec/demo.check.json", json.dumps(data))
+                found, why = checks.read_check(self.context())
+                self.assertIsNone(found)
+                self.assertIn("spec/demo.check.json: /questions/0: ", why)
+                self.assertIn(problem, why)
+                result = self.settled()
+                self.assertFalse(result.ok)
+                self.assertIn(problem, result.detail)
+                out = self.resolve("Q2", "minor", "comma", expect=4)
+                self.assertIn("error=check_invalid:", out)
+                self.assertIn(problem, out)
+        self.put("spec/demo.check.json", json.dumps(good))
+        self.resolve("Q1", "theirs", "UTF-8", "--author-call")
+        self.resolve("Q2", "minor", "comma")
+        self.assertTrue(self.settled().ok)
+
+
+# A secret-shaped value, built in pieces so the file itself holds none.
+FAKE_TOKEN = "gh" + "p_" + "R8kLq2Wv9XmT4zNp7Hs3Jd6Fb1Yc5Ge0Ua8K"
+
+
+class TestMasking(SpecCheckCase):
+    def test_reader_text_and_resolution_are_masked(self):
+        self.reach()
+        out = self.record("Is %s the key to use?" % FAKE_TOKEN)
+        self.assertNotIn(FAKE_TOKEN, out)
+        question = self.check_file()["questions"][0]
+        self.assertEqual(question["question"], "Is ***MASKED*** the key to use?")
+        self.assertNotIn(FAKE_TOKEN, question["why"])
+        self.assertIn("***MASKED***", question["why"])
+        out = self.resolve("Q1", "minor", "Use %s for now." % FAKE_TOKEN)
+        self.assertNotIn(FAKE_TOKEN, out)
+        raw = (self.pkg() / "spec" / "demo.check.json").read_text(encoding="utf-8")
+        self.assertNotIn(FAKE_TOKEN, raw)
+        self.assertEqual(self.check_file()["questions"][0]["resolution"], "Use ***MASKED*** for now.")
+        code, text = self.next()  # the claim card lists the author's call with its question and resolution
+        self.assertEqual(card_fields(text)["step"], "claim", text)
+        self.assertIn("author_call=", text)
+        self.assertNotIn(FAKE_TOKEN, text)
+        self.assertIn("***MASKED***", text)
 
 
 class TestPackaging(SpecCheckCase):

@@ -221,15 +221,31 @@ def _writers(ctx, step) -> list:
     return found
 
 
+def _done_externally(ctx, step, transitions) -> bool:
+    """True while another plugin's work stands for `step` (`sdlc external`): its state entry carries
+    `external` and its latest `done` record is the external one. A step redone in the package after
+    that (its inputs changed) is the package's own work again."""
+    if not ((ctx.state.get("steps") or {}).get(step["id"]) or {}).get("external"):
+        return False
+    done = [r for r in transitions if r.get("kind") == "done" and r.get("step") == step["id"]]
+    return bool(done) and done[-1].get("cause") == "external"
+
+
 def _recheck(ctx, step) -> None:
     """Run the done-checks of the steps that wrote the gated artifacts again, as `next` would (with
     the frontmatter it would stamp); SdlcError(4, artifact_checks_failed:<step>:<detail>) at the
     first that fails. A done step is not checked again while its inputs hold, so a spec edited after
-    its step was done must still pass that step's checks before it is approved (design 4.4)."""
+    its step was done must still pass that step's checks before it is approved (design 4.4).
+
+    A writer done by another plugin (`_done_externally`) is left out: its artifact lives outside the
+    package (an external intent writes no design.md), so its own checks would fail at every approve."""
     probe = engine.Context(ctx.project, ctx.root, ctx.pkg, copy.deepcopy(ctx.state), ctx.flow, ctx.shared)
     probe.write = False
     engine.stamp(probe)
+    transitions = logs.read(Path(ctx.pkg) / engine.TRANSITIONS_LOG)
     for writer in _writers(probe, step):
+        if _done_externally(probe, writer, transitions):
+            continue
         for _name, result in engine._run_checks(probe, writer):
             if not result.ok:
                 raise SdlcError(4, "artifact_checks_failed:%s:%s" % (writer["id"], result.detail))

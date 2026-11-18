@@ -9,21 +9,25 @@ those two files without talking to their author. This module:
 - `sdlc check-record [--from FILE | --text T]` validates the reader's JSON and writes
   `spec/<work_id>.check.json` (`agentic-sdlc/check@1`) with the spec body fingerprint the reader
   read and the reader's freshness. Within one visit of the step the record may be replaced until the
-  first question is settled; a new visit (a changed `design.md` re-opens the step) starts a new one;
+  first of its questions is settled. A new visit (a changed `design.md` re-opens the step) keeps the
+  settled questions of the earlier visits with their settlement and drops the open ones. Every record
+  numbers its questions after the highest id the file ever held (`issued`), so a `(source: Q<n>)` in
+  the spec names the question it was written for, or none;
 - `sdlc check-resolve --id Q<n> --pile answered|minor|theirs --resolution T [--answer-seq N |
   --author-call]` settles one question: `answered` (the answer went into the spec), `minor` (the
   main loop decided, an author's call) or `theirs` (the user's answer, an `answer` record of
   `questions.jsonl` for a question asked during the step, or an author's call when no user is there).
 
-Both commands take the package lock and are refused (exit 4) unless the step is the current one.
-The `settled` check (checks.py) is done when every question has a pile.
+The reader's questions and every resolution are masked before they are stored, as `ask` and the
+quotes are. Both commands take the package lock and are refused (exit 4) unless the step is the
+current one. The `settled` check (checks.py) is done when every question has a pile.
 """
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-from . import checks, fingerprint, frontmatter, logs, manifest, paths, schema
+from . import checks, fingerprint, frontmatter, logs, manifest, mask, paths
 from . import loop as loop_mod
 from . import strategy as strategy_mod
 from .lock import PackageLock
@@ -35,7 +39,7 @@ PILES = ("answered", "minor", "theirs")
 PROMPT_REL = "draft/prompts/%s.md"
 WRITE_REL = "draft/check.answer.json"
 QUESTIONS_LOG = "questions.jsonl"
-_QUESTION_ID = re.compile(r"Q[1-9][0-9]*\Z")
+_QUESTION_ID = re.compile(r"Q([1-9][0-9]{0,5})\Z")  # the check schema's id pattern
 
 
 # --- the card ----------------------------------------------------------------------------------
@@ -115,14 +119,15 @@ def _read_check(ctx):
 
 
 def _write_check(ctx, data) -> None:
-    errors = schema.validate(data, manifest.load_schema("check"))
+    errors = checks.check_problems(data)
     if errors:
         raise SdlcError(2, "check_invalid:%s" % errors[0])
     write_json_atomic(_abs(ctx, checks.check_file_rel(ctx)), data, within=ctx.pkg)
 
 
-def _reader_questions(text) -> list:
-    """The reader's JSON as unsettled question records Q1, Q2, ...; SdlcError(4, check_answer_invalid:<why>)."""
+def _reader_questions(text, issued=0, visit=None) -> list:
+    """The reader's JSON as unsettled question records numbered after `issued` (Q1, Q2, ... for 0),
+    each marked with `visit` and its text masked; SdlcError(4, check_answer_invalid:<why>)."""
     try:
         data = loop_mod._json_strict(text)
     except ValueError:
@@ -139,30 +144,73 @@ def _reader_questions(text) -> list:
         for key in ("question", "why"):
             if not isinstance(item.get(key), str) or not item[key].strip():
                 raise SdlcError(4, "check_answer_invalid:question %d has no %s" % (index, key))
-        found.append({"id": "Q%d" % index, "question": item["question"].strip(), "why": item["why"].strip(),
-                      "pile": None, "resolution": None, "answer_seq": None, "author_call": False})
+        question = {"id": "Q%d" % (issued + index), "question": mask.mask_text(item["question"]).strip(),
+                    "why": mask.mask_text(item["why"]).strip(), "pile": None, "resolution": None,
+                    "answer_seq": None, "author_call": False}
+        if visit is not None:
+            question["visit"] = visit
+        found.append(question)
     return found
 
 
+def _number(question_id) -> int:
+    match = _QUESTION_ID.match(str(question_id or ""))
+    return int(match.group(1)) if match else 0
+
+
+def _earlier(ctx, visit) -> tuple:
+    """(kept questions, issued) from the check file before a record in `visit`.
+
+    Only a file that validates (checks.read_check) is built on; any other file is replaced, as before.
+    A question belongs to its own `visit`, or to the file's when it has none (a file written before
+    questions carried one). The settled questions of other visits are kept with their settlement;
+    the open ones are dropped, so citing one is an unknown source. The current visit's questions are
+    replaced, which is refused once one of them is settled. `issued` is the highest question number
+    the file ever held: its `issued`, or its highest id when it has none.
+    """
+    data, _problem = checks.read_check(ctx)
+    if data is None:
+        return [], 0
+    file_visit = data.get("visit")
+    kept = []
+    for question in data["questions"]:
+        owner = question.get("visit", file_visit)
+        if owner == visit:
+            if question["pile"] is not None:
+                raise SdlcError(4, "check_already_resolving (a new record starts with a new visit of %s)" % STEP_ID)
+            continue
+        if question["pile"] is not None:
+            carried = dict(question)
+            if owner is not None:
+                carried["visit"] = owner
+            kept.append(carried)
+    issued = max([data.get("issued", 0)] + [_number(q["id"]) for q in data["questions"]])
+    return kept, issued
+
+
 def record(ctx, step, text) -> int:
-    """Write the check file from the reader's answer (the caller holds the lock; the step is current)."""
+    """Write the check file from the reader's answer (the caller holds the lock; the step is current).
+
+    Returns the number of new questions; the settled questions of earlier visits stay in the file
+    (`_earlier`).
+    """
     if len(str(text).encode("utf-8", "replace")) > loop_mod.MAX_RECORD_BYTES:
         raise SdlcError(4, "record_too_large (at most %d bytes)" % loop_mod.MAX_RECORD_BYTES)
-    questions = _reader_questions(text)
+    _reader_questions(text)  # the reader's answer is judged before anything else
     spec_rel = checks.artifact_rel(ctx, "spec")
     spec = _abs(ctx, spec_rel)
     if not spec.is_file():
         raise SdlcError(4, "spec_missing:%s" % spec_rel)
     visit = ctx.state["steps"][step["id"]]["visits"]
-    before = _read_check(ctx)
-    if before is not None and before.get("visit") == visit and any(
-            isinstance(q, dict) and q.get("pile") is not None for q in before.get("questions") or []):
-        raise SdlcError(4, "check_already_resolving (a new record starts with a new visit of %s)" % step["id"])
+    kept, issued = _earlier(ctx, visit)
+    questions = _reader_questions(text, issued, visit)
     mechanism, degraded = _mechanism(ctx, step)
     reader = "degraded" if mechanism in strategy_mod.DEGRADED or degraded != "none" else "fresh"
     _write_check(ctx, {"schema": CHECK_SCHEMA_ID, "artifact": "spec", "body_fingerprint": fingerprint.body_fp(spec),
-                       "reader": reader, "visit": visit, "questions": questions})
-    ctx.log({"kind": "check", "step": step["id"], "visit": visit, "questions": len(questions), "reader": reader})
+                       "reader": reader, "visit": visit, "issued": issued + len(questions),
+                       "questions": kept + questions})
+    ctx.log({"kind": "check", "step": step["id"], "visit": visit, "questions": len(questions), "kept": len(kept),
+             "reader": reader})
     return len(questions)
 
 
@@ -184,7 +232,7 @@ def resolve(ctx, step, qid, pile, resolution, answer_seq, author_call) -> None:
         if (_abs(ctx, checks.check_file_rel(ctx))).exists():
             raise SdlcError(4, "check_invalid:%s is not a JSON object" % checks.check_file_rel(ctx))
         raise SdlcError(4, "check_missing:%s (run sdlc check-record first)" % checks.check_file_rel(ctx))
-    errors = schema.validate(data, manifest.load_schema("check"))
+    errors = checks.check_problems(data)
     if errors:
         raise SdlcError(4, "check_invalid:%s" % errors[0])
     question = next((q for q in data["questions"] if q["id"] == qid), None)
@@ -192,7 +240,7 @@ def resolve(ctx, step, qid, pile, resolution, answer_seq, author_call) -> None:
         raise SdlcError(4, "unknown_question:%s" % qid)
     if question["pile"] is not None:
         raise SdlcError(4, "already_settled:%s" % qid)
-    text = str(resolution or "").strip()
+    text = mask.mask_text(str(resolution or "")).strip()
     if not text:
         raise SdlcError(4, "resolution_empty")
     if pile != "theirs" and (answer_seq is not None or author_call):

@@ -19,7 +19,10 @@ The card names the reader (`role=`, `role_file=`), its prompt (`prompt=`) and wh
 3. Save the reader's last message, unchanged, to `write=`, unless the reader wrote that file
    itself. It is one JSON object, `{"questions": [{"question": "...", "why": "..."}]}`.
 4. Record it: `sdlc check-record --slug <slug>` (it reads the `write=` file; `--from <file>` names
-   another). The runner numbers the questions `Q1`, `Q2`, ... in `spec/<work id>.check.json`.
+   another). The runner numbers the questions `Q1`, `Q2`, ... in `spec/<work id>.check.json`. On a
+   later visit the settled questions of the earlier visits stay there with their settlement, and
+   the new questions are numbered after the highest id the file ever held, so a `Q<n>` the spec
+   cites keeps naming its question.
 
 If a launch fails or is refused, record it, then play the role yourself as in step 2. `<capability>`
 is the one that failed (`subagent` or `workflow`); `<reason>` is `missing`, `denied` or

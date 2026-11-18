@@ -113,6 +113,9 @@ ANSWERED_AC = ("\n- AC2: Given a report with hidden rows, when the user exports 
                "(source: Q1)")
 TWO_AC_SPEC = TWOGATE_SPEC.replace("every visible row. (source: D1)", "every visible row. (source: D1)" + ANSWERED_AC)
 TWO_AC_PLAN = PLAN_BODY.replace("(AC1)", "(AC1, AC2)")
+# With the intent given to another plugin there is no design.md, so a criterion can cite only the request
+# or a reader question.
+REQUEST_SOURCED_SPEC = SPEC_BODY.replace("every visible row.", "every visible row. (source: request)")
 DEFAULT_CAPABILITIES = "workflow=no,subagent=yes,team=no"
 # A runtime with no sub-agent tool runs each fresh role inline and says so (hybrid design §4.3).
 NO_SUBAGENT_STRATEGY = ("spec-check=inline-degraded:no sub-agent tool", "security=inline-degraded:no sub-agent tool",
@@ -631,6 +634,139 @@ class TestFlowsEndToEnd(FlowCase):
         self.assertEqual(self.meta("spec/%s.md" % slug, slug)["status"], "complete")
         self.assertEqual(self.author_calls(self.cards[(slug, "claim")]),
                          [("D2", "design.md"), ("Q1", "spec/%s.check.json" % slug)])
+
+    def test_external_intent_does_not_block_the_spec_gate(self):
+        # The user gave the design to another plugin: `sdlc external intent` marks the step done and no
+        # design.md is written. `approve` checks the spec again, not the intent step's design check on a
+        # file the external path never writes.
+        slug = "elsewhere"
+        code, text = self.start(flow="spec", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, stop="intent")
+        self.write("notes/design-elsewhere.md", b"# A design another plugin wrote\n")
+        self.sdlc_ok("external", "intent", "--slug", slug, "--owner", "superpowers:brainstorming",
+                     "--artifact", "notes/design-elsewhere.md", "--quote", "Use superpowers for the design.")
+        self.assertEqual(self.state(slug)["steps"]["intent"]["external"]["owner"], "superpowers:brainstorming")
+        self.assertFalse((self.pkg(slug) / "design.md").exists())
+        text, fields = self.step(slug, step="spec")
+        self.put("spec/%s.md" % slug, REQUEST_SOURCED_SPEC, slug)
+        text, fields = self.step(slug, step="spec-check")
+        self.read_spec(slug, fields, [])
+        text, fields = self.step(slug, state="wait-gate", step="spec-review")
+        self.approve(text, slug, gate="spec-review")
+        self.assertEqual(self.approvals(slug), [("spec-review", "reply", "fresh")])
+        text, fields = self.play(slug, text=self.next(slug)[1])
+        self.assert_completed(text, slug, FLOW_STEPS["spec"])
+        self.assertEqual([r.get("cause") for r in self.records("done", slug, step="intent")], ["external"])
+
+    def test_external_intent_gate_still_checks_the_spec(self):
+        # Only the external writer is left out: the spec step's own check still runs at approve.
+        slug = "elsewhere2"
+        code, text = self.start(flow="spec", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, stop="intent")
+        self.write("notes/design-elsewhere.md", b"# A design another plugin wrote\n")
+        self.sdlc_ok("external", "intent", "--slug", slug, "--owner", "superpowers:brainstorming",
+                     "--artifact", "notes/design-elsewhere.md", "--quote", "Use superpowers for the design.")
+        self.step(slug, step="spec")
+        spec = self.put("spec/%s.md" % slug, REQUEST_SOURCED_SPEC, slug)
+        text, fields = self.step(slug, step="spec-check")
+        self.read_spec(slug, fields, [])
+        spec.write_bytes(spec.read_bytes().replace(b" (source: request)", b""))
+        text, fields = self.step(slug, state="wait-gate", step="spec-review")
+        code, out = self.approve(text, slug, gate="spec-review", expect=4)
+        self.assertIn("error=artifact_checks_failed:spec:", out)
+        self.assertIn("ac_no_source:AC1", out)
+        self.assertNotIn("artifact_checks_failed:intent", out)
+
+    def test_intent_redone_in_the_package_after_external_is_checked_again(self):
+        slug = "back"
+        code, text = self.start(flow="spec", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, stop="intent")
+        self.write("notes/design-elsewhere.md", b"# A design another plugin wrote\n")
+        self.sdlc_ok("external", "intent", "--slug", slug, "--owner", "superpowers:brainstorming",
+                     "--artifact", "notes/design-elsewhere.md", "--quote", "Use superpowers for the design.")
+        # The intent's input changes, so the step runs again in the package and writes design.md itself.
+        self.put("context.md", SCOPE + "\nArchived reports export too.\n", slug)
+        text, fields = self.step(slug, step="intent")
+        self.assertEqual(fields["visit"], "2/3")
+        self.put("design.md", DESIGN_BODY, slug)
+        text, fields = self.play(slug, text=self.next(slug)[1], stop="spec-review")
+        # design.md loses an owner after its step: the gate checks the intent step again.
+        (self.pkg(slug) / "design.md").write_bytes(DESIGN_BODY.replace(" (user)", "").encode("utf-8"))
+        text, fields = self.step(slug, step="spec")
+        spec = self.pkg(slug) / "spec" / (slug + ".md")
+        spec.write_bytes(spec.read_bytes() + b"\n- Archived reports keep their export button.\n")
+        text, fields = self.step(slug, step="spec-check")
+        self.read_spec(slug, fields, [])
+        text, fields = self.step(slug, state="wait-gate", step="spec-review")
+        code, out = self.approve(text, slug, gate="spec-review", expect=4)
+        self.assertIn("error=artifact_checks_failed:intent:", out)
+        self.assertIn("decision_missing_owner:D1", out)
+
+    def reread_after_a_design_change(self, slug):
+        """A changed design.md while the spec flow waits: the spec is written again (it keeps citing Q1),
+        and its reader runs again; returns the spec-check card of the new visit."""
+        design = self.pkg(slug) / "design.md"
+        design.write_bytes(design.read_text(encoding="utf-8").replace("Rows are streamed.", "Rows are buffered.")
+                           .encode("utf-8"))
+        text, fields = self.step(slug, step="spec")
+        spec = self.pkg(slug) / "spec" / (slug + ".md")
+        spec.write_bytes(spec.read_text(encoding="utf-8").replace("(source: D1)", "(source: D1, D2)").encode("utf-8"))
+        text, fields = self.step(slug, step="spec-check")
+        self.assertEqual(fields["visit"], "2/3")
+        return fields
+
+    def test_a_cited_question_keeps_its_id_after_a_design_change(self):
+        # The spec cites Q1, the user's answer to "Which file format?". The design changes and the new
+        # reader asks something else: that question is Q2, and Q1 still names the answered one.
+        slug = "keepq"
+        code, text = self.start(flow="spec", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, stop="spec-check")
+        self.read_spec(slug, fields, ["Which file format?"])
+        (self.pkg(slug) / "spec" / (slug + ".md")).write_bytes(TWO_AC_SPEC.encode("utf-8"))  # AC2 cites Q1
+        seq = self.ask_the_user(slug, "Which file format?", "CSV, please.")
+        self.sdlc_ok("check-resolve", "--slug", slug, "--id", "Q1", "--pile", "theirs",
+                     "--resolution", "The file is CSV.", "--answer-seq", str(seq))
+        text, fields = self.step(slug, state="wait-gate", step="spec-review")
+        fields = self.reread_after_a_design_change(slug)
+        self.read_spec(slug, fields, ["Which time zone?"])
+        check = textio.read_json(self.pkg(slug) / "spec" / (slug + ".check.json"))
+        self.assertEqual([(q["id"], q["question"], q["pile"], q["resolution"], q["answer_seq"])
+                          for q in check["questions"]],
+                         [("Q1", "Which file format?", "theirs", "The file is CSV.", seq),
+                          ("Q2", "Which time zone?", None, None, None)])
+        self.assertEqual([q.get("visit") for q in check["questions"]], [1, 2])
+        self.sdlc_ok("check-resolve", "--slug", slug, "--id", "Q2", "--pile", "minor",
+                     "--resolution", "Times are UTC.")
+        text, fields = self.step(slug, state="wait-gate", step="spec-review")
+        self.assertIn('settled_theirs={"id": "Q1", "question": "Which file format?"', text)
+        self.assertIn('settled_minor={"id": "Q2", "question": "Which time zone?"', text)
+        self.approve(text, slug, gate="spec-review")
+        text, fields = self.play(slug, text=self.next(slug)[1])
+        self.assertEqual(fields["state"], "complete", text)
+        # The author's calls come from every visit's questions: here the minor Q2 (Q1 was the user's answer).
+        self.assertEqual(self.author_calls(self.cards[(slug, "claim")]),
+                         [("D2", "design.md"), ("Q2", "spec/%s.check.json" % slug)])
+
+    def test_an_open_question_of_an_old_visit_is_dropped_and_its_id_not_reused(self):
+        slug = "dropq"
+        code, text = self.start(flow="spec", work_type="feature", runtime="codex", work_id=slug)
+        text, fields = self.play(slug, text=text, stop="spec-check")
+        self.read_spec(slug, fields, ["Which file format?", "Which delimiter?"])
+        self.sdlc_ok("check-resolve", "--slug", slug, "--id", "Q1", "--pile", "minor", "--resolution", "CSV.")
+        # Q2 is still open when the design changes: the new visit drops it, and its id stays unused.
+        fields = self.reread_after_a_design_change(slug)
+        self.read_spec(slug, fields, ["Which time zone?"])
+        check = textio.read_json(self.pkg(slug) / "spec" / (slug + ".check.json"))
+        self.assertEqual([(q["id"], q["question"], q["pile"]) for q in check["questions"]],
+                         [("Q1", "Which file format?", "minor"), ("Q3", "Which time zone?", None)])
+        self.assertEqual(check["issued"], 3)
+        # A criterion citing the dropped Q2 names an unknown source.
+        spec = self.pkg(slug) / "spec" / (slug + ".md")
+        spec.write_bytes(spec.read_text(encoding="utf-8").replace("(source: D1, D2)", "(source: Q2)").encode("utf-8"))
+        self.sdlc_ok("check-resolve", "--slug", slug, "--id", "Q3", "--pile", "minor", "--resolution", "UTC.")
+        text, fields = self.step(slug, state="wait-gate", step="spec-review")
+        code, out = self.approve(text, slug, gate="spec-review", expect=4)
+        self.assertIn("ac_unknown_source:AC1:Q2", out)
 
     def approved_spec(self, slug) -> Path:
         source = self.tmp / ("approved-%s.md" % slug)

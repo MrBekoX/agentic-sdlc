@@ -201,6 +201,23 @@ class TestValidate(unittest.TestCase):
                                  overrides=[(key, "workflow", "the user said: use the workflow engine")])
                     self.assertEqual(strategy.validate(asked, _flow("feature"), state), [])
 
+    def test_an_explicit_request_runtime_runs_no_engine_by_default_on_any_key(self):
+        # ZCode's workflow runs only on the user's explicit request: a default `workflow` entry is refused
+        # on every key there, not only on the loop's draft keys. On a native row only the draft keys are.
+        message = "an engine runs only on the user's explicit request (an override with a reason)"
+        caps = _caps(workflow="yes")
+        for runtime, refused in (("zcode", True), ("claude", False)):
+            for key in ("implement", "security"):
+                with self.subTest(runtime=runtime, key=key):
+                    forced = _map("feature", runtime, caps)
+                    forced["entries"][key] = {"mechanism": "workflow", "reason": "a hand edit", "source": "default"}
+                    errors = strategy.validate(forced, _flow("feature"), _state(runtime=runtime))
+                    self.assertEqual(any(e.startswith("/entries/%s:" % key) and message in e for e in errors),
+                                     refused, errors)
+                    asked = _map("feature", runtime, caps,
+                                 overrides=[(key, "workflow", "the user said: use the workflow engine")])
+                    self.assertEqual(strategy.validate(asked, _flow("feature"), _state(runtime=runtime)), [])
+
     def test_mandated_keys_never_main(self):
         for key in ("draft.critic", "security", "audit", "quality-review"):
             with self.subTest(key=key):
