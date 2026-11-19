@@ -12,8 +12,8 @@ For the component reference see [`plugin-readme.md`](./plugin-readme.md); for ru
 
 `using-agentic-sdlc` is the session-local router. Before acting, it asks which AGENTIC-SDLC skill owns the current prompt and chooses the **smallest sufficient skill**.
 
-- A focused skill directly matches the intent → route to that skill.
-- The intent spans the full SDLC envelope, **or** touches production-impacting areas (auth, payment, database migrations, API contracts, permissions, user data, tokens/sessions, RLS) → escalate to `agentic-sdlc-pipeline`.
+- The intent spans the full SDLC envelope, **or** asks to build, change, fix or refactor code on a production-impacting surface (auth, payment, database migrations, API contracts, permissions, user data, tokens/sessions, RLS) → escalate to `agentic-sdlc-pipeline`. The router checks this before the focused routes; the surface, not the size of the change, decides.
+- Otherwise, a focused skill that directly matches the intent → route to that skill.
 - The user asks *which skill to use*, *how to route*, or *whether scope has shifted* → stay in `using-agentic-sdlc`.
 
 `agentic-sdlc-pipeline` is the **escalation path, not the default**. Focused skills must not call it unless the user is intentionally escalating to the full flow.
@@ -70,7 +70,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 
 - **Purpose:** full-envelope SDLC orchestrator for production-impacting, end-to-end work.
 - **Should trigger:** user asks for end-to-end implementation with spec, plan, TDD, tests, security review, PR-ready diff; production-impacting areas (auth, payment, DB migration, API contract, permissions, user data, token/session, RLS).
-- **Should NOT trigger:** narrow feature/fix/test/spec/plan/refactor/review/audit requests; as the default for every implementation question.
+- **Should NOT trigger:** narrow test/spec/plan/review/audit requests, and feature/fix/refactor requests off the high-risk surfaces; as the default for every implementation question.
 - **Produces:** approved `docs/agentic-sdlc/specs/<work_id>.md` + `docs/agentic-sdlc/plans/<work_id>.md`, implementation, tests, a TDD evidence file, security findings, final implementation report.
 - **Delegates to:** the `dispatch-strategy` skill (once, at kickoff, before Step 1) and the `completion-claim-gate` skill; the `spec-plan-draft` workflow (Claude Code); the `context-analyst`, `security-reviewer` and `implementation-auditor` agents. Steps 8–13 run from the selected work-type core file of `root-cause-fix`/`feature-build`/`safe-refactor`/`test-authoring`; no focused skill is invoked.
 - **Contracts:** all of `00`–`10`.
@@ -97,17 +97,17 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 
 - **Purpose:** build a new feature or endpoint in small, reversible, convention-respecting steps.
 - **Should trigger:** "add/build a new feature, endpoint, screen, flow, or capability"; focused new functionality when the full pipeline envelope has **not** been requested.
-- **Should NOT trigger:** bug/root-cause fixes (→ `root-cause-fix`); test-only work (→ `test-authoring`); behavior-preserving refactors (→ `safe-refactor`); full SDLC envelope requests (→ `agentic-sdlc-pipeline`); steps inside an active `agentic-sdlc-pipeline` run (the pipeline reads this skill's work-type core file).
-- **Produces:** implemented feature, tests, security notes, final report.
+- **Should NOT trigger:** bug/root-cause fixes (→ `root-cause-fix`); test-only work (→ `test-authoring`); behavior-preserving refactors (→ `safe-refactor`); full SDLC envelope requests (→ `agentic-sdlc-pipeline`); steps inside an active `agentic-sdlc-pipeline` run (the pipeline reads this skill's work-type core file); work on a high-risk surface (→ `agentic-sdlc-pipeline`).
+- **Produces:** a saved, `--strict`-validated `docs/agentic-sdlc/specs/<work_id>.md` and `plans/<work_id>.md`; implemented feature, tests, security notes, final report.
 - **Delegates to:** `context-analyst` for per-layer scope mapping; `dispatch-strategy` for exploration/verification fan-out; `implementation-control` for pre-final audit; `completion-claim-gate` before success claims.
 - **Contracts:** `01`, `02`, `03`, `04`, `05`, `06`, `07`, `08`, `09`, `10`.
 
 ### `root-cause-fix`
 
 - **Purpose:** find the root cause of a bug or failing behavior and fix it with a regression test.
-- **Should trigger:** "fix a bug / error / broken behavior / failing test / production issue / incident / regression"; "find and fix / root cause / null reference / webhook / expired-token failures".
-- **Should NOT trigger:** new features (→ `feature-build`); pure refactors (→ `safe-refactor`); received review feedback (→ `feedback-triage`); steps inside an active `agentic-sdlc-pipeline` run (the pipeline reads this skill's work-type core file).
-- **Produces:** a minimal fix, regression test, test output, security pass, final report.
+- **Should trigger:** "fix a bug / error / broken behavior / failing test / production issue / incident / regression"; "find and fix / root cause / null reference / webhook failures".
+- **Should NOT trigger:** new features (→ `feature-build`); pure refactors (→ `safe-refactor`); received review feedback (→ `feedback-triage`); steps inside an active `agentic-sdlc-pipeline` run (the pipeline reads this skill's work-type core file); work on a high-risk surface (→ `agentic-sdlc-pipeline`).
+- **Produces:** a saved, `--strict`-validated `docs/agentic-sdlc/specs/<work_id>.md` and `plans/<work_id>.md`; a minimal fix, regression test, test output, security pass, final report.
 - **Delegates to:** `debugger`, `context-analyst`, `dispatch-strategy`, `security-audit`, `implementation-control`, `completion-claim-gate`.
 - **Contracts:** `01`, `02`, `03`, `05`, `06`, `07`, `08`, `10`.
 
@@ -115,7 +115,7 @@ Each card lists: **purpose · should trigger · should NOT trigger · produces �
 
 - **Purpose:** improve structure while preserving behavior, guarded by characterization tests.
 - **Should trigger:** "refactor / restructure / clean up / simplify / improve readability / reduce duplication / change architecture without changing behavior"; requests requiring characterization tests and approval for broad scope.
-- **Should NOT trigger:** bug fixes (→ `root-cause-fix`); new features (→ `feature-build`); test-only work (→ `test-authoring`); steps inside an active `agentic-sdlc-pipeline` run (the pipeline reads this skill's work-type core file).
+- **Should NOT trigger:** bug fixes (→ `root-cause-fix`); new features (→ `feature-build`); test-only work (→ `test-authoring`); steps inside an active `agentic-sdlc-pipeline` run (the pipeline reads this skill's work-type core file); work on a high-risk surface (→ `agentic-sdlc-pipeline`).
 - **Produces:** restructured code, proof behavior is unchanged (tests green before and after), remaining risks.
 - **Delegates to:** `software-architect`/`context-analyst` for per-module characterization; `dispatch-strategy` for multi-file fan-out; `implementation-control` for pre-final audit.
 - **Contracts:** `01`, `04`, `05`, `06`, `07`, `08`, `10`.
@@ -248,7 +248,7 @@ Standalone `spec-authoring` / `plan-authoring` may still use `spec-plan-draft` a
 
 ```text
 End-to-end spec + plan + TDD + tests + security + final audit + PR readiness?
-   OR production-impacting / auth / payment / DB migration / API contract / permissions / user data / tokens / RLS?
+   OR build / change / fix / refactor on auth / payment / DB migration / API contract / permissions / user data / tokens / RLS?
    YES -> agentic-sdlc-pipeline
    NO  -> go to focused-work ladder
 ```

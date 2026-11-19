@@ -115,6 +115,8 @@ AGENTIC_BRANCH_GUARD_BLOCK=true
 
 Unknown local state remains nonblocking unless a protected destination is independently known, for example `HEAD:refs/heads/main`. This includes unavailable Git, nonrepositories, exhausted read budgets, command-supplied Git environment/include/path overrides and unsupported expansions. A tag source with an unqualified destination has an unknown remote namespace; use an explicit `refs/heads/` or `refs/tags/` destination. The guard does not connect to a remote to resolve uncertainty. See [push resolution boundaries](../hooks/README.md) for details.
 
+One exception: a git alias the guard cannot resolve (past 32 lookups or 4 seconds per command, defined in a config the call does not use, or past the resolver's work budget) is treated as a possible commit or push to a protected branch, on any branch. It warns, and is denied under `AGENTIC_BRANCH_GUARD_BLOCK=true`.
+
 Very large configured mapping queries can also exhaust the documented matching-work budget. Such a query remains unresolved rather than gaining a guessed upstream or same-name destination; later independently known explicit protected destinations still warn or deny. This client-side backstop preserves fail-open handling for unknown queries.
 
 ## Completion Claim Guard Only Warns
@@ -135,7 +137,7 @@ This is the default in Claude Code for `flow-order-guard.mjs` and `flow-step-gua
 AGENTIC_FLOW_GATE_BLOCK=true
 ```
 
-The flow guards re-derive evidence from the current transcript, validated `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/` artifacts, real tool calls, and real commands. Prose such as "I ran the gate" does not satisfy a required step. A source file written through `Bash` or `PowerShell` (`sed -i`, a redirect, a heredoc, `tee`) is an edit like a `Write`. At Stop only the specs and plans this session wrote count: after resuming work whose artifacts an earlier session saved, save them again before the warning clears.
+The flow guards re-derive evidence from the current transcript, validated `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/` artifacts, real tool calls, and real commands. Prose such as "I ran the gate" does not satisfy a required step. A source file written through `Bash` or `PowerShell` (`sed -i`, a redirect, a heredoc, `tee`) is an edit like a `Write`; so is a shell write to a source-extension file outside the project (`cat > /tmp/probe.py <<'EOF'`). PowerShell cmdlet writes (`Set-Content`, `Out-File`) are not recognised. At Stop only the specs and plans this session wrote count: after resuming work whose artifacts an earlier session saved, save them again before the warning clears.
 
 `flow-step-guard.mjs` also warns when an `agentic-sdlc-pipeline` turn ends on the `dispatch-strategy` decision: the pipeline skill was invoked in the current turn (a `Skill` call or a slash-command start), the turn's last top-level tool call is that `Skill` call, and the final assistant text is known and contains no `?`. `AGENTIC_FLOW_GATE_BLOCK=true` blocks it with the same reason; a missing-step finding takes precedence and silences it.
 
@@ -160,6 +162,8 @@ The scanners never print secret values. If a warning is false positive:
 - recursive `rm` forms such as `rm -r`, `rm -rf`, `rm --recursive`, `/bin/rm -rf`, `sudo rm -rf`, `sudo FOO=bar rm -rf`, `command rm -rf`, `env FOO=bar rm -rf`, and `env -u FOO rm -rf`
 - `Remove-Item -Recurse`, common aliases such as `ri`/`del`/`rd`/`rmdir`, and simple `powershell`/`pwsh -Command` wrappers
 - the same operations spelled with a unique long-option prefix (`rm --rec`, `git reset --ha`, `git clean --fo`), `git clean` under `clean.requireForce=false` or a `clean.requireForce` the guard cannot read, and a git alias that expands to one of them
+
+A here-document body is read as commands, by this guard and by the git guards, so `cat > notes.md <<EOF` whose text mentions a recursive delete or a push to `main` can be denied. Only a whole command of one exact shape keeps its body out: `cat > PATH <<'EOF'`, `cat >> PATH <<'EOF'`, `cat <<'EOF' > PATH`, `cat <<'EOF' >> PATH`, `tee PATH <<'EOF'`, or `git commit -F - <<'EOF'`. The shape needs a quoted delimiter, a plain relative `PATH`, and nothing before the opener or after the closing line, and it never applies under the PowerShell tool. Otherwise write the file with the file-write tool.
 
 Use a scoped, reviewed command and get explicit approval for destructive cleanup.
 
