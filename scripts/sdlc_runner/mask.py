@@ -337,7 +337,7 @@ def line_matches(line: str, patterns) -> list:
     return out
 
 
-def _mask_quoted_passwords(line: str, patterns) -> str:
+def _redact_quoted_passwords(line: str, patterns) -> str:
     """Port of `maskQuotedPasswords`: a quoted password-literal value is masked up to its closing quote."""
     p = next((pattern for pattern in patterns if pattern.label == "password-literal"), None)
     v = p.value if p is not None else None
@@ -372,7 +372,7 @@ def _mask_quoted_passwords(line: str, patterns) -> str:
 
 
 def _redact_line(line: str, patterns) -> str:
-    redacted = _mask_quoted_passwords(line, patterns)
+    redacted = _redact_quoted_passwords(line, patterns)
     matches = None  # recomputed only after a pass changed the line
     for index, p in enumerate(patterns):
         if matches is None:
