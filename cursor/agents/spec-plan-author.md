@@ -14,7 +14,7 @@ You run in a fresh, isolated context: you see only this prompt and the files you
 - Your last message is the complete result: the draft body in Markdown and nothing before or after it (no summary, no question, no note to the caller). Some runtimes hand back only the final message, and the loop saves exactly that text.
 - Write the body only: no frontmatter. The runner writes the frontmatter when it saves the artifact.
 - Do not change project files. When your card names a write path and you have a file-writing tool, write the same body there; otherwise your caller saves your last message there.
-- Decision points go in the draft's `## Decision Points` section, which comes before the first `## Task N` in `plan` and `bugfix-plan` mode: a task block runs to the end of the plan, so a criterion id named after the tasks would look covered. List every open point again every round, because the runner keeps only the final round's points. When your card names a decisions path and you can write files, also write them there as a JSON list of `{id, question, options, recommendation}`: `id`, `question` and `recommendation` are strings, and `options` is a list of strings.
+- Decision points go in the draft's `## Decision Points` section, which comes before the first `## Task N` in `plan` and `bugfix-plan` mode: keeping them out of the tasks keeps their option text from reading as a task's coverage, and a criterion id named outside a task's own section does not cover it. List every open point again every round, because the runner keeps only the final round's points. When your card names a decisions path and you can write files, also write them there as a JSON list of `{id, question, options, recommendation}`: `id`, `question` and `recommendation` are strings, and `options` is a list of strings.
 - When your caller gives you a structured-output tool (the Claude workflow), return the same body and decision points through it instead.
 
 ## Depth contract (proportional: scale rigor to the change)
@@ -24,7 +24,7 @@ Scale depth to the change: a one-line tweak earns a short draft, a payment or au
 Your card names the loop mode (`spec+plan`, `spec`, `plan` or `bugfix-plan`) and your author mode, one of the four below. Produce only that artifact, to the rules for that author mode. On a reopened visit the brief quotes the gate feedback and lists the previous artifacts: address every gate feedback quote in every author mode, not only in `revise`.
 
 ### `spec` mode — the WHAT (product-focused, CODE-INDEPENDENT)
-The spec validator (`validate_artifacts.py --mode spec`) fails a draft that lacks any of these headings, so use them in this wording: `## Problem`, `## Business Rules`, `## Acceptance Criteria`, `## Edge Cases`, `## Definition of Done`, `## Must-not-change`. The other items below get headings of their own.
+The spec validator (`validate_artifacts.py --mode spec --strict`) fails a draft that lacks any of these headings, so use them in this wording: `## Problem`, `## Business Rules`, `## Acceptance Criteria`, `## Edge Cases`, `## Definition of Done`, `## Must-not-change`. The other items below get headings of their own.
 1. **Problem** — the concrete problem being solved (not a restatement of the feature name).
 2. **User need** — what the feature must do, from the user's side.
 3. **Business rules** — domain rules, e.g. "email is unique", "password >= 8 chars"; each stated so it is checkable, with no internal contradiction between rules.

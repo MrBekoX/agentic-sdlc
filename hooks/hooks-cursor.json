@@ -23,7 +23,7 @@
       {
         "command": "node -e \"if(!process.env.CURSOR_PLUGIN_ROOT){process.stderr.write('error=cursor_plugin_root_unset');process.exit(1)}const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','cursor-launch.mjs');const h=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','scan-write.mjs');void h;process.argv[1]=p;process.argv.push('--event','preToolUse','--handler','scan-write.mjs');import(require('node:url').pathToFileURL(p).href)\"",
         "timeout": 15,
-        "matcher": "Write|Edit|StrReplace|ApplyPatch|Delete"
+        "matcher": "Write|Edit|StrReplace|ApplyPatch"
       },
       {
         "command": "node -e \"if(!process.env.CURSOR_PLUGIN_ROOT){process.stderr.write('error=cursor_plugin_root_unset');process.exit(1)}const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','cursor-launch.mjs');const h=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'hooks','flow-order-guard.mjs');void h;process.argv[1]=p;process.argv.push('--event','preToolUse','--handler','flow-order-guard.mjs');import(require('node:url').pathToFileURL(p).href)\"",

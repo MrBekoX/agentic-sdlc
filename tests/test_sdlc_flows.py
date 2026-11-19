@@ -78,6 +78,9 @@ FLOW_STEPS = {flow_id: default_steps(flow_id) for flow_id in ("feature", "full",
 LOOP_STEPS = default_steps("feature", options=("loop",))
 BUGFIX_LOOP_STEPS = default_steps("bugfix", options=("loop",))
 SCOPE = "# Context\n\n## Scope Lock\n\nOnly the report page and its new export.\n"
+# The auditor's decision is the line under `## Final Decision`: the implement flows' audit step is done
+# only with `allow-final` there (audit SK-5: a report without it once completed the step).
+AUDIT_REPORT = "# Implementation audit\n\nEvery task is done.\n\n## Overall Status\nPASS\n\n## Final Decision\nallow-final\n"
 RUN_LINE = r"run_seq=\d+ exit=%d valid=yes reason=\S+ chain=[0-9a-f]{12}$"
 DECISION = {"id": "DP1", "question": "CSV only?", "options": ["CSV", "CSV and JSON"], "recommendation": "CSV"}
 # runexec._windows_command_line: `"<comspec>" /d /s /c ""<shim>" <args>"` for a Windows .cmd launcher.
@@ -257,7 +260,7 @@ class FlowCase(LoopCase):
 
     def audit_and_claim(self, slug):
         """The audit report (its resolver_ok and GREEN checks are the runner's), then the claim."""
-        self.put("evidence/%s.audit.md" % slug, "# Implementation audit\n\nEvery task is done.\n", slug)
+        self.put("evidence/%s.audit.md" % slug, AUDIT_REPORT, slug)
         text, fields = self.step(slug, step="claim")
         self.put("evidence/%s.claim.md" % slug, "# Completion claim\n\nDone, with the evidence above.\n", slug)
         return self.step(slug, state="complete")
@@ -334,7 +337,7 @@ class FlowCase(LoopCase):
         elif step == "security":
             self.security_pass(slug)
         elif step == "audit":
-            self.put("evidence/%s.audit.md" % slug, "# Implementation audit\n\nEvery task is done.\n", slug)
+            self.put("evidence/%s.audit.md" % slug, AUDIT_REPORT, slug)
         elif step == "claim":
             self.put("evidence/%s.claim.md" % slug, "# Completion claim\n\nDone, with the evidence above.\n", slug)
         else:

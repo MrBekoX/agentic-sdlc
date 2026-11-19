@@ -1971,7 +1971,9 @@ class TestFindingsRecord(HistoryTestCase):
 
 CI_WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 SOURCE_STEPS = [
-    ("Version consistency", "python3 scripts/bump_version.py --release-check"),
+    # RL-4: every run checks the declarations; only a release run also checks the CHANGELOG.
+    ("Version consistency", "python3 scripts/bump_version.py --check"),
+    ("Release consistency", "python3 scripts/bump_version.py --release-check"),
     ("Manifest coverage", "python3 scripts/bump_version.py --audit"),
     ("Static checks", "python3 scripts/check_all.py"),
     ("Skill harness", "python3 tests/skills/harness.py"),

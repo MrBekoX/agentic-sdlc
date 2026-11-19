@@ -13,15 +13,15 @@
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation, resolveBranchState, runValidator } from './flow-evidence.mjs';
+import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation, resolveBranchState, workIdOf, runValidator } from './flow-evidence.mjs';
 import {
   readRolloutSignals, readRolloutRuns, splitBr6Statements, trailingOrRun, isVersionOrHelpOnly, hasUnquotedPipe,
   hasUnquotedBackground, inSafeBr6Grammar, hasUnmodeledShellSyntax, isBr6RunnerStatement, readRollout,
-  readOwnerSignals, COMPLETION_CLAIM, COMPLETION_NEGATED,
+  readOwnerSignals, completionClaimed,
 } from './codex-rollout.mjs';
 
 export const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
-export { blockFlag };
+export { blockFlag, workIdOf };
 
 // Opt-in strict evidence (AGENTIC_FLOW_STRICT_EVIDENCE), read at call time. Default off: with the flag
 // unset the tests step keeps the default shape + exit0 + BR6-attribution path below.
@@ -122,14 +122,8 @@ export function findArtifactFile(cwd, role, req, workId) {
   return null;
 }
 
-// Reduce a rollout edit-target path to a bare work-id base-name; reject traversal/empty.
-export function workIdOf(target) {
-  const id = String(target).replace(/\\/g, '/').split('/').pop()
-    .replace(/\.md$/i, '')
-    .replace(/[^A-Za-z0-9._-]/g, '');
-  if (!id || id.includes('..')) return null;
-  return id;
-}
+// workIdOf (a rollout edit-target path -> bare work-id base-name; traversal/empty rejected) now lives in
+// flow-evidence.mjs and is re-exported above, so the Claude Stop scoping (FH-4) uses the same rule.
 
 // The merged Codex-observable stop:block step set across artifact-bearing flows (BR4a): a flow
 // qualifies if it has at least one `artifact` evidence step; from each qualifier take stop==="block"
@@ -238,7 +232,8 @@ export function deriveFlowEvidenceWith(signals, req, cwd, runs) {
     if (!workIds.length) return { flow: false, workIds: [], missingBlockSteps: [] };
 
     // Obligation gate (BR5): no in-session NON-test source edit -> active flow, no step obligation.
-    const sourceEdited = signals.editTargets.some((t) => isSourceFile(t, req));
+    // FH-2: a patch_apply_end target is absolute, so it is classified relative to the project.
+    const sourceEdited = signals.editTargets.some((t) => isSourceFile(t, req, cwd));
     if (!sourceEdited) return { flow: true, workIds, missingBlockSteps: [] };
 
     const steps = mergedBlockSteps(req);
@@ -295,7 +290,7 @@ export function deriveStrictEvidence(rolloutPath, cwd) {
   try { if (typeof req.testCommand === 'string') re = new RegExp(req.testCommand, 'i'); } catch { re = null; }
 
   const workIds = activeWorkIds(signals, req);
-  const sourceEdited = signals.editTargets.some((t) => isSourceFile(t, req));
+  const sourceEdited = signals.editTargets.some((t) => isSourceFile(t, req, cwd));
 
   let evidence;
   if (!workIds.length || (sourceEdited && !(re && signals.commands.some((c) => isRealRunnerInvocation(c, re))))) {
@@ -312,7 +307,7 @@ export function deriveStrictEvidence(rolloutPath, cwd) {
   }
 
   let completion = 'n/a';
-  if (workIds.length && COMPLETION_CLAIM.test(roll.finalMessage) && !COMPLETION_NEGATED.test(roll.finalMessage)) {
+  if (workIds.length && completionClaimed(roll.finalMessage)) { // FH-8: the guards' claim reading
     if (owner.phase === 'house') completion = roll.gateMarkerPresent ? 'satisfied' : 'unsatisfied';
     else if (owner.phase === 'superpowers') completion = roll.gateMarkerPresent || owner.verificationDelivered ? 'satisfied' : 'unsatisfied';
     else completion = 'unsatisfied';

@@ -65,12 +65,33 @@ PLACEHOLDER_RE = re.compile(r"\b(TODO|TBD|FIXME|XXX)\b")
 # narrow so high-entropy prose (build hashes, correlation ids) does not fire.
 # Provider-prefix tokens mirror hooks/secret-patterns.mjs (HIGH) so this validator and the
 # commit/write guards recognize the same modern formats — keep the two lists in sync.
+#
+# An `api_key` / `secret` / `password` label fires only with a value after it:
+#   * after `=`, any value: an optional quote, then a character that is neither a blank nor a quote
+#     (`password=` + a word is an assignment, whatever the word);
+#   * after `:`, a quoted value of 6+ characters (`"..."` or `'...'`, blanks allowed); a YAML block opener
+#     (`|` or `>`, with its chomping or indent indicator, and nothing else on the line), whose value is the
+#     indented lines below; or an unquoted run of 6+ characters without a blank, a quote, a backtick, `<`,
+#     `>` or `;` (a backtick before it is allowed) that is not a single prose word. A prose word is at most
+#     three hyphen-joined parts, each lowercase or Capitalized and at most 24 letters (`non-empty`,
+#     `X-Api-Key`), then optional sentence punctuation. Case is read as written, whatever the label's flag.
+# So a label in prose ("Password: must be non-empty", "Client secret: never logged", "Secret: per-tenant")
+# is no secret, and that exemption covers nothing else: a mixed-case or all-caps value and a passphrase of
+# four or more parts fire. Every alternative reads its own bounded run, and the word test is unambiguous
+# (each part's first letter decides its case, each hyphen starts the next part), so the scan stays linear.
+_SECRET_RUN = r"""[^\s"'`<>;]"""
+_SECRET_WORD_PART = r"(?:[a-z]{1,24}|[A-Z][a-z]{0,23})"
+_SECRET_WORD = r"(?-i:%s(?:-%s){0,2})[.,:)]*(?!%s)" % (_SECRET_WORD_PART, _SECRET_WORD_PART, _SECRET_RUN)
+_SECRET_VALUE = (r"""(?:\s*=\s*["'`]?[^\s"'`]"""
+                 r"""|\s*:\s*(?:"[^"\n]{6}|'[^'\n]{6}|[|>][-+1-9]{0,2}\s*$|`?(?!%s)%s{6}))"""
+                 % (_SECRET_WORD, _SECRET_RUN))
 SECRET_PATTERNS = [
-    re.compile(r"api[_-]?key\s*[:=]", re.IGNORECASE),
-    re.compile(r"secret\s*[:=]", re.IGNORECASE),
-    re.compile(r"password\s*[:=]", re.IGNORECASE),
+    re.compile(r"api[_-]?key" + _SECRET_VALUE, re.IGNORECASE),
+    re.compile(r"secret" + _SECRET_VALUE, re.IGNORECASE),
+    re.compile(r"password" + _SECRET_VALUE, re.IGNORECASE),
     re.compile(r"token\s*[:=]\s*\S{12,}", re.IGNORECASE),
-    re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----"),
+    # PKCS#8, RSA/EC/OPENSSH and an armored PGP secret key (`... PRIVATE KEY BLOCK-----`).
+    re.compile(r"-----BEGIN[A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
     re.compile(r"(?:gh[posru]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,})"),
     re.compile(r"(?:xox[baprs]|xapp)-[A-Za-z0-9-]{10,}", re.IGNORECASE),
@@ -78,6 +99,15 @@ SECRET_PATTERNS = [
     re.compile(r"AIza[0-9A-Za-z_-]{35}"),
     re.compile(r"sk-(?:proj-)?[A-Za-z0-9]{20,}"),
     re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
+    # The provider formats hooks/secret-patterns.mjs added (SW-1/SW-2), copied with their left anchor: a
+    # temporary AWS key id, a GitLab, npm or Hugging Face token, an Anthropic key, and the OpenAI project,
+    # service-account and admin keys, whose base64url body holds `-` and `_`.
+    re.compile(r"(?<![A-Za-z0-9])ASIA[0-9A-Z]{16}"),
+    re.compile(r"(?<![A-Za-z0-9])glpat-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"(?<![A-Za-z0-9])npm_[A-Za-z0-9]{36}"),
+    re.compile(r"(?<![A-Za-z0-9])hf_[A-Za-z]{34}(?![A-Za-z0-9_])"),
+    re.compile(r"(?<![A-Za-z0-9])sk-ant-(?:api|admin|oat|ort)\d{2}-[A-Za-z0-9_-]{32,}"),
+    re.compile(r"(?<![A-Za-z0-9])sk-(?:proj|svcacct|admin|None)-[A-Za-z0-9_-]{20,}"),
 ]
 
 # A heading line: one-or-more '#' then text. We also accept the task forms below.
@@ -95,21 +125,35 @@ HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$")
 # `Q<n>`, feedback record `F<n>`) has 1 to ID_DIGITS digits. A longer run of digits is no id, so it is
 # reported like any other malformed token instead of reaching int(), which refuses more than 4300 digits.
 ID_DIGITS = 6
-TASK_HEADING_RE = re.compile(r"^\s{0,3}#{2,4}\s*Task\b", re.IGNORECASE)
+# A task heading is "Task" followed by an id, a placeholder letter, punctuation or nothing ("## Task 3",
+# "## Task T2 - ...", "## Task N: <title>", "## Task: ..."). "Task" followed by a word ("## Task list",
+# "## Task overview") names a section about the tasks, not a task.
+TASK_HEADING_RE = re.compile(r"^\s{0,3}#{2,4}\s*Task\b(?!\s+[a-z]{2})", re.IGNORECASE)
+# The number of a "## Task 3" / "## Task T3" / "## Task #3" heading, read for the ordering check.
+# `#` separates the two whitespace runs, so no run of spaces can be split between them (linear on a long line).
+TASK_HEADING_NUMBER_RE = re.compile(r"^\s{0,3}#{2,4}\s*Task\s*(?:#\s*)?T?(\d{1,%d})\b" % ID_DIGITS, re.IGNORECASE)
 TASK_TID_RE = re.compile(r"\bT\d{1,%d}\b" % ID_DIGITS)
-TASK_TID_START_RE = re.compile(r"^[\s>*\-#]*\*{0,2}\s*(T\d{1,%d})\b" % ID_DIGITS)
+# `*` and blanks are already in the leading class, so one class run covers `**T3**` and `> * T3`.
+# A separate `\*{0,2}\s*` after the class would retry every split of a blank run (quadratic).
+TASK_TID_START_RE = re.compile(r"^[\s>*\-#]*(T\d{1,%d})\b" % ID_DIGITS)
 
 # An acceptance-criterion id: `AC1`, `AC-1`, or a grouped `AC-A1` (pipeline specs use all three).
 # `AC1` and `AC-1` name the same criterion, so ids are compared by `_ac_key`, never by spelling.
-# The group letter needs the hyphen, so a word such as `ACE2` is not an id.
-AC_ID_RE = re.compile(r"\bAC(?:-?(\d{1,%d})|-([A-Z])(\d{1,%d}))\b" % (ID_DIGITS, ID_DIGITS))
+# The group letter needs the hyphen, so a word such as `ACE2` is not an id. A dotted sub-id (`AC1.2`,
+# `AC-A1.2`) is a criterion of its own: `AC1.1` and `AC1.2` are two obligations, not two spellings of
+# `AC1`. A dot followed by a digit that does not end a sub-id (`AC1.2.3`, a sub-number longer than
+# ID_DIGITS) makes the token no id at all, so it is never read as a shorter id.
+AC_ID_RE = re.compile(r"\bAC(?:-?(\d{1,%d})|-([A-Z])(\d{1,%d}))(?:\.(\d{1,%d}))?\b(?!\.\d)"
+                      % (ID_DIGITS, ID_DIGITS, ID_DIGITS))
 
 
 def _ac_key(match):
-    """('', 1) for `AC1`/`AC-1`/`AC01`; ('A', 1) for `AC-A1`."""
+    """('', 1) for `AC1`/`AC-1`/`AC01`; ('A', 1) for `AC-A1`; ('', 1, 2) for `AC1.2`."""
     if match.group(1) is not None:
-        return ("", int(match.group(1)))
-    return (match.group(2), int(match.group(3)))
+        key = ("", int(match.group(1)))
+    else:
+        key = (match.group(2), int(match.group(3)))
+    return key if match.group(4) is None else key + (int(match.group(4)),)
 
 FILE_REF_RE = re.compile(r"\b(Create|Modify)\b", re.IGNORECASE)
 TDD_MARKER_RE = re.compile(r"\b(TDD|RED|failing test)\b", re.IGNORECASE)
@@ -147,22 +191,35 @@ def _normalize_heading(text):
 
 
 def _iter_headings(text):
-    """Yield (lineno, raw_text, normalized_text) for every markdown heading."""
-    for i, line in enumerate(text.splitlines(), start=1):
+    """Yield (lineno, raw_text, normalized_text) for every markdown heading outside a code fence.
+
+    A heading inside a fence is an example (a template pasted for reference, a `# comment` in a shell
+    snippet), so it neither stands in for a required section nor ends one.
+    """
+    lines = text.splitlines()
+    fenced = _fenced_lines(lines)
+    for i, line in enumerate(lines, start=1):
         m = HEADING_RE.match(line)
-        if m:
+        if m and i - 1 not in fenced:
             raw = m.group(1)
             yield i, raw, _normalize_heading(raw)
 
 
 def _section_body(text, start_lineno):
-    """Return the non-heading body text between a heading and the next heading."""
+    """Return the body of the section whose heading is on line `start_lineno` (1-based).
+
+    The section runs to the next heading, outside a code fence, of the same or a higher level, so a
+    `### Login` sub-heading and the bullets under it stay inside an `## Acceptance Criteria` section, and a
+    fenced `# comment` stays inside its section. `start_lineno` is a heading `_iter_headings` yields.
+    """
     lines = text.splitlines()
+    fenced = _fenced_lines(lines)
+    level = _heading_level(lines[start_lineno - 1])
     body = []
-    for line in lines[start_lineno:]:  # start_lineno is 1-based; slice skips the heading
-        if HEADING_RE.match(line):
+    for i in range(start_lineno, len(lines)):  # start_lineno is 1-based; the range skips the heading
+        if i not in fenced and HEADING_RE.match(lines[i]) and _heading_level(lines[i]) <= level:
             break
-        body.append(line)
+        body.append(lines[i])
     return "\n".join(body)
 
 
@@ -201,13 +258,10 @@ def _criterion_bullets(body):
 def _acceptance_criteria(text):
     """Return [(index, line, nested)] for each bullet of the first acceptance-criteria section.
 
-    No section means no criteria.
+    The section is the one the source check reads (`_criteria_section`: sub-headings stay inside it), and
+    a bullet in a code fence is an example, not a criterion. No section means no criteria.
     """
-    needle = REQUIRED_SPEC_SECTIONS["acceptance-criteria"]
-    for lineno, _raw, norm in _iter_headings(text):
-        if needle in norm:
-            return _criterion_bullets(_section_body(text, lineno))
-    return []
+    return _criterion_bullets(_unfenced(_criteria_section(text) or ""))
 
 
 def _unlabelled(criteria):
@@ -358,9 +412,13 @@ def check_frontmatter(text, mode):
     """Errors for the required keys of `mode`. An empty value counts as missing.
 
     An unknown status is named only when it is a plain word (`invalid_status:wip`); any other
-    value is masked, so the gate never echoes a credential pasted into the frontmatter.
+    value is masked, so the gate never echoes a credential pasted into the frontmatter. Mode `all`
+    runs the spec and the plan checks on one file, so it needs the keys of both.
     """
-    required = FRONTMATTER_REQUIRED.get(mode)
+    if mode == "all":
+        required = tuple(dict.fromkeys(FRONTMATTER_REQUIRED["spec"] + FRONTMATTER_REQUIRED["plan"]))
+    else:
+        required = FRONTMATTER_REQUIRED.get(mode)
     if not required:
         return []
     meta, errors = _frontmatter_block(text)
@@ -513,6 +571,33 @@ def _sourced_criteria(blocks):
     return found
 
 
+# The label of a criterion bullet: its first token, after the bullet mark, a task-list box and any bold,
+# italic or code marks ("- AC1: ...", "- **AC-2** ...", "1. `AC3` ...").
+AC_LABEL_PREFIX_RE = re.compile(r"(?:[-*+]|\d+\.)\s*(?:\[[ xX]\]\s*)?[*_`]*")
+
+
+def _duplicate_criterion_ids(blocks):
+    """`ac_duplicate_id:<id>` once for each id that labels two top-level bullets among `blocks`
+    (`_bullet_blocks`), named as its second bullet writes it. Two criteria under one id are one coverage
+    obligation, so a plan that names the id once would cover both and the second could go unbuilt. Only an
+    id in the label position counts, so a bullet that merely refers to another criterion ("- Note: AC1 and
+    AC2 share a fixture") is no second AC1."""
+    seen = set()
+    reported = set()
+    errors = []
+    for _index, line, nested, _text in blocks:
+        prefix = AC_LABEL_PREFIX_RE.match(line)
+        match = AC_ID_RE.match(line, prefix.end()) if prefix and not nested else None
+        if not match:
+            continue
+        key = _ac_key(match)
+        if key in seen and key not in reported:
+            errors.append(f"ac_duplicate_id:{match.group(0)}")
+            reported.add(key)
+        seen.add(key)
+    return errors
+
+
 def _source_errors(blocks, decisions, questions, counted_text, feedback=frozenset()):
     """Errors for the criteria among `blocks` (`_bullet_blocks`) that do not name a known source.
 
@@ -612,11 +697,13 @@ def check_spec(text, design_text=None, check_data=None, require_sources=False, f
                feedback_gates=None):
     """Validate a spec artifact. Returns {'errors': [...], 'warnings': [...]}.
 
-    Errors: a required section is absent.
-    Warnings: a present section is thin (<40 non-blank chars before the next
-    heading); an acceptance-criteria bullet lacks a testable marker or an `AC<n>`
-    id (the plan gate checks coverage by id, so an unlabelled criterion is one
-    it cannot check).
+    Errors: a required section is absent; two top-level criteria are labelled with one id
+    (`ac_duplicate_id:<id>`, see `_duplicate_criterion_ids`).
+    Warnings: a present section is thin (<40 non-blank chars before the next heading of its own
+    or a higher level, headings in code fences aside); an acceptance-criteria bullet lacks a
+    testable marker or an `AC<n>` id (the plan gate checks coverage by id, so an unlabelled
+    criterion is one it cannot check); the criteria section holds no id at all (`ac_none`, an
+    error with `require_sources`).
 
     With `require_sources`, every criterion (a top-level bullet of the acceptance-criteria section
     that carries an `AC<n>` id; the section runs to the next heading of its own level, see
@@ -660,9 +747,17 @@ def check_spec(text, design_text=None, check_data=None, require_sources=False, f
             warnings.append(f"untestable_criterion:{index}")
     warnings += [f"ac_missing_id:{index}" for index in _unlabelled_criteria(text)]
 
+    section = _criteria_section(text)
+    criteria_blocks = _bullet_blocks(_unfenced(section or ""))
+    errors += _duplicate_criterion_ids(criteria_blocks)
+    # A criteria section without a single id gives the plan gate nothing to check (`ac_source_empty`
+    # there). With `require_sources` (the gates that need every criterion to carry an id and a source)
+    # it is an error; otherwise a warning that --strict promotes.
+    if section is not None and not AC_ID_RE.search(_unfenced(section)):
+        (errors if require_sources else warnings).append("ac_none")
+
     if require_sources:
-        section = _criteria_section(text)
-        errors += _source_errors(_bullet_blocks(_unfenced(section or "")), _decision_numbers(design_text),
+        errors += _source_errors(criteria_blocks, _decision_numbers(design_text),
                                  _check_questions(check_data), text,
                                  _feedback_numbers(feedback_text, feedback_gates))
 
@@ -767,8 +862,11 @@ def _task_starts(lines):
         is_start = False
         if TASK_HEADING_RE.match(line):
             is_start = True
-            mtid = TASK_TID_RE.search(line)
-            if mtid:
+            mnum = TASK_HEADING_NUMBER_RE.match(line)
+            mtid = None if mnum else TASK_TID_RE.search(line)
+            if mnum:
+                number = int(mnum.group(1))
+            elif mtid:
                 number = int(mtid.group(0)[1:])
         else:
             mtid = TASK_TID_START_RE.match(line)
@@ -784,9 +882,12 @@ def _iter_task_blocks(text):
     """Split plan text into task blocks. Returns a list of (number, block_text).
 
     A task block starts at a "## Task N" heading or a line-leading "TN" marker (see
-    the detector regexes). `number` is the integer used for ordering, taken from a
-    'T\\d+' token when present, else None. Bare numbered list items and mid-prose
+    the detector regexes). `number` is the integer used for ordering, taken from the
+    heading's own number ("## Task 3", "## Task T3") or else a 'T\\d+' token, else None. Bare numbered list items and mid-prose
     task-id references are intentionally NOT task starts (they over-count real plans).
+
+    The blocks partition the plan from its first task on (the runner hashes them); the plan checks
+    read `_task_bodies`, which end each task at its section's end.
     """
     lines = text.splitlines()
     starts = _task_starts(lines)
@@ -797,6 +898,34 @@ def _iter_task_blocks(text):
         block = "\n".join(lines[line_i:end])
         blocks.append((number, block))
     return blocks
+
+
+def _task_bodies(text):
+    """[(number, body)] for each task: what the task itself holds, read by the plan checks.
+
+    `_iter_task_blocks` runs each block to the next task start, so the last one ran to the end of the
+    plan and an "AC2 is deferred" note after the tasks counted as covered. A body ends earlier, at the
+    first heading outside a code fence that closes it: for a task that starts at a heading, the next
+    heading of the same or a higher level (its own sub-headings stay inside); for a task that starts on a
+    bullet or a line of text, any heading, since a heading ends a list item or a paragraph. Text between a
+    body's end and the next task belongs to no task.
+
+    `_iter_task_blocks` itself stays a partition of the plan from its first task on: the runner hashes
+    those blocks (gates.plan_tasks), and a section after the last task must stay inside a hashed block.
+    """
+    lines = text.splitlines()
+    fenced = _fenced_lines(lines)
+    starts = _task_starts(lines)
+    bodies = []
+    for idx, (line_i, number) in enumerate(starts):
+        end = starts[idx + 1][0] if idx + 1 < len(starts) else len(lines)
+        level = _heading_level(lines[line_i]) if HEADING_RE.match(lines[line_i]) else None
+        for j in range(line_i + 1, end):
+            if j not in fenced and HEADING_RE.match(lines[j]) and (level is None or _heading_level(lines[j]) <= level):
+                end = j
+                break
+        bodies.append((number, "\n".join(lines[line_i:end])))
+    return bodies
 
 
 # The bug report of a bugfix plan: a heading that starts with the word "Bug" ("## Bug",
@@ -894,7 +1023,8 @@ def check_plan(text, spec_text, bugfix=False, own_criteria=False, design_text=No
     cannot judge coverage -> single `ac_source_missing` warning.
 
     Coverage must not pass by having nothing to check: a plan with no task block
-    warns `plan_no_tasks`, and a spec that yields no id warns `ac_source_empty`.
+    warns `plan_no_tasks`, and a spec that yields no id warns `ac_source_empty`. A task covers
+    the ids its own body names (`_task_bodies`), not ids in a section after it.
     A single criterion without an id is reported by the spec check
     (`ac_missing_id:<n>`), not here: telling a criterion bullet from a detail
     bullet is a heuristic, and this check is the strict plan gate.
@@ -928,7 +1058,7 @@ def check_plan(text, spec_text, bugfix=False, own_criteria=False, design_text=No
     text = _body(text)
     if spec_text is not None:
         spec_text = _body(spec_text)
-    blocks = _iter_task_blocks(text)
+    blocks = _task_bodies(text)
     metrics["plan_tasks"] = len(blocks)
     if not blocks:
         warnings.append("plan_no_tasks")
@@ -969,6 +1099,7 @@ def check_plan(text, spec_text, bugfix=False, own_criteria=False, design_text=No
             fenced = _fenced_lines(criteria_lines)
             unfenced = "\n".join(line for i, line in enumerate(criteria_lines) if i not in fenced)
             warnings += [f"ac_missing_id:{index}" for index in _unlabelled(_criterion_bullets(unfenced))]
+            errors += _duplicate_criterion_ids(_bullet_blocks(unfenced))
             if require_sources:
                 errors += _source_errors(_bullet_blocks(unfenced), _decision_numbers(design_text), set(), criteria,
                                          _feedback_numbers(feedback_text, feedback_gates))
@@ -1037,7 +1168,7 @@ def _read_check(path):
         return None, unreadable
     try:
         data = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):  # nesting deeper than the parser's stack is no check file either
         return None, "invalid_json"
     if not isinstance(data, dict) or not isinstance(data.get("questions", []), list):
         return None, "invalid_shape"

@@ -78,6 +78,34 @@ def matches_trigger(value, clean_name, skill_name):
     return clean_name in value or skill_name in value
 
 
+# The `skill` member of a Skill call's input JSON, once its string is complete. A quote inside another
+# member's string is escaped (`\"`), so `"skill"` followed by `:` is only ever the key itself.
+SKILL_FIELD_RE = re.compile(r'"skill"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def skill_field(partial_json):
+    """The `skill` value of a (partial) Skill input JSON, or None while it is not complete.
+
+    Only this value names the skill that fired. The whole input also holds `args`, so matching the target's
+    name anywhere in it counted a router call whose args mention the target as the target's trigger, while
+    the full-message path read the `skill` value only.
+    """
+    match = SKILL_FIELD_RE.search(partial_json or "")
+    if not match:
+        return None
+    try:
+        value = json.loads('"%s"' % match.group(1))
+    except ValueError:
+        return match.group(1)
+    return value if isinstance(value, str) else None
+
+
+def skill_matches(partial_json, clean_name, skill_name):
+    """True once the Skill input's `skill` value names this skill (`matches_trigger`)."""
+    value = skill_field(partial_json)
+    return value is not None and matches_trigger(value, clean_name, skill_name)
+
+
 def is_target_skill_read(value, skill_name):
     value = (value or "").replace("\\", "/")
     return f"skills/{skill_name}/SKILL.md" in value
@@ -120,14 +148,14 @@ def detect_trigger(lines, clean_name, skill_name):
                 d = se.get("delta", {})
                 if d.get("type") == "input_json_delta":
                     acc += d.get("partial_json", "")
-                    if pending == "Skill" and matches_trigger(acc, clean_name, skill_name):
+                    if pending == "Skill" and skill_matches(acc, clean_name, skill_name):
                         return True
                     if pending == "Read" and is_target_skill_read(acc, skill_name):
                         return True
             elif st in ("content_block_stop", "message_stop"):
                 if pending:
                     if pending == "Skill":
-                        return matches_trigger(acc, clean_name, skill_name)
+                        return skill_matches(acc, clean_name, skill_name)
                     if pending == "Read":
                         if is_target_skill_read(acc, skill_name):
                             return True
@@ -174,6 +202,9 @@ class TriggerDetector:
     def matches(self, value):
         return matches_trigger(value, self.clean_name, self.skill_name)
 
+    def skill_matches(self, partial_json):
+        return skill_matches(partial_json, self.clean_name, self.skill_name)
+
     def is_target_skill_read(self, value):
         return is_target_skill_read(value, self.skill_name)
 
@@ -204,14 +235,14 @@ class TriggerDetector:
                 d = se.get("delta", {})
                 if d.get("type") == "input_json_delta":
                     self.acc += d.get("partial_json", "")
-                    if self.pending == "Skill" and self.matches(self.acc):
+                    if self.pending == "Skill" and self.skill_matches(self.acc):
                         return True
                     if self.pending == "Read" and self.is_target_skill_read(self.acc):
                         return True
             elif st in ("content_block_stop", "message_stop"):
                 if self.pending:
                     if self.pending == "Skill":
-                        return self.matches(self.acc)
+                        return self.skill_matches(self.acc)
                     if self.pending == "Read":
                         if self.is_target_skill_read(self.acc):
                             return True

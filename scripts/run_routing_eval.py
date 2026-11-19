@@ -12,7 +12,8 @@ Eval-set JSON:
   {"scenarios": [{"prompt": "...", "expected": "mind-spark", "escalation": false}]}
 
 A scenario passes when:
-  - expected is among the routed skills, and
+  - expected is the first focused skill routed (the router's decision; a skill reached
+    only after another one does not count), and
   - unless escalation is true, agentic-sdlc-pipeline is not routed.
 
 Output: sorted key=value lines plus routing_eval=passed|failed.
@@ -291,7 +292,6 @@ def run_claude(
     captured: list[str] = []
     timed_out = False
     deadline = time.monotonic() + args.timeout
-    norm_expected = normalize_skill(expected_skill)
     try:
         while True:
             if time.monotonic() > deadline:
@@ -309,12 +309,10 @@ def run_claude(
             # skill then runs a long auditor/agent pass is not misread as a timeout. The
             # routing eval measures the route decision, not full skill execution. Only the
             # Skill/Read tool events carry route signal, so skip the per-line parse otherwise.
+            # The first focused route is the decision evaluate_route grades (the expected skill, the
+            # pipeline, or another skill that came first), so the run stops as soon as there is one.
             if "Skill" in line or "SKILL.md" in line:
-                routes = collect_claude_routes(captured)
-                if routes and (
-                    (not escalation and PIPELINE in routes)  # over-escalation: decided (fails later)
-                    or (norm_expected and norm_expected in routes)  # expected feeder reached
-                ):
+                if collect_claude_routes(captured):
                     kill_process_tree(proc)
                     break
     finally:
@@ -500,12 +498,17 @@ def run_codex_once(
 
 
 def evaluate_route(expected: str, routes: list[str], escalation: bool) -> tuple[bool, str | None]:
+    """(ok, reason): the expected skill must be the FIRST focused route. `routes` lists the focused skills in
+    the order the run reached them (`collect_claude_routes`), so a wrong first route followed by the expected
+    one is the router choosing wrong, not a pass (`expected_not_first`)."""
     expected = normalize_skill(expected)
     normalized_routes = [normalize_skill(route) for route in routes if normalize_skill(route)]
     if not escalation and PIPELINE in normalized_routes:
         return False, "over_escalated_to_pipeline"
     if expected not in normalized_routes:
         return False, "no_expected"
+    if normalized_routes[0] != expected:
+        return False, "expected_not_first"
     return True, None
 
 

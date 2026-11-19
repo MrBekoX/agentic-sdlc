@@ -54,6 +54,35 @@ jobs:
         with:
           node-version: "22"
       - name: Version consistency
+        run: python3 scripts/bump_version.py --check
+      # A VERSION change is a release whatever its branch is called: a pull request whose merge commit
+      # changes VERSION against its base (the first parent), or a push to main that changes it against
+      # the previous tip. A base this clone does not hold counts as a change, so the check runs.
+      - name: Detect a VERSION change
+        id: version_change
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base=""
+          case "$EVENT_NAME" in
+            pull_request) base="HEAD^1" ;;
+            push) base="$BEFORE"; if [ -z "${base//0/}" ]; then base="HEAD^1"; fi ;;
+          esac
+          changed=false
+          if [ -n "$base" ]; then
+            if ! git rev-parse -q --verify "$base^{commit}" > /dev/null || ! git diff --quiet "$base" HEAD -- VERSION; then
+              changed=true
+            fi
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+      # --release-check also needs an empty `## Unreleased` and a dated CHANGELOG section for VERSION,
+      # which only a release has. It runs when VERSION changes (above), for a pull request from
+      # `chore/release-<version>`, and for a manual run on such a branch or on a tag; any other pull
+      # request keeps its notes under `## Unreleased` and passes with --check above.
+      - name: Release consistency
+        if: steps.version_change.outputs.changed == 'true' || startsWith(github.head_ref, 'chore/release-') || startsWith(github.ref, 'refs/heads/chore/release-') || startsWith(github.ref, 'refs/tags/')
         run: python3 scripts/bump_version.py --release-check
       - name: Manifest coverage
         run: python3 scripts/bump_version.py --audit
@@ -87,6 +116,7 @@ jobs:
         working-directory: ${{ runner.temp }}/archive-extract/agentic-sdlc
         run: python3 scripts/bump_version.py --check 2>&1 | tee "$RUNNER_TEMP/archive-logs/archive-gate-version-check.log"
       - name: "Archive gate: release check"
+        if: steps.version_change.outputs.changed == 'true' || startsWith(github.head_ref, 'chore/release-') || startsWith(github.ref, 'refs/heads/chore/release-') || startsWith(github.ref, 'refs/tags/')
         shell: bash
         working-directory: ${{ runner.temp }}/archive-extract/agentic-sdlc
         run: python3 scripts/bump_version.py --release-check 2>&1 | tee "$RUNNER_TEMP/archive-logs/archive-gate-release-check.log"

@@ -16,16 +16,16 @@
 // delivery recorded after the phase start silences it. The no-owner, house-owned and unreadable
 // owner-scan paths keep the 5801cb9 output bytes.
 import { readStdin } from './secret-patterns.mjs';
-import { GATE_MARKER, readRollout, readOwnerSignals } from './codex-rollout.mjs';
+import { GATE_MARKER, readRollout, readOwnerSignals, completionClaimed } from './codex-rollout.mjs';
 
 const BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_COMPLETION_GATE_BLOCK || ''));
 
 // Strong, final-sounding completion claims (COPIED from completion-claim-guard.mjs — keep byte-identical).
 const CLAIM =
-  /\b(all\s+tests?\s+(pass|passing|green)|all\s+green|ready\s+to\s+(merge|ship)|ready\s+for\s+review|implementation\s+(is\s+)?complete|feature\s+complete|task\s+(is\s+)?complete|done\s+and\s+verified|fixed\s+and\s+verified|verified\s+and\s+(complete|done)|everything\s+(works|passes))\b/i;
+  /\b(?:all\s+(?:the\s+)?(?:\d+\s+)?tests?\s+(?:(?:are|have)\s+(?:now\s+)?)?(?:pass|passes|passed|passing|green)|all\s+green|ready\s+to\s+(?:merge|ship)|ready\s+for\s+review|implementation\s+(?:is\s+)?(?:now\s+)?completed?|feature\s+(?:is\s+)?completed?|task\s+(?:is\s+)?completed?|done\s+and\s+verified|fixed\s+and\s+verified|verified\s+and\s+(?:complete|done)|everything\s+(?:works|passes))\b|(?<![A-Za-zÇĞİÖŞÜçğıöşü])(?:(?:tüm|bütün)\s+(?:\d+\s+)?test(?:ler)?\s+(?:başarıyla\s+)?(?:geçti|geçiyor)|testlerin\s+(?:hepsi|tamamı)\s+(?:başarıyla\s+)?(?:geçti|geçiyor)|(?:uygulama|görev|geliştirme|özellik|düzeltme)\s+(?:başarıyla\s+)?tamamlandı|(?:birleştirmeye|incelemeye|yayına)\s+hazır|(?:düzeltildi|tamamlandı)\s+ve\s+doğrulandı|her\s+şey\s+çalışıyor)(?![A-Za-zÇĞİÖŞÜçğıöşü])/i;
 
 // Phrases that signal the work is explicitly NOT finished (COPIED — keep byte-identical).
-const NEGATED = /\b(not\s+(yet\s+)?(done|complete|ready|passing)|still\s+(failing|broken|todo)|incomplete|do\s+not\s+claim)\b/i;
+const NEGATED = /\b(?:not\s+(?:yet\s+)?(?:all|done|complete|completed|ready|passing|passed|green)|still\s+(?:failing|broken|todo)|incomplete|do\s+not\s+claim)\b|n['’]t\s+(?:yet\s+)?(?:been\s+)?(?:all\s+)?(?:done|complete|completed|ready|pass|passing|passed|green|work|working)\b|(?<![A-Za-zÇĞİÖŞÜçğıöşü])(?:hazır\s+değil|tamamlanmadı|geçmedi|geçmiyor)(?![A-Za-zÇĞİÖŞÜçğıöşü])/i;
 
 const CLAIM_CAP = 64 * 1024; // R11/DP10: over-cap claim text is unscannable -> SILENT (never a block).
 const FFFD = '�'; // R5/DP4: U+FFFD in last_assistant_message = the Windows corruption signature.
@@ -53,7 +53,9 @@ try {
   const claimText = primaryOk ? lam : (roll.finalMessage || '');
 
   if (!claimText || claimText.length > CLAIM_CAP) process.exit(0);     // no claim text / over-cap -> silent
-  if (!CLAIM.test(claimText) || NEGATED.test(claimText)) process.exit(0); // no claim, or negated -> silent
+  // FH-8: claim read through the shared completionClaimed (scoped negation; questions, conditionals and
+  // quoted spans are not claims).
+  if (!completionClaimed(claimText, CLAIM, NEGATED)) process.exit(0); // no claim, or negated -> silent
   if (!roll.readable) process.exit(0);          // gate unconfirmable (unreadable rollout, DP5) -> silent
   if (roll.gateMarkerPresent) process.exit(0);  // the gate emitted its marker -> nothing to do
 

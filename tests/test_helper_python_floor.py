@@ -26,6 +26,9 @@ USER_FACING = (
     "scripts/check_plugin_portability.py",
     "scripts/check_cursor_plugin.py",
     "scripts/install_cursor_plugin.py",
+    # The Cursor installer imports the release exclusion rules, which import the path-safety helper.
+    "scripts/build_release.py",
+    "scripts/eval_safety.py",
     "skills/skill-authoring/scripts/resolve_skill_creator.py",
     # The sdlc runner (python3 <root>/scripts/sdlc.py) runs in the user's project.
     "scripts/sdlc.py",
@@ -77,6 +80,17 @@ def _defers_annotations(tree):
                and any(a.name == "annotations" for a in n.names) for n in tree.body)
 
 
+# Methods added in Python 3.9 (str/bytes.removeprefix and removesuffix, PurePath.is_relative_to).
+# The grammar check cannot see them: the call parses on 3.8 and raises AttributeError when it runs.
+NEWER_METHODS = frozenset({"removeprefix", "removesuffix", "is_relative_to"})
+
+
+def _newer_method_calls(tree):
+    return sorted({(node.lineno, node.func.attr) for node in ast.walk(tree)
+                   if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                   and node.func.attr in NEWER_METHODS})
+
+
 class TestHelperPythonFloor(unittest.TestCase):
     def test_user_facing_helpers_parse_with_the_floor_grammar(self):
         for rel in USER_FACING:
@@ -92,6 +106,19 @@ class TestHelperPythonFloor(unittest.TestCase):
                     self.assertTrue(_defers_annotations(tree),
                                     rel + " evaluates `X | Y` annotations at import; add "
                                     "`from __future__ import annotations`")
+
+    def test_rl6_floor_helpers_call_no_python39_methods(self):
+        for rel in USER_FACING:
+            with self.subTest(helper=rel):
+                tree = ast.parse((REPO / rel).read_text(encoding="utf-8"), filename=rel)
+                self.assertEqual(_newer_method_calls(tree), [],
+                                 rel + " calls a 3.9+ method that raises AttributeError on 3.8")
+
+    def test_rl6_the_method_check_fires(self):
+        # Negative control: each method the floor forbids is seen as a call, an attribute name alone is not.
+        tree = ast.parse("a = p.removeprefix('./')\nb = s.removesuffix('\\r')\nc = x.is_relative_to(y)\n"
+                         "d = getattr(s, 'removeprefix', None)\n")
+        self.assertEqual(_newer_method_calls(tree), [(1, "removeprefix"), (2, "removesuffix"), (3, "is_relative_to")])
 
     def test_the_check_fires_on_an_undeferred_union(self):
         # Negative control: the detector must see the construct that broke 3.9 imports.

@@ -358,13 +358,16 @@ function smokeDraft(mode) {
       draftMarkdown: `# Plan: Smoke Eval Draft
 
 ## Task T1 - RED tests
-Modify the existing test file. Add TDD RED coverage for AC1 and AC2 before production edits. Run the targeted test command and capture the failing test evidence.
+Modify the existing test file. Add TDD RED coverage for AC1 and AC2 before production edits: write the failing test for each criterion first.
+Run: \`pytest\` on the targeted test file. Expect the new tests to fail (RED), and keep that failing output as evidence.
 
 ## Task T2 - GREEN implementation
-Modify the production file. Implement the smallest behavior change for AC1 and AC2, then run the targeted test command until the suite passes.
+Modify the production file. Implement the smallest behavior change for AC1 and AC2 that turns the RED failing tests from T1 green.
+Run: \`pytest\` on the targeted test file until it passes. Expect every test to pass (GREEN).
 
 ## Task T3 - Verification
-Modify no extra files. Run validation, security review, implementation control, and diff review. Keep commit, push, and merge out of scope.`,
+Modify no extra files. Re-run the TDD evidence for AC1 and AC2 on the full suite, then run validation, security review, implementation control, and diff review. Keep commit, push, and merge out of scope.
+Run: \`pytest\` on the full suite. Expect it to pass with the RED-then-GREEN tests of T1 and T2 included.`,
       decisionPoints: [],
       residualCriticNotes: [],
       rounds: 0,

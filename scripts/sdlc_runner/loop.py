@@ -346,11 +346,31 @@ def _brief(ctx) -> str:
     if previous and int(loop.get("visit") or 1) > 1:
         parts += ["", "## Previous draft (reopened: revise it with the feedback)", ""]
         parts += ["- %s" % path for path in previous]
+        findings = _previous_findings(ctx)
+        if findings:
+            parts += ["", "## Validator findings on the previous draft (fix every one)", ""]
+            parts += ["- %s" % finding for finding in findings]
     parts += ["", "## Contracts"]
     for pattern in ("02-*.md", "03-*.md"):
         for path in sorted((paths.plugin_root() / "contracts" / "skills").glob(pattern)):
             parts += ["", "### contracts/skills/%s" % path.name, "", _read_optional(path).strip()]
     return "\n".join(parts) + "\n"
+
+
+def _previous_findings(ctx) -> list:
+    """The failing validator checks of the loop step on the spec and plan an earlier visit ingested:
+    the findings a stop that ran out of rounds or progress left (RN-2), for the next visit's brief."""
+    step = _loop_step(ctx)
+    found = []
+    for spec in step.get("done_when") or []:
+        if spec.get("check") != "validator" or spec.get("mode") not in ("spec", "plan"):
+            continue
+        if not _abs(ctx, checks.artifact_rel(ctx, spec["mode"])).is_file():
+            continue
+        result = checks.run_check(ctx, spec, step)
+        if not result.ok:
+            found.append(result.detail)
+    return found
 
 
 def _logs(path) -> list:
@@ -603,7 +623,17 @@ def next_role(ctx, step, write: bool):
         loop.update({"visit": entry.get("visits"), "round": 0, "role": None, "role_visits": 0,
                      "last_issue_keys": [], "stop_reason": None, "critic": [], "ingested": False, "staged": None})
     if loop.get("stop_reason"):
-        return None
+        failing = ["%s: %s" % (name, result.detail) for name, result in results if not result.ok]
+        if not failing:
+            return None
+        # The loop stopped (no-progress or max-rounds, or its files were changed after the ingest) and
+        # the drafts still fail the step's checks: nothing in this visit can change them. Halt with
+        # the reason, and leave the step to re-enter, so `resume` starts a new visit at round 0 whose
+        # brief carries the previous drafts and their validator findings.
+        entry["reenter"] = "loop-stop"
+        return engine.halt(ctx, original, "the spec/plan loop stopped (%s) and the drafts still fail: %s; resume "
+                           "starts a new loop visit with these findings in the brief"
+                           % (loop["stop_reason"], "; ".join(failing)), step)
     mechanism, _degraded = _mechanism(ctx, "draft")
     if not loop.get("engine") or (loop["engine"] != "zcode-dwf" and loop["engine"] != _engine_for(ctx, mechanism)):
         loop["engine"] = _engine_for(ctx, mechanism)
@@ -662,19 +692,37 @@ def _record_freshness(ctx, finished: int) -> None:
 
 # --- stop, assemble, ingest --------------------------------------------------------------------
 
-def _decisions(ctx, definition, round_no) -> list:
+def clean_points(items) -> list:
+    """The well-formed decision points of an author's list, as the Claude and Grok engines keep them
+    (cleanPoints / clean_points): a non-empty string id and question, an options list (its non-string
+    entries dropped) and a string recommendation; a later point with an id seen before is dropped. A
+    malformed point never reaches the result, whose schema would refuse it on every `next` (RN-4)."""
     found, seen = [], set()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        point_id, question = item.get("id"), item.get("question")
+        if (not isinstance(point_id, str) or not point_id.strip() or not isinstance(question, str)
+                or not question.strip() or not isinstance(item.get("options"), list)
+                or not isinstance(item.get("recommendation"), str) or point_id in seen):
+            continue
+        seen.add(point_id)
+        found.append({"id": point_id, "question": question,
+                      "options": [option for option in item["options"] if isinstance(option, str)],
+                      "recommendation": item["recommendation"]})
+    return found
+
+
+def _decisions(ctx, definition, round_no) -> list:
+    found = []
     for role, _mode_name in _round_roles(ctx, definition, 0):
         path = _abs(ctx, _file(definition, "decisions", role, round_no))
         try:
             items = read_json(path)
         except (OSError, ValueError, SdlcError):
             continue
-        for item in items if isinstance(items, list) else []:
-            if (isinstance(item, dict) and all(k in item for k in POINT_FIELDS) and item["id"] not in seen
-                    and isinstance(item["options"], list)):
-                seen.add(item["id"])
-                found.append({k: item[k] for k in POINT_FIELDS})
+        seen = {point["id"] for point in found}
+        found += [point for point in clean_points(items) if point["id"] not in seen]
     return found
 
 
@@ -749,15 +797,23 @@ def assemble(ctx) -> dict:
             or not isinstance(marks, list) or len(marks) != rounds or any(m not in ("fresh", "degraded") for m in marks)
             or engine_id not in ENGINES or loop_json.get("mode") != _loop_state(ctx)["mode"]):
         raise SdlcError(4, "loop_json_invalid:engine, mode, rounds >= 1, stopReason and one critic mark per round")
+    loop = _loop_state(ctx)
+    # The engine and the critic's freshness are the runner's own record (RN-3): loop.json may name
+    # only the engine the loop runs, and may mark a round degraded but never upgrade one the runner
+    # counts as degraded (a recorded mark, else the freshness its strategy gives the critic now).
+    if loop.get("engine") and engine_id != loop["engine"]:
+        raise SdlcError(4, "loop_json_invalid:engine %s (the loop runs %s)" % (engine_id, loop["engine"]))
     try:
         found_rounds, found_reason, critic_data = _stop_from_files(ctx, definition, step)
     except SdlcError as exc:
         raise SdlcError(4, "loop_json_invalid:%s" % exc.message.split(":", 1)[-1]) from None
     if (found_rounds, found_reason) != (rounds, reason):
         raise SdlcError(4, "loop_json_invalid:the round files say %s after round %d" % (found_reason, found_rounds))
-    points = loop_json.get("decisionPoints") if isinstance(loop_json.get("decisionPoints"), list) else None
+    recorded = list(loop.get("critic") or [])
+    runner_marks = [recorded[index] if index < len(recorded) else _critic_freshness(ctx) for index in range(rounds)]
+    marks = ["degraded" if "degraded" in (claimed, own) else "fresh" for claimed, own in zip(marks, runner_marks)]
+    points = clean_points(loop_json["decisionPoints"]) if isinstance(loop_json.get("decisionPoints"), list) else None
     result = _result(ctx, definition, rounds, reason, critic_data, marks, engine_id, points)
-    loop = _loop_state(ctx)
     loop["engine"], loop["critic"] = engine_id, marks
     write_json_atomic(_abs(ctx, _file(definition, "result")), result, within=ctx.pkg)
     return result

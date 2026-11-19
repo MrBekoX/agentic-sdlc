@@ -23,6 +23,87 @@ import { expandAnsiCQuotes, decodeAnsiC } from './shell-quoting.mjs';
 const MAX = 512 * 1024;
 // Any expansion token: `$` + word/brace/paren, or a backtick. Conservative on purpose (R6a).
 const EXPANSION = /\$[\w{(]|`/;
+
+// The ONE heredoc grammar shared by every reader of shell writes (this extractor, the Codex precise
+// write-target recognizer in codex-rollout.mjs and the test-run shape check in flow-evidence.mjs), so
+// their heredoc coverage cannot drift apart (the #5 root cause). Groups: 1 head (opener + rest of its
+// line), 2 backslash, 3 quote, 4 delimiter, 5 CR, 6 rest of the opener line, 7 body. Bash treats ANY
+// quoting of the delimiter word as literal: `<<'EOF'`, `<<"EOF"` and `<<\EOF` (SW-7).
+// R2-FH-3: a CR is part of the delimiter only when it directly follows the delimiter word on the opener
+// line (a CRLF command), exactly as bash reads it: then the closing line is `EOF` + CR; otherwise a line
+// `EOF` + CR is still body, and the lines after it are still written (and scanned).
+// R2-FH-1: `(?!\w)` stops the delimiter word from being split on a failed match, and the opener blanks
+// are `[ \t]*`: the old `([A-Za-z_]\w*)\3([^\n]*)` tried every split of a long word, O(n^2) on one
+// `<<aaaa...` with no newline. Per opener the match is now linear; the lazy body still scans to the end
+// once per UNTERMINATED opener, so callers skip heredoc parsing above HEREDOC_OPENER_CAP openers.
+export const HEREDOC_OPENER_CAP = 24;
+const HEREDOC_SOURCE = String.raw`(<<-?[ \t]*(\\?)(['"]?)([A-Za-z_]\w*)(?!\w)\3(\r?)(?!\r)([^\n]*))\n([\s\S]*?)\n\4\5(?=\n|$)`;
+
+export function heredocPattern() {
+  return new RegExp(HEREDOC_SOURCE, 'g'); // a fresh global regex per use: no shared lastIndex state
+}
+
+function overHeredocCap(cmd) {
+  return (cmd.match(/<</g) || []).length > HEREDOC_OPENER_CAP;
+}
+
+// Drop every heredoc BODY and closing delimiter, keeping the opener line (its redirect target and any
+// `&& next` command on it run). Over the opener cap the command is returned unchanged.
+export function blankHeredocBodies(command) {
+  const cmd = String(command || '');
+  if (overHeredocCap(cmd)) return cmd;
+  return cmd.replace(heredocPattern(), (_full, head) => `${head} `);
+}
+
+// One shell word with its quote DELIMITERS removed when the whole word is quoted (`"src/app.py"`).
+export function unquoteWord(word) {
+  const s = String(word);
+  if (s.length >= 2 && (s[0] === '"' || s[0] === "'") && s[s.length - 1] === s[0]) return s.slice(1, -1);
+  return s;
+}
+
+// FH-5: `apply_patch <<'PATCH'` (or `... <<'PATCH' | apply_patch`) run through the shell applies the
+// heredoc body as a V4A patch, so the body's file headers are write targets.
+// R2-FH-2: read with plain splits and one pass per part. The regex `\|\s*(?:\S*\/)?apply_patch` this
+// replaces was O(k^2) on an opener line carrying a long run of `|`.
+function isApplyPatchCommand(text) {
+  const t = text.trim();
+  let end = 0;
+  while (end < t.length && t[end] !== ' ' && t[end] !== '\t') end += 1; // the command word
+  const word = t.slice(0, end);
+  const base = word.slice(word.lastIndexOf('/') + 1);
+  return base === 'apply_patch' || base === 'applypatch';
+}
+
+function heredocFeedsApplyPatch(cmd, offset, rest) {
+  const piped = rest.split('|');
+  for (let k = 1; k < piped.length; k += 1) if (isApplyPatchCommand(piped[k])) return true;
+  const lineStart = cmd.lastIndexOf('\n', offset - 1) + 1;
+  return isApplyPatchCommand(cmd.slice(lineStart, offset).split(/;|&&|\|\||\||\(/).pop());
+}
+
+// R2-FH-1: the segment's trailing `>`/`>>` redirect, read in one linear pass: { before, target } for
+// `<before> > <word>` or `<before>><word>` at the end of the (trimmed) segment, else null. It keeps the
+// earliest-operator reading of the regexes it replaces, `/(?:>>?)\s*\S+\s*$/` and
+// `/^(...)([\s\S]*?)\s*>>?\s*(\S+)\s*$/`, which retried the `\S+` run from every `>` and were O(n^2)
+// on one long `>` run (`echo '>>>...> y'` held a Claude flow hook past its timeout).
+const BLANK = /\s/;
+function trailingRedirect(seg) {
+  let k = seg.length;
+  while (k > 0 && !BLANK.test(seg[k - 1])) k -= 1;          // start of the last word
+  if (k === seg.length) return null;
+  let p = k - 1;
+  while (p >= 0 && BLANK.test(seg[p])) p -= 1;              // last character before the blank run
+  if (k > 0 && p >= 0 && seg[p] === '>') {                  // `... > word`
+    const op = p > 0 && seg[p - 1] === '>' ? p - 1 : p;
+    return { before: seg.slice(0, op), target: seg.slice(k) };
+  }
+  const gt = seg.indexOf('>', k);                           // `...>word` inside the last word
+  if (gt === -1) return null;
+  if (seg[gt + 1] === '>' && gt + 2 < seg.length) return { before: seg.slice(0, gt), target: seg.slice(gt + 2) };
+  if (gt + 1 < seg.length) return { before: seg.slice(0, gt), target: seg.slice(gt + 1) };
+  return null;
+}
 // Write-capable forms this extractor deliberately does NOT read. Matching one does not change what
 // is scanned (nothing is readable from them); it only stops `parsed` from claiming coverage we do
 // not have. Bounded character classes only — every quantifier here is linear (no ReDoS surface).
@@ -55,6 +136,9 @@ function parseApplyPatch(cmd) {
   for (const line of cmd.split(/\r?\n/)) {
     const m = /^\*\*\* (?:Add|Update) File: (.+)$/.exec(line);
     if (m) { targets.push(m[1].trim()); continue; }
+    // FH-5: an Update hunk with `*** Move to: <path>` writes its content to the new path.
+    const mv = /^\*\*\* Move to: (.+)$/.exec(line);
+    if (mv) { targets.push(mv[1].trim()); continue; }
     if (/^\*\*\* /.test(line)) continue;                 // *** Begin/End Patch, *** Delete File:
     if (/^@@/.test(line)) continue;                      // hunk header
     if (line.startsWith('+')) added.push(line.slice(1)); // an added content line
@@ -82,18 +166,21 @@ function parseBash(cmd) {
   // has at most a handful of heredocs, so if there are absurdly many `<<` openers we skip heredoc parsing
   // entirely (the command is then handled by the redirect/segment path; its heredoc bodies are not
   // scanned — accepted within the bounded-backstop posture, and far better than a timeout-then-allow).
-  const HEREDOC_OPENER_CAP = 24;
-  const openerCount = (cmd.match(/<</g) || []).length;
   // `<<-` (tab-stripping) is as common as `<<`. Matching only `<<\s*` left `cat <<-EOF > f` both
   // unread AND unflagged: no substitution happened, the segment's trailing text was the closing
   // delimiter rather than a redirect, and no UNREAD_WRITE token appeared -> parsed:true with empty
   // content. The same CWE-636 shape as `sed --in-place`, one review round later.
-  const heredocRe = /<<-?\s*(['"]?)([A-Za-z_]\w*)\1([^\n]*)\n([\s\S]*?)\n\2(?=\n|$)/g;
-  const work = openerCount > HEREDOC_OPENER_CAP ? cmd : cmd.replace(heredocRe, (full, q, _delim, rest, body) => {
-    const literal = q === "'";                 // single-quoted delimiter => no expansion of the body
+  // The grammar is the shared heredocPattern (SW-7: `<<"EOF"`, `<<\EOF` and CRLF are read as well).
+  const work = overHeredocCap(cmd) ? cmd : cmd.replace(heredocPattern(), (full, _head, bs, q, _delim, _cr, rest, body, offset) => {
+    const literal = Boolean(bs || q);          // any quoted delimiter => no expansion of the body
     const tgt = /(?:>>?)\s*(\S+)/.exec(rest);
+    // The redirect target is known whatever the body expands to; only the CONTENT depends on it.
+    if (tgt) targets.push(unquoteWord(tgt[1]));
+    if (heredocFeedsApplyPatch(cmd, offset, rest)) {
+      for (const t of parseApplyPatch(body).targets) targets.push(t);
+    }
     if (!literal && EXPANSION.test(body)) { hasExpansion = true; }
-    else { if (tgt) targets.push(tgt[1]); added.push(body); }
+    else { added.push(body); }
     return ' ';
   });
 
@@ -113,15 +200,17 @@ function parseBash(cmd) {
     // opener cap, or an opener shape outside its grammar). Its body never reached `added`, so this
     // command is not accounted for — say so instead of letting it pass as parsed.
     if (seg.includes('<<')) { unreadWrite = true; continue; }
-    if (!/(?:>>?)\s*\S+\s*$/.test(seg)) {
+    const redirect = trailingRedirect(seg);
+    if (!redirect) {
       // No trailing `>`/`>>`. The segment may still WRITE by other means (tee/dd/sed -i/cp/...) or
       // via a redirect form outside this grammar (`>|`, `&>`, `N>`, `>&N`). We cannot read those,
       // so we must not go on claiming we accounted for the command.
       if (UNREAD_WRITE.test(seg)) unreadWrite = true;
       continue;
     }
-    const m = /^(?:printf|echo)\b\s+([\s\S]*?)\s*>>?\s*(\S+)\s*$/.exec(seg);
-    if (!m) { unreadWrite = true; continue; }            // a redirect driven by some other command
+    const lead = /^(?:printf|echo)\b\s+/.exec(redirect.before);
+    if (!lead) { unreadWrite = true; continue; }         // a redirect driven by some other command
+    const m = [null, redirect.before.slice(lead[0].length), redirect.target];
     const payload = m[1].trim();
     // Quote-AWARE expansion test. Bash never expands inside single quotes, so
     // `echo 'password=p$ssw0rd…' > f` is a fully literal write of the declared-covered form (agentic-sdlc:allow-secret)
@@ -129,7 +218,7 @@ function parseBash(cmd) {
     // negative inside the coverage this extractor claims. The heredoc path one block above already
     // gets this right by checking the delimiter's quoting; this branch had no equivalent.
     if (hasUnquotedExpansion(payload)) { hasExpansion = true; continue; }
-    targets.push(m[2]);
+    targets.push(unquoteWord(m[2])); // FH-5: `> "src/app.py"` writes src/app.py
     // Scan the WHOLE payload, not just its first literal token. The previous extractLiteral() read
     // only the text between the FIRST pair of quotes (or a bare word containing no whitespace) and
     // silently dropped the rest, so

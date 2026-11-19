@@ -20,25 +20,56 @@ Each entry includes:
 
 ---
 
-## 2026-11-18 — Before pushing, run the version check CI runs, not only the local gate's weaker one
+## 2026-11-19 — A gate reads its verdict from one exact field, never from a substring of wider text
+
+- **Date:** 2026-11-19
+- **Task / context:** Fixing the 2026-11-18 bug audit of `f430715`, whose first cross-cutting pattern was "gates that pass with nothing real checked".
+- **Symptom:** Six gates passed on evidence that said the opposite or nothing:
+  - The runner's security step completed on a report with a top-level `Verdict: fail` and an open High finding, because one per-lens line read `- secrets: Verdict: pass` (RN-1). The audit step completed on a `block-final` report, because it checked only the header (SK-5).
+  - The completion-claim guard counted the gate as run when its name appeared in another skill's args, in an errored call or in a look-alike skill name (FH-7). The Claude trigger eval counted a router call whose args named the target as the target's trigger (VA-8).
+  - The routing eval passed when the expected skill was anywhere in the routes, after a wrong first route (VA-18). The procedure eval took a failed `Read` of a spec path as the written artifact (VA-7).
+- **Root cause:** Each check asked "does the evidence text contain the expected token?" instead of "does the one field that carries the decision hold the expected value?". A substring test over a wider text is satisfied by a neighbouring field (args, a per-lens line, a later route, a read path) and by an error, so it can only fail open.
+- **Correct fix:** Name the field and read it exactly once. `verdict_problem` requires exactly one `Verdict:` line and compares its value, or reads the single line under `## Final Decision`. The completion-claim guard asks `skillInvoked` for a non-errored `Skill` call whose name equals the gate. The trigger eval reads only the `skill` member of the call. The routing eval compares the first route. `required_artifacts` counts only a write whose result is not an error.
+- **Preventive rule / automated check:** A gate states which field carries its decision, compares that field for equality after normalising it, and treats a second candidate or an error as a failure. Each fix ships a twin pair: the evidence the gate must reject (a passing token in the wrong field, an errored call) and the evidence it must accept. When a gate has nothing to read, report that state (`unmeasured`, `ac_none`, `ac_source_empty`) instead of passing; see the 2026-09-18 and 2026-10-22 entries.
+- **Related files & tests:** `scripts/sdlc_runner/checks.py` (`verdict_problem`), `flows/{full,feature,bugfix,refactor}.json`, `hooks/completion-claim-guard.mjs`, `hooks/flow-evidence.mjs` (`skillInvoked`), `scripts/run_trigger_eval.py` (`skill_field`), `scripts/run_routing_eval.py` (`evaluate_route`), `scripts/run_procedure_eval.py` (`_produced_paths`); `tests/test_audit_rn.py`, `tests/test_audit_fh.py`, `tests/test_audit_va.py`.
+
+---
+
+## 2026-11-19 — A grammar copied into two guards drifts again after a lesson names the class; share the code and drive one spelling table through every guard
+
+- **Date:** 2026-11-19
+- **Task / context:** Fixing the command-guard and flow-hook findings of the 2026-11-18 bug audit of `f430715`.
+- **Symptom:** The command-text guards were string matchers that disagreed with the shell and with git, although the 2026-08-22, 2026-08-23 and 2026-09-21 entries already named the class:
+  - The destructive guard matched `--hard` and `--recursive` exactly, while git and coreutils run the unique prefixes `--ha` and `--rec`, and it ignored `clean.requireForce=false` and git aliases (CG-2).
+  - The git resolver kept its own wrapper table, narrower than the destructive guard's, so `env -u HOME git commit` and `timeout --kill-after 1 30 git push` reached neither git guard (CG-4). It read `2>&1` as a remote (CG-5).
+  - The Codex write-target reader and the secret-write extractor parsed heredocs differently again, so quoted targets, `<<"EOF"` and CRLF heredocs passed one and not the other (FH-5, SW-7). A heredoc body or a `#` comment counted as a test run (FH-3) and as a destructive command (CG-10).
+- **Root cause:** The earlier fixes added parity tests over the cases they had seen, but each guard still carried its own copy of the grammar: two wrapper tables, two heredoc regexes plus a test-run check that read no heredoc at all, and two write-target readers. A copy drifts from the program it models and from its siblings as soon as one of them is fixed, and a parity test over a few known rows cannot see a spelling nobody listed.
+- **Correct fix:** One copy of each layer, imported by every guard: the wrapper table in `hooks/git-invocation.mjs`, the statement lexer (`scanShell`) in `hooks/shell-quoting.mjs`, the heredoc grammar in `hooks/codex-write-signal.mjs`, and the write-target recognizer (`currentEditTargets`) in `hooks/codex-rollout.mjs`, which the Claude flow guards now use too. Option matching follows the program's own rules: GNU `getopt_long` and git's parse-options accept any unique prefix of a long option.
+- **Preventive rule / automated check:**
+  - When a lesson's class comes back, the prose did not hold: replace the copies with one module, and let no guard keep a private table of the same grammar.
+  - Never let a guard's own model of the shell decide that text is safe to skip. The CG-10 false positive was fixed twice by setting heredoc bodies aside as data: first unless a listed stdin reader was on the line, then unless an allow-list proved the body inert. Each design had a High bypass, because the lexer cannot model bash exactly. After the second failure the fix was re-planned (AGENTS.md: stop after two failed fixes): every body line is read as a command again, as in `f430715`, and only a whole command of an exact, linearly matched shape (`cat` or `tee` writing a plain relative path, or `git commit -F - <<'D'`) keeps its body out. A third exception, Claude Code's `git commit -m "$(cat <<'D' … D)"` idiom, was dropped in review: bash closes that heredoc early and runs the next line. The false positives come back, by design.
+  - Build the test table from the program's documented grammar, not from the spellings seen in transcripts: unique option prefixes, aliases (inline, stored and `!`), wrappers with value-taking options, redirections, heredoc and here-string forms, comments, command substitution and function bodies. Drive every row through every guard that reads that grammar, with a benign twin per row.
+- **Related files & tests:** `hooks/git-invocation.mjs`, `hooks/shell-quoting.mjs`, `hooks/shell-prefix.mjs`, `hooks/destructive-command-guard.mjs`, `hooks/codex-write-signal.mjs`, `hooks/codex-rollout.mjs`, `hooks/flow-evidence.mjs`; `tests/test_audit_cg.py::TestCG4SharedWrapperTable` (one table, every row through every guard) and `::TestR3CG1ExactShapesOnly`, `tests/test_audit_fh.py` (including `TestSW7CodexHeredocForms`).
+
+---
+
+## 2026-11-18 — Before pushing, run the version check CI runs, not only the local gate's weaker one (rule reversed 2026-11-19)
 
 - **Date:** 2026-11-18
 - **Task / context:** PR #29, the runner's hybrid spec/plan path. The branch passed the four local gate commands on a fresh WSL clone and on Windows, and was then pushed and opened as a pull request.
 - **Symptom:** CI failed on all three OS jobs at its first step, `Version consistency`, with `release_check=failed:nonempty_unreleased`. On the same tree, run locally, `bump_version.py --check` prints `version_check=passed` and `bump_version.py --release-check` prints `release_check=failed:nonempty_unreleased`.
 - **Root cause:**
-  - The local gate in `AGENTS.md` and the pre-push checklist in `docs/testing.md` both run `bump_version.py --check`. CI runs `--release-check` on every pull request. That mode also fails while the `## Unreleased` section of `CHANGELOG.md` has any content.
-  - The branch's plan had its docs task write release notes and open points under `## Unreleased`. Feature pull requests leave `CHANGELOG.md` to the release pull request, which writes the version section. Neither local list says so.
-- **Correct fix:**
-  - `CHANGELOG.md` went back to main's text, with an empty `## Unreleased`.
-  - The notes moved verbatim into the pull request description, for the next release pull request to write.
-  - `--release-check` then passed locally, and the CI re-run was green.
+  - The local gate in `AGENTS.md` and the pre-push checklist in `docs/testing.md` both run `bump_version.py --check`. CI ran `--release-check` on every pull request. That mode also fails while the `## Unreleased` section of `CHANGELOG.md` has any content.
+  - The branch's plan had its docs task write release notes and open points under `## Unreleased`. Feature pull requests left `CHANGELOG.md` to the release pull request, which writes the version section. Neither local list said so.
+- **Correct fix (first, superseded):** `CHANGELOG.md` went back to main's text with an empty `## Unreleased`, and the notes moved into the pull request description. That kept CI green, but the 2026-11-18 bug audit (RL-4) found what it cost: `main` moved past 0.7.0 by 87 changed files and 20 feature or fix commits, with no version bump and no changelog entry, because no release pull request ever collected the notes left in pull request bodies.
+- **Correct fix (2026-11-19):** CI runs `--check` on every pull request and `--release-check` (`Release consistency` and `Archive gate: release check`) only for a release: a pull request or a push to `main` that changes `VERSION`, found by the `Detect a VERSION change` step (a base the clone does not hold counts as a change), a `chore/release-*` branch, a manual run on such a branch, or a tag. The `VERSION` condition came from a security review of the first version of this fix, which keyed the release check on the branch name alone: a release merged from any other branch would have skipped it.
 - **Preventive rule / automated check:**
-  - Before pushing, run `python3 scripts/bump_version.py --release-check` as well as the four gate commands, so the local run includes the CI version step.
-  - A feature branch leaves `## Unreleased` empty. Its release notes and open points go in the pull request body. A plan's docs task does not add `CHANGELOG.md` entries outside a release pull request.
-  - This rule is not enforced yet. Both local lists still name `--check`. To enforce it, make them name the version command that `.github/workflows/ci.yml` runs, and pin that with a test.
+  - A feature pull request writes its notes under `## Unreleased` and passes `python3 scripts/bump_version.py --check`, the version step CI runs for it.
+  - The release pull request changes `VERSION`, ideally from a `chore/release-<version>` branch. It moves those notes under the dated `## <version> - <date>` heading, leaves `## Unreleased` empty and must pass `python3 scripts/bump_version.py --release-check`; CI runs that check because `VERSION` changed, whatever the branch is called.
+  - Enforced: `tests/test_audit_rl.py::TestRl4ReleaseCheckRunsOnlyForReleases` pins which CI steps run which mode, and `::TestR2Rl4VersionChangeIsDetected` drives the detection step's script for a pull request and a push. Neither runs the workflow on GitHub.
 - **Related files & tests:**
-  - Files: `scripts/bump_version.py` (`check(release=True)`), `.github/workflows/ci.yml` (`Version consistency`), `AGENTS.md` (Build & test commands), `docs/testing.md` (Pre-push checklist), `CHANGELOG.md`.
-  - Tests: `tests/test_packaging_metadata.py::test_all_declarations_match_passes` covers only the passing release check. No test covers `nonempty_unreleased`.
+  - Files: `scripts/bump_version.py` (`check(release=True)`), `.github/workflows/ci.yml` (`Version consistency`, `Detect a VERSION change`, `Release consistency`), `docs/testing.md` (Automation / CI policy, Pre-push checklist), `CHANGELOG.md`.
+  - Tests: `tests/test_audit_rl.py::TestRl4ReleaseCheckRunsOnlyForReleases`, `::TestR2Rl4VersionChangeIsDetected`; `tests/test_packaging_metadata.py::test_all_declarations_match_passes` covers the passing release check.
 
 ---
 

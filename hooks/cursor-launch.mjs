@@ -73,7 +73,9 @@ function translateIn(event, input) {
     const content = typeof nested.content === 'string'
       ? nested.content
       : (typeof nested.contents === 'string' ? nested.contents : undefined);
+    // The event name tells scan-write.mjs that the file on disk is still the old one (SW-8).
     return {
+      hook_event_name: 'PreToolUse',
       tool_name: String(input.tool_name || 'Write'),
       tool_input: { ...nested, file_path: filePath(input), content, new_string: nested.new_string, edits },
       cwd,

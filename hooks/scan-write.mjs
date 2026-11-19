@@ -1,4 +1,5 @@
-// PostToolUse (Write|Edit|MultiEdit) — scans the WRITTEN/CHANGED text for secrets; WARNS (does not block).
+// PostToolUse (Write|Edit|MultiEdit|NotebookEdit) — scans the WRITTEN/CHANGED text for secrets; WARNS (does
+// not block). Cursor runs it before the write (preToolUse) through cursor-launch.mjs.
 // Only scans the new/changed text -> existing secrets don't re-warn on every edit.
 import { readFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
@@ -26,19 +27,30 @@ const raw = await readStdin();
 let input = {};
 try { input = JSON.parse(raw || '{}'); } catch { /* ignore */ }
 const ti = input?.tool_input || {};
-const file = String(ti.file_path || '');
+// NotebookEdit names its file `notebook_path` and carries the new cell text in `new_source` (SW-9).
+const notebook = !ti.file_path && typeof ti.notebook_path === 'string' && ti.notebook_path !== '';
+const file = String(ti.file_path || '') || String(ti.notebook_path || '');
 const normFile = file.replace(/\\/g, '/');
 const cwd = typeof input?.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
 
 if (!file || SKIP.some((re) => re.test(normFile)) || isOwnHookSource(file, cwd)) process.exit(0);
+// A delete writes nothing (SW-8).
+if (/^delete$/i.test(String(input?.tool_name || ''))) process.exit(0);
+
+// A pre-write event (Cursor's preToolUse) sees the file as it was before the change, so the on-disk
+// fallback below would report a secret this write does not add, or one a Delete removes (SW-8).
+const preWrite = /^pre/i.test(String(input?.hook_event_name || ''));
 
 // Collect only the new/changed text.
 let text = '';
 if (typeof ti.new_string === 'string') text = ti.new_string;              // Edit
 else if (Array.isArray(ti.edits)) text = ti.edits.map((e) => e?.new_string || '').join('\n'); // MultiEdit
 else if (typeof ti.content === 'string') text = ti.content;              // Write
-else {
-  try { text = readFileSync(file, 'utf8'); } catch { /* ignore */ }      // fallback
+else if (typeof ti.new_source === 'string') text = ti.new_source;        // NotebookEdit
+else if (!preWrite && !notebook) {
+  // Fallback for an unknown post-write shape. A NotebookEdit without new_source deletes a cell, and
+  // reading the whole notebook would re-report every secret already in it.
+  try { text = readFileSync(file, 'utf8'); } catch { /* ignore */ }
 }
 
 const findings = scanLines(text, BROAD);

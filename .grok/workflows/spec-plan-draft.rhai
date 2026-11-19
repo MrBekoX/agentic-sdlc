@@ -67,11 +67,14 @@ fn smoke_spec() {
 fn smoke_plan() {
     let md = "# Plan: Smoke Eval Draft\n\n";
     md += "## Task T1 - RED tests\n";
-    md += "Modify the existing test file. Add TDD RED coverage for AC1 and AC2 before production edits. Run the targeted test command and capture the failing test evidence.\n\n";
+    md += "Modify the existing test file. Add TDD RED coverage for AC1 and AC2 before production edits: write the failing test for each criterion first.\n";
+    md += "Run: `pytest` on the targeted test file. Expect the new tests to fail (RED), and keep that failing output as evidence.\n\n";
     md += "## Task T2 - GREEN implementation\n";
-    md += "Modify the production file. Implement the smallest behavior change for AC1 and AC2, then run the targeted test command until the suite passes.\n\n";
+    md += "Modify the production file. Implement the smallest behavior change for AC1 and AC2 that turns the RED failing tests from T1 green.\n";
+    md += "Run: `pytest` on the targeted test file until it passes. Expect every test to pass (GREEN).\n\n";
     md += "## Task T3 - Verification\n";
-    md += "Modify no extra files. Run validation, security review, implementation control, and diff review. Keep commit, push, and merge out of scope.";
+    md += "Modify no extra files. Re-run the TDD evidence for AC1 and AC2 on the full suite, then run validation, security review, implementation control, and diff review. Keep commit, push, and merge out of scope.\n";
+    md += "Run: `pytest` on the full suite. Expect it to pass with the RED-then-GREEN tests of T1 and T2 included.";
     md
 }
 

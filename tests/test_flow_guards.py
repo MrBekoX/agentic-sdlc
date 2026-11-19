@@ -463,11 +463,13 @@ class TestFlowStepGuard(unittest.TestCase):
             ev_text("Done."),
         ])
 
+    # FH-4 (2026-11-18 audit): Stop validates only the artifacts of THIS session's work ids, so each test
+    # below records the Write of the artifacts it relies on; an on-disk file alone no longer counts.
     def test_per_package_spec_plan_recognized_claude(self):  # AC15 (Stop listing + re-validation)
         with tempfile.TemporaryDirectory() as cwd:
-            _write_pp_artifact(cwd, "work-x", "spec", "work-x", ac_id="AC1")
-            _write_pp_artifact(cwd, "work-x", "plan", "work-x", ac_id="AC1")
-            out = self.run_guard([skill(RCF)] + self._pp_satisfied_tail(), block=True, cwd=cwd)
+            spec = _write_pp_artifact(cwd, "work-x", "spec", "work-x", ac_id="AC1")
+            plan = _write_pp_artifact(cwd, "work-x", "plan", "work-x", ac_id="AC1")
+            out = self.run_guard([skill(RCF), edit(spec), edit(plan)] + self._pp_satisfied_tail(), block=True, cwd=cwd)
         self.assertEqual(out, {})  # per-package spec+plan listed AND re-validated -> all satisfied
 
     def test_per_package_plan_paired_with_colocated_spec_on_stop_claude(self):  # BR10 (co-located pairing)
@@ -476,19 +478,19 @@ class TestFlowStepGuard(unittest.TestCase):
         # (validate_artifacts has no work_id check - RC2), so without the co-located specForPlan fix
         # the plan step is FALSELY reported missing. With the fix it pairs with its own-package spec.
         with tempfile.TemporaryDirectory() as cwd:
-            _write_pp_artifact(cwd, "work-x", "spec", "work-x", ac_id="AC2")
-            _write_pp_artifact(cwd, "work-x", "plan", "work-x", ac_id="AC2")
+            spec = _write_pp_artifact(cwd, "work-x", "spec", "work-x", ac_id="AC2")
+            plan = _write_pp_artifact(cwd, "work-x", "plan", "work-x", ac_id="AC2")
             _write_flat_artifact(cwd, "spec", "flat-other", ac_id="AC1")  # foreign spec, sorts first
-            out = self.run_guard([skill(RCF)] + self._pp_satisfied_tail(), block=True, cwd=cwd)
+            out = self.run_guard([skill(RCF), edit(spec), edit(plan)] + self._pp_satisfied_tail(), block=True, cwd=cwd)
         self.assertNotIn("plan", _block_ids(out))  # plan satisfied against its OWN-package spec
 
     def test_per_package_plan_without_colocated_spec_unsatisfied_claude(self):  # BR10 negative
         # A per-package plan with NO co-located spec must stay unsatisfied - it must NOT be falsely
         # paired with the unrelated flat spec that happens to exist on disk.
         with tempfile.TemporaryDirectory() as cwd:
-            _write_pp_artifact(cwd, "work-x", "plan", "work-x", ac_id="AC2")
+            plan = _write_pp_artifact(cwd, "work-x", "plan", "work-x", ac_id="AC2")
             _write_flat_artifact(cwd, "spec", "flat-other", ac_id="AC1")  # exists, but not co-located
-            out = self.run_guard([skill(RCF)] + self._pp_satisfied_tail(), block=True, cwd=cwd)
+            out = self.run_guard([skill(RCF), edit(plan)] + self._pp_satisfied_tail(), block=True, cwd=cwd)
         self.assertEqual(out.get("decision"), "block")
         self.assertIn("plan", _block_ids(out))  # no false pairing -> plan correctly missing
 

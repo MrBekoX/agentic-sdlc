@@ -40,14 +40,21 @@ CODEX_CFG = REPO / "hooks" / "hooks-codex.json"
 # describe; the digest is what makes skipping it visible.
 LOCK_DIGESTS = {
     # The pre-edit ordering gate: whether required evidence exists before a source edit.
+    # Rebased 2026-11-18 (bug audit FH-1): Bash/PowerShell source writes are edits too, read by the shared
+    # write-target recognizer; the current call is excluded from its own evidence. Covered by
+    # tests/test_audit_fh.py TestFH1ShellWritesReachClaudeFlowGuards.
+    # Rebased 2026-11-19 (round-2 review R2-FH-1): the transcript is parsed once and the current call is
+    # dropped with withoutCalls; the current command is read whole. Covered by TestR2FH1ShellAnalysisIsLinear.
     "hooks/flow-order-guard.mjs":
-        "f584b0c25d1b6a8a655b2bc37fbad37350ee9c80545b412d2bd49e30d6a3b646",
+        "1626289d0af617a11a12f29d918f6df8f59ccecd38ad480b7906de1a19200cc3",
     # hooks/flow-step-guard.mjs (the Stop-time flow-step gate) is no longer locked here.
     # Released 2026-10 (pipeline v2.1 D7): the block reason named implementation-control, which the pipeline no longer invokes; behavior is pinned by tests/test_flow_guards.py PINNED_STEP_BLOCK_MAIN and the pipeline block pin.
     # The completion-claim backstop.
     # Rebased for Claude Code 2.1.293: prefer last_assistant_message; block only when caught up.
+    # Rebased 2026-11-18 (bug audit FH-7/FH-8): the gate counts only as an exact, non-errored Skill call, and
+    # claims are read through the shared completionClaimed. Covered by tests/test_audit_fh.py (FH-7, FH-8).
     "hooks/completion-claim-guard.mjs":
-        "ad454dd5f68c2ba08583c283b444318c24892d9c3305161b913dea3bcf317c9b",
+        "a8dcfbf2ec3ec0920e2c5b3d493f7e820b33fd1632df1b51f8657b40965b8818",
     # The Codex flow-step equivalent.
     "hooks/flow-step-guard-codex.mjs":
         "b6d05a7d8358647c2245386a8f98b19e99abcc3f0fb291d2b04b36c8317c446f",
@@ -858,6 +865,27 @@ def _br6_carrier_lines(row):
     return [_exec_fc_id(row["command"], call_id)] * carrier["callEvents"] + [output] * carrier["outputRecords"]
 
 
+# 2026-11-18 bug audit (FH-3, FH-9): the shared shape check isRealRunnerInvocation now skips `#` comments,
+# honours backslash escapes, line continuations and bash blanks (BR6 splitter), and reads `bash -c` wrappers.
+# These shared-table rows changed their live shape from the 5801cb9 column on purpose: each forged row runs
+# no runner in bash, and the wrapper row does. Only these rows; every other row must still match the table.
+FH_ORDER_DECISION_CHANGES = {
+    "edge-bash-c-wrapper": True,
+    "edge-forged-escaped-separator-semicolon": False,
+    "edge-forged-escaped-separator-semicolon-glued": False,
+    "edge-forged-escaped-separator-pipe": False,
+    "edge-forged-escaped-separator-pipe-args": False,
+    "edge-forged-escaped-separator-npm": False,
+    "edge-forged-escaped-separator-python-m": False,
+    "edge-forged-join-continued-echo": False,
+    "edge-forged-join-continued-assignment": False,
+    "edge-forged-join-comment-semicolon": False,
+    "edge-forged-join-comment-oror": False,
+    "edge-forged-value-blank-escaped-space-single": False,
+    "edge-forged-value-blank-nbsp-single": False,
+}
+
+
 # ---- AC130: the Stop-evidence closure never reaches the Codex ordering decision (Task 16) ----
 class TestClosureScopeCodexOrderGuard(_Tmp):
     def test_table_order_decision_unchanged(self):  # AC130
@@ -867,7 +895,8 @@ class TestClosureScopeCodexOrderGuard(_Tmp):
         bad = []
         for row in rows:
             decision = _order_decision(_br6_carrier_lines(row), req, cwd)
-            expected = row["baseline5801cb9"]["codexOrderGuard"] == "satisfied"
+            expected = FH_ORDER_DECISION_CHANGES.get(
+                row["id"], row["baseline5801cb9"]["codexOrderGuard"] == "satisfied")
             if (decision.get("satisfied") is True) != expected:
                 bad.append(row["id"])
         self.assertEqual(bad, [], f"order decisions that differ from the 5801cb9 column: {bad}")

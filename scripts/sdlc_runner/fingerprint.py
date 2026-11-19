@@ -152,17 +152,23 @@ def _inside(name: str) -> bool:
     return ".." not in name.split("/")
 
 
-def set_fp(project, names, head) -> str:
-    """sha256 hex over the HEAD commit and the sorted (path, file_fp) pairs of a named set.
+def set_fp(project, names, gitlinks=None) -> str:
+    """sha256 hex over the sorted (path, file_fp) pairs of a named set.
 
     Order and duplicates do not matter. A member that is missing counts as "absent"; a name that
-    would leave the project is never read (it counts as "outside").
+    would leave the project is never read (it counts as "outside"). The HEAD commit is no part of
+    it: the set is the change against the run's base commit, so committing that change, or an
+    empty commit, changes no member and makes no `@source` or `@tests` step stale. A member that is
+    a folder holding a repository (a submodule's gitlink) counts by its checked-out commit,
+    `gitlinks` {path: commit id, or None when git cannot read it}, so moving a submodule is a change.
     """
     root = Path(project)
+    gitlinks = gitlinks or {}
     digest = hashlib.sha256()
-    digest.update(b"head\0" + (head or "-").encode("utf-8") + b"\n")
     for name in sorted(set(names)):
         fp = file_fp(root.joinpath(*name.split("/"))) if _inside(name) else OUTSIDE
+        if fp == DIR and name in gitlinks:
+            fp = "gitlink:%s" % (gitlinks[name] or UNREADABLE)
         digest.update(_path_bytes(name) + b"\0" + fp.encode("ascii") + b"\n")
     return digest.hexdigest()
 

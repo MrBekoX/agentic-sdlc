@@ -65,8 +65,9 @@ round's issues, or after the last round; open issues become residual notes. The 
 `plan/<work id>.md` (and `spec/<work id>.md` when the loop drafted one) with a `.review.json`
 sidecar each, and checks the stop, the validators and that each sidecar matches its body.
 - Do not edit those files afterwards: a changed body fails the sidecar check.
-- If a check stays `pending=` after the stop, tell the user which one fails and why (the data part
-  has the detail), and ask how to go on.
+- If the drafts still fail a check after the stop, the runner halts and its reason names the
+  check. Tell the user and ask how to go on. On their word, `sdlc resume` makes the next `then=`
+  start a new visit at round 0 whose brief lists the previous draft and its validator findings.
 - A new visit after the user's change request starts again at round 0 with their words in the
   brief; run its cards the same way.
 

@@ -433,7 +433,7 @@ def _security_review(ctx, step):
         if spec.get("header", "").strip() not in lines:
             return None
         verdict = spec.get("verdict")
-        passing = verdict is None or any(verdict in line for line in lines)
+        passing = verdict is None or checks.verdict_problem(lines, verdict, spec.get("under")) is None
         return fingerprint.file_fp(target), passing
     return None
 

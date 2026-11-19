@@ -1,7 +1,7 @@
 ---
 name: git-safety-check
 description: Read-only pre-commit git safety check (status, diff, log, secret scan). Never commits or pushes.
-allowed-tools: ["Bash(git status)", "Bash(git diff --no-ext-diff --no-textconv --stat)", "Bash(git diff --no-ext-diff --no-textconv)", "Bash(git log --oneline -n 10)", "Bash(git diff --cached --name-only)", "PowerShell(git status)", "PowerShell(git diff --no-ext-diff --no-textconv --stat)", "PowerShell(git diff --no-ext-diff --no-textconv)", "PowerShell(git log --oneline -n 10)", "PowerShell(git diff --cached --name-only)", "Read", "Grep"]
+allowed-tools: ["Bash(git status)", "Bash(git diff --no-ext-diff --no-textconv --stat)", "Bash(git diff --no-ext-diff --no-textconv)", "Bash(git log --oneline -n 10)", "Bash(git diff --cached --name-only)", "Bash(git diff --name-only)", "Bash(git ls-files --others --exclude-standard)", "PowerShell(git status)", "PowerShell(git diff --no-ext-diff --no-textconv --stat)", "PowerShell(git diff --no-ext-diff --no-textconv)", "PowerShell(git log --oneline -n 10)", "PowerShell(git diff --cached --name-only)", "PowerShell(git diff --name-only)", "PowerShell(git ls-files --others --exclude-standard)", "Read", "Grep"]
 ---
 
 # git-safety-check — Git Safety Check
@@ -18,12 +18,15 @@ git log --oneline -n 10
 `--no-ext-diff --no-textconv` keeps a repository-configured diff program from running or rewriting what you review. These exact commands are pre-approved; any other form asks first.
 
 ## Secret scan (read-only)
-Check staged changes for leaks with git alone — no `grep` or other shell pipe, so it works in PowerShell-only Windows shells as well as POSIX shells. Both commands print file names only, never a matched value; the marker search is not pre-approved, so approve it when asked:
+Check everything a commit could take — the index, unstaged edits and untracked files — with git alone: no `grep` or other shell pipe, so it works in PowerShell-only Windows shells as well as POSIX shells. Every command prints file names only, never a matched value; the two marker searches are not pre-approved, so approve them when asked:
 ```bash
 git diff --cached --name-only
+git diff --name-only
+git ls-files --others --exclude-standard
 git diff --cached --name-only --text --no-ext-diff --no-textconv -i -G "pass(word|wd)[[:space:]]*[:=]|secret|api[_-]?key|connection[_ ]?string|bearer[[:space:]]|token|-----BEGIN"
+git diff --name-only --text --no-ext-diff --no-textconv -i -G "pass(word|wd)[[:space:]]*[:=]|secret|api[_-]?key|connection[_ ]?string|bearer[[:space:]]|token|-----BEGIN"
 ```
-- The full name list shows staged credential files such as `.env`, `id_rsa` or `*.pem`; the `-G` list shows staged files whose changed lines contain a secret marker.
+- The first three lists name the staged, unstaged and untracked files, so credential files such as `.env`, `id_rsa` or `*.pem` show up wherever they sit. The two `-G` lists name the staged and unstaged files whose changed lines contain a secret marker. `git diff` never shows untracked files: search each one from the third list for the same markers with the Grep tool.
 - Open each listed file with the Read or Grep tool — never build a shell command from a file name. Judge each marker line without echoing it. On a suspicious match: **do not print the real value** — report `file:line` and the risk type, with the value replaced by `***MASKED***`.
 
 ## Pre-commit checklist

@@ -30,7 +30,8 @@
         ]
       },
       {
-        "matcher": "Write|Edit|MultiEdit",
+        "$comment": "Bash and PowerShell too: a source file written by a shell command (sed -i, a redirect, a heredoc, tee) is an edit like a Write/Edit, read by the shared write-target recognizer. No `if` filter, for the same reason as the command guards above; the guard exits early when a command writes no source file.",
+        "matcher": "Write|Edit|MultiEdit|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -44,7 +45,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",

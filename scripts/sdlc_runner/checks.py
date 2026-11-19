@@ -198,7 +198,48 @@ def check_sidecar_ok(ctx, step, artifact):
     return CheckResult(True, "%s matches %s" % (sidecar_rel, rel))
 
 
-def check_report(ctx, step, path, header, verdict=None, fresh=True):
+def verdict_problem(lines, verdict, under=None):
+    """None when a report (`lines`, each stripped) gives `verdict`, else why not.
+
+    Without `under`, the verdict is a `<label>: <value>` line such as `Verdict: pass`: every line
+    that holds the label (in any case, anywhere in it) counts as a verdict line, exactly one may
+    exist, it must start with the label, and its value must be the verdict's (both stripped, case
+    ignored). So a per-lens `- secrets: Verdict: pass` never stands in for the report's own
+    `Verdict: fail`. With `under` (a heading line such as `## Final Decision`), the heading appears
+    once and the one non-empty line below it, before the next heading, is the verdict.
+    """
+    want = verdict.strip()
+    if under is not None:
+        heading = under.strip()
+        at = [index for index, line in enumerate(lines) if line == heading]
+        if len(at) != 1:
+            return "has %s %r line" % ("no" if not at else "more than one", heading)
+        section = []
+        for line in lines[at[0] + 1:]:
+            if line.startswith("#"):
+                break
+            if line:
+                section.append(line)
+        if len(section) != 1:
+            return "needs one line under %r, %r alone (found %d)" % (heading, want, len(section))
+        if section[0].casefold() != want.casefold():
+            return "has %r under %r, not %r" % (section[0], heading, want)
+        return None
+    label, colon, value = want.partition(":")
+    label = label.strip() + colon
+    folded = label.casefold()
+    found = [line for line in lines if folded in line.casefold()]
+    if not found:
+        return "has no %r line" % label
+    if len(found) > 1:
+        return "has %d lines with %r; exactly one verdict line is allowed" % (len(found), label)
+    line = found[0]
+    if not line.casefold().startswith(folded) or line[len(label):].strip().casefold() != value.strip().casefold():
+        return "has %r, not %r" % (line, want)
+    return None
+
+
+def check_report(ctx, step, path, header, verdict=None, fresh=True, under=None):
     rel = _rel(ctx, path)
     target = Path(ctx.pkg).joinpath(*rel.split("/"))
     if not target.is_file():
@@ -210,8 +251,9 @@ def check_report(ctx, step, path, header, verdict=None, fresh=True):
     lines = [line.strip() for line in text.splitlines()]
     if header.strip() not in lines:
         return CheckResult(False, "%s has no line %r" % (rel, header))
-    if verdict is not None and not any(verdict in line for line in lines):
-        return CheckResult(False, "%s has no %r" % (rel, verdict))
+    problem = verdict_problem(lines, verdict, under) if verdict is not None else None
+    if problem:
+        return CheckResult(False, "%s %s" % (rel, problem))
     if fresh:
         recorded = (_step_entry(ctx, step).get("visit_fps") or {}).get(rel)
         if recorded is None or recorded == fingerprint.file_fp(target):
@@ -335,7 +377,13 @@ def current_branch(ctx):
 def check_branch_ok(ctx, step):
     if ctx.state.get("branch_policy") == "stay":
         return CheckResult(True, "branch_policy=stay (recorded with the user's quote)")
-    branch = current_branch(ctx)
+    facts = gitinfo.facts(ctx.project)
+    branch = facts.get("branch") if facts.get("repo") else None
+    if facts.get("repo") and branch is None:
+        # A detached HEAD (or one git cannot read) is no work branch: commits there belong to none.
+        return CheckResult(False, "%s: create a work branch, or record branch_policy=stay with the user's quote"
+                           % ("detached HEAD" if facts.get("detached") else
+                              "the branch cannot be read (%s)" % (facts.get("reason") or "unknown")))
     if branch in PROTECTED_BRANCHES:
         return CheckResult(False, "on %s: create a work branch, or record branch_policy=stay with the user's quote"
                            % branch)
@@ -489,8 +537,10 @@ def describe(spec: dict, state: dict) -> str:
         return "%s exists and is not empty" % path
     if name == "report":
         text = "%s has the line %r" % (path, spec.get("header"))
-        if spec.get("verdict"):
-            text += " and %r" % spec["verdict"]
+        if spec.get("verdict") and spec.get("under"):
+            text += " and %r under %r" % (spec["verdict"], spec["under"])
+        elif spec.get("verdict"):
+            text += " and exactly one verdict line, %r" % spec["verdict"]
         return text + (", written in this visit" if spec.get("fresh", True) else "")
     if name == "run_recorded":
         kind = "a failing (RED) run" if spec.get("expect") == "fail" else "a passing (GREEN) run at the current source"
@@ -505,7 +555,7 @@ def describe(spec: dict, state: dict) -> str:
     if name == "approval":
         return "the user approved gate %s" % spec.get("gate")
     if name == "branch_ok":
-        return "you are on a work branch (not main/master), or branch_policy=stay was recorded"
+        return "you are on a work branch (not main/master, not a detached HEAD), or branch_policy=stay was recorded"
     if name == "resolver_ok":
         return "resolve_work_package.py resolves the package"
     if name == "strategy_ok":

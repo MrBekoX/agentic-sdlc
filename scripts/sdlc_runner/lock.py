@@ -1,17 +1,25 @@
 """The exclusive package lock (`<package>/.lock`) around every state-changing command.
 
-The lock file is created with O_EXCL and holds JSON {pid, host, ts, nonce, start}. `host` is the
-first 16 hex of the sha256 of the host name, never the name (design §4: the file sits in the
+The lock file is created with O_EXCL and holds JSON {pid, host, ts, nonce, start, space}. `host` is
+the first 16 hex of the sha256 of the host name, never the name (design §4: the file sits in the
 user's project, which the plugin neither ignores nor commits, and the `locked:` message reaches
 transcripts). `start` identifies the holder process beyond its pid (its creation time on Windows,
-boot id and start tick on Linux; absent where the platform gives none).
+boot id and start tick on Linux; absent where the platform gives none). `space` names the PID
+space the pid belongs to (Linux: boot id and PID-namespace inode; Windows: `win` and the boot
+minute; absent where the platform gives none): a host name alone does not, since WSL2 and Windows
+share one on /mnt/<drive>, as do a host-network container and its host, or two machines of the same
+name over NFS.
 
-A lock is stale when it is older than `stale_seconds` AND its holder is gone: it came from another
-host, its pid is not alive on this host, or that pid now names another process (`start` differs;
-pids are reused). A lock without `start` is judged by its pid alone. A stale lock is broken by
-moving it aside and checking that what was moved is what was judged stale, so two runners breaking
-the same lock cannot remove a fresh one. Readers (`card`, `status`) never lock. Release removes the
-file only while it still holds this lock's own content.
+A lock whose holder is in this runner's own PID space (same host and same `space`) is stale as soon
+as its holder is gone, whatever its age: its pid is not alive, or that pid now names another
+process (`start` differs; pids are reused). A lock without `start` is judged by its pid alone, and
+a live holder in this space is never stale. Any other lock (another host or PID space, no `space`,
+or content that cannot be read yet, such as a file just created and not yet written) is stale only
+once it is older than `stale_seconds`, and then when it came from another host or PID space or its
+holder is gone. A stale lock is broken by moving it aside and checking that what was moved is
+what was judged stale, so two runners breaking the same lock cannot remove a fresh one. Readers
+(`card`, `status`) never lock. Release removes the file only while it still holds this lock's own
+content.
 
 A lock that cannot be written is SdlcError(2, "lock_unwritable:<path>"): at once when its folder
 cannot be made or the file system refuses the create for good (EROFS, ...), after about a second
@@ -19,6 +27,7 @@ when a create is refused (EACCES/EPERM) with no lock file in sight, never after 
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -68,6 +77,37 @@ def _process_start_linux(pid: int):
     if len(fields) < 20 or not fields[19].isdigit():
         return None
     return "linux:%s:%s" % (boot, fields[19])  # field 22 of /proc/<pid>/stat: start time in ticks
+
+
+@functools.lru_cache(maxsize=1)
+def _pid_space():
+    """This runner's PID space as the lock stores it, or None where the platform gives none.
+
+    Two runners with the same host name can still see different pids (WSL2 and Windows, a container
+    with a bind mount, two machines over NFS); only a holder in this same space can be judged by its
+    pid. Linux: the boot id and the inode of /proc/self/ns/pid. Windows (one PID space per running
+    system): `win` and the boot time in minutes; a holder whose minute reads differently only falls
+    back to the age rule.
+    """
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/sys/kernel/random/boot_id", "rb") as handle:
+                boot = handle.read(64).decode("ascii", "replace").strip()
+            namespace = os.stat("/proc/self/ns/pid").st_ino
+        except OSError:
+            return None
+        return "linux:%s:%d" % (boot, namespace) if boot else None
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.GetTickCount64.restype = ctypes.c_ulonglong
+            uptime_ms = kernel32.GetTickCount64()
+        except (OSError, AttributeError):
+            return None
+        return "win:%d" % int((time.time() * 1000 - uptime_ms) // 60000)
+    return None
 
 
 def _pid_alive(pid) -> bool:
@@ -174,10 +214,13 @@ class PackageLock:
         deadline = time.monotonic() + max(0.0, float(timeout))
         refused = 0
         start = _process_start(os.getpid())
+        space = _pid_space()
         while True:
             fields = {"host": _host_id(), "nonce": uuid.uuid4().hex, "pid": os.getpid(), "ts": now_iso()}
             if start is not None:
                 fields["start"] = start
+            if space is not None:
+                fields["space"] = space
             token = json.dumps(fields, sort_keys=True).encode("utf-8")
             outcome = self._try_create(token)
             if outcome == _CREATED:
@@ -273,11 +316,23 @@ class PackageLock:
 
     def _is_stale(self, seen: bytes) -> bool:
         meta = _parse(seen)
+        same_host = bool(meta) and meta.get("host") == _host_id()
+        recorded_space = meta.get("space") if meta else None
+        mine = _pid_space()
+        if same_host and isinstance(recorded_space, str) and mine is not None and recorded_space == mine:
+            # This runner sees its holder's pid: a dead holder frees the lock at once (RN-10), not after
+            # the age a remote holder needs, so `next` never waits 30 s on a crashed runner.
+            return self._holder_gone(meta)
         age = self._age(meta)
         if age is None or age <= self.stale_seconds:
-            return False
-        if not meta or meta.get("host") != _host_id():
+            return False  # another host or PID space, or no space recorded: its pid means nothing yet
+        if not same_host or (isinstance(recorded_space, str) and mine is not None and recorded_space != mine):
             return True
+        return self._holder_gone(meta)  # an old lock of this host that names no space
+
+    @staticmethod
+    def _holder_gone(meta) -> bool:
+        """The holder's pid is not alive here, or now names another process (`start` differs)."""
         pid = meta.get("pid")
         if not _pid_alive(pid):
             return True

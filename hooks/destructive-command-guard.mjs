@@ -16,11 +16,19 @@
 // denies). Single quotes suppress the substitution and are allowed - which is what a
 // careful shell user would write anyway.
 //
+// Also read the way the programs themselves read them: unique long-option prefixes
+// (`rm --rec`, `git reset --ha`, `git clean --fo`), `clean.requireForce=false` (inline, from the
+// environment, or stored), git aliases (inline `-c alias.x=...` and stored, `!` aliases included,
+// through git-invocation.mjs), `env -S`, brace expansion, `exec -a`, here-strings, a here-document
+// fed to a shell, and PowerShell's `iex`, dot-sourcing, `-Command` prefixes, `-EncodedCommand`
+// and backtick escapes. A here-document body that nothing executes is data, not a command.
+//
 // Two halves with different guarantees. The cmd_prefix set is CLOSED by the shell grammar
 // (POSIX 2.9.1 plus bash's reserved-word list), so it is a positive grammar and complete.
-// The WRAPPERS table is OPEN-ENDED and stays a deny-list: there is no specification that
-// bounds "programs that run another program", so a wrapper not in the table is a gap, not a
-// bug in the walker. Do not read the parity check as evidence that the table is complete.
+// The wrapper table (shared with the git resolver in git-invocation.mjs) is OPEN-ENDED and stays
+// a deny-list: there is no specification that bounds "programs that run another program", so a
+// wrapper not in the table is a gap, not a bug in the walker. Do not read the parity check as
+// evidence that the table is complete.
 //
 // NOT covered, by design: other destructive verbs (find -delete, shred, truncate -s 0, dd of=,
 // >-redirect) and runtime shell indirection that is statically undecidable (eval "$(...)",
@@ -28,8 +36,14 @@
 // The permission prompt remains the primary control; this guard only catches the common cases.
 import { readStdin } from './secret-patterns.mjs';
 import { expandAnsiCQuotes } from './shell-quoting.mjs';
-import { skipCommandPrefix } from './shell-prefix.mjs';
+import { isAssignmentWord } from './shell-prefix.mjs';
 import { emitHookResult } from './hook-output.mjs';
+import { runGit } from './git-exec.mjs';
+import {
+  commandCwd, resolveGitCommands, resolveTargetCwd, unwrapCommand, shellPayloadAt, shortCluster,
+  exactHeredocShape, powershellCommentRanges,
+} from './git-invocation.mjs';
+import { scanShell } from './shell-quoting.mjs';
 
 const BLOCKED = [
   {
@@ -72,9 +86,33 @@ function stripCmdCarets(text) {
 
 // `/s` alone or in a switch run such as `/s/q`, `/q/s` or `/s/a:h`, any case, carets removed. Git
 // Bash users write `//s`, because its path conversion would turn a lone `/s` into a path.
+// One left-to-right pass over the switch run. The regex it replaces had a starred group on both
+// sides of the `/s` it looked for, so a long run that failed at its last character backtracked
+// quadratically - reachable through the widened scan, which reads tokens of any length.
+function isSubtreeSwitchRun(raw) {
+  const t = stripCmdCarets(String(raw)).toLowerCase();
+  if (!t.startsWith('/')) return false;
+  let found = false;
+  let i = 0;
+  while (i < t.length) {
+    if (t[i] !== '/') return false;
+    i += 1;
+    if (t[i] === '/') i += 1;
+    const c = t[i];
+    if (!c || !((c >= 'a' && c <= 'z') || c === '?')) return false;
+    i += 1;
+    if (t[i] === ':') {                                   // `/a:h`: a value-carrying switch
+      i += 1;
+      while (i < t.length && ((t[i] >= 'a' && t[i] <= 'z') || t[i] === '-')) i += 1;
+      continue;
+    }
+    if (c === 's') found = true;
+  }
+  return found;
+}
+
 function hasCmdSubtreeSwitch(args) {
-  return args.some((arg) => /^(?:\/{1,2}[a-z?](?::[a-z-]*)?)*\/{1,2}s(?:\/{1,2}[a-z?](?::[a-z-]*)?)*$/i
-    .test(stripCmdCarets(arg)));
+  return args.some(isSubtreeSwitchRun);
 }
 
 // cmd.exe by name, by the variable that names it, or glued to its switch (`cmd/c`).
@@ -114,32 +152,6 @@ function isCmdTreeDelete(tokens) {
   return CMD_REMOVE.has(commandName(first)) && hasCmdSubtreeSwitch(tokens.slice(i + 1));
 }
 
-// Command wrappers whose real command follows them: `timeout 5 rm -rf`, `nice -n 10 rm -rf`,
-// `nohup rm -rf`, `xargs rm -rf`. positional = positional args the wrapper itself consumes
-// (timeout takes a DURATION); argOpts = options that consume a following value.
-const WRAPPERS = {
-  nohup: { positional: 0, argOpts: new Set() },
-  setsid: { positional: 0, argOpts: new Set() },
-  nice: { positional: 0, argOpts: new Set(['-n', '--adjustment']) },
-  ionice: { positional: 0, argOpts: new Set(['-c', '-n', '-p']) },
-  stdbuf: { positional: 0, argOpts: new Set(['-i', '-o', '-e']) },
-  time: { positional: 0, argOpts: new Set(['-o', '--output', '-f', '--format']) },
-  timeout: { positional: 1, argOpts: new Set(['-s', '--signal', '-k', '--kill-after']) },
-  // argOpts is EXACTLY the options that take a SEPARATE following value. Both errors are
-  // bypasses: over-consuming skips past the command name, and under-consuming leaves the
-  // option's value sitting where the command name should be, so `5` resolves as the command
-  // and nothing matches. In GNU xargs `-p`/`--interactive` is a plain flag, and `-i[R]`,
-  // `-l[N]`, `-e[eof]` take only an ATTACHED value - as do the long forms `--replace`,
-  // `--max-lines` and `--eof`, whose optional arguments must be written with `=`.
-  xargs: { positional: 0, argOpts: new Set(['-n', '--max-args', '-P', '--max-procs', '-I', '-L', '-E', '-d', '--delimiter', '-a', '--arg-file', '-s', '--max-chars']) },
-  // `builtin` was carried by git-invocation.mjs and not by this guard - the capability
-  // asymmetry BR2 calls a defect by definition.
-  builtin: { positional: 0, argOpts: new Set() },
-};
-
-// Shells whose `-c <payload>` (and `eval <payload>`) run an inline command we must inspect.
-const SHELL_NAMES = ['powershell', 'pwsh', 'bash', 'sh', 'zsh', 'dash', 'ksh'];
-
 function removeBashLineContinuations(cmd) {
   let out = '';
   let quote = null;
@@ -177,24 +189,109 @@ function removeBashLineContinuations(cmd) {
   return out;
 }
 
-// True when the `&` at `index` belongs to a redirect operator rather than being a separator:
-// `2>&1`, `<&0`, `&>log`, `&>>log`. Splitting on it left a segment starting with a bare fd
-// digit, so the command after it was never resolved.
-function ampersandIsRedirect(text, index, segment) {
-  if (text[index + 1] === '>') return true;          // &> / &>>
-  for (let i = segment.length - 1; i >= 0; i -= 1) { // 2>& / <&
-    const c = segment[i];
-    if (c === ' ' || c === '\t') continue;
-    return c === '>' || c === '<';
-  }
-  return false;
+// True when an `&` belongs to a redirect operator rather than being a separator: `2>&1`, `<&0`,
+// `&>log`, `&>>log`. Splitting on it left a segment starting with a bare fd digit, so the command
+// after it was never resolved. An ESCAPED `>` is literal text, not an operator: without that
+// distinction `echo a\> & rm -rf x` read as a redirect and the `&` stopped separating - the parity
+// regression git-invocation.mjs had already fixed. Takes scalars carried beside the segment, never
+// the segment itself (indexing a `+=`-built string flattens it, see lessons.md 2026-09-21).
+function ampersandIsRedirect(next, lastNonSpace, lastWasEscaped) {
+  if (next === '>') return true;                       // &> / &>>
+  if (lastNonSpace !== '>' && lastNonSpace !== '<') return false;
+  return !lastWasEscaped;
 }
 
-function rawCommandSegments(cmd, protectEscapedSeparators = false) {
+// Bash brace expansion: `{rm,-rf,x}` is the three words `rm -rf x`, and `rm -{r,f}` is `rm -r -f`.
+// The splitter keeps such a word whole (instead of splitting at its braces) and the bash view
+// expands it after tokenizing. A brace word needs an unquoted comma or `..` at its own level;
+// `{ cmd; }` (a group: blank after `{`) and `${x}` are not brace words. Returns the index of the
+// closing brace, or -(stop index) - 1 when this is not a brace word, so the caller never rescans
+// the same word (linear).
+function braceWordEnd(cmd, start) {
+  let depth = 0;
+  let list = false;
+  for (let k = start; k < cmd.length; k += 1) {
+    const c = cmd[k];
+    if (c === '\\') { k += 1; continue; }
+    // A double quote, `$` or a backtick can carry an escaped quote or a command substitution that
+    // this linear scan reads wrongly: `indexOf('"')` stopped at an escaped `\"`, swallowing the
+    // statements after the brace word, and a `"$(...)"` part was added raw so substitution
+    // extraction never saw it (R4-2). Treat the candidate as NOT a brace word and let the normal
+    // segmenter, which models escapes and extracts substitutions, read it instead.
+    if (c === '"' || c === '$' || c === '`') return -k - 1;
+    if (c === "'") {
+      const close = cmd.indexOf("'", k + 1);
+      if (close < 0) return -k - 1;
+      k = close;
+      continue;
+    }
+    if (c === ' ' || c === '\t' || c === '\n' || c === ';' || c === '&' || c === '|' || c === '<'
+      || c === '>' || c === '(' || c === ')') return -k - 1;
+    if (c === '{') depth += 1;
+    else if (c === '}') {
+      depth -= 1;
+      if (depth === 0) return list ? k : -k - 1;
+    } else if (depth === 1 && (c === ',' || (c === '.' && cmd[k + 1] === '.'))) list = true;
+  }
+  return -cmd.length - 1;
+}
+
+const MAX_BRACE_WORDS = 64;
+
+// Expand one word's brace lists (comma lists only; a `..` sequence is left as written). One pass
+// with a stack finds an innermost list with a comma at its own level; that list is expanded and the
+// results are expanded again, until no list is left or the word count reaches the cap.
+function expandBraces(word) {
+  if (!word.includes('{') || !word.includes(',')) return [word];
+  let work = [word];
+  for (let round = 0; round < 16; round += 1) {
+    const next = [];
+    let changed = false;
+    for (const w of work) {
+      const group = findBraceList(w);
+      if (!group) { next.push(w); continue; }
+      // Count before building: one list of thousands of alternatives must not be materialised.
+      if (next.length + group.commas.length + 1 > MAX_BRACE_WORDS) { WALK.unresolved = true; return [word]; }
+      changed = true;
+      const prefix = w.slice(0, group.start);
+      const suffix = w.slice(group.end + 1);
+      let from = group.start + 1;
+      for (const comma of [...group.commas, group.end]) {
+        next.push(prefix + w.slice(from, comma) + suffix);
+        from = comma + 1;
+      }
+    }
+    if (next.length > MAX_BRACE_WORDS) { WALK.unresolved = true; return [word]; }
+    work = next;
+    if (!changed) break;
+  }
+  return work;
+}
+
+function findBraceList(word) {
+  const stack = [];
+  for (let k = 0; k < word.length; k += 1) {
+    const c = word[k];
+    if (c === '{' && word[k - 1] !== '$') stack.push({ start: k, commas: [] });
+    else if (c === ',' && stack.length) stack[stack.length - 1].commas.push(k);
+    else if (c === '}' && stack.length) {
+      const open = stack.pop();
+      if (open.commas.length) return { start: open.start, end: k, commas: open.commas };
+    }
+  }
+  return null;
+}
+
+function rawCommandSegments(cmd, protectEscapedSeparators = false, nest = 0) {
   const segments = [];
   let segment = '';
   let quote = null;
   let escaped = false;
+  // Carried beside `segment` for the redirect test (see ampersandIsRedirect).
+  let lastNonSpace = '';
+  let lastWasEscaped = false;
+  let backslashRun = 0;
+  let noBraceBefore = -1;
   // Command substitution INSIDE a double-quoted string. Bash runs it there, so its BODY is
   // a command context - but the quoted text around it is an argument to the outer command,
   // not a new statement. An earlier revision split the string at the substitution, which
@@ -205,9 +302,20 @@ function rawCommandSegments(cmd, protectEscapedSeparators = false) {
   let subBuf = '';
   let backtickOpen = false;
   const extracted = [];
+  const add = (ch) => {
+    segment += ch;
+    if (ch !== ' ' && ch !== '\t') {
+      lastNonSpace = ch;
+      lastWasEscaped = backslashRun % 2 === 1;
+    }
+    backslashRun = ch === '\\' ? backslashRun + 1 : 0;
+  };
   const flush = () => {
     if (segment.trim()) segments.push(segment.trim());
     segment = '';
+    lastNonSpace = '';
+    lastWasEscaped = false;
+    backslashRun = 0;
   };
   for (let idx = 0; idx < cmd.length; idx += 1) {
     const ch = cmd[idx];
@@ -241,7 +349,7 @@ function rawCommandSegments(cmd, protectEscapedSeparators = false) {
         if (ch === '$' && cmd[idx + 1] === '(') { subDepth = 1; idx += 1; continue; }
         if (ch === '`') { backtickOpen = true; continue; }
       }
-      segment += ch;
+      add(ch);
       if (escaped) {
         escaped = false;
       } else if (ch === '\\' && quote === '"') {
@@ -257,35 +365,51 @@ function rawCommandSegments(cmd, protectEscapedSeparators = false) {
     if (protectEscapedSeparators && escaped) {
       // Keep the pair intact. tokenizePreservingQuotes() performs the ONE Bash unescape pass;
       // consuming it here as well turns safe r\\\\m into rm and creates a false denial.
-      segment += ch;
+      add(ch);
       escaped = false;
       continue;
     }
     if (protectEscapedSeparators && ch === '\\') {
-      segment += ch;
+      add(ch);
       escaped = true;
       continue;
     }
     if (ch === '"' || ch === "'") {
       quote = ch;
-      segment += ch;
+      add(ch);
       continue;
     }
-    if (ch === '&' && ampersandIsRedirect(cmd, idx, segment)) {
-      segment += ch;
+    if (ch === '&' && ampersandIsRedirect(cmd[idx + 1], lastNonSpace, lastWasEscaped)) {
+      add(ch);
       continue;
+    }
+    if (protectEscapedSeparators && ch === '{' && idx > noBraceBefore && cmd[idx - 1] !== '$') {
+      const close = braceWordEnd(cmd, idx);
+      if (close > idx) {
+        for (let k = idx; k <= close; k += 1) add(cmd[k]);
+        idx = close;
+        continue;
+      }
+      noBraceBefore = -close - 1;
     }
     if (/[;&|\n(){}]/.test(ch)) {
       flush();
       continue;
     }
-    segment += ch;
+    add(ch);
   }
   flush();
   // An unterminated substitution still carries whatever was read: dropping it would let an
   // unbalanced `"$(rm -rf x` go unexamined.
   if (subBuf.trim()) extracted.push(subBuf.trim());
-  return segments.concat(extracted);
+  // A substitution body is a command line of its own, so it is segmented again:
+  // `"$(true; rm -rf x)"` runs both statements, and the second is not the body's first word.
+  if (nest >= 8) {
+    if (extracted.length) WALK.unresolved = true;
+    return segments.concat(extracted);
+  }
+  return segments.concat(extracted.flatMap((body) =>
+    rawCommandSegments(body, protectEscapedSeparators, nest + 1)));
 }
 
 function tokenizePreservingQuotes(text, unescapeUnquoted = false) {
@@ -338,6 +462,34 @@ function tokenizePreservingQuotes(text, unescapeUnquoted = false) {
   return tokens;
 }
 
+// PowerShell's escape character is the backtick: outside single quotes `` `X `` is the character X
+// (`` Remove-It`em `` runs Remove-Item), and a backtick before a newline continues the line. An
+// escaped quote is replaced by `_` so it cannot open a string the shell never opened.
+function psUnescape(text) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (quote === "'") {
+      out += c;
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (c === '`' && i + 1 < text.length) {
+      const n = text[i + 1];
+      i += 1;
+      if (n === '\n') continue;
+      if (n === '\r' && text[i + 1] === '\n') { i += 1; continue; }
+      out += n === '"' || n === "'" ? '_' : n;
+      continue;
+    }
+    if (c === "'" && quote === null) quote = "'";
+    else if (c === '"') quote = quote === '"' ? null : '"';
+    out += c;
+  }
+  return out;
+}
+
 function basename(token) {
   return token.replace(/^["']|["']$/g, '').split(/[\\/]/).pop();
 }
@@ -375,6 +527,36 @@ const MAX_PAYLOADS_PER_LEVEL = 32;
 // answers "did I account for this input?", never "did I happen to see no hazard".
 const WALK = { budget: 0, unresolved: false };
 
+// Per-invocation git context: the directory the command runs in, the git resolver's view of the
+// command (aliases expanded), and stored `clean.requireForce` answers. `lookups` bounds the config
+// reads: a repository can make each one stall (a FIFO include), so all of them share one count and
+// one deadline, and an answer that is not known in time counts as switched off (R2-CG-9).
+const GIT_CONTEXT = { cwd: process.cwd(), resolved: null, requireForce: new Map(), lookups: 0, deadline: 0 };
+const MAX_CONFIG_LOOKUPS = 4;
+const CONFIG_LOOKUP_BUDGET_MS = 2500;
+
+// Unique long-option prefixes (GNU getopt_long and git's parse-options accept them):
+// `--rec`/`--r` is `--recursive`, `--ha`/`--h` is `git reset --hard`, `--fo`/`--f` is
+// `git clean --force`. Each is the only option of its program starting with that letter.
+function isLongPrefixOf(arg, option) {
+  return arg.length >= 3 && option.startsWith(arg);
+}
+
+function isHardOption(arg) {
+  return isLongPrefixOf(arg, '--hard');
+}
+
+// Single-dash letter clusters are read with `shortCluster` (one linear pass). The regexes they
+// replace (`^-[A-Za-z]*f[A-Za-z]*$` and kin) backtracked quadratically on a long cluster that
+// fails at its last character, and the widened scan applies them to tokens of any length (R2-CG-13).
+function isCleanForceOption(arg) {
+  return isLongPrefixOf(arg, '--force') || shortCluster(arg, 'f');
+}
+
+function isCleanTargetOption(arg) {
+  return arg === '--ignored' || arg === '--exclude-standard' || shortCluster(arg, 'dxX');
+}
+
 // Linear fallback for input the walk did not fully account for. Deliberately NOT "re-run each
 // check at every token position": that is O(n^2), measured at ~18 s on 32k tokens, which would
 // make the escape hatch slower than the code it replaces and rebuild the DoS one layer down.
@@ -397,9 +579,10 @@ function widenedFindingLabel(cmd) {
   // `grep -rn "rm" src/...` matched the rm rule, with `-rn` grep's and `rm` grep's search
   // pattern. Here a rule matches only when the flag appears AFTER the command name inside
   // the same statement. One backward sweep per statement builds the suffix answers, then one
-  // forward sweep asks them - linear, with no slice in the loop.
+  // forward sweep asks them - linear, with no slice in the loop. A comma also separates words
+  // here, so an unexpanded brace word (`{rm,-rf,x}`) is read as its parts.
   for (const statement of decoded.split(/[;&|\n]+/)) {
-    const tokens = statement.split(/[\s(){}'"`]+/).filter(Boolean);
+    const tokens = statement.split(/[\s(){}'"`,]+/).filter(Boolean);
     if (!tokens.length) continue;
     const n = tokens.length;
     const recursiveAfter = new Array(n + 1).fill(false);
@@ -414,10 +597,9 @@ function widenedFindingLabel(cmd) {
       const t = tokens[i];
       const args = [t];
       recursiveAfter[i] = recursiveAfter[i + 1] || hasRmRecursiveFlag(args);
-      hardAfter[i] = hardAfter[i + 1] || t === '--hard';
-      forceAfter[i] = forceAfter[i + 1] || t === '--force' || /^-[A-Za-z]*f[A-Za-z]*$/.test(t);
-      cleanTargetAfter[i] = cleanTargetAfter[i + 1] || t === '--ignored'
-        || t === '--exclude-standard' || /^-[A-Za-z]*[dxX][A-Za-z]*$/.test(t);
+      hardAfter[i] = hardAfter[i + 1] || isHardOption(t);
+      forceAfter[i] = forceAfter[i + 1] || isCleanForceOption(t);
+      cleanTargetAfter[i] = cleanTargetAfter[i + 1] || isCleanTargetOption(t);
       riAfter[i] = riAfter[i + 1] || hasRemoveItemRecursiveFlag(args);
       resetAfter[i] = resetAfter[i + 1] || t === 'reset';
       cleanAfter[i] = cleanAfter[i + 1] || t === 'clean';
@@ -438,27 +620,111 @@ function widenedFindingLabel(cmd) {
   return null;
 }
 
-function commandTokensOne(cmd, unescapeUnquoted, depth = 0) {
+// R3-CG-1 / R3-CG-2: what each view reads.
+//   * The command exactly as written - base f430715's reading, here-document body lines included.
+//     Nothing is ever removed from this reading: two attempts at dropping "data" bodies had bypasses.
+//   * In addition, when the command has comments or here-documents: the same text with comments
+//     blanked and here-document bodies removed. That reading finds what an odd quote hid from the
+//     first one - `# don't forget` followed by a delete, or a body line `We're shipping` followed by
+//     a delete after the closing delimiter (H0/H1). The union can only add findings.
+//   * A whole command of one exact here-document shape (git-invocation.mjs `exactHeredocShape`) is
+//     read as its opener line only: the body is a file's contents or a commit message. Never for
+//     PowerShell, where `<<` is not a here-document.
+function rewriteRanges(text, blanks, removes) {
+  const ranges = [
+    ...blanks.map(([a, b]) => ({ a, b, remove: false })),
+    ...removes.map(([a, b]) => ({ a, b, remove: true })),
+  ].sort((x, y) => x.a - y.a);
+  let out = '';
+  let at = 0;
+  for (const { a, b, remove } of ranges) {
+    if (b <= at) continue;
+    const from = Math.max(a, at);
+    out += text.slice(at, from);
+    if (!remove) out += text.slice(from, b).replace(/[^\n]/g, ' ');
+    at = b;
+  }
+  return out + text.slice(at);
+}
+
+// The tool's raw command string, the only text an exact here-document shape may be judged on.
+let RAW_COMMAND = null;
+
+function commandVariants(cmd, view, depth = 0) {
+  const powershell = view === 'ps' || TOOL === 'PowerShell';
+  // The exact here-document shape is judged only on the tool's raw command (depth 0), as the git
+  // resolver does. A nested payload's text comes out of a lossy decode (`\\` before a newline,
+  // `\cJ` in ANSI-C quoting), so a delimiter line bash sees can merge into the line above in this
+  // copy, the shape would match, and the lines after it would go unread (R5).
+  // The same holds for a `!` alias text: it comes out of the resolver's tokenizer, not raw, so the
+  // shape is judged only on text that IS the tool's own command string.
+  if (!powershell && depth === 0 && cmd === RAW_COMMAND) {
+    const shape = exactHeredocShape(cmd);
+    if (shape) return [shape.opener];
+  }
+  const variants = [cmd];
+  if (powershell) {
+    if (cmd.includes('#')) {
+      const comments = powershellCommentRanges(cmd);
+      if (comments.length) variants.push(rewriteRanges(cmd, comments, []));
+    }
+  } else if (cmd.includes('#') || cmd.includes('<<')) {
+    const lex = scanShell(cmd);
+    if (lex.commentRanges.length || lex.bodyRanges.length) {
+      variants.push(rewriteRanges(cmd, lex.commentRanges, lex.bodyRanges));
+    }
+  }
+  return variants;
+}
+
+// The shared wrapper walk (git-invocation.mjs), with this view's word splitter for `env -S`.
+// A `GIT_CONFIG_*` assignment naming requireForce in front of the command is remembered on the
+// result: it can switch `git clean`'s force requirement off from the environment.
+function unwrapForView(tokens, bash) {
+  const { rest, consumed, unresolved } = unwrapCommand(tokens, {
+    splitWords: (text) => tokenizePreservingQuotes(text, bash),
+  });
+  if (unresolved) WALK.unresolved = true;
+  if (consumed.some((word) => isAssignmentWord(word)
+      && /^GIT_CONFIG_(?:PARAMETERS|KEY_\d+)=.*requireforce/i.test(word))) {
+    rest.requireForceFromEnv = true;
+  }
+  // R2-CG-11: an environment prefix that changes which config git reads makes a stored
+  // `clean.requireForce` read from here meaningless for this call.
+  if (consumed.some((word) => isAssignmentWord(word) && /^(?:GIT_[A-Z0-9_]+|HOME|XDG_CONFIG_HOME)=/.test(word))) {
+    rest.configContextUnknown = true;
+  }
+  return rest;
+}
+
+function commandTokensOne(cmd, view, depth = 0) {
   if (cmd.length > MAX_INPUT_CHARS) { WALK.unresolved = true; return []; }
   if (depth > MAX_PAYLOAD_DEPTH) { WALK.unresolved = true; return []; }
   if (WALK.budget <= 0) { WALK.unresolved = true; return []; }
   WALK.budget -= 1;
-  const source = unescapeUnquoted
-    ? expandAnsiCQuotes(removeBashLineContinuations(cmd))
-    : cmd;
+  let all = [];
+  for (const text of commandVariants(cmd, view, depth)) all = all.concat(tokensOfText(text, view, depth));
+  return all;
+}
+
+function tokensOfText(text, view, depth) {
+  const bash = view === 'bash';
+  const decoded = view === 'ps' ? psUnescape(text) : text;
+  const source = bash ? expandAnsiCQuotes(removeBashLineContinuations(decoded)) : decoded;
   // Segment on UNQUOTED separators, then tokenize each segment with quote REMOVAL (not blanking).
   // A quoted command name still runs the command in a shell ("rm"/'rm'/r"m" all execute rm), so
   // unquoting per token — instead of erasing quoted spans before tokenizing — keeps the real
   // command name visible to the checks below while still treating a quoted argument blob
   // (echo "rm -rf x") as a single non-command token.
-  const segments = rawCommandSegments(source, unescapeUnquoted);
+  const segments = rawCommandSegments(source, bash);
   const tokens = segments
-    .map((segment) => tokenizePreservingQuotes(segment, unescapeUnquoted))
-    .map(unwrapCommand)
+    .map((segment) => tokenizePreservingQuotes(segment, bash))
+    .map((items) => (bash ? items.flatMap(expandBraces) : items))
+    .map((items) => unwrapForView(items, bash))
     .filter((items) => items.length);
   // Each explicit shell starts a new parsing layer. A payload single-quoted for the outer shell
   // can contain a backslash-newline or ANSI-C quote that only the INNER bash/sh realizes.
-  const payloads = segments.flatMap((segment) => shellPayloads(segment, unescapeUnquoted));
+  const payloads = segments.flatMap((segment) => shellPayloads(segment, view));
   if (payloads.length > MAX_PAYLOADS_PER_LEVEL) {
     WALK.unresolved = true;
     payloads.length = MAX_PAYLOADS_PER_LEVEL;
@@ -470,186 +736,62 @@ function commandTokensOne(cmd, unescapeUnquoted, depth = 0) {
     const cost = 1 + (payload.text.length >> 6);
     if (WALK.budget < cost) { WALK.unresolved = true; break; }
     WALK.budget -= cost;
-    for (const t of commandTokensOne(payload.text, payload.bashSemantics, depth + 1)) {
+    for (const t of commandTokensOne(payload.text, payload.view, depth + 1)) {
       wrapped.push(t);
     }
   }
   return tokens.concat(wrapped);
 }
 
-// Memoised across the four BLOCKED checks. Each check re-ran the whole walk, and the two views
-// doubled it again -- eight full traversals per command. On the allow path, where nothing
-// short-circuits, that multiplier was most of the cost.
+// Memoised across the BLOCKED checks. Each check re-ran the whole walk, and the views multiplied
+// it again. On the allow path, where nothing short-circuits, that multiplier was most of the cost.
 let cachedKey = null;
 let cachedTokens = null;
 
-function commandTokens(cmd, bashSemantics = false) {
-  const key = (bashSemantics ? '1|' : '0|') + cmd;
+function commandTokens(cmd, views) {
+  const key = views.join(',') + '|' + cmd;
   if (cachedKey === key) return cachedTokens;
   WALK.unresolved = false;
   // Per-VIEW budget. Sharing one drained on the raw view and then returned [] for the bash
   // view at entry - silently discarding the only view that unescapes, so `r\m -rf x` came
   // back as a fast, confident allow. A bound must narrow what is examined visibly, never
   // delete a whole reading.
-  WALK.budget = WORK_BUDGET;
-  const raw = commandTokensOne(cmd, false, 0);
-  // Preserve the generic/PowerShell view and add a Bash-realized view; the union keeps Bash
-  // quote removal from hiding Windows-style paths while still exposing the escaped spellings.
-  let all = raw;
-  if (bashSemantics) {
+  // Every view is read and the union is checked: the generic view keeps Windows-style paths,
+  // the Bash view exposes escaped spellings, the PowerShell view backtick escapes.
+  let all = [];
+  for (const view of views) {
     WALK.budget = WORK_BUDGET;
-    all = raw.concat(commandTokensOne(cmd, true, 0));
+    all = all.concat(commandTokensOne(cmd, view, 0));
   }
   cachedKey = key;
   cachedTokens = all;
   return all;
 }
 
-function shellPayloads(segment, unescapeUnquoted) {
-  const tokens = tokenizePreservingQuotes(segment, unescapeUnquoted);
+function shellPayloads(segment, view) {
+  const tokens = tokenizePreservingQuotes(segment, view === 'bash');
   const payloads = [];
   for (let i = 0; i < tokens.length; i += 1) {
     const name = commandName(tokens[i]);
-    if (name === 'eval') {
-      const payload = tokens.slice(i + 1).join(' ').trim();
-      if (payload) payloads.push({ text: payload, bashSemantics: unescapeUnquoted });
-      continue;
-    }
     if (CMD_NAMES.has(name) || CMD_GLUED_RUN.test(stripCmdCarets(String(tokens[i])))) {
       const payload = cmdPayload(tokens, i);
-      if (payload) payloads.push({ text: payload, bashSemantics: false });
+      if (payload) payloads.push({ text: payload, view: 'raw' });
       continue;
     }
-    if (!SHELL_NAMES.includes(name)) continue;
-    for (let j = i + 1; j < tokens.length; j += 1) {
-      // bash/sh/zsh/dash/ksh: -c (also -lc/-ic); powershell/pwsh: -Command / -c / /c.
-      if (/^(?:-command|\/c|-[a-z]*c)$/i.test(tokens[j])) {
-        const payload = tokens.slice(j + 1).join(' ').trim();
-    if (payload) {
-      payloads.push({
-        text: payload,
-        bashSemantics: ['bash', 'sh', 'zsh', 'dash', 'ksh'].includes(name),
-      });
-    }
-        break;
-      }
-    }
+    // bash/sh/zsh/... -c [options] [--] (also -lc/-ce), here-strings, eval [--], su -c,
+    // powershell/pwsh -Command and its prefixes, -EncodedCommand, iex / Invoke-Expression.
+    const found = shellPayloadAt(tokens, i);
+    if (found && found.unresolved) WALK.unresolved = true;
+    if (found && found.text) payloads.push({ text: found.text, view: found.semantics === 'inherit' ? view : found.semantics });
   }
   return payloads;
 }
 
-
-// POSIX Shell & Utilities 2.9.1 closes the production that sits in front of a command name:
-//
-//   simple_command := cmd_prefix* [ cmd_word cmd_suffix* ]
-//   cmd_prefix     := io_redirect | ASSIGNMENT_WORD
-//
-// plus bash's reserved words and `!`. That set is fixed BY THE LANGUAGE, which is why this
-// half is a positive grammar rather than another deny-list -- unlike WRAPPERS above, which
-// is open-ended and stays a deny-list. Every bypass this closes was the same mechanical
-// failure: tokens[0] was a prefix construct, so the real command was never examined.
-//
-// The grammar itself lives in `shell-prefix.mjs` because the git resolver needs exactly the
-// same answers about it; what stays here is the alternation with the wrapper table below.
-
-function unwrapCommand(tokens) {
-  let i = 0;
-  // The prefix walker and the wrapper table must ALTERNATE to a fixed point, not replace one
-  // another: `then env FOO=1 nohup rm -rf x` is prefix, wrapper, prefix, wrapper. A first
-  // prototype that swapped the table for the walker regressed `env rm -rf` and `nohup rm -rf`
-  // from deny to allow -- the exact "a new component re-loses its neighbour's capability"
-  // shape recorded in lessons.md 2026-08-23. The round cap makes non-termination impossible.
-  for (let round = 0; round < 16; round += 1) {
-    const next = skipCommandPrefix(tokens, i);
-    if (next === i) break;
-    i = next;
-  }
-  while (i < tokens.length) {
-    const name = commandName(tokens[i]);
-    if (name === 'sudo') {
-      i += 1;
-      while (i < tokens.length && tokens[i].startsWith('-')) {
-        const option = tokens[i].toLowerCase();
-        i += 1;
-        if (/^(?:-[ughpc]|--(?:user|group|host|prompt|chdir))$/.test(option) && i < tokens.length && !tokens[i].startsWith('-')) {
-          i += 1;
-        }
-      }
-      while (i < tokens.length && tokens[i].includes('=')) i += 1;
-      continue;
-    }
-    if (name === 'command') {
-      i += 1;
-      while (i < tokens.length && tokens[i].startsWith('-')) i += 1;
-      continue;
-    }
-    if (name === 'env') {
-      i += 1;
-      while (i < tokens.length) {
-        if (tokens[i].includes('=')) {
-          i += 1;
-          continue;
-        }
-        if (!tokens[i].startsWith('-')) break;
-        const option = tokens[i].toLowerCase();
-        i += 1;
-        if (/^(?:-u|--unset|--chdir|-c|-s|--split-string)$/i.test(option) && i < tokens.length && !tokens[i].startsWith('-')) {
-          i += 1;
-        }
-      }
-      continue;
-    }
-    if (WRAPPERS[name]) {
-      const wrap = WRAPPERS[name];
-      i += 1;
-      while (i < tokens.length && tokens[i].startsWith('-')) {
-        const raw = tokens[i];
-        // Option names are CASE-SENSITIVE, and lowercasing here made the table unable to
-        // express its own contents: in xargs `-I` takes a separate replace-string while
-        // `-i` takes only an attached one, and `-L`/`-l`, `-P`/`-p`, `-E`/`-e` are likewise
-        // distinct options. Folding case merged each pair, so whichever spelling was listed
-        // decided both - and getting it wrong is a bypass in either direction (over-consume
-        // and the command name is skipped; under-consume and the option's value is resolved
-        // as the command). The wrapper NAME stays case-insensitive, because that is a
-        // filename and Windows treats those case-insensitively.
-        const opt = raw.split('=')[0];
-        i += 1;
-        if (!raw.includes('=') && wrap.argOpts.has(opt) && i < tokens.length && !tokens[i].startsWith('-')) {
-          i += 1;
-        }
-      }
-      for (let p = 0; p < wrap.positional && i < tokens.length && !tokens[i].startsWith('-'); p += 1) {
-        i += 1;
-      }
-      continue;
-    }
-    if (name === 'find') {
-      const rest = tokens.slice(i + 1);
-      const execAt = rest.findIndex((t) => /^-exec$|^-execdir$/i.test(t));
-      if (execAt !== -1) {
-        i += 1 + execAt + 1;
-        continue;
-      }
-      break;
-    }
-    break;
-  }
-  // A wrapper may be followed by another prefix run (`nohup FOO=1 rm -rf x`).
-  if (i !== 0) {
-    for (let round = 0; round < 16; round += 1) {
-      const next = skipCommandPrefix(tokens, i);
-      if (next === i) break;
-      i = next;
-    }
-  }
-  return tokens.slice(i);
-}
-
 function hasRmRecursiveFlag(args) {
   // A single-dash bundle of letters containing r/R is a recursive rm flag at any length
-  // (the prior arg.length<=5 cap let `rm -rfvvv` through). `--recursive` starts with two dashes,
-  // so the regex never matches it here, and a non-flag path argument never starts with a single dash.
-  return args.some((arg) => arg === '--recursive' || /^-[A-Za-z]*[rR][A-Za-z]*$/.test(arg));
+  // (the prior arg.length<=5 cap let `rm -rfvvv` through). `--recursive` and every unique prefix
+  // of it (`--rec`, `--r`) is too: GNU rm has no other long option starting with `r`.
+  return args.some((arg) => isLongPrefixOf(arg, '--recursive') || shortCluster(arg, 'rR'));
 }
 
 // PowerShell switch parameters accept an optional bound value: `-Recurse`, `-Recurse:$true`,
@@ -658,6 +800,8 @@ function hasRmRecursiveFlag(args) {
 // is the switch turned OFF, so denying it would be a false block on an explicit opt-out.
 // The pattern is a fixed prefix chain with no ambiguous repetition before the anchor: the
 // ReDoS shape this repo recorded twice does not apply (see lessons.md 2026-08-22).
+const PS_FALSY = new Set(['false', '$false', '0', '$0', 'null', '$null']);
+
 function hasRemoveItemRecursiveFlag(args) {
   // `-Recurse: $false` is legal binding syntax with the value in the next token, so a switch
   // ending in `:` takes the following word as its bound value.
@@ -672,63 +816,154 @@ function hasRemoveItemRecursiveFlag(args) {
     const m = /^-(r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?)(?::(.*))?$/i.exec(arg);
     if (!m) return false;
     if (m[2] === undefined) return true;                 // bare switch
-    return !/^\s*\$?(?:false|0|null)\s*$/i.test(m[2]);   // set unless bound to a falsy value
+    // Set unless bound to a falsy value. Trim and look up, linear: the anchored `\s*` pattern this
+    // replaces backtracked quadratically on a long run of blanks before a non-matching word.
+    return !PS_FALSY.has(m[2].trim().toLowerCase());
   });
 }
 
-function hasRecursiveRm(cmd, bashSemantics) {
-  return commandTokens(cmd, bashSemantics).some((tokens) => {
+function hasRecursiveRm(cmd, views) {
+  return commandTokens(cmd, views).some((tokens) => {
     const name = commandName(tokens[0]);
     return name === 'rm' && hasRmRecursiveFlag(tokens.slice(1));
   });
 }
 
-function hasCmdRecursiveRemove(cmd, bashSemantics) {
-  return commandTokens(cmd, bashSemantics).some(isCmdTreeDelete);
+function hasCmdRecursiveRemove(cmd, views) {
+  return commandTokens(cmd, views).some(isCmdTreeDelete);
 }
 
-function hasRecursiveRemoveItem(cmd, bashSemantics) {
+function hasRecursiveRemoveItem(cmd, views) {
   const names = new Set(['remove-item', 'ri', 'del', 'erase', 'rd', 'rmdir', 'rm']);
-  return commandTokens(cmd, bashSemantics).some((tokens) => {
+  return commandTokens(cmd, views).some((tokens) => {
     const name = commandName(tokens[0]);
     return names.has(name) && hasRemoveItemRecursiveFlag(tokens.slice(1));
   });
 }
 
-// Return the git subcommand + its args, skipping any global options before the subcommand
-// (git -C <dir>, git -c k=v, git --no-pager, ...) so `git -C /tmp reset --hard` is still matched.
-function gitSubcommand(tokens) {
-  const ARG_OPTS = new Set(['-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--exec-path']);
+// The git global options before the subcommand (git -C <dir>, git -c k=v, git --no-pager, ...),
+// so `git -C /tmp reset --hard` is still matched. Returns { sub: [subcommand, ...args], config, dirs,
+// contextKnown }. `--config-env=<key>=<ENV>` takes its value from the environment: recorded as
+// `<key>=?`. `contextKnown` is false when an option changes which config git reads (R2-CG-11).
+function gitParts(tokens) {
+  const VALUE_OPTS = new Set(['-c', '-C', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--exec-path']);
+  const fromEnv = (text) => {
+    const j = String(text).indexOf('=');
+    return (j < 0 ? String(text) : String(text).slice(0, j)) + '=?';
+  };
+  const config = [];
+  const dirs = [];
+  let contextKnown = true;
   let i = 1;
   while (i < tokens.length && tokens[i].startsWith('-')) {
     const raw = tokens[i];
-    const base = raw.split('=')[0].toLowerCase();
     i += 1;
-    if (!raw.includes('=') && ARG_OPTS.has(base) && i < tokens.length && !tokens[i].startsWith('-')) {
-      i += 1;
+    if (raw.startsWith('-c') && raw.length > 2) { config.push(raw.slice(2)); continue; }
+    if (raw.startsWith('-C') && raw.length > 2) { dirs.push(raw.slice(2)); continue; }
+    const eq = raw.indexOf('=');
+    const name = eq < 0 ? raw : raw.slice(0, eq);
+    if (/^--(?:git-dir|work-tree|bare)$/.test(name)) contextKnown = false;
+    if (name === '--config-env') {
+      if (eq >= 0) config.push(fromEnv(raw.slice(eq + 1)));
+      else if (i < tokens.length) { config.push(fromEnv(tokens[i])); i += 1; }
+      continue;
     }
+    if (eq >= 0 || !VALUE_OPTS.has(name) || i >= tokens.length) continue;
+    if (name === '-c') config.push(tokens[i]);
+    else if (name === '-C') dirs.push(tokens[i]);
+    i += 1;
   }
-  return tokens.slice(i);
+  if (config.some((pair) => /^(?:include\.path|includeif\..*\.path|core\.worktree|core\.bare)(?:=|$)/i.test(String(pair)))) {
+    contextKnown = false;
+  }
+  return { sub: tokens.slice(i), config, dirs, contextKnown };
 }
 
-function hasGitResetHard(cmd, bashSemantics) {
-  return commandTokens(cmd, bashSemantics).some((tokens) => {
+const GIT_FALSE = new Set(['false', 'no', 'off', '0', '']);
+function gitBooleanIsFalse(value) {
+  return GIT_FALSE.has(String(value).trim().toLowerCase());
+}
+
+// `clean.requireForce=false` makes `git clean -dx` delete without `-f`. Read from inline `-c`
+// pairs, a `GIT_CONFIG_*` environment prefix, and the repository's stored config. `--config-env`
+// takes its value from the environment, so it counts as switched off.
+function inlineRequireForceDisabled(configPairs) {
+  for (const pair of configPairs) {
+    const text = String(pair);
+    const eq = text.indexOf('=');
+    const key = (eq < 0 ? text : text.slice(0, eq)).toLowerCase();
+    if (key !== 'clean.requireforce') continue;
+    const value = eq < 0 ? 'true' : text.slice(eq + 1);
+    if (value === '?' || gitBooleanIsFalse(value)) return true;
+  }
+  return false;
+}
+
+function requireForceDisabled(configPairs, cwd, fromEnv = false, contextKnown = true) {
+  if (fromEnv || !contextKnown || inlineRequireForceDisabled(configPairs)) return true;
+  if (!GIT_CONTEXT.requireForce.has(cwd)) {
+    // Unknown (over the count, past the deadline, a stalled or failing read) counts as switched off.
+    let disabled = true;
+    const remaining = GIT_CONTEXT.deadline - Date.now();
+    if (GIT_CONTEXT.lookups < MAX_CONFIG_LOOKUPS && remaining > 0) {
+      GIT_CONTEXT.lookups += 1;
+      try {
+        const stored = String(runGit(['config', '--get', 'clean.requireForce'], {
+          cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: Math.min(2000, remaining),
+        })).trim();
+        disabled = stored !== '' && gitBooleanIsFalse(stored);
+      } catch (error) {
+        disabled = !(error && error.status === 1 && !error.signal);     // exit 1: not set
+      }
+    }
+    GIT_CONTEXT.requireForce.set(cwd, disabled);
+  }
+  return GIT_CONTEXT.requireForce.get(cwd);
+}
+
+function resolvedInvocations(subcommand) {
+  return (GIT_CONTEXT.resolved?.invocations || []).filter((inv) => inv.subcommand === subcommand);
+}
+
+// `lookups` is false in the first phase: no check may start a subprocess there (R2-CG-9).
+function hasGitResetHard(cmd, views, lookups = false) {
+  const typed = commandTokens(cmd, views).some((tokens) => {
     if (commandName(tokens[0]) !== 'git') return false;
-    const sub = gitSubcommand(tokens);
-    return sub[0] === 'reset' && sub.slice(1).some((arg) => arg === '--hard');
+    const { sub } = gitParts(tokens);
+    return sub[0] === 'reset' && sub.slice(1).some(isHardOption);
   });
+  // Aliases (`git -c alias.nuke='reset --hard' nuke`, a stored `alias.nuke`) resolved by the git
+  // resolver, which expands them the way git does.
+  return typed || (lookups && resolvedInvocations('reset').some((inv) => inv.args.some(isHardOption)));
 }
 
-function hasGitCleanForce(cmd, bashSemantics) {
-  return commandTokens(cmd, bashSemantics).some((tokens) => {
+// `-n` / `--dry-run` (and its prefixes) deletes nothing. Only consulted when the force comes from
+// configuration, so an explicit `-f` keeps the existing reading.
+function isCleanDryRun(args) {
+  return args.some((arg) => isLongPrefixOf(arg, '--dry-run') || shortCluster(arg, 'n'));
+}
+
+function cleanDeletes(args, config, cwd, fromEnv, contextKnown, lookups) {
+  if (!args.some(isCleanTargetOption)) return false;
+  if (args.some(isCleanForceOption)) return true;
+  if (isCleanDryRun(args)) return false;
+  // Inline and environment answers need no subprocess; a stored one waits for the second phase.
+  if (!lookups) return fromEnv || !contextKnown || inlineRequireForceDisabled(config);
+  return requireForceDisabled(config, cwd, fromEnv, contextKnown);
+}
+
+function hasGitCleanForce(cmd, views, lookups = false) {
+  const typed = commandTokens(cmd, views).some((tokens) => {
     if (commandName(tokens[0]) !== 'git') return false;
-    const sub = gitSubcommand(tokens);
+    const { sub, config, dirs, contextKnown } = gitParts(tokens);
     if (sub[0] !== 'clean') return false;
-    const args = sub.slice(1);
-    const force = args.some((arg) => arg === '--force' || /^-[A-Za-z]*f[A-Za-z]*$/.test(arg));
-    const target = args.some((arg) => arg === '--ignored' || arg === '--exclude-standard' || /^-[A-Za-z]*[dxX][A-Za-z]*$/.test(arg));
-    return force && target;
+    return cleanDeletes(sub.slice(1), config, resolveTargetCwd(GIT_CONTEXT.cwd, dirs),
+      !!tokens.requireForceFromEnv, contextKnown && !tokens.configContextUnknown, lookups);
   });
+  // Alias-derived calls only: the typed ones are read above, with their own context.
+  return typed || (lookups && resolvedInvocations('clean').some((inv) => inv.depth > 0
+    && cleanDeletes(inv.args, inv.inlineConfig.map(([k, v]) => k + '=' + v), inv.cwd, false,
+      inv.readContextKnown, true)));
 }
 
 function deny(finding) {
@@ -749,11 +984,30 @@ const raw = await readStdin();
 let input = {};
 try { input = JSON.parse(raw || '{}'); } catch { /* fail open */ }
 const cmd = String(input?.toolInput?.command || input?.tool_input?.command || '');
+RAW_COMMAND = cmd;
 const toolName = String(input?.toolName || input?.tool_name || '');
-const bashSemantics = toolName === 'Bash' || toolName === 'run_terminal_command';
+const TOOL = toolName;
+const VIEWS = toolName === 'Bash' || toolName === 'run_terminal_command' ? ['raw', 'bash']
+  : toolName === 'PowerShell' ? ['raw', 'ps'] : ['raw'];
+GIT_CONTEXT.cwd = commandCwd(input);
 
+function widenedDeny(text) {
+  const label = widenedFindingLabel(text);
+  const finding = label ? BLOCKED.find((f) => f.label === label) : null;
+  if (!finding) return false;
+  deny({
+    label: finding.label,
+    reason: finding.reason
+      + ' (matched by a widened scan: this command is longer or more deeply nested than the'
+      + ' guard parses, so it was checked coarsely rather than reported clean.)',
+  });
+  return true;
+}
+
+// Phase 1 (R2-CG-9): every check that needs no subprocess, first. A repository that stalls config
+// reads can then delay a decision, but never ahead of a plain recursive delete on the same line.
 for (const finding of BLOCKED) {
-  if (finding.check(cmd, bashSemantics)) {
+  if (finding.check(cmd, VIEWS, false)) {
     deny(finding);
     process.exit(0);
   }
@@ -761,16 +1015,36 @@ for (const finding of BLOCKED) {
 
 // The walk gave up somewhere: a depth cap, an exhausted budget, or an over-long input. It must
 // not report clean on the strength of a parse it did not finish. Widen once, linearly.
-if (WALK.unresolved) {
-  const label = widenedFindingLabel(cmd);
-  const finding = label ? BLOCKED.find((f) => f.label === label) : null;
-  if (finding) {
-    deny({
-      label: finding.label,
-      reason: finding.reason
-        + ' (matched by a widened scan: this command is longer or more deeply nested than the'
-        + ' guard parses, so it was checked coarsely rather than reported clean.)',
+if (WALK.unresolved && widenedDeny(cmd)) process.exit(0);
+
+// Phase 2: git config reads - aliases through the shared resolver, stored `clean.requireForce` -
+// under one count and one deadline. Oversized input never reaches it: base sent that straight to
+// the widened scan above, and the resolver must not be the slow path (R2-CG-8).
+GIT_CONTEXT.deadline = Date.now() + CONFIG_LOOKUP_BUDGET_MS;
+if (cmd.length <= MAX_INPUT_CHARS && /\bgit\b/i.test(expandAnsiCQuotes(cmd).replace(/['"\\]/g, ''))) {
+  try {
+    GIT_CONTEXT.resolved = resolveGitCommands(cmd, {
+      cwd: GIT_CONTEXT.cwd, allowHeredocStrip: TOOL !== 'PowerShell',
     });
+  } catch {
+    GIT_CONTEXT.resolved = null;
+  }
+  const resolved = GIT_CONTEXT.resolved;
+  // `!` git aliases are shell command lines (`git -c alias.x='!<delete> build' x`).
+  for (const alias of resolved?.aliasShellTexts || []) {
+    for (const finding of BLOCKED) {
+      if (finding.check(alias, ['raw', 'bash'], false)) {
+        deny(finding);
+        process.exit(0);
+      }
+    }
+    if (WALK.unresolved && widenedDeny(alias)) process.exit(0);
+  }
+  if (resolved?.workExhausted && widenedDeny(cmd)) process.exit(0);
+}
+for (const [label, check] of [['git-reset-hard', hasGitResetHard], ['git-clean-force', hasGitCleanForce]]) {
+  if (check(cmd, VIEWS, true)) {
+    deny(BLOCKED.find((f) => f.label === label));
     process.exit(0);
   }
 }

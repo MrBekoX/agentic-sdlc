@@ -37,12 +37,17 @@ LOCK_DIGESTS = {
     # is exempt now. Covered by test_a_users_own_hooks_folder_is_scanned and
     # test_this_plugins_own_hook_sources_stay_exempt.
     # Rebased 2026-10-12 by merging main into PR #59: own-hooks exemption plus the hook-output emitter.
-    "hooks/scan-write.mjs": "e39f68e42748225c747b29386bcac70684d53126645bba313b9356e1fc3faadc",
+    # Rebased 2026-11-18 by the bug audit: NotebookEdit's notebook_path/new_source are scanned (SW-9),
+    # and a pre-write event or a Delete never falls back to the file on disk (SW-8). Covered by
+    # tests/test_audit_sw.py TestSW8SW9WriteScanner.
+    "hooks/scan-write.mjs": "9b1364b6641989481241a1578e14d7ac07535e379f3e3856055366cec39f9bc2",
     # Refreshed by the 2026-08-22 guard-bypass fix: the Bash-only matcher and the
     # `if: Bash(git commit*)` filters were removed (a Bash-only matcher is inert on a
     # Windows host with no Git Bash, and a subcommand-level `if` never starts the hook
     # for a git alias).
-    "hooks/hooks-claude.json": "e50dbe053f4cc59a1b2ce23fc1cc6b96581a1f0f28048b1bc31aa544c0e3ed39",
+    # Rebased 2026-11-18 (bug audit FH-1, SW-9 wiring): flow-order-guard.mjs is also wired on Bash|PowerShell
+    # (no `if`), and the write scan on NotebookEdit. Covered by tests/test_audit_fh.py.
+    "hooks/hooks-claude.json": "8edcd24c344be67d070f4a8465b4ced4db2dae1f73414132b08066f60920fbac",
 }
 
 NODE = shutil.which("node")

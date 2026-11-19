@@ -34,8 +34,10 @@ LOCK_DIGESTS = {
     # hooks/flow-step-guard.mjs is no longer locked here.
     # Released 2026-10 (pipeline v2.1 D7): the block reason named implementation-control, which the pipeline no longer invokes; behavior is pinned by tests/test_flow_guards.py PINNED_STEP_BLOCK_MAIN and the pipeline block pin.
     # Rebased for Claude Code 2.1.293: prefer last_assistant_message; block only when caught up.
+    # Rebased 2026-11-18 (bug audit FH-7/FH-8): the gate counts only as an exact, non-errored Skill call, and
+    # claims are read through the shared completionClaimed. Covered by tests/test_audit_fh.py (FH-7, FH-8).
     "hooks/completion-claim-guard.mjs":
-        "ad454dd5f68c2ba08583c283b444318c24892d9c3305161b913dea3bcf317c9b",
+        "a8dcfbf2ec3ec0920e2c5b3d493f7e820b33fd1632df1b51f8657b40965b8818",
 }
 
 # The Codex Stop handler this suite pins by NAME and by VALUE. Presence is asserted before the
@@ -317,6 +319,35 @@ def _run_hook(stop_input, env_extra=None):
 
 # ---- BR6 exit attribution (publication-readiness Tasks 15, 16, 18) ------------
 BR6_TABLE = REPO / "tests" / "fixtures" / "transcripts" / "br6-attribution-cases.json"
+
+
+# 2026-11-18 bug audit (FH-3, FH-9): the shared shape check isRealRunnerInvocation now skips `#` comments,
+# honours backslash escapes, line continuations and bash blanks (BR6 splitter), and reads `bash -c` wrappers.
+# These shared-table rows changed their live shape from the 5801cb9 column on purpose: each forged row runs
+# no runner in bash, and the wrapper row does. Only these rows; every other row must still match the table.
+FH_SHAPE_CHANGES = {
+    "edge-bash-c-wrapper": True,
+    "edge-forged-escaped-separator-semicolon": False,
+    "edge-forged-escaped-separator-semicolon-glued": False,
+    "edge-forged-escaped-separator-pipe": False,
+    "edge-forged-escaped-separator-pipe-args": False,
+    "edge-forged-escaped-separator-npm": False,
+    "edge-forged-escaped-separator-python-m": False,
+    "edge-forged-join-continued-echo": False,
+    "edge-forged-join-continued-assignment": False,
+    "edge-forged-join-comment-semicolon": False,
+    "edge-forged-join-comment-oror": False,
+    "edge-forged-value-blank-escaped-space-single": False,
+    "edge-forged-value-blank-nbsp-single": False,
+}
+# Of those, the rows whose default Codex Stop `tests` outcome moves from satisfied to missing (the shape
+# floor no longer admits them; the other changed rows were already missing by BR6 attribution).
+FH_DEFAULT_TESTS_CHANGES = {
+    "edge-forged-escaped-separator-pipe": "missing",
+    "edge-forged-escaped-separator-pipe-args": "missing",
+    "edge-forged-value-blank-escaped-space-single": "missing",
+    "edge-forged-value-blank-nbsp-single": "missing",
+}
 
 
 def _br6_rows():
@@ -1353,7 +1384,7 @@ class TestBR6StatementSplit(unittest.TestCase):
         mismatches = []
         for row, got in zip(rows, results):
             expected = (row["statements"], row["lastVersionOrHelpOnly"], row["lastHasPipe"],
-                        row["lastIsRealRunner"], row["runnerShape5801cb9"])
+                        row["lastIsRealRunner"], FH_SHAPE_CHANGES.get(row["id"], row["runnerShape5801cb9"]))
             actual = (got["statements"], got["lastVersionOrHelpOnly"], got["lastHasPipe"],
                       got["lastIsRealRunner"], got["runnerShape"])
             if expected != actual:
@@ -1372,7 +1403,11 @@ class TestExitAttributionClosure(_Tmp):
         cls.rows, cls.outcome, cls.results = _br6_tests_outcomes()
 
     def _mismatches(self, ids, expected_column):
-        return [i for i in ids if self.outcome[i] != self.rows[i][expected_column]]
+        def expected(i):
+            if expected_column == "defaultTests":
+                return FH_DEFAULT_TESTS_CHANGES.get(i, self.rows[i][expected_column])
+            return self.rows[i][expected_column]
+        return [i for i in ids if self.outcome[i] != expected(i)]
 
     def test_shared_table_default_column(self):  # D3 (RED before the closure)
         bad = self._mismatches(self.rows, "defaultTests")
@@ -1449,11 +1484,12 @@ class TestExitAttributionClosure(_Tmp):
 
     def test_d27_separator_free_forgeries_keep_5801cb9_default(self):
         # Mutation: dropping the explicit separator-free step (these rows would turn missing).
+        # FH-3 (2026-11-18 audit): four of these six forgeries no longer pass the shape floor at all.
         ids = self._d27_forged(False)
         self.assertEqual(len(ids), 6)
         for i in ids:
             with self.subTest(id=i):
-                self.assertEqual(self.outcome[i], "satisfied")
+                self.assertEqual(self.outcome[i], FH_DEFAULT_TESTS_CHANGES.get(i, "satisfied"))
 
     def test_d27_grammar_runner_shapes_satisfy(self):
         # Mutation: reading an assignment prefix, an escaped blank in a value or a background head as no runner run.
@@ -1618,7 +1654,8 @@ class TestStrictEvidenceFlag(_Tmp):
 
     # ---- guards: pass before and after the flag exists ----
     def test_shared_table_flag_unset_equals_default(self):
-        bad = [i for i, row in self.rows.items() if self.default[i] != row["defaultTests"]]
+        bad = [i for i, row in self.rows.items()
+               if self.default[i] != FH_DEFAULT_TESTS_CHANGES.get(i, row["defaultTests"])]
         self.assertEqual(bad, [], f"flag-unset outcomes that differ from defaultTests: {bad}")
 
     def test_strict_flag_accepts_attributable_green_run(self):

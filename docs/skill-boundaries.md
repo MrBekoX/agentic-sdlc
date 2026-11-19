@@ -290,6 +290,8 @@ Interactive, collaborative, continuous parallel work where peers talk and a live
 
 **Cost ladder:** `main loop` < `sub-agent` < `dynamic-workflow` < `agent-team`. Always use the smallest sufficient mechanism.
 
+Exception: inside `agentic-sdlc-pipeline`, the Step 11 and 14 `security-reviewer` lenses run as parallel direct `Agent` calls, never a dynamic-workflow or agent-team: the pipeline's security gate counts only that call.
+
 ---
 
 ## Artifact layouts and per-package evidence

@@ -42,8 +42,8 @@ unexamined; the cure is to decompose before you refine.
 Reach for this at the *start* of any creative change where the design isn't settled: a new feature,
 component, endpoint, screen, job, or a "change how X behaves" request. It runs before the spec — it
 produces the agreed intent the spec then makes testable. It composes with `agentic-sdlc-pipeline` rather than
-competing: when agentic-sdlc-pipeline kicks off a production change, this runs first and feeds the approved intent
-into agentic-sdlc-pipeline's Spec phase.
+competing: inside an agentic-sdlc-pipeline run it runs after the pipeline's kickoff (`dispatch-strategy`) and branch
+checkpoint, before Step 4, and feeds the approved intent into agentic-sdlc-pipeline's Spec phase.
 
 **The one decision test for a fix/refactor request:** does the request already carry a testable
 definition of done — a spec, a ticket with acceptance criteria, or a bug whose correct behavior is

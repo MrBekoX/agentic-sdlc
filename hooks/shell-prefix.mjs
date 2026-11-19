@@ -50,9 +50,52 @@ export function redirectOperatorLength(token) {
   if (i === 0 && token[0] === '&' && token[1] === '>') i = 1;
   if (i >= token.length) return 0;
   if (token[i] !== '>' && token[i] !== '<') return 0;
+  // `<<<` (here-string) and `<<-` (tab-stripping here-document) are three-character operators.
+  // Read as `<<` plus an attached target, `<<< word` left `word` behind as an argument.
+  if (token[i] === '<' && token[i + 1] === '<' && (token[i + 2] === '<' || token[i + 2] === '-')) {
+    return i + 3;
+  }
   let j = i + 1;
   if (token[j] === '>' || token[j] === '<' || token[j] === '|' || token[j] === '&') j += 1;
   return j;
+}
+
+// A function-definition header word: `name()`. Bash accepts almost any non-metacharacter text as
+// a function name, so this only rejects what cannot be one. Linear: one scan, no regex.
+function isFunctionHeader(token) {
+  if (token.length < 3 || !token.endsWith('()')) return false;
+  for (let k = 0; k < token.length - 2; k += 1) {
+    const c = token[k];
+    if (c === '(' || c === ')' || c === '$' || c === '`' || c === '"' || c === "'" || c === '='
+      || c === '<' || c === '>' || c === ';' || c === '&' || c === '|' || c === ' ' || c === '\t') {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isFunctionName(token) {
+  return isFunctionHeader(token + '()');
+}
+
+// bash's `exec [-cl] [-a name] [--]`: its own option grammar is fixed by the builtin, so it belongs
+// here with the reserved words. Returns the index after exec's options.
+function skipExecOptions(tokens, start) {
+  let i = start;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t === '--') return i + 1;
+    if (t.length < 2 || t[0] !== '-') return i;
+    let valueNext = false;
+    for (let k = 1; k < t.length; k += 1) {
+      const c = t[k];
+      if (c === 'c' || c === 'l') continue;
+      if (c === 'a') { valueNext = k === t.length - 1; break; }  // -a NAME, or -aNAME attached
+      return i;                                                   // not an exec option
+    }
+    i += valueNext ? 2 : 1;
+  }
+  return i;
 }
 
 // Walk off one run of cmd_prefix tokens. Returns the index of the first token that is not a
@@ -71,7 +114,19 @@ export function skipCommandPrefix(tokens, start) {
       while (j < limit && !tokens[j].endsWith(')')) j += 1;
       if (j < limit && tokens[j].endsWith(')')) { i = j + 1; continue; }
     }
-    if (RESERVED_WORDS.has(raw.toLowerCase())) { i += 1; continue; }
+    const lower = raw.toLowerCase();
+    // `exec -a NAME cmd` / `exec -cl cmd`: exec's own options sit between it and the command.
+    if (lower === 'exec') { i = skipExecOptions(tokens, i + 1); continue; }
+    // A function DEFINITION runs its body when called: `f() { git commit ...; }; f`. The header
+    // (`name()`, `name ()` or `function name [()]`) is walked off so the body is examined.
+    if (lower === 'function' && i + 1 < tokens.length && isFunctionName(tokens[i + 1])) {
+      i += 2;
+      if (tokens[i] === '()') i += 1;
+      continue;
+    }
+    if (isFunctionHeader(raw)) { i += 1; continue; }
+    if (tokens[i + 1] === '()' && isFunctionName(raw)) { i += 2; continue; }
+    if (RESERVED_WORDS.has(lower)) { i += 1; continue; }
     if (isAssignmentWord(raw)) { i += 1; continue; }
     const op = redirectOperatorLength(raw);
     if (op > 0) {

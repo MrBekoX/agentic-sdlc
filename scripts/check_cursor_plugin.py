@@ -38,6 +38,11 @@ def _frontmatter(text: str) -> dict[str, str]:
     return found
 
 
+def _without_dot_slash(value: str) -> str:
+    # str.removeprefix is Python 3.9+; this helper runs on the documented 3.8 floor (RL-6).
+    return value[2:] if value.startswith("./") else value
+
+
 def _relative_path(value: str) -> bool:
     if not isinstance(value, str) or not value or value.startswith(("/", "\\")):
         return False
@@ -53,8 +58,7 @@ def _component_dirs(manifest: dict, root: Path, field: str, default: str) -> lis
     for value in values:
         if not isinstance(value, str):
             continue
-        relative = value.removeprefix("./")
-        paths.append(root / relative)
+        paths.append(root / _without_dot_slash(value))
     return paths
 
 
@@ -88,7 +92,7 @@ def validate(root: Path) -> list[str]:
             if not isinstance(item, str) or not _relative_path(item):
                 errors.append(f"cursor_path_unsafe:{field}")
                 continue
-            if not (root / item.removeprefix("./")).exists():
+            if not (root / _without_dot_slash(item)).exists():
                 errors.append(f"cursor_path_missing:{field}:{item}")
     if (root / "hooks" / "hooks.json").exists():
         errors.append("cursor_default_hooks_json_present")
@@ -132,7 +136,7 @@ def validate(root: Path) -> list[str]:
             errors.append(f"cursor_rule_frontmatter:{rule.name}")
 
     hook_field = manifest.get("hooks")
-    hook_path = root / str(hook_field).removeprefix("./")
+    hook_path = root / _without_dot_slash(str(hook_field))
     hooks = _read_json(hook_path)
     if not isinstance(hooks, dict) or not isinstance(hooks.get("hooks"), dict):
         errors.append("cursor_hooks_invalid")
@@ -155,10 +159,12 @@ def validate(root: Path) -> list[str]:
                     errors.append(f"cursor_hook_command_invalid:{event}")
     marketplace = _read_json(root / ".cursor-plugin" / "marketplace.json")
     plugins = marketplace.get("plugins") if isinstance(marketplace, dict) else None
-    entry = plugins[0] if isinstance(plugins, list) and plugins else None
-    if not isinstance(entry, dict) or entry.get("name") != "agentic-sdlc" or entry.get("source") != ".":
+    # RL-9: every entry of this plugin counts, wherever it sits; another plugin's entry is not ours.
+    entries = [entry for entry in plugins if isinstance(entry, dict) and entry.get("name") == "agentic-sdlc"] \
+        if isinstance(plugins, list) else []
+    if not entries or any(entry.get("source") != "." for entry in entries):
         errors.append("cursor_marketplace_invalid")
-    elif entry.get("version") != manifest.get("version"):
+    elif any(entry.get("version") != manifest.get("version") for entry in entries):
         errors.append("cursor_marketplace_version_mismatch")
     return errors
 

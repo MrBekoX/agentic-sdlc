@@ -15,7 +15,7 @@ import {
   parseTranscript,
   activeFlowNames,
   stepSatisfied,
-  isSourceFile,
+  sourceEdited as sessionEditedSource,
   completionClaimPresent,
   turnEndsOnSkill,
   turnInvokesSkill,
@@ -49,7 +49,10 @@ try {
   // invoked but no production source file was edited this session (a diagnose/report-only run),
   // nothing was implemented -> nothing to test/secure/audit. Mirror flow-order-guard, which only
   // ever gates real source edits. (completion-claim-guard still catches a bare "fixed" claim.)
-  const sourceEdited = trace.edits.some((e) => isSourceFile(e, req));
+  // trace.edits includes shell writes (FH-1); paths are classified relative to the project (FH-2); a shell
+  // command too long to read counts as a possible source edit (R3-FH-2).
+  const projectDir = (typeof input?.cwd === 'string' && input.cwd) ? input.cwd : process.cwd();
+  const sourceEdited = sessionEditedSource(trace, req, projectDir);
 
   const missing = [];
   for (const flow of flows) {
@@ -65,7 +68,7 @@ try {
 
   // Heuristic only when no flow was active: source edits + a completion claim but no flow skill.
   const heuristic = flows.length === 0
-    && trace.edits.some((e) => isSourceFile(e, req))
+    && sourceEdited
     && completionClaimPresent(trace, req, lastAssistant);
 
   const block = missing.filter((m) => m.mode === 'block');

@@ -84,7 +84,8 @@ def portability_errors(members: dict[str, bytes]) -> list[str]:
                 continue
             wire_path = manifest_path
             if isinstance(entry, str):
-                wire_path = entry.removeprefix('./')
+                # str.removeprefix is Python 3.9+; this helper runs on the documented 3.8 floor (RL-6).
+                wire_path = entry[2:] if entry.startswith('./') else entry
                 if not _safe_relative(wire_path):
                     errors.add(f'unsafe_hook_config_path:{manifest_path}')
                     continue

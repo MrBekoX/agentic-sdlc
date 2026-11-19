@@ -550,7 +550,9 @@ class TestLock(TempDirCase):
         self.assertEqual(meta["host"], HOST_ID)
         self.assertRegex(meta["host"], r"^[0-9a-f]{16}$")
         self.assertNotEqual(meta["host"], socket.gethostname())
-        self.assertEqual(sorted(meta), sorted(["host", "nonce", "pid", "ts"] + (["start"] if "start" in meta else [])))
+        optional = [key for key in ("start", "space") if key in meta]  # where the platform gives them
+        self.assertEqual(sorted(meta), sorted(["host", "nonce", "pid", "ts"] + optional))
+        self.assertEqual(meta.get("space"), lock._pid_space())
 
     def test_lock_stale_is_broken_after_timeout(self):
         path = self.tmp / ".lock"
@@ -604,19 +606,41 @@ class TestLock(TempDirCase):
             with lock.PackageLock(path, stale_seconds=600):
                 self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["start"],
                                  lock._process_start(os.getpid()))
-            # A recent lock is kept whatever its start says.
-            self._write_lock(path, child.pid, HOST_ID, textio.now_iso(), start="x" + started)
+            # A recent lock whose pid now names another process in this PID space is broken at once
+            # too: this runner sees its holder is gone, so it need not wait for the age (audit RN-10).
+            space = lock._pid_space()
+            if space is not None:
+                self._write_lock(path, child.pid, HOST_ID, textio.now_iso(), start="x" + started, space=space)
+                with lock.PackageLock(path, stale_seconds=600):
+                    self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["pid"], os.getpid())
+            # Twins: a recent lock of the live process itself is kept, and so is one from another PID
+            # space (round 2: WSL2 and Windows share a host name, not a PID space).
+            self._write_lock(path, child.pid, HOST_ID, textio.now_iso(), start="x" + started, space="win:1")
+            with self.assertRaises(textio.SdlcError):
+                lock.PackageLock(path, stale_seconds=600).acquire(timeout=0.2)
+            self._write_lock(path, child.pid, HOST_ID, textio.now_iso(), start=started)
             with self.assertRaises(textio.SdlcError):
                 lock.PackageLock(path, stale_seconds=600).acquire(timeout=0.2)
         finally:
             child.kill()
             child.wait(timeout=30)
 
-    def test_lock_recent_with_dead_pid_is_kept(self):
+    def test_lock_recent_with_dead_pid_is_broken_in_this_pid_space_only(self):
+        # A recent lock whose holder died in this runner's PID space is broken at once (audit RN-10:
+        # it was kept for stale_seconds, and `next` waited 30 s and failed). A pid from another host,
+        # from another PID space of this host name (round 2: WSL2 and Windows), or from a lock that
+        # names no space means nothing here, so that lock still waits for the age.
         path = self.tmp / ".lock"
-        self._write_lock(path, _dead_pid(), HOST_ID, textio.now_iso())
-        with self.assertRaises(textio.SdlcError):
-            lock.PackageLock(path, stale_seconds=600).acquire(timeout=0.2)
+        space = lock._pid_space()
+        if space is not None:
+            self._write_lock(path, _dead_pid(), HOST_ID, textio.now_iso(), space=space)
+            with lock.PackageLock(path, stale_seconds=600):
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["pid"], os.getpid())
+        for host, extra in (("some-other-host.invalid", {"space": space}), (HOST_ID, {"space": "win:1"}),
+                            (HOST_ID, {})):
+            self._write_lock(path, _dead_pid(), host, textio.now_iso(), **{k: v for k, v in extra.items() if v})
+            with self.subTest(host=host, extra=extra), self.assertRaises(textio.SdlcError):
+                lock.PackageLock(path, stale_seconds=600).acquire(timeout=0.2)
 
     def test_lock_old_from_another_host_is_broken(self):
         path = self.tmp / ".lock"

@@ -29,13 +29,15 @@ On Windows, use `py -3` when `python3` is missing or is the Microsoft Store alia
 
 The installer copies the package. Cursor does not load a symlink in `~/.cursor/plugins/local` whose target sits outside that folder. Pass `--dest` only when you need a different directory; the default is the documented local plugin folder.
 
+From a git checkout the installer copies only the committed files (`git ls-files`), never an untracked or gitignored one, so `.env`, `settings.local.json`, `AGENTS.md`, `CLAUDE.md`, session reports and audit dumps stay behind; an extracted package is walked, and the release exclusion classes apply to both. A file you have not committed yet is installed only after `git add`, and a checkout git cannot list is refused with `error=cursor_package_unreadable` instead of being copied from the working tree. The destination must be empty or new: a folder that holds files but no install receipt is refused with `error=cursor_dest_not_empty`. The receipt is written before the first file is copied, so an interrupted install can be run again or uninstalled. A managed path or a receipt that is a symlink is refused.
+
 ## Update
 
 ```bash
 python3 scripts/install_cursor_plugin.py update
 ```
 
-Reload the window afterwards. The update replaces files this installer wrote. A file you added inside the destination, and every Cursor setting outside it (`~/.cursor/hooks.json`, other plugins, user settings), stays. Edits you made to installed plugin files are replaced, because those files belong to the package.
+Reload the window afterwards. The update replaces files this installer wrote. When a path the new package adds already holds a file the installer did not write, the update refuses with `error=cursor_dest_file_unmanaged:<path>` and changes nothing; move that file and run it again. A file you added inside the destination, and every Cursor setting outside it (`~/.cursor/hooks.json`, other plugins, user settings), stays. Edits you made to installed plugin files are replaced, because those files belong to the package.
 
 ## Uninstall
 
@@ -43,7 +45,7 @@ Reload the window afterwards. The update replaces files this installer wrote. A 
 python3 scripts/install_cursor_plugin.py uninstall
 ```
 
-This deletes only the paths recorded in `.cursor-plugin/install-receipt.json` inside the destination. If that receipt is missing, the command refuses and deletes nothing. Files you added, and the rest of `~/.cursor`, stay. Remove a team-marketplace install from Customize or the dashboard; this script does not call the dashboard.
+This deletes only the paths recorded in `.cursor-plugin/install-receipt.json` inside the destination. On Linux and macOS it deletes through folder handles opened without following links, so a folder replaced by a link is never followed; on Windows the path is checked before the delete. If that receipt is missing, the command refuses and deletes nothing. Files you added, and the rest of `~/.cursor`, stay. Remove a team-marketplace install from Customize or the dashboard; this script does not call the dashboard.
 
 ## Use
 
@@ -85,7 +87,7 @@ Hook commands read `CURSOR_PLUGIN_ROOT` inside Node. They do not splice the inst
 - The default worktree-scan advisory is not shown. Cursor's documented `stop` output is `followup_message`, and sending the advisory there would start another turn. Set `AGENTIC_WORKTREE_SCAN_BLOCK=true` to forward a finding as that follow-up.
 - Flow-order warns by default. Cursor `preToolUse` has no documented allow-time context field, so the warning is not converted into a deny. `AGENTIC_FLOW_GATE_BLOCK=true` denies the edit.
 - Flow-order activates on a `Skill` tool call to a flow skill, or on a Claude Code slash-command record (`<command-name>/<skill></command-name>`). Cursor's documented invocations, `/<skill-name>` and reading `SKILL.md`, are not known to record either, so flow-order is not known to gate `agentic-sdlc-pipeline` or any other flow; no test covers activation from a real Cursor transcript.
-- A write-scan finding is a `preToolUse` deny. `afterFileEdit` documents no model-visible output.
+- A write-scan finding is a `preToolUse` deny. `afterFileEdit` documents no model-visible output. The scan runs on `Write`, `Edit`, `StrReplace` and `ApplyPatch`, reads only the new text and never the file on disk, which is still the old one; deleting a file is not write-scanned.
 - `beforeShellExecution` warnings, including the default protected-branch warning, use `permission: ask`.
 - There is no MCP server in this plugin.
 - Public marketplace submission has not been sent. See [cursor-marketplace.md](../docs/publication/cursor-marketplace.md).

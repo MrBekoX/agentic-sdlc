@@ -562,21 +562,21 @@ class TestFingerprint(GitCase):
                          _sha(("---\nstatus: draft\n" + body).encode("utf-8")))
 
     def test_set_fp(self):
+        # The set fingerprint is its members and their content only. It once also hashed the HEAD
+        # commit, so committing the work (or an empty commit) made every @source/@tests step stale
+        # and used up a security fix round (audit RN-6); set_fp takes no HEAD since.
         self.write(self.tmp, "src/a.py", b"a\n")
         self.write(self.tmp, "src/b.py", b"b\n")
-        head = "1" * 40
-        fp = fingerprint.set_fp(self.tmp, ["src/a.py", "src/b.py"], head)
+        fp = fingerprint.set_fp(self.tmp, ["src/a.py", "src/b.py"])
         self.assertRegex(fp, r"^[0-9a-f]{64}$")
-        self.assertEqual(fingerprint.set_fp(self.tmp, ["src/b.py", "src/a.py", "src/a.py"], head), fp)
-        self.assertNotEqual(fingerprint.set_fp(self.tmp, ["src/a.py", "src/b.py"], "2" * 40), fp)
-        self.assertNotEqual(fingerprint.set_fp(self.tmp, ["src/a.py", "src/b.py"], None), fp)
-        self.assertNotEqual(fingerprint.set_fp(self.tmp, ["src/a.py"], head), fp)
-        self.assertNotEqual(fingerprint.set_fp(self.tmp, ["src/a.py", "src/b.py", "gone.py"], head), fp)
+        self.assertEqual(fingerprint.set_fp(self.tmp, ["src/b.py", "src/a.py", "src/a.py"]), fp)
+        self.assertNotEqual(fingerprint.set_fp(self.tmp, ["src/a.py"]), fp)
+        self.assertNotEqual(fingerprint.set_fp(self.tmp, ["src/a.py", "src/b.py", "gone.py"]), fp)
         self.write(self.tmp, "src/a.py", b"a\r\n")  # a CRLF checkout is not a change
-        self.assertEqual(fingerprint.set_fp(self.tmp, ["src/a.py", "src/b.py"], head), fp)
+        self.assertEqual(fingerprint.set_fp(self.tmp, ["src/a.py", "src/b.py"]), fp)
         self.write(self.tmp, "src/a.py", b"A\n")
-        self.assertNotEqual(fingerprint.set_fp(self.tmp, ["src/a.py", "src/b.py"], head), fp)
-        self.assertEqual(fingerprint.set_fp(self.tmp, [], None), fingerprint.set_fp(self.tmp, [], None))
+        self.assertNotEqual(fingerprint.set_fp(self.tmp, ["src/a.py", "src/b.py"]), fp)
+        self.assertEqual(fingerprint.set_fp(self.tmp, []), fingerprint.set_fp(self.tmp, []))
 
     def test_set_fp_never_reads_a_name_outside_the_project(self):
         project = self.tmp / "proj"
@@ -585,14 +585,13 @@ class TestFingerprint(GitCase):
         outside = ["../secret.txt", "/etc/passwd", "src/../../secret.txt"]
         if sys.platform == "win32":
             outside += [str(secret).replace("\\", "/"), "C:/x", "src\\..\\..\\secret.txt", "a:b"]
-        head = "1" * 40
-        before = fingerprint.set_fp(project, ["src/a.py"] + outside, head)
+        before = fingerprint.set_fp(project, ["src/a.py"] + outside)
         secret.write_bytes(b"two\n")
-        self.assertEqual(fingerprint.set_fp(project, ["src/a.py"] + outside, head), before)
+        self.assertEqual(fingerprint.set_fp(project, ["src/a.py"] + outside), before)
         # Twins: the names still count as members, and an inside change is still seen.
-        self.assertNotEqual(fingerprint.set_fp(project, ["src/a.py"], head), before)
+        self.assertNotEqual(fingerprint.set_fp(project, ["src/a.py"]), before)
         self.write(project, "src/a.py", b"A\n")
-        self.assertNotEqual(fingerprint.set_fp(project, ["src/a.py"] + outside, head), before)
+        self.assertNotEqual(fingerprint.set_fp(project, ["src/a.py"] + outside), before)
 
     def test_body_fp_tells_undecodable_bytes_apart(self):
         # Two cp1254 specs (PowerShell 5.1 Set-Content) that differ only in a Turkish letter.

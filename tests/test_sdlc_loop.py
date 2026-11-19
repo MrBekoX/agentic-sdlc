@@ -587,7 +587,9 @@ class TestIngest(LoopCase):
                 self.assertIn("error=not_active:halted", out)
 
     def test_assemble_needs_the_critic_files(self):
-        self.to_draft(runtime="claude", capabilities="workflow=yes,subagent=yes,team=no")
+        # The loop runs the Claude workflow engine its loop.json names: assemble refuses any other
+        # (audit RN-3; without the overrides the loop runs runner-loop and the claim was taken anyway).
+        self.to_draft(runtime="claude", capabilities="workflow=yes,subagent=yes,team=no", overrides=ENGINE_OVERRIDES)
         self.draft("spec.r0.md").write_bytes(SPEC_BODY.encode("utf-8"))
         self.draft("plan.r0.md").write_bytes(PLAN_BODY.encode("utf-8"))
         claim = {"schema": "agentic-sdlc/loop@1", "engine": "claude-workflow", "mode": "spec+plan", "rounds": 1,
@@ -608,7 +610,7 @@ class TestIngest(LoopCase):
         self.assertFalse((self.pkg() / "spec" / "demo.md").exists())
 
     def test_assemble_from_engine_files(self):
-        self.to_draft(runtime="claude", capabilities="workflow=yes,subagent=yes,team=no")
+        self.to_draft(runtime="claude", capabilities="workflow=yes,subagent=yes,team=no", overrides=ENGINE_OVERRIDES)
         self.draft("spec.r0.md").write_bytes(SPEC_BODY.encode("utf-8"))
         self.draft("plan.r0.md").write_bytes(PLAN_BODY.encode("utf-8"))
         self.draft("critic.r1.json").write_bytes(CLEAN.encode("utf-8"))
