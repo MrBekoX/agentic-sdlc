@@ -1,7 +1,7 @@
 // Codex flow-evidence engine (AP2b). Session-scoped, evidence-only port of the Claude flow-step
 // backstop: it re-derives whether an artifact-bearing SDLC flow finished THIS rollout with a required
 // step lacking observable evidence. It reuses the Claude engine's read-only helpers
-// (loadRequirements / blockFlag / isSourceFile / runValidator) and the additive rollout-signal reader.
+// (loadRequirements / blockFlag / anySourceFile / runValidator) and the additive rollout-signal reader.
 // Pure derivation + a bounded read-only validator subprocess. Fail-open everywhere (BR8).
 //
 // Divergences from the Claude engine, all deliberate (see the spec):
@@ -13,7 +13,7 @@
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { loadRequirements, blockFlag, isSourceFile, isRealRunnerInvocation, resolveBranchState, workIdOf, runValidator } from './flow-evidence.mjs';
+import { loadRequirements, blockFlag, anySourceFile, isRealRunnerInvocation, resolveBranchState, workIdOf, runValidator } from './flow-evidence.mjs';
 import {
   readRolloutSignals, readRolloutRuns, splitBr6Statements, trailingOrRun, isVersionOrHelpOnly, hasUnquotedPipe,
   hasUnquotedBackground, inSafeBr6Grammar, hasUnmodeledShellSyntax, isBr6RunnerStatement, readRollout,
@@ -233,7 +233,7 @@ export function deriveFlowEvidenceWith(signals, req, cwd, runs) {
 
     // Obligation gate (BR5): no in-session NON-test source edit -> active flow, no step obligation.
     // FH-2: a patch_apply_end target is absolute, so it is classified relative to the project.
-    const sourceEdited = signals.editTargets.some((t) => isSourceFile(t, req, cwd));
+    const sourceEdited = anySourceFile(signals.editTargets, req, cwd);
     if (!sourceEdited) return { flow: true, workIds, missingBlockSteps: [] };
 
     const steps = mergedBlockSteps(req);
@@ -290,7 +290,7 @@ export function deriveStrictEvidence(rolloutPath, cwd) {
   try { if (typeof req.testCommand === 'string') re = new RegExp(req.testCommand, 'i'); } catch { re = null; }
 
   const workIds = activeWorkIds(signals, req);
-  const sourceEdited = signals.editTargets.some((t) => isSourceFile(t, req, cwd));
+  const sourceEdited = anySourceFile(signals.editTargets, req, cwd);
 
   let evidence;
   if (!workIds.length || (sourceEdited && !(re && signals.commands.some((c) => isRealRunnerInvocation(c, re))))) {

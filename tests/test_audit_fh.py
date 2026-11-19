@@ -269,10 +269,13 @@ class _Tmp(unittest.TestCase):
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def step(self, events, *, cwd=None, block=True, last=None):
+    def step(self, events, *, cwd=None, block=True, last=None, payload_cwd=True):
         cwd = cwd or self.project()
-        # Claude Code sends `cwd` with every hook payload, Stop included.
-        payload = {"transcript_path": self.transcript(events), "stop_hook_active": False, "cwd": str(cwd)}
+        # Claude Code sends `cwd` with every hook payload, Stop included. `payload_cwd` names it as
+        # given (True), as another spelling (a str), or leaves it out (None) as another runtime may.
+        payload = {"transcript_path": self.transcript(events), "stop_hook_active": False}
+        if payload_cwd is not None:
+            payload["cwd"] = str(cwd) if payload_cwd is True else payload_cwd
         if last is not None:
             payload["last_assistant_message"] = last
         return _run_hook(STEP_GUARD, payload, cwd=str(cwd),
@@ -423,6 +426,57 @@ class TestFH2TestPathIsRelativeToProject(_Tmp):
         cwd = link / "tests" / "myapp"
         events = _Calls().skill(PIPE).edit(str(cwd / "src" / "app.py")).text("Done.").events
         self.assertEqual(self.step(events, cwd=cwd).get("decision"), "block")
+
+    def _linked_project(self):
+        real = self.project("tests", "myapp")
+        link = self.tmp / "linked"
+        os.symlink(str(self.tmp / "proj"), str(link))
+        return real, link / "tests" / "myapp"
+
+    @unittest.skipIf(os.name == "nt", "symlink creation needs a privilege on Windows")
+    def test_fh2_symlinked_edit_is_gated_at_stop_when_the_payload_has_no_cwd(self):
+        # Without `cwd` the hook falls back to its own working directory, which the OS gives resolved.
+        real, linked = self._linked_project()
+        events = _Calls().skill(PIPE).edit(str(linked / "src" / "app.py")).text("Done.").events
+        self.assertEqual(self.step(events, cwd=real, payload_cwd=None).get("decision"), "block")
+
+    @unittest.skipIf(os.name == "nt", "symlink creation needs a privilege on Windows")
+    def test_fh2_symlinked_edit_is_gated_at_stop_when_cwd_is_the_resolved_path(self):
+        real, linked = self._linked_project()
+        events = _Calls().skill(PIPE).edit(str(linked / "src" / "app.py")).text("Done.").events
+        self.assertEqual(self.step(events, cwd=real, payload_cwd=str(real)).get("decision"), "block")
+
+    @unittest.skipIf(os.name == "nt", "symlink creation needs a privilege on Windows")
+    def test_fh2_resolved_edit_is_gated_pre_edit_when_cwd_is_the_linked_path(self):
+        # A new file: the path does not exist yet, so its nearest existing folder is resolved.
+        real, linked = self._linked_project()
+        out = self.order(_Calls().skill(RCF).events, {"file_path": str(real / "src" / "new.py")}, cwd=linked)
+        self.assertTrue(_is_deny(out), out)
+
+    @unittest.skipIf(os.name == "nt", "symlink creation needs a privilege on Windows")
+    def test_fh2_a_link_into_the_tests_folder_does_not_hide_a_source_edit(self):
+        # Resolving links may only make a path gated: `alias/src/app.py` names a source file as written.
+        real = self.project("myapp")
+        (real / "tests").mkdir()
+        alias = self.tmp / "alias"
+        os.symlink(str(real / "tests"), str(alias))
+        out = self.order(_Calls().skill(RCF).events, {"file_path": str(alias / "src" / "app.py")}, cwd=real)
+        self.assertTrue(_is_deny(out), out)
+
+    def test_fh2_a_very_long_path_is_classified_quickly(self):
+        # A hook that runs past its timeout is cancelled and the call goes ahead, so the link
+        # resolution must stay bounded on a path the agent writes.
+        long_path = "/x" + "/a" * 30000 + "/tests/f.py"
+        started = time.monotonic()
+        out = self.order(_Calls().skill(RCF).events, {"file_path": long_path})
+        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertEqual(out, {})
+
+    @unittest.skipIf(os.name == "nt", "symlink creation needs a privilege on Windows")
+    def test_fh2_symlinked_test_file_stays_exempt(self):
+        real, linked = self._linked_project()
+        out = self.order(_Calls().skill(RCF).events, {"file_path": str(linked / "tests" / "test_app.py")}, cwd=real)
+        self.assertEqual(out, {})
 
     def test_fh2_real_test_files_stay_exempt(self):
         cwd = self.project("tests", "myapp")

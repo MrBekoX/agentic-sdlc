@@ -27,7 +27,7 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { readStdin } from './secret-patterns.mjs';
 import { readRolloutSignals, currentEditTargets } from './codex-rollout.mjs';
-import { loadRequirements, isSourceFile, isRealRunnerInvocation, runValidator } from './flow-evidence.mjs';
+import { loadRequirements, anySourceFile, isRealRunnerInvocation, runValidator } from './flow-evidence.mjs';
 import { findArtifactFile, perPackageRole, workIdOf } from './codex-flow-evidence.mjs';
 
 // A2/DP-ENV decouple: flow-order has its OWN opt-in switch, independent of the flow-step Stop guard's
@@ -177,7 +177,7 @@ async function main() {
     const targets = currentEditTargets(toolName, command);
     const req = loadRequirements();
     const cwd = (typeof input?.cwd === 'string' && input.cwd) ? input.cwd : process.cwd(); // DP-CWD
-    if (!targets.some((t) => isSourceFile(t, req, cwd))) process.exit(0); // BR2/AC6/AC9 no source target (FH-2: project-relative)
+    if (!anySourceFile(targets, req, cwd)) process.exit(0); // BR2/AC6/AC9 no source target (FH-2: project-relative)
     const toolUseId = (typeof input?.tool_use_id === 'string' && input.tool_use_id) ? input.tool_use_id : null;
     const signals = withoutCurrentCall(readRolloutSignals(input?.transcript_path), toolUseId, command); // FH-6
     const d = orderDecision(signals, req, cwd);

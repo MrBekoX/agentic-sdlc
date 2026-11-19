@@ -9,7 +9,7 @@
 //   - branch   : the Stop-time working-directory branch is not main/master (warn-level step).
 //   - reviewResult : a dispatched reviewer returned a correlated non-error tool_result (warn-level).
 // Every reader fails OPEN (treats as allowed / satisfied) on its own error, matching the other guards.
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve as resolvePath } from 'node:path';
@@ -555,7 +555,7 @@ export function parseTranscript(transcriptPath) {
 // command too long to read, which is never evidence but may have written source, so Stop keeps the flow's
 // obligations for it.
 export function sourceEdited(trace, req, cwd) {
-  return (trace.edits || []).some((e) => isSourceFile(e, req, cwd)) || (trace.opaqueShellIds || []).length > 0;
+  return anySourceFile(trace.edits, req, cwd) || (trace.opaqueShellIds || []).length > 0;
 }
 
 // Did the call with this tool_use id fail? Three shapes count (C6, amended by C17 item 6):
@@ -974,7 +974,8 @@ export function stepSatisfied(step, trace, ctx) {
 }
 
 // FH-2: a path inside the project is classified on its project-relative form, so a project that itself
-// lives under a `tests/` or `test_*` folder is still gated. A path outside `cwd` (or no `cwd`) is used as is.
+// lives under a `tests/` or `test_*` folder is still gated. A path outside `cwd` (or no `cwd`) is used as is;
+// `isSourceFile` may retry it with both sides resolved through links (`resolvedThroughLinks`).
 function projectRelative(norm, cwd) {
   if (typeof cwd !== 'string' || !cwd) return norm;
   let base = cwd.replace(/\\/g, '/');
@@ -1002,17 +1003,81 @@ function resolveDotSegments(norm) {
   return (absolute ? '/' : '') + out.join('/');
 }
 
-// A path is a production source file: extension in sourceGlobs, NOT an artifact root, NOT a test.
-export function isSourceFile(filePath, req, cwd) {
-  if (!filePath) return false;
-  const base = typeof cwd === 'string' && cwd ? resolveDotSegments(cwd.replace(/\\/g, '/')) : cwd;
-  const norm = projectRelative(resolveDotSegments(String(filePath).replace(/\\/g, '/')), base);
+// FH-2: one folder can be named through a link (macOS `/var` is `/private/var`), and a runtime that sends
+// no `cwd` leaves the hook's own working directory, which the OS gives resolved. A folder is resolved
+// through its nearest existing ancestor, because the folder of a file about to be written may not exist
+// yet. The work is bounded, because a hook that runs past its timeout is cancelled and the call goes
+// ahead: a folder of more than LINK_MAX_SEGMENTS segments or LINK_MAX_LENGTH characters is not resolved,
+// at most LINK_MAX_ANCESTORS folders are tried, and one process resolves at most LINK_MAX_RESOLVES
+// folders. A lookup that stalls in the filesystem (a dead network mount) is not bounded, which is why
+// `anySourceFile` reads every path as written before it resolves any (the byte-locked Claude pre-edit
+// guard still checks its targets one by one). Null when nothing resolves.
+const LINK_MAX_SEGMENTS = 128;
+const LINK_MAX_LENGTH = 4096;
+const LINK_MAX_ANCESTORS = 32;
+const LINK_MAX_RESOLVES = 64;
+const resolvedFolders = new Map();
+
+function resolvedThroughLinks(folder) {
+  if (resolvedFolders.has(folder)) return resolvedFolders.get(folder);
+  const segs = folder.split('/');
+  if (resolvedFolders.size >= LINK_MAX_RESOLVES || segs.length > LINK_MAX_SEGMENTS
+      || folder.length > LINK_MAX_LENGTH) return null;
+  let found = null;
+  for (let keep = segs.length; keep > Math.max(0, segs.length - LINK_MAX_ANCESTORS); keep -= 1) {
+    let head = segs.slice(0, keep).join('/');
+    if (head === '') head = '/';
+    else if (/^[A-Za-z]:$/.test(head)) head += '/';
+    let real;
+    try { real = realpathSync.native(head).replace(/\\/g, '/'); } catch { continue; }
+    const rest = segs.slice(keep).join('/');
+    found = rest ? `${real.endsWith('/') ? real.slice(0, -1) : real}/${rest}` : real;
+    break;
+  }
+  resolvedFolders.set(folder, found);
+  return found;
+}
+
+const isAbsolutePath = (norm) => norm.startsWith('/') || /^[A-Za-z]:\//.test(norm);
+
+const hasSourceExtension = (norm, req) =>
+  (req.sourceGlobs || []).includes((norm.split('.').pop() || '').toLowerCase());
+
+function classifiedAsSource(norm, req) {
   for (const root of Object.values(req.artifactRoots || {})) {
     if (norm.includes(root)) return false;
   }
   if (/(^|\/)tests?\//.test(norm) || /(^|\/)test_|_test\.|\.test\.|\.spec\./.test(norm)) return false;
-  const ext = (norm.split('.').pop() || '').toLowerCase();
-  return (req.sourceGlobs || []).includes(ext);
+  return hasSourceExtension(norm, req);
+}
+
+// A path is a production source file: extension in sourceGlobs, NOT an artifact root, NOT a test.
+// `resolveLinks: false` reads the path only as written.
+export function isSourceFile(filePath, req, cwd, resolveLinks = true) {
+  if (!filePath) return false;
+  const base = typeof cwd === 'string' && cwd ? resolveDotSegments(cwd.replace(/\\/g, '/')) : null;
+  const path = resolveDotSegments(String(filePath).replace(/\\/g, '/'));
+  const norm = projectRelative(path, base);
+  if (classifiedAsSource(norm, req)) return true;
+  if (!resolveLinks) return false;
+  // FH-2: a path that is not under `cwd` as written, and reads as a test or an artifact on its absolute
+  // form, is retried with its folder and `cwd` resolved through links. The retry can only make a path a
+  // source file, never the reverse, so a link cannot hide a source edit; the file name is kept as written.
+  if (norm !== path || !base || !isAbsolutePath(path) || !hasSourceExtension(path, req)) return false;
+  const cut = path.lastIndexOf('/');
+  const realBase = resolvedThroughLinks(base);
+  const realFolder = realBase && resolvedThroughLinks(path.slice(0, cut) || '/');
+  if (!realFolder) return false;
+  const realPath = `${realFolder.endsWith('/') ? realFolder.slice(0, -1) : realFolder}/${path.slice(cut + 1)}`;
+  const relative = projectRelative(realPath, realBase);
+  return relative !== realPath && classifiedAsSource(relative, req);
+}
+
+// Any of `paths` is a production source file. Every path is read as written before any link is
+// resolved, so a lookup that stalls on one path cannot keep a later source path from being found.
+export function anySourceFile(paths, req, cwd) {
+  const list = paths || [];
+  return list.some((p) => isSourceFile(p, req, cwd, false)) || list.some((p) => isSourceFile(p, req, cwd));
 }
 
 export function completionClaimPresent(trace, req, lastAssistantMessage) {
