@@ -45,12 +45,22 @@ except ModuleNotFoundError:
 EXCLUSION_CLASSES = {
     1: "maintainer prompts (agentic-sdlc-prompts/**)",
     2: "private eval prompt test (tests/test_superpowers_referenced_eval_prompt.py)",
-    3: "local agent instructions (AGENTS.md, CLAUDE.md)",
+    3: "local agent instructions (AGENTS.md, CLAUDE.md, CLAUDE.local.md)",
     4: "user settings (.claude/, .codex/, settings.local.json, .env, .env.*)",
     5: "raw transcripts (tests/artifacts/**)",
     6: "audit dumps (audit-docs/**, .handoffs/**)",
     7: "unsafe member (symlink, absolute, '..', backslash)",
+    8: "local session and tool state (session-reports/, .video_agent/, mcps/, debug dumps, ...)",
 }
+# Class 8 (RL-5): the local-only folders and files `.gitignore` keeps out of the repository after the
+# BR13 classes were drawn. A force-added copy must still never ship or reach a local package copy.
+# Folders match at any depth, as their `.gitignore` patterns do; the dated debug dumps only at the root.
+LOCAL_ONLY_DIRECTORIES = frozenset({
+    "session-reports", ".video_agent", ".codegraph", ".zcode", ".opencode", ".omo", ".sdd",
+    ".worktrees", ".tmp-superpowers-compare", "_tmp_superpowers_benchmark", "mcps",
+})
+LOCAL_ONLY_FILES = frozenset({"debug.txt", "scheduled_tasks.lock"})
+_ROOT_DEBUG_DUMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.txt$")
 
 _SYMLINK_MODE = 0o120000
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
@@ -111,9 +121,9 @@ def _display_path(path: str) -> str:
 
 
 def exclusion_class(path: str, mode) -> int | None:
-    """Return the BR13 exclusion class (1..7) of a member path and git mode, or None.
+    """Return the BR13 exclusion class (1..8) of a member path and git mode, or None.
 
-    Classes 1-6 compare case-folded segments with trailing dots and spaces stripped, because a
+    Classes 1-6 and 8 compare case-folded segments with trailing dots and spaces stripped, because a
     case-insensitive filesystem (NTFS, APFS) opens those spellings as the excluded file (SEC-8).
     """
     if _is_symlink_mode(mode) or _is_unsafe_path(path):
@@ -124,7 +134,7 @@ def exclusion_class(path: str, mode) -> int | None:
         return 1
     if parts == ["tests", "test_superpowers_referenced_eval_prompt.py"]:
         return 2
-    if base in ("agents.md", "claude.md"):
+    if base in ("agents.md", "claude.md", "claude.local.md"):
         return 3
     if (
         any(part in (".claude", ".codex") for part in parts[:-1])
@@ -136,7 +146,75 @@ def exclusion_class(path: str, mode) -> int | None:
         return 5
     if parts[0] in ("audit-docs", ".handoffs"):
         return 6
+    if (
+        any(part in LOCAL_ONLY_DIRECTORIES for part in parts[:-1])
+        or base in LOCAL_ONLY_FILES
+        or (len(parts) == 1 and _ROOT_DEBUG_DUMP.match(base))
+    ):
+        return 8
     return None
+
+
+def _git_toplevel(root: Path) -> Path | None:
+    """The resolved top level of the git work tree whose root is `root`, or None for any other directory."""
+    try:
+        proc = _run_git(["rev-parse", "--show-toplevel"], cwd=root)
+    except ReleaseError:
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    toplevel = Path(proc.stdout.decode("utf-8", "surrogateescape").strip()).resolve()
+    return toplevel if toplevel == root.resolve() else None
+
+
+def _has_repository(root: Path) -> bool:
+    """True when `root/.git` is what git opens as a repository: a gitfile, or a folder with objects/ and refs/."""
+    marker = root / ".git"
+    return marker.is_file() or ((marker / "objects").is_dir() and (marker / "refs").is_dir())
+
+
+def local_package_files(root, skip=frozenset()) -> list:
+    """Relative POSIX paths of the files a local copy of the package at `root` may take (RL-3).
+
+    A git checkout (`root` is its top level) lists `git ls-files`, so an untracked or gitignored file
+    (`.env`, `settings.local.json`, session reports) is never copied; any other directory, such as an
+    extracted archive, is walked without following symlinks. Either way a path in an exclusion class
+    is dropped, the rule the release archive applies, and so is a path below a folder named in `skip`.
+    A repository that git cannot list (git missing, a damaged or foreign-owned checkout) raises
+    ReleaseError instead of being walked, which would copy its untracked files (R2-RL-3).
+    """
+    root = Path(root)
+    skip = frozenset(skip) | {".git"}
+    candidates = []
+    listed = _git_toplevel(root) is not None
+    if not listed and _has_repository(root):
+        raise ReleaseError(["error=package_git_unreadable"], exit_code=2)
+    if listed:
+        listing = _git_ok(["ls-files", "-z", "--stage"], cwd=root)
+        for record in listing.split(b"\0"):
+            if not record:
+                continue
+            meta, _, raw = record.partition(b"\t")
+            candidates.append((raw.decode("utf-8", "surrogateescape"), meta.split(b" ")[0].decode("ascii")))
+    else:
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            current = Path(dirpath)
+            dirnames[:] = sorted(name for name in dirnames if name not in skip)
+            for name in sorted(filenames):
+                path = current / name
+                mode = "120000" if path.is_symlink() else "100644"
+                candidates.append((path.relative_to(root).as_posix(), mode))
+    files = []
+    for relative, mode in candidates:
+        if mode == "160000" or any(part in skip for part in relative.split("/")[:-1]):
+            continue
+        if exclusion_class(relative, mode) is not None:
+            continue
+        path = root / relative
+        if path.is_symlink() or not path.is_file():
+            continue
+        files.append(relative)
+    return sorted(files)
 
 
 _ABSOLUTE_WINDOWS_ENTRY = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|//)")
@@ -377,8 +455,16 @@ def _write_atomic(output: Path, data: bytes) -> None:
         raise
 
 
-def _public_references(text: str, source: str, destination: str, mapping: dict, source_paths: set) -> str:
-    """Rewrite known package references; workspace output paths are deliberately not mapped."""
+def _public_references(text: str, source: str, destination: str, mapping: dict, source_paths: set,
+                       folders: dict | None = None) -> str:
+    """Rewrite known package references; workspace output paths are deliberately not mapped.
+
+    `folders` relocates a whole source folder (RL-7: `agents/` ships as the public role folder). It is
+    used for link and `<runtime-root>/` targets only, never for bare text, where a folder name such as
+    `agents` is an ordinary word.
+    """
+    folders = folders or {}
+
     def link(match):
         label, raw_target = match.group(1), match.group(2)
         if raw_target.startswith(("https://", "http://", "#")):
@@ -386,12 +472,13 @@ def _public_references(text: str, source: str, destination: str, mapping: dict, 
         target, separator, anchor = raw_target.partition("#")
         resolved = posixpath.normpath(posixpath.join(posixpath.dirname(source), target))
         key = target if target in mapping else resolved
-        if key not in mapping:
+        moved = mapping.get(key, folders.get(resolved))
+        if moved is None:
             if key in source_paths or resolved in source_paths:
                 # Source-only manual-runtime/test links are information, not public dependencies.
                 return label + " (source checkout only)"
             return match.group(0)
-        relative = posixpath.relpath(mapping[key], posixpath.dirname(destination))
+        relative = posixpath.relpath(moved, posixpath.dirname(destination))
         return "[" + label + "](" + relative + (separator + anchor if separator else "") + ")"
 
     text = re.sub(r"\[([^\]\n]+)\]\(([^()\s]+)\)", link, text)
@@ -402,8 +489,9 @@ def _public_references(text: str, source: str, destination: str, mapping: dict, 
         ref = match.group(1)
         core = ref.rstrip(".")
         key = core.rstrip("/")
-        if key in mapping:
-            return "<runtime-root>/" + mapping[key] + ("/" if core.endswith("/") else "") + ref[len(core):]
+        moved = mapping.get(key, folders.get(key))
+        if moved is not None:
+            return "<runtime-root>/" + moved + ("/" if core.endswith("/") else "") + ref[len(core):]
         if key in source_paths:
             return key + " (source checkout only)" + ref[len(core):]
         return match.group(0)
@@ -446,6 +534,8 @@ def _public_house_payload(members: dict, selected: dict) -> dict:
     mapping = {f"agents/{name}.md": f"{PUBLIC_REFERENCE_ROOT}/roles/{name}.md" for name in PUBLIC_ROLES}
     mapping.update({f"docs/{name}.md": f"{PUBLIC_REFERENCE_ROOT}/docs/{name}.md" for name in PUBLIC_DOCS})
     mapping["commands/git-safety-check.md"] = f"{PUBLIC_REFERENCE_ROOT}/git-safety-check.md"
+    # RL-7: skills name the role folder itself (`<runtime-root>/agents/<role>.md`); it ships as the role folder.
+    folders = {"agents": f"{PUBLIC_REFERENCE_ROOT}/roles"}
     required = set(mapping) | PUBLIC_RUNTIME_HELPERS | {CODEX_MANIFEST}
     missing = sorted(required - set(members))
     if missing:
@@ -550,7 +640,7 @@ def _public_house_payload(members: dict, selected: dict) -> dict:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
             raise ReleaseError([f"error=public_dependency_unreadable:{source}"]) from None
-        text = _public_references(text, source, path, reference_map, source_paths)
+        text = _public_references(text, source, path, reference_map, source_paths, folders)
         if path.endswith("/SKILL.md"):
             notice = ("\nPreserve any required skill activation or dispatch-strategy-first gate below before reading other files.\n"
                       "After that gate, read `<runtime-root>/" + guide_path + "`\n"
@@ -754,7 +844,8 @@ def _node_bridge(script: str, records: list) -> dict:
     results = {}
     # D25 model (4): JSON.stringify leaves U+2028/U+2029 raw, so split on newline only.
     for raw in proc.stdout.decode("utf-8").split("\n"):
-        raw = raw.removesuffix("\r")
+        if raw.endswith("\r"):
+            raw = raw[:-1]
         if raw:
             record = json.loads(raw)
             results[record["id"]] = record
@@ -786,28 +877,76 @@ def credential_filenames(paths) -> set:
     return {path for index, path in enumerate(paths) if results[index]["credential"] is True}
 
 
-def _is_text(data: bytes) -> bool:
-    return b"\0" not in data[:BINARY_PROBE_BYTES]
+# UTF-32 marks first: the UTF-16LE mark is a prefix of the UTF-32LE one.
+_WIDE_TEXT_BOMS = (
+    (b"\xff\xfe\x00\x00", "utf-32-le"), (b"\x00\x00\xfe\xff", "utf-32-be"),
+    (b"\xff\xfe", "utf-16-le"), (b"\xfe\xff", "utf-16-be"),
+)
+
+
+def _utf16_without_bom(probe: bytes) -> str | None:
+    """'utf-16-le'/'utf-16-be' when NULs fill one byte lane only, as in ASCII-heavy UTF-16 text."""
+    probe = probe[:len(probe) - len(probe) % 2]
+    even, odd = probe[0::2], probe[1::2]
+    if len(probe) < 4:
+        return None
+    if odd.count(0) * 10 >= len(odd) * 3 and even.count(0) == 0:
+        return "utf-16-le"
+    if even.count(0) * 10 >= len(even) * 3 and odd.count(0) == 0:
+        return "utf-16-be"
+    return None
+
+
+def _member_texts(data: bytes) -> list:
+    """Every decoding the secret scan reads from a member; empty for a binary member (RL-2, R2-RL-1).
+
+    NUL-free bytes are read as UTF-8 only, exactly as before, even behind a UTF-16 byte-order mark: a
+    UTF-8 secret after `FF FE` must not turn into mojibake (and a UTF-8 BOM stays in the text, so the
+    line hashes of reviewed findings do not move). Bytes with a NUL in the probe used to be skipped as
+    binary. When a UTF-16/UTF-32 mark or a NUL-only byte lane names a wide codec, they are read in that
+    codec and as UTF-8 as well, so a wrong guess can only add text to the scan, never hide any; with
+    neither sign they stay binary.
+    """
+    utf8 = data.decode("utf-8", "replace")
+    probe = data[:BINARY_PROBE_BYTES]
+    if b"\0" not in probe:
+        return [utf8]
+    for bom, codec in _WIDE_TEXT_BOMS:
+        if data.startswith(bom):
+            return [data[len(bom):].decode(codec, "replace"), utf8]
+    codec = _utf16_without_bom(probe)
+    return [data.decode(codec, "replace"), utf8] if codec else []
 
 
 def _scan_members(data: dict) -> tuple:
-    """Masked secret_finding and suppressed_finding lines for text members, plus the binary count."""
+    """Masked secret_finding and suppressed_finding lines for text members, plus the binary count.
+
+    A member read in more than one decoding reports the first decoding's lines, then any line another
+    decoding adds (R2-RL-1).
+    """
     ordered = _utf8_order(data)
     credentials = credential_filenames(ordered)
-    texts = [(name, data[name].decode("utf-8", "replace")) for name in ordered if _is_text(data[name])]
-    results = scan_texts(texts)
+    decoded = {name: _member_texts(data[name]) for name in ordered}
+    results = scan_texts([(f"{index}:{name}", text) for name in ordered
+                          for index, text in enumerate(decoded[name])])
     findings = [
         f"secret_finding={_display_path(name)}:0:{CREDENTIAL_FILENAME_LABEL}" for name in ordered if name in credentials
     ]
     suppressed = []
-    for name, _text in texts:
-        record = results[name]
+    for name in ordered:
         shown = _display_path(name)
-        findings += [f"secret_finding={shown}:{f['line']}:{f['label']}" for f in record["findings"]]
-        suppressed += [
-            f"suppressed_finding={shown}:{s['line']}:{s['label']}:{s['reason']}" for s in record["suppressed"]
-        ]
-    return findings, suppressed, len(data) - len(texts)
+        member_findings, member_suppressed = [], []
+        for index in range(len(decoded[name])):
+            record = results[f"{index}:{name}"]
+            member_findings += [line for line in (f"secret_finding={shown}:{f['line']}:{f['label']}"
+                                                  for f in record["findings"])
+                                if index == 0 or line not in member_findings]
+            member_suppressed += [line for line in (
+                f"suppressed_finding={shown}:{s['line']}:{s['label']}:{s['reason']}" for s in record["suppressed"])
+                if index == 0 or line not in member_suppressed]
+        findings += member_findings
+        suppressed += member_suppressed
+    return findings, suppressed, sum(1 for name in ordered if not decoded[name])
 
 
 @dataclass
@@ -1197,9 +1336,11 @@ def scan_history(mirror, record=None) -> HistoryReport:
             chunk = oids[start:start + SCAN_BATCH_SIZE]
             contents = _read_objects(chunk, **git)
             for oid in chunk:
-                if _is_text(contents[oid]):
+                blob_texts = _member_texts(contents[oid])
+                if blob_texts:
                     text_blobs += 1
-                    queue(contents[oid].decode("utf-8", "replace"), blob_sightings[oid])
+                    for blob_text in blob_texts:
+                        queue(blob_text, blob_sightings[oid])
                 else:
                     binary_blobs += 1
         flush()
@@ -1288,7 +1429,7 @@ def _history_mirror(argument: str, emit) -> Path | None:
         return None
     if toplevel.returncode == 0 and toplevel.stdout.strip():
         roots.append(Path(toplevel.stdout.decode("utf-8").strip()).resolve())
-    if any(mirror == root or mirror.is_relative_to(root) for root in roots):
+    if any(mirror == root or root in mirror.parents for root in roots):
         emit("error=mirror_inside_repository")
         return None
     # (3) and (4): an existing bare repository only.
@@ -1309,7 +1450,9 @@ def _history_mirror(argument: str, emit) -> Path | None:
 # that way is missing from the parsed skips, so the parsed skip count differs from the summary's
 # skipped=N and the comparison fails closed: a possible false failure, never a false pass.
 _RESULT_LINE = re.compile(
-    r"^\S+ \(([\w.]+)\)(?:\n[^\n]*?)? \.\.\. (ok|skipped '.*'|FAIL|ERROR|expected failure|unexpected success)$",
+    # unittest prints a skip reason's repr: double-quoted when the reason holds an apostrophe.
+    r"^\S+ \(([\w.]+)\)(?:\n[^\n]*?)? \.\.\. "
+    r"(ok|skipped '.*'|skipped \".*\"|FAIL|ERROR|expected failure|unexpected success)$",
     re.M,
 )
 _FAILURE_HEADER = re.compile(r"^(?:FAIL|ERROR): \S+ \(([\w.]+)\)", re.M)

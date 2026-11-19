@@ -132,24 +132,18 @@ def classify_artifact(repo, path):
 
 
 def recognized_root(repo, path, role):
-    """True if path (after symlink resolution) is inside a recognized root for role.
+    """True if path (after symlink resolution) is an artifact of `role` in a recognized root.
 
     A recognized root is the flat root (`docs/agentic-sdlc/specs|plans`) **or** any
-    per-package `docs/agentic-sdlc/<valid-slug>/<role>/` (BR9). This replaces the
-    single-root `_is_inside(..., SPEC_ROOT|PLAN_ROOT)` gate while preserving its
-    symlink-resolving traversal guard via `_is_inside`/`resolve(strict=False)`.
+    per-package `docs/agentic-sdlc/<valid-slug>/<role>/` (BR9), and the artifact sits directly in
+    it: exactly the shapes `classify_artifact` names a layout for. A deeper path
+    (`<slug>/plan/sub/x.md`, `plans/sub/x.md`) used to pass here while `classify_artifact` gave it no
+    layout, which switched off the layout-class, co-location and basename checks, so such a plan could
+    resolve to another package's spec. The symlink-resolving traversal guard is kept:
+    `classify_artifact` reads the resolved path (`resolve(strict=False)`).
     """
-    repo = Path(repo).resolve(strict=False)
-    p = _as_repo_path(repo, path)
-    flat_root = repo / (SPEC_ROOT if role == "spec" else PLAN_ROOT)
-    if _is_inside(p, flat_root):
-        return True
-    try:
-        rel = p.relative_to((repo / AGENTIC_ROOT).resolve(strict=False))
-    except ValueError:
-        return False
-    parts = rel.parts
-    return len(parts) >= 2 and is_valid_slug(parts[0]) and parts[1] == role
+    info = classify_artifact(repo, path)
+    return info["layout"] is not None and info["role"] == role
 
 
 def _bad_slug_path(repo, path, role):
@@ -200,8 +194,15 @@ def _parse_frontmatter(path):
     `#` lines are skipped; any other line without a `:` or with an empty key is
     `invalid_frontmatter_line:<file line>`. scripts/validate_artifacts.py reads the block the same
     way; tests/test_validator_resolver_parity.py runs both command lines on one fixture set.
+
+    A file that cannot be read as UTF-8 text (bad bytes, a directory named `*.md`, a permission error)
+    is `unreadable`, never an exception: one stray file under a plan root must not crash a resolution
+    that does not even select it.
     """
-    text = path.read_text(encoding="utf-8-sig")
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return {}, ["unreadable"]
     lines = text.splitlines()
     if not lines or lines[0].rstrip() != "---":
         return {}, ["missing_frontmatter"]
@@ -378,7 +379,8 @@ def _plan_files(repo):
         info = classify_artifact(repo, candidate)
         if info["layout"] == "per-package" and info["role"] == "plan":
             plans.append(candidate)
-    return sorted(set(plans))
+    # A directory named `*.md` is no plan: only files are candidates (VA-10).
+    return sorted(plan for plan in set(plans) if plan.is_file())
 
 
 def _current_branch(repo):
@@ -423,7 +425,7 @@ def _changed_plans_from_git(repo):
             path = path.split(" -> ", 1)[1]
         p = _as_repo_path(repo, path)
         if p.is_dir() and _is_inside(p, repo / PLAN_ROOT):
-            plans.extend(sorted(p.glob("*.md")))
+            plans.extend(sorted(q for q in p.glob("*.md") if q.is_file()))
         elif p.suffix == ".md" and _is_inside(p, repo / PLAN_ROOT):
             plans.append(p)
     return sorted(set(plans))
@@ -448,7 +450,7 @@ def _changed_plans_from_fs(repo):
     plans = []
     for candidate in (repo / AGENTIC_ROOT).glob("*/plan/*.md"):
         info = classify_artifact(repo, candidate)
-        if info["layout"] == "per-package" and info["role"] == "plan":
+        if info["layout"] == "per-package" and info["role"] == "plan" and candidate.is_file():
             plans.append(candidate)
     return sorted(set(plans))
 

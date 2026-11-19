@@ -26,7 +26,7 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 UNDER_TEST = Path(os.environ.get("AGENTIC_TRUST_CHECK_UNDER_TEST") or REPO / "scripts" / "check_codex_hook_trust.py")
-PLUGIN = "agentic-sdlc@personal"
+PLUGIN = "agentic-sdlc@mrbekox"
 OTHER_PLUGIN = "other-plugin@elsewhere"
 LOG_NAME = "methods.log"
 PID_NAME = "server.pid"
@@ -48,7 +48,7 @@ import time
 MODE = os.environ["FAKE_TRUST_MODE"]
 STATE = os.environ["FAKE_TRUST_STATE_DIR"]
 EXPECT_CWD = os.environ["FAKE_TRUST_EXPECT_CWD"]
-PLUGIN = "agentic-sdlc@personal"
+PLUGIN = "agentic-sdlc@mrbekox"
 OTHER = "other-plugin@elsewhere"
 MARK = os.environ["FAKE_TRUST_MARK"]
 # The 8 hooks of hooks/hooks-codex.json: 5 preToolUse, 1 sessionStart, 2 stop.

@@ -6,7 +6,11 @@ Codex CLI does not expose a comparable Skill tool event in `codex exec --json`,
 so this runner checks Codex's route decision as a compact classifier.
 
 Eval-set JSON: {"queries": [{"query": "...", "should_trigger": true}, ...]}
-Output: sorted key=value lines + codex_trigger_eval=passed|failed.
+Output: sorted key=value lines + codex_trigger_eval=passed|failed|unmeasured.
+Exit 0 passed; 1 a measured query missed its expectation; 3 some run produced no measurement (codex
+missing, a non-zero exit, a `turn.failed` event, no answer, a timeout) and no measured query failed,
+the code scripts/run_trigger_eval.py uses. A run without a measurement is never graded as "the skill
+did not trigger": a failed CLI run used to pass every should_trigger=false query.
 """
 
 from __future__ import annotations
@@ -31,6 +35,9 @@ try:
 except ModuleNotFoundError:
     from eval_safety import require_slug, resolve_under
     from sensitive_redaction import redact_text
+
+
+EXIT_UNMEASURED = 3
 
 
 def split_frontmatter(text: str) -> dict[str, str]:
@@ -121,6 +128,29 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
+def unmeasured_reason(lines: list[str], exit_code: int | None) -> str | None:
+    """Why a finished `codex exec --json` run measured nothing, or None when it answered.
+
+    A non-zero exit, a `turn.failed` event and a run with no agent message have no route decision to grade.
+    """
+    if exit_code not in (0, None):
+        return f"exit_{exit_code}"
+    answered = False
+    for raw in lines:
+        try:
+            event = json.loads(raw)
+        except (ValueError, RecursionError):
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "turn.failed":
+            return "turn_failed"
+        item = event.get("item") if isinstance(event.get("item"), dict) else {}
+        if event.get("type") == "item.completed" and item.get("type") == "agent_message":
+            answered = True
+    return None if answered else "no_answer"
+
+
 def parse_codex_events(lines: list[str]) -> tuple[str | None, dict[str, Any]]:
     final_text = ""
     usage: dict[str, Any] = {}
@@ -202,6 +232,10 @@ def run_codex_once(prompt: str, project_root: Path, args: argparse.Namespace, tr
                 line = lines.get(timeout=0.1)
             except queue.Empty:
                 if proc.poll() is not None:
+                    # The child has exited: take what the reader thread still holds before deciding.
+                    reader.join(timeout=2)
+                    if not lines.empty():
+                        continue
                     break
                 continue
             captured.append(line)
@@ -212,6 +246,9 @@ def run_codex_once(prompt: str, project_root: Path, args: argparse.Namespace, tr
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
         transcript_path.write_text(redact_text("".join(captured)), encoding="utf-8")
     actual, usage = parse_codex_events(captured)
+    reason = unmeasured_reason(captured, proc.poll())
+    if reason:
+        return None, usage, reason
     return actual, usage, None
 
 
@@ -273,10 +310,13 @@ def main(argv: list[str] | None = None) -> int:
         temporary_project = tempfile.TemporaryDirectory(prefix="agentic-sdlc-codex-trigger-")
         args.project_root = Path(temporary_project.name)
 
+    mismatches = 0
+    unmeasured = 0
     try:
         for i, query in enumerate(queries):
             matches = 0
             actuals = []
+            reasons = []
             for run_index in range(args.runs):
                 prompt = build_prompt(query["query"], skills)
                 transcript_path = None
@@ -288,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 actual, usage, error = run_codex_once(prompt, args.project_root, args, transcript_path)
                 if error:
-                    errors.append(f"q{i}_{error}")
+                    reasons.append(error)
                     continue
                 actuals.append(actual or "")
                 if actual == target_skill:
@@ -296,13 +336,22 @@ def main(argv: list[str] | None = None) -> int:
                 total_input_tokens += int(usage.get("input_tokens") or 0)
                 total_output_tokens += int(usage.get("output_tokens") or 0)
                 total_reasoning_tokens += int(usage.get("reasoning_output_tokens") or 0)
+            should = str(query["should_trigger"]).lower()
+            fields[f"q{i}_actual"] = ",".join(actuals)
+            if reasons:
+                # A rate over the runs that did measure would hide the ones that did not: the whole query is
+                # unmeasured, never passed or failed (as in run_trigger_eval.py).
+                unmeasured += 1
+                fields[f"q{i}_should={should}_rate"] = "unmeasured"
+                errors.append(f"q{i}_unmeasured:runs={len(reasons)},reason={'+'.join(sorted(set(reasons)))}")
+                continue
             rate = matches / args.runs
             ok = (rate >= args.threshold) if query["should_trigger"] else (rate < args.threshold)
-            fields[f"q{i}_actual"] = ",".join(actuals)
-            fields[f"q{i}_should={str(query['should_trigger']).lower()}_rate"] = f"{rate:.2f}"
+            fields[f"q{i}_should={should}_rate"] = f"{rate:.2f}"
             if ok:
                 passed += 1
             else:
+                mismatches += 1
                 errors.append(f"q{i}_mismatch:should_trigger={query['should_trigger']},rate={rate:.2f}")
     finally:
         if temporary_project is not None:
@@ -312,11 +361,13 @@ def main(argv: list[str] | None = None) -> int:
     fields["input_tokens"] = total_input_tokens
     fields["output_tokens"] = total_output_tokens
     fields["reasoning_output_tokens"] = total_reasoning_tokens
-    fields["codex_trigger_eval"] = "failed" if errors else "passed"
+    fields["codex_trigger_eval"] = "failed" if mismatches else ("unmeasured" if unmeasured else "passed")
 
     for line in sorted([f"{key}={value}" for key, value in fields.items()] + [f"error={err}" for err in errors]):
         print(line)
-    return 1 if errors else 0
+    if mismatches:
+        return 1
+    return EXIT_UNMEASURED if unmeasured else 0
 
 
 if __name__ == "__main__":

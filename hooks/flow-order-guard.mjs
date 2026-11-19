@@ -1,10 +1,15 @@
-// PreToolUse (Write/Edit/MultiEdit) — enforces flow ordering: spec + plan must exist
+// PreToolUse (Write/Edit/MultiEdit and Bash/PowerShell) — enforces flow ordering: spec + plan must exist
 // before the first production-source edit inside an active flow. This is the cheap,
 // pre-edit counterpart to flow-step-guard.mjs (which runs thorough checks on Stop):
 // here we only check existence / tool_use evidence, never the full validator. On any
 // error, or outside an active flow / on non-source files, it fails open (allows).
+// A shell command is an edit of every file the shared write-target recognizer reads from it (FH-1);
+// a command that writes no source file stays silent.
 import { readStdin } from './secret-patterns.mjs';
-import { loadRequirements, blockFlag, parseTranscript, activeFlowNames, stepSatisfied, isSourceFile, emit } from './flow-evidence.mjs';
+import {
+  loadRequirements, blockFlag, parseTranscript, activeFlowNames, stepSatisfied, isSourceFile, shellWriteTargets,
+  pendingCallIds, withoutCalls, emit,
+} from './flow-evidence.mjs';
 
 try {
   const raw = await readStdin();
@@ -12,10 +17,19 @@ try {
   try { input = JSON.parse(raw || '{}'); } catch { /* fail open */ }
 
   const req = loadRequirements();
-  const fp = input?.tool_input?.file_path;
-  if (!isSourceFile(fp, req)) process.exit(0); // spec/plan/test/docs/non-source -> allow
+  const toolInput = input?.tool_input || {};
+  const cwd = (typeof input?.cwd === 'string' && input.cwd) ? input.cwd : process.cwd();
+  const targets = typeof toolInput.command === 'string'
+    ? shellWriteTargets(toolInput.command, Infinity)          // Bash / PowerShell: the current call is read whole
+    : [toolInput.file_path];                                  // Write / Edit / MultiEdit
+  if (!targets.some((t) => isSourceFile(t, req, cwd))) process.exit(0); // spec/plan/test/docs/non-source -> allow
 
-  const trace = parseTranscript(input?.transcript_path);
+  // The current call may already be in the transcript, but it has not run: its own `&& pytest` or its own
+  // spec write is not evidence that came BEFORE this edit. Drop it by id, or (no id) by its identical,
+  // still-unresolved input - from the one parse (R2-FH-1: the transcript is read and analysed once).
+  const toolUseId = (typeof input?.tool_use_id === 'string' && input.tool_use_id) ? input.tool_use_id : null;
+  const parsed = parseTranscript(input?.transcript_path);
+  const trace = withoutCalls(parsed, toolUseId ? new Set([toolUseId]) : pendingCallIds(parsed, toolInput));
   const flows = activeFlowNames(trace, req);
   if (!flows.length) process.exit(0); // ordering only applies inside an active flow
 

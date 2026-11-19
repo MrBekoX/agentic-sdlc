@@ -31,7 +31,8 @@ DEFAULT_MAX_BUDGET_USD = "0.10"
 DEFAULT_CODEX_MODEL = "gpt-5.6-luna"
 DEFAULT_REASONING_EFFORT = "low"
 
-# Exit code scripts/run_trigger_eval.py uses when a run produced no measurement (see its docstring).
+# Exit code scripts/run_trigger_eval.py and scripts/run_codex_trigger_eval.py use when a run produced no
+# measurement (see their docstrings).
 EXIT_UNMEASURED = 3
 
 # Output format constants

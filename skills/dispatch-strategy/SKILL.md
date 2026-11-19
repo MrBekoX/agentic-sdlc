@@ -74,7 +74,7 @@ The common in-skill shape: the work splits into 2+ **independent read-only slice
 
 ## Mandatory gates (contracts)
 - **Delegation required:** an **independent** piece whose intermediate work you don't need to keep (exploration, reference analysis, N-file fixed-pattern generation, multi-file verification) → **sub-agent**. Doing it serially in the main loop is forbidden.
-- **Fan-out required:** ≈3+ similar **verification/research** items → **dynamic-workflow** (don't do them one-by-one inline).
+- **Fan-out required:** ≈3+ similar **verification/research** items → **dynamic-workflow** (don't do them one-by-one inline). Exception: the `security-reviewer` lenses of `agentic-sdlc-pipeline` Steps 11 and 14 are parallel `Agent(security-reviewer)` calls in one message (or one call for all lenses), never a dynamic-workflow or agent-team: the pipeline's flow hook counts only a direct `Agent` call with that `subagent_type`.
 - **All three can write code:** sub-agent, workflow (worktree-isolated parallel), and agent-team all write code. Choose by the **shape of the work**, not by authority. Use worktree isolation to avoid collisions in parallel writes.
 - **Smallest sufficient mechanism (YAGNI):** cost ladder **Main loop < Sub-agent < Dynamic-workflow < Agent-team**. Don't build a workflow for one task; don't open an agent-team for a simple handoff.
 - **Agent-team only when interactive:** in headless/automated/cron runs use a workflow instead.
@@ -103,7 +103,7 @@ The common in-skill shape: the work splits into 2+ **independent read-only slice
 | Analyze a reference repo / external source | Sub-agent |
 | Generate N similar files from one clear spec | Sub-agent |
 | 100+ file bulk migration (parallel, worktree) | Dynamic-workflow |
-| Review a diff from 4 security lenses in parallel | Dynamic-workflow |
+| Review a diff from 4 security lenses in parallel | Sub-agents: one `Agent(security-reviewer)` per lens, in one message |
 | test + lint + typecheck + secret-scan in parallel | Dynamic-workflow |
 | Interactively review a PR for security/perf/test | Agent-team |
 | Debug with competing hypotheses in parallel | Agent-team |

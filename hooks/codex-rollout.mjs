@@ -9,17 +9,146 @@
 // envelope), across the whole rollout (user- and assistant-authored carriers alike).
 import { statSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { extractWrittenContent } from './codex-write-signal.mjs';
+import { extractWrittenContent, blankHeredocBodies, unquoteWord, HEREDOC_OPENER_CAP } from './codex-write-signal.mjs';
 
 // Single source of truth for the gate's self-signature. The completion-claim-gate SKILL.md emits this
 // exact literal when it runs; AC17's drift test asserts the two copies stay byte-identical.
 export const GATE_MARKER = '<!-- agentic-sdlc:gate:completion-claim:verified -->';
 
 // Byte copies of completion-claim-guard-codex.mjs CLAIM and NEGATED for the offline strict evaluator's
-// completion line (a parity test keeps the copies identical).
+// completion line (a parity test keeps the copies identical). FH-8: inflections ("passed", "All 42 tests
+// pass", "is completed"), a few Turkish completion phrases (the maintainer's reply language) and scoped
+// negations ("isn't ready", "not all", "hazır değil"). Turkish words end in non-ASCII letters, where the
+// ASCII `\b` does not work, so that half is bounded by explicit letter lookarounds instead.
 export const COMPLETION_CLAIM =
-  /\b(all\s+tests?\s+(pass|passing|green)|all\s+green|ready\s+to\s+(merge|ship)|ready\s+for\s+review|implementation\s+(is\s+)?complete|feature\s+complete|task\s+(is\s+)?complete|done\s+and\s+verified|fixed\s+and\s+verified|verified\s+and\s+(complete|done)|everything\s+(works|passes))\b/i;
-export const COMPLETION_NEGATED = /\b(not\s+(yet\s+)?(done|complete|ready|passing)|still\s+(failing|broken|todo)|incomplete|do\s+not\s+claim)\b/i;
+  /\b(?:all\s+(?:the\s+)?(?:\d+\s+)?tests?\s+(?:(?:are|have)\s+(?:now\s+)?)?(?:pass|passes|passed|passing|green)|all\s+green|ready\s+to\s+(?:merge|ship)|ready\s+for\s+review|implementation\s+(?:is\s+)?(?:now\s+)?completed?|feature\s+(?:is\s+)?completed?|task\s+(?:is\s+)?completed?|done\s+and\s+verified|fixed\s+and\s+verified|verified\s+and\s+(?:complete|done)|everything\s+(?:works|passes))\b|(?<![A-Za-zÇĞİÖŞÜçğıöşü])(?:(?:tüm|bütün)\s+(?:\d+\s+)?test(?:ler)?\s+(?:başarıyla\s+)?(?:geçti|geçiyor)|testlerin\s+(?:hepsi|tamamı)\s+(?:başarıyla\s+)?(?:geçti|geçiyor)|(?:uygulama|görev|geliştirme|özellik|düzeltme)\s+(?:başarıyla\s+)?tamamlandı|(?:birleştirmeye|incelemeye|yayına)\s+hazır|(?:düzeltildi|tamamlandı)\s+ve\s+doğrulandı|her\s+şey\s+çalışıyor)(?![A-Za-zÇĞİÖŞÜçğıöşü])/i;
+export const COMPLETION_NEGATED = /\b(?:not\s+(?:yet\s+)?(?:all|done|complete|completed|ready|passing|passed|green)|still\s+(?:failing|broken|todo)|incomplete|do\s+not\s+claim)\b|n['’]t\s+(?:yet\s+)?(?:been\s+)?(?:all\s+)?(?:done|complete|completed|ready|pass|passing|passed|green|work|working)\b|(?<![A-Za-zÇĞİÖŞÜçğıöşü])(?:hazır\s+değil|tamamlanmadı|geçmedi|geçmiyor)(?![A-Za-zÇĞİÖŞÜçğıöşü])/i;
+
+// FH-8 claim reading, shared by both completion guards and the offline strict reader. A claim counts only
+// when it is the speaker's own present statement:
+//   - quoted spans are not claims: "...", “...”, `...`, a 'quoted' span, a fenced code block (a `>`
+//     Markdown line is the speaker's own callout, so it is read, R2-FH-5);
+//   - a sentence that is a question (ends in `?`) is not a claim;
+//   - a negation counts only inside the claim's own sentence ("Fixed the incomplete X. All tests pass."
+//     claims; "All tests pass, but it is not yet complete." does not);
+//   - R2-FH-5: hypothetical-ness is scoped to the claim's own clause. The claim is hypothetical when its
+//     clause holds if/unless/whether/assuming/provided that/eğer, OPENS with one of those or with
+//     once/until ("Once CI is green it is ready"), holds a Turkish future/conditional form, or a modal
+//     governs it (at most three words before it: "it will be ready to merge"); or when an earlier clause of
+//     the sentence opens with if/unless/whether/assuming/provided that/eğer and is joined to the claim's
+//     clause by commas only ("If CI is green, it is ready"; a `;` or `:` ends that reach, R3-FH-1).
+//     "Once again, all tests pass" and "We may refactor later, but all tests pass" are claims.
+// Every step is one linear pass or a linear regex over a slice that is visited once.
+const CLAIM_LETTERS = /[A-Za-z0-9ÇĞİÖŞÜçğıöşü]/;
+const CLAIM_CONDITIONAL = /\b(?:if|unless|whether|assuming|provided\s+that)\b|(?<![A-Za-zÇĞİÖŞÜçğıöşü])eğer(?![A-Za-zÇĞİÖŞÜçğıöşü])/i;
+const CLAIM_CONDITION_OPENER = /^\s*(?:(?:if|unless|whether|assuming|provided\s+that)\b|eğer(?![A-Za-zÇĞİÖŞÜçğıöşü]))/i;
+const CLAIM_TEMPORAL_OPENER = /^\s*(?:once|until)\b/i;
+const CLAIM_MODAL = /\b(?:will|would|should|could|might|may|shall)\b|['’]ll\b/gi;
+const CLAIM_MODAL_REACH = 3; // words a modal may stand before the claim and still govern it
+const CLAIM_TR_HYPOTHETICAL = /(?<![A-Za-zÇĞİÖŞÜçğıöşü])ol(?:acak|acaktır|ur|ursa|malı|abilir)(?![A-Za-zÇĞİÖŞÜçğıöşü])/i;
+const PAIRED_QUOTES = { '"': '"', '`': '`', '“': '”' };
+
+// Index of `close` in str[from, end), or -1 (bounded to one line, so a failed search is paid once per line).
+function findOnLine(str, close, from, end, accept) {
+  for (let k = from; k < end; k += 1) {
+    if (str[k] === close && (!accept || accept(k))) return k;
+  }
+  return -1;
+}
+
+function blankQuotedSpans(text) {
+  const s = String(text);
+  const out = s.split('');
+  const blank = (a, b) => { for (let k = a; k < b; k += 1) if (out[k] !== '\n') out[k] = ' '; };
+  let inFence = false;
+  for (let pos = 0; pos < s.length;) {
+    let end = s.indexOf('\n', pos);
+    if (end === -1) end = s.length;
+    let first = pos;
+    while (first < end && (s[first] === ' ' || s[first] === '\t')) first += 1;
+    if (s.startsWith('```', first) || s.startsWith('~~~', first)) { inFence = !inFence; blank(pos, end); }
+    else if (inFence) blank(pos, end);
+    else {
+      const failed = new Set(); // quote kinds with no closer left on this line
+      for (let i = pos; i < end; i += 1) {
+        const c = s[i];
+        let close = -1;
+        if (PAIRED_QUOTES[c] && !failed.has(c)) {
+          close = findOnLine(s, PAIRED_QUOTES[c], i + 1, end);
+        } else if (c === "'" && !failed.has(c) && (i === pos || !CLAIM_LETTERS.test(s[i - 1]))
+          && i + 1 < end && !/\s/.test(s[i + 1])) {
+          close = findOnLine(s, "'", i + 1, end, (k) => k + 1 >= end || !CLAIM_LETTERS.test(s[k + 1]));
+        } else continue;
+        if (close === -1) { failed.add(c); continue; }
+        blank(i, close + 1);
+        i = close;
+      }
+    }
+    pos = end + 1;
+  }
+  return out.join('');
+}
+
+// Sentences of `text`, split at a newline or at a run of . ! ? followed by a blank or the end.
+function sentencesOf(text) {
+  const out = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '\n') { out.push({ text: text.slice(start, i), question: false }); start = i + 1; continue; }
+    if (c !== '.' && c !== '!' && c !== '?' && c !== '？') continue;
+    let j = i;
+    let question = false;
+    while (j < text.length && '.!?？'.includes(text[j])) { if (text[j] === '?' || text[j] === '？') question = true; j += 1; }
+    if (j === text.length || /\s/.test(text[j])) { out.push({ text: text.slice(start, i), question }); start = j; }
+    i = j - 1;
+  }
+  if (start < text.length) out.push({ text: text.slice(start), question: false });
+  return out;
+}
+
+// Does a modal stand at most CLAIM_MODAL_REACH words before index `at` of `clause`? One pass up to `at`.
+function modalGoverns(clause, at) {
+  CLAIM_MODAL.lastIndex = 0;
+  let end = -1;
+  for (let m = CLAIM_MODAL.exec(clause); m && m.index < at; m = CLAIM_MODAL.exec(clause)) {
+    end = m.index + m[0].length;
+  }
+  if (end < 0) return false;
+  const gap = clause.slice(end, at).trim();
+  return !gap || gap.split(/\s+/).length <= CLAIM_MODAL_REACH;
+}
+
+export function completionClaimed(text, claim = COMPLETION_CLAIM, negated = COMPLETION_NEGATED) {
+  if (typeof text !== 'string' || !text) return false;
+  const claimAll = new RegExp(claim.source, claim.flags.replace(/[gy]/g, '') + 'g');
+  for (const { text: sentence, question } of sentencesOf(blankQuotedSpans(text))) {
+    if (question) continue;
+    claimAll.lastIndex = 0;
+    if (!claimAll.test(sentence) || negated.test(sentence)) continue;
+    let conditionOpened = false; // an earlier clause opened with if/unless/... ("If X, <claim>")
+    // Clauses end at `,` `;` or `:` followed by a blank; each clause is visited once.
+    for (let from = 0; from < sentence.length;) {
+      let to = from;
+      while (to < sentence.length && !(',;:'.includes(sentence[to]) && /\s/.test(sentence[to + 1] || ' '))) to += 1;
+      const clause = sentence.slice(from, to);
+      claimAll.lastIndex = 0;
+      const m = claimAll.exec(clause);
+      if (m) {
+        const hypothetical = conditionOpened || CLAIM_CONDITIONAL.test(clause)
+          || CLAIM_CONDITION_OPENER.test(clause) || CLAIM_TEMPORAL_OPENER.test(clause)
+          || CLAIM_TR_HYPOTHETICAL.test(clause) || modalGoverns(clause, m.index);
+        if (!hypothetical) return true;
+      }
+      // R3-FH-1: an `If ...` opener reaches only the clauses joined to it by `,`; a `;` or `:` starts an
+      // independent clause ("If you want a PR, say so; all tests pass" claims).
+      if (sentence[to] === ';' || sentence[to] === ':') conditionOpened = false;
+      else if (CLAIM_CONDITION_OPENER.test(clause)) conditionOpened = true;
+      from = to + 1;
+    }
+  }
+  return false;
+}
 
 const MAX = 8 * 1024 * 1024; // 8 MiB whole-rollout ceiling (R11/DP10); over-ceiling -> unconfirmable.
 
@@ -179,9 +308,11 @@ export function parseCodexExitCode(text) {
 // `N>`, `>&N` unrecognized (deferred residual #6). Pure: string/regex over the
 // command treated as DATA (no eval, no spawn).
 const CMD_MAX = 512 * 1024;                                   // per-command scan cap (mirrors codex-write-signal)
-const HEREDOC_OPENER_CAP = 24;                               // pathological `<<` flood -> skip heredoc parse
 const EXPANSION = /\$[\w{(]|`/;                              // any shell-expansion marker (re-implemented, not imported)
-const REDIRECT = /[^0-9&>]>>?\s*(['"]?)([^\s'";&|<>()]+)/g;  // `>`/`>>` only; fd/&-excluded; LINEAR
+// `>`/`>>` only; fd/&-excluded; LINEAR. FH-5: `^` also admits a redirect that opens the command (`>src/app.py`).
+const REDIRECT = /(?:^|[^0-9&>])>>?\s*(['"]?)([^\s'";&|<>()]+)/g;
+// The operator alone, for the precise reader that then reads the (possibly quoted) target word itself.
+const REDIRECT_OP = /(?:^|[^0-9&>])(>>?)/g;
 const TEE = /\btee\b\s+(?:-a\s+)?([^\s;|&<>'"]+)/g;          // HEAD first-operand baseline (raw superset); LINEAR
 const SED_LAST = /\s([^\s;|&<>'"]+)\s*$/;                    // HEAD last-token baseline (raw superset)
 
@@ -231,6 +362,9 @@ function splitSegmentsQA(str) {
     if (c === '\n' || c === ';') { segs.push(cur); cur = ''; continue; }
     if (c === '&' && n === '&') { segs.push(cur); cur = ''; i += 1; continue; }
     if (c === '|' && n === '|') { segs.push(cur); cur = ''; i += 1; continue; }
+    // The `&` of `&>`, `>&` and `<&` is part of a redirection, not a separator: splitting there would
+    // leave a statement that opens with `>` (now read as a redirect, FH-5) for the deferred `&>` form.
+    if (c === '&' && (n === '>' || cur.endsWith('>') || cur.endsWith('<'))) { cur += c; continue; }
     if (c === '|' || c === '&') { segs.push(cur); cur = ''; continue; }
     cur += c;
   }
@@ -238,13 +372,39 @@ function splitSegmentsQA(str) {
   return segs;
 }
 
-// Blank every heredoc window (opener + body) to spaces so a body line like `> evil.py`
-// is never mistaken for a redirect. The heredoc's own opener redirect target is
-// supplied by extractWrittenContent in the caller's union, so it need not be
-// re-extracted here. `[\s\S]*?` is opener-capped by the caller against a `<<` flood.
+// Drop every heredoc body so a body line like `> evil.py` is never mistaken for a redirect. FH-5: the
+// grammar is the one shared heredocPattern (codex-write-signal.mjs), so `<<-`, `<<"EOF"`, `<<\EOF` and
+// CRLF heredocs are read the same way here as by the secret-write extractor, and the opener line is
+// kept, so its own redirect target (`cat <<EOF > src/app.py`) is seen here too. Opener-capped.
 function blankHeredocs(cmd) {
-  const heredocRe = /<<\s*(['"]?)([A-Za-z_]\w*)\1([^\n]*)\n([\s\S]*?)\n\2(?=\n|$)/g;
-  return cmd.replace(heredocRe, (full) => full.replace(/[^\n]/g, ' '));
+  return blankHeredocBodies(cmd);
+}
+
+// One shell word read from `str` at index `i` (leading blanks skipped): quote-aware, ending at an
+// unquoted blank or shell metacharacter. Returns the word with its quotes removed and whether any part
+// of it expands (`$`/backtick outside single quotes). Single pass from `i` (LINEAR per call; the
+// caller calls it once per redirect operator, and the word ends at the next operator).
+function readShellWord(str, i) {
+  let j = i;
+  while (j < str.length && (str[j] === ' ' || str[j] === '\t')) j += 1;
+  let value = '';
+  let expands = false;
+  let q = null;
+  for (; j < str.length; j += 1) {
+    const c = str[j];
+    if (q === "'") { if (c === "'") q = null; else value += c; continue; }
+    if (q === '"') {
+      if (c === '"') { q = null; continue; }
+      if (c === '$' || c === '`') expands = true;
+      value += c;
+      continue;
+    }
+    if (c === "'" || c === '"') { q = c; continue; }
+    if (/[\s;&|<>()]/.test(c)) break;
+    if (c === '$' || c === '`') expands = true;
+    value += c;
+  }
+  return { value, expands };
 }
 
 // Strip a wrapping subshell `( ... )`. LINEAR: trim + single-char slices only — deliberately NOT a
@@ -331,6 +491,9 @@ export function writeTargetsOf(command) {
   const str = String(command || '');
   const targets = [];
   for (const m of str.matchAll(REDIRECT)) targets.push(m[2]);   // (1) HEAD redirects
+  // (4) FH-5: the literal write forms the current-edit reader takes from extractWrittenContent (a Bash
+  // `apply_patch <<'PATCH'` body, quoted heredoc and printf/echo targets), so both readers stay in step.
+  for (const t of extractWrittenContent('Bash', str).targets) targets.push(t);
   for (const m of str.matchAll(TEE)) targets.push(m[1]);        // (2a) HEAD tee first-operand
   for (const seg of str.split(/[;\n|&]+/)) {
     const toks = shellTokens(seg);
@@ -351,14 +514,17 @@ export function writeTargetsOf(command) {
 export function preciseWriteTargetsOf(command) {
   const cmd = String(command || '');
   if (!cmd || cmd.length > CMD_MAX) return [];
-  if ((cmd.match(/<</g) || []).length > HEREDOC_OPENER_CAP) return []; // `<<` flood -> fail-open
+  if ((cmd.match(/<</g) || []).length > HEREDOC_OPENER_CAP) return []; // `<<` flood -> fail-open (shared cap)
   const work = blankHeredocs(cmd);
   const targets = [];
   for (const rawSeg of splitSegmentsQA(work)) {
     const stmt = stripWrappingSubshell(rawSeg);
     if (!stmt) continue;
-    for (const m of quoteBlank(stmt).matchAll(REDIRECT)) {       // redirect over the QUOTE-BLANKED statement
-      if (!EXPANSION.test(m[2])) targets.push(m[2]);             // drop `$`-expansion targets (DP1/BR4)
+    // The OPERATOR is found over the QUOTE-BLANKED statement (a quoted `>` is data); FH-5: the target word
+    // is then read from the statement itself, so a quoted target (`> "src/app.py"`) counts as written.
+    for (const m of quoteBlank(stmt).matchAll(REDIRECT_OP)) {
+      const word = readShellWord(stmt, m.index + m[0].length);
+      if (word.value && !word.expands) targets.push(word.value); // drop `$`-expansion targets (DP1/BR4)
     }
     const toks = shellTokens(stmt);                             // quote-aware (script stays one token)
     const cw = commandWord(toks);
@@ -370,6 +536,18 @@ export function preciseWriteTargetsOf(command) {
     }
   }
   return targets;
+}
+
+// The CURRENT-EDIT write targets of one tool call: extractWrittenContent's targets (apply_patch headers,
+// printf/echo and heredoc redirects) plus, for a shell command only, the precise sed/tee/redirect
+// recognizer above (never over patch text, BR8). One recognizer, shared by the Codex flow-order gate and
+// the Claude flow guards (FH-1), so the runtimes see the same write forms. Quote-stripped, deduplicated.
+export function currentEditTargets(toolName, command) {
+  const cmd = String(command || '');
+  const isPatch = toolName === 'apply_patch';
+  const base = extractWrittenContent(isPatch ? 'apply_patch' : 'Bash', cmd).targets;
+  const all = isPatch ? base : base.concat(preciseWriteTargetsOf(cmd));
+  return [...new Set(all.map((t) => unquoteWord(t)).filter(Boolean))];
 }
 
 export function readRolloutSignals(path) {

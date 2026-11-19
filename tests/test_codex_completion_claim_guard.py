@@ -25,8 +25,10 @@ CODEX_CFG = REPO / "hooks" / "hooks-codex.json"
 # `git show HEAD:`, which on a clean checkout compared the file against itself.
 LOCK_DIGESTS = {
     # Rebased for Claude Code 2.1.293: prefer last_assistant_message; block only when caught up.
+    # Rebased 2026-11-18 (bug audit FH-7/FH-8): the gate counts only as an exact, non-errored Skill call, and
+    # claims are read through the shared completionClaimed. Covered by tests/test_audit_fh.py (FH-7, FH-8).
     "hooks/completion-claim-guard.mjs":
-        "ad454dd5f68c2ba08583c283b444318c24892d9c3305161b913dea3bcf317c9b",
+        "a8dcfbf2ec3ec0920e2c5b3d493f7e820b33fd1632df1b51f8657b40965b8818",
 }
 
 

@@ -60,6 +60,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_release import ReleaseError, local_package_files  # noqa: E402
+
 PLATFORMS = ("claude", "codex", "grok", "kimi", "zcode")
 HOSTILE_SEGMENT = "plug in \u011f \u76ee\u5f55"
 # Codex splits marketplace sources on '#', Grok sources on '@' and '#'; cmd.exe expands '%' and '&'.
@@ -178,27 +181,30 @@ def package_counts(package) -> tuple:
     return skills, commands
 
 
+# Local build and cache folders that no copy takes; private files are dropped by the release rules.
+COPY_SKIP = frozenset({
+    ".git", ".pytest_cache", "__pycache__", "audit-docs", "artifacts", "build", "dist", ".opencode",
+    ".claude", ".worktrees", ".tmp-superpowers-compare",
+})
+
+
 def copy_package(source, dest) -> None:
-    dest = Path(dest)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(
-        str(source),
-        str(dest),
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".pytest_cache",
-            "__pycache__",
-            "audit-docs",
-            "artifacts",
-            "build",
-            "dist",
-            ".opencode",
-            ".claude",
-            ".worktrees",
-            ".tmp-superpowers-compare",
-        ),
-        ignore_dangling_symlinks=True,
-    )
+    """Copy the package files a release may hold (RL-3) into a new `dest`.
+
+    A checkout contributes its committed tree (`git ls-files`), never an untracked or gitignored
+    file; an extracted package is walked. Paths in a release exclusion class (`.env`,
+    `settings.local.json`, `AGENTS.md`, session reports, audit dumps, symlinks) never enter the copy.
+    """
+    source, dest = Path(source), Path(dest)
+    try:
+        files = local_package_files(source, skip=COPY_SKIP)
+    except ReleaseError:
+        raise Failed("package_unreadable") from None
+    dest.mkdir(parents=True)
+    for relative in files:
+        target = dest / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(source / relative), str(target))
 
 
 def _absolute_entry(entry: str) -> bool:

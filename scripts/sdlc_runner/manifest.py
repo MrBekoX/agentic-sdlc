@@ -34,7 +34,7 @@ CHECK_PARAMS = {
     "exists": (("path",), ()),
     "validator": (("mode",), ("strict", "sources")),
     "sidecar_ok": (("artifact",), ()),
-    "report": (("path", "header"), ("verdict", "fresh")),
+    "report": (("path", "header"), ("verdict", "fresh", "under")),
     "run_recorded": (("expect",), ("label",)),
     "approval": (("gate",), ()),
     "branch_ok": ((), ()),
@@ -565,6 +565,8 @@ def _check_done_when(out: _Errors, at: str, step: dict, work_types: list) -> Non
             else:
                 if parsed["set"] or parsed["body"] or parsed["optional"]:
                     out.add(where + "/path", "a check path is a plain package path")
+        if "under" in check and "verdict" not in check:
+            out.add(where + "/under", "under names where the verdict is: it needs a verdict")
         if name == "approval":
             approvals.append((where, check.get("gate")))
     gate = step.get("gate")

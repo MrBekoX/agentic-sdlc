@@ -27,7 +27,15 @@
     {"family": "url-credential", "name": "redis-empty-user", "prefix": "REDIS_URL=", "masked": ["redis://:", "s3cretPassw0rd", "@cache.internal:6379/0"], "suffix": ""},
     {"family": "password-literal", "name": "app-prefixed-db-password", "prefix": "", "masked": ["MYAPP_DB_PASS", "WORD=Hq7mK2pWz9"], "suffix": ""},
     {"family": "json-credential", "name": "json-credential", "prefix": "", "masked": ["{\"api_sec", "ret\": \"q7Wm4Lp9Xz2Rt8Kv3Nb6\"}"], "suffix": ""},
-    {"family": "assigned-secret", "name": "assigned-secret", "prefix": "config ", "masked": ["api", "_key = Lq8Zt3Wm7Kx2Rv9Pn4Bc"], "suffix": ""}
+    {"family": "assigned-secret", "name": "assigned-secret", "prefix": "config ", "masked": ["api", "_key = Lq8Zt3Wm7Kx2Rv9Pn4Bc"], "suffix": ""},
+    {"family": "private-key", "name": "pgp-private-key-block", "prefix": "armored:\n", "masked": ["-----BEGIN PGP PRIV", "ATE KEY BLOCK-----\n\n", "lQOYBGVzRkQBCADfmVzxYHo6ShhZmzGmOetS1ra6V7G9", "\n-----END PGP PRIV", "ATE KEY BLOCK-----"], "suffix": "\ndone"},
+    {"family": "aws-access-key-id", "name": "aws-sts", "prefix": "AWS_ACCESS_KEY_ID=", "masked": ["AS", "IAJQN5X2XXTDEMT5RI"], "suffix": ""},
+    {"family": "gitlab-token", "name": "gitlab-pat", "prefix": "GITLAB_TOKEN=", "masked": ["gl", "pat-lGQUHZqpSXUvWgIYvecC"], "suffix": ""},
+    {"family": "npm-token", "name": "npm-token", "prefix": "//registry.npmjs.org/:_authToken=", "masked": ["np", "m_dDXJ3BrC4pZjvTqEzngYZM27XttWNyrR08VJ"], "suffix": ""},
+    {"family": "huggingface-token", "name": "huggingface-token", "prefix": "HF_TOKEN=", "masked": ["h", "f_iCexTGlZFjmnuCtgbHqVNMwJXhnWQyGGlR"], "suffix": ""},
+    {"family": "anthropic-key", "name": "anthropic-api-key", "prefix": "ANTHROPIC_API_KEY=", "masked": ["sk", "-ant-api03-", "fmVzxYHo6S_hhZmzGmOetS1ra6V7G9_5IQoSfPCQi4eJ7GzSu46EVEI2PGxLp9TB6PeIYm6V0uTdf7dRzGD1lKJPA1", "AA"], "suffix": ""},
+    {"family": "openai-key", "name": "openai-svcacct-base64url", "prefix": "OPENAI_API_KEY=", "masked": ["sk", "-svcacct-", "WxpR2sI-TxogtSUDgFsznCuOrusTsmvpg_tfErMrbIsINtLi6zvHqyZZYlAk"], "suffix": ""},
+    {"family": "assigned-secret", "name": "assigned-secret-env-prefix", "prefix": "", "masked": ["ANTHROPIC_API", "_KEY=Lq8Zt3Wm7Kx2Rv9Pn4Bc"], "suffix": ""}
   ],
   "benign": [
     {"name": "git-status", "text": ["git status"]},

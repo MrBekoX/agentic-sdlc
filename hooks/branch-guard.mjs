@@ -77,7 +77,15 @@ if (!/\bgit\b/i.test(expandAnsiCQuotes(cmd).replace(/['"\\]/g, ''))) process.exi
 // `-C <dir>` and the payload cwd select the repository whose branch actually matters; parsing `-C`
 // without propagating it to the git reads meant reporting the wrong repo's branch.
 const baseCwd = commandCwd(input);
-const info = resolveGitCommands(cmd, { cwd: baseCwd });
+const toolName = String(input?.toolName || input?.tool_name || '');
+let info;
+try {
+  info = resolveGitCommands(cmd, { cwd: baseCwd, allowHeredocStrip: toolName !== 'PowerShell' });
+} catch {
+  // R3-CG-3: the resolver must never take the hook down. If it throws, nothing on the line was
+  // resolved, which is reported like an unresolved alias below (denied when blocking is on).
+  info = { subcommands: new Set(), invocations: [], unresolved: true };
+}
 // EVERY repository the command commits or pushes into. scan-commit.mjs was moved to the plural
 // resolver when a second `-C` commit was found to go unscanned; this guard was left on the
 // singular one, so `git -C feature-repo commit && git -C main-checkout commit` reported only
@@ -85,7 +93,28 @@ const info = resolveGitCommands(cmd, { cwd: baseCwd });
 const invocations = (info.invocations || []).filter((call) => call.subcommand === 'commit' || call.subcommand === 'push');
 const repoCwds = [...new Set(invocations.map((call) => call.cwd))];
 const isPush = info.subcommands.has('push');
-if (!info.subcommands.has('commit') && !isPush) process.exit(0);
+// CG-11 / R2-CG-10 / R2-CG-11: an alias that was not resolved - past the per-invocation lookup cap,
+// read from a config the call does not use, or past the resolver's work budget - may be a commit or
+// a push to a protected branch. Every statement is still walked, so an explicit protected push is
+// still seen; the unresolved alias is treated like a possible protected commit/push: denied when
+// blocking is on, warned otherwise.
+const unresolvedNote = info.unresolved
+  ? 'this command names git subcommands that could not be resolved (alias lookup budget, a different config, or the work budget); one of them may commit or push to a protected branch.'
+  : '';
+function reportUnresolved() {
+  if (BLOCK) {
+    emitHookResult({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: unresolvedNote },
+      systemMessage: '🚧 branch-guard: blocked (unresolved git alias).',
+    }, 'PreToolUse');
+  } else {
+    emitHookResult({ systemMessage: `🚧 branch-guard: ${unresolvedNote}` }, 'PreToolUse');
+  }
+}
+if (!info.subcommands.has('commit') && !isPush) {
+  if (unresolvedNote) reportUnresolved();
+  process.exit(0);
+}
 
 // Check EVERY repository the command touches, not just the first. One protected branch anywhere in
 // a compound command is enough to warn/deny.
@@ -111,6 +140,8 @@ if (branch && PROTECTED.test(branch)) {
   } else {
     emitHookResult({ systemMessage: `🚧 branch-guard: ${msg}` }, 'PreToolUse');
   }
+} else if (unresolvedNote) {
+  reportUnresolved();
 }
 
 process.exit(0);

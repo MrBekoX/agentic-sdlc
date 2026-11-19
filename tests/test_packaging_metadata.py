@@ -826,6 +826,8 @@ class TestVersionDeclarations(unittest.TestCase):
             "docs/plugin-readme.md": self.PLUGIN_README if plugin_readme is None else plugin_readme,
             "docs/release-readiness.md": self.RELEASE_READINESS if release_readiness is None else release_readiness,
             "CHANGELOG.md": "# Changelog\n\n## Unreleased\n\n## 0.4.3 - 2026-09-14\n\n- Publication readiness.\n",
+            # RL-8: the supported minor line is a version declaration too.
+            "SECURITY.md": "# Security Policy\n\nSecurity fixes are provided for the latest `0.4.x` release.\n",
         }
         for rel, text in files.items():
             path = root / rel

@@ -155,7 +155,7 @@ class TestAuthorRole(unittest.TestCase):
         decisions = next((line for line in output.splitlines() if line.startswith("- Decision points")), None)
         self.assertIsNotNone(decisions, "the author's Output names no decision-point rule")
         self.assertIn("`{%s}`" % ", ".join(loop.POINT_FIELDS), decisions)
-        # A task block runs to the end of the plan, so AC ids in a trailing section would count as covered.
+        # Decision points sit before the tasks, so their option text never lands inside a task's section.
         self.assertIn("before the first `## Task N`", decisions)
         # The runner reads only the final round's decisions file.
         self.assertIn("every round", decisions)

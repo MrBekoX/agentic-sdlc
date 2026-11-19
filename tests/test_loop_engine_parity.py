@@ -126,6 +126,31 @@ class TestZcodeDriver(unittest.TestCase):
         self.assertEqual(LOOP["roles"]["critic"]["fresh"], True)  # hence a new actor per card
 
 
+class TestSlugRule(unittest.TestCase):
+    """Every engine takes the slugs the runner's packages have: scripts/resolve_work_package.py SLUG_RE,
+    which allows a trailing hyphen (`demo-`). The ZCode driver once refused it (audit RN-8)."""
+
+    def test_the_claude_and_zcode_slug_checks_are_the_resolvers(self):
+        import resolve_work_package
+
+        for name, path in (("claude", CLAUDE), ("zcode", ZCODE)):
+            with self.subTest(engine=name):
+                found = re.search(r"!/(.+?)/\.test\(slug\)", code_of(path))
+                self.assertIsNotNone(found, "the %s slug check moved" % name)
+                self.assertEqual(found.group(1), resolve_work_package.SLUG_RE.pattern)
+                rule = re.compile(found.group(1))
+                for slug in ("demo", "demo-", "fix-1-", "x" * 64, "Demo", "-demo", "a/b", "", "x" * 65):
+                    self.assertEqual(bool(rule.fullmatch(slug)), bool(resolve_work_package.SLUG_RE.fullmatch(slug)),
+                                     slug)
+
+    def test_the_grok_slug_check_allows_a_trailing_hyphen(self):
+        body = code_of(GROK).split("fn is_slug(s) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("s.len() > 64", body)
+        self.assertIn('s.sub_string(0, 1) == "-"', body)
+        self.assertNotIn("s.len() - 1", body)  # no last-character rule
+        self.assertIn('only_chars(s, "abcdefghijklmnopqrstuvwxyz0123456789-")', body)
+
+
 class TestAgentTypes(unittest.TestCase):
     def test_the_harness_resolves_every_engine_role(self):
         types = h.workflow_agent_types()

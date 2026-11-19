@@ -14,7 +14,11 @@ routing. Each call therefore runs in a neutral temp cwd so only the prompt's
 skill descriptions influence the classification.
 
 Eval-set JSON: {"queries": [{"query": "...", "should_trigger": true}, ...]}
-Output: sorted key=value lines + glm_trigger_eval=passed|failed.
+Output: sorted key=value lines + glm_trigger_eval=passed|failed|unmeasured.
+Exit 0 passed; 1 a measured query missed its expectation; 3 some run produced no measurement (opencode
+missing, a non-zero exit, no answer text, a timeout) and no measured query failed, the code
+scripts/run_trigger_eval.py uses. A run without a measurement is never graded as "the skill did not
+trigger": a failed CLI run used to pass every should_trigger=false query.
 """
 
 from __future__ import annotations
@@ -39,6 +43,9 @@ try:
 except ModuleNotFoundError:
     from eval_safety import require_slug, resolve_under
     from sensitive_redaction import redact_text
+
+
+EXIT_UNMEASURED = 3
 
 
 def split_frontmatter(text: str) -> dict[str, str]:
@@ -112,6 +119,27 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
         if isinstance(value, dict):
             return value
     return None
+
+
+def unmeasured_reason(lines: list[str], exit_code: int | None) -> str | None:
+    """Why a finished `opencode run --format json` call measured nothing, or None when it answered.
+
+    A non-zero exit and a run without any model text have no route decision to grade.
+    """
+    if exit_code not in (0, None):
+        return f"exit_{exit_code}"
+    for raw in lines:
+        try:
+            event = json.loads(raw)
+        except (ValueError, RecursionError):
+            continue
+        if not isinstance(event, dict):
+            continue
+        part = event.get("part")
+        if (event.get("type") == "text" and isinstance(part, dict) and isinstance(part.get("text"), str)
+                and part["text"].strip()):
+            return None
+    return "no_answer"
 
 
 def parse_opencode_events(lines: list[str]) -> tuple[str | None, dict[str, Any]]:
@@ -192,6 +220,10 @@ def run_opencode_once(
                 line = lines.get(timeout=0.2)
             except queue.Empty:
                 if proc.poll() is not None:
+                    # The child has exited: take what the reader thread still holds before deciding.
+                    reader.join(timeout=2)
+                    if not lines.empty():
+                        continue
                     break
                 continue
             captured.append(line)
@@ -202,6 +234,9 @@ def run_opencode_once(
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
         transcript_path.write_text(redact_text("".join(captured)), encoding="utf-8")
     actual, usage = parse_opencode_events(captured)
+    reason = unmeasured_reason(captured, proc.poll())
+    if reason:
+        return None, usage, reason
     return actual, usage, None
 
 
@@ -254,9 +289,12 @@ def main(argv: list[str] | None = None) -> int:
     total_reasoning_tokens = 0
     total_cost = 0.0
 
+    mismatches = 0
+    unmeasured = 0
     for i, query in enumerate(queries):
         matches = 0
         actuals = []
+        reasons = []
         for run_index in range(args.runs):
             prompt = build_prompt(query["query"], skills)
             transcript_path = None
@@ -268,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             actual, usage, error = run_opencode_once(prompt, args.model, args.timeout, eval_cwd, transcript_path)
             if error:
-                errors.append(f"q{i}_{error}")
+                reasons.append(error)
                 continue
             actuals.append(actual or "NONE")
             if actual == target_skill:
@@ -277,13 +315,22 @@ def main(argv: list[str] | None = None) -> int:
             total_output_tokens += int(usage.get("output_tokens") or 0)
             total_reasoning_tokens += int(usage.get("reasoning_output_tokens") or 0)
             total_cost += float(usage.get("cost") or 0.0)
+        should = str(query["should_trigger"]).lower()
+        fields[f"q{i}_actual"] = ",".join(actuals)
+        if reasons:
+            # A rate over the runs that did measure would hide the ones that did not: the whole query is
+            # unmeasured, never passed or failed (as in run_trigger_eval.py).
+            unmeasured += 1
+            fields[f"q{i}_should={should}_rate"] = "unmeasured"
+            errors.append(f"q{i}_unmeasured:runs={len(reasons)},reason={'+'.join(sorted(set(reasons)))}")
+            continue
         rate = matches / args.runs if args.runs else 0.0
         ok = (rate >= args.threshold) if query["should_trigger"] else (rate < args.threshold)
-        fields[f"q{i}_actual"] = ",".join(actuals)
-        fields[f"q{i}_should={str(query['should_trigger']).lower()}_rate"] = f"{rate:.2f}"
+        fields[f"q{i}_should={should}_rate"] = f"{rate:.2f}"
         if ok:
             passed += 1
         else:
+            mismatches += 1
             errors.append(f"q{i}_mismatch:should_trigger={query['should_trigger']},rate={rate:.2f},actual={','.join(actuals)}")
 
     fields["queries_passed"] = f"{passed}/{len(queries)}"
@@ -291,11 +338,13 @@ def main(argv: list[str] | None = None) -> int:
     fields["output_tokens"] = total_output_tokens
     fields["reasoning_output_tokens"] = total_reasoning_tokens
     fields["cost_usd"] = f"{total_cost:.6f}"
-    fields["glm_trigger_eval"] = "failed" if errors else "passed"
+    fields["glm_trigger_eval"] = "failed" if mismatches else ("unmeasured" if unmeasured else "passed")
 
     for line in sorted([f"{key}={value}" for key, value in fields.items()] + [f"error={err}" for err in errors]):
         print(line)
-    return 1 if errors else 0
+    if mismatches:
+        return 1
+    return EXIT_UNMEASURED if unmeasured else 0
 
 
 if __name__ == "__main__":

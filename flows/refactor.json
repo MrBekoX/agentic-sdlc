@@ -69,7 +69,7 @@
       "outputs": ["evidence/{work_id}.audit.md"],
       "done_when": [
         {"check": "run_recorded", "expect": "pass", "label": "green"},
-        {"check": "report", "path": "evidence/{work_id}.audit.md", "header": "# Implementation audit"}
+        {"check": "report", "path": "evidence/{work_id}.audit.md", "header": "# Implementation audit", "verdict": "allow-final", "under": "## Final Decision"}
       ],
       "mechanism_key": "audit"
     },

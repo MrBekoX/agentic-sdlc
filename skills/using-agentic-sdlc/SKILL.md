@@ -77,12 +77,13 @@ Resolve conflicts by semantic intent before domain nouns. Do not rely on exact k
 - Any-language plan-only, HOW, task breakdown, or no direct code/fix yet -> `plan-authoring`, even when the prompt mentions a bug, failing behavior, or fix.
 - For any-language plan-only/HOW/no direct code or fix yet prompts, activate `plan-authoring` immediately; never ask for bug details first or say you will use `plan-authoring` after details arrive.
 - Any-language end-to-end/full-envelope prompts that ask for spec, plan, TDD, security/audit, and release-readiness -> `agentic-sdlc-pipeline`, not `mind-spark`, even if they mention design or requirements.
+- Any-language prompts that ask to build, change, fix, or refactor code now on a high-risk surface — auth, payment, database migration, API contract, permissions, user data, token/session, or RLS -> `agentic-sdlc-pipeline`, not `feature-build`, `root-cause-fix`, or `safe-refactor`. Check this before the focused routes below; the surface, not the size of the change, decides.
 - Any-language test-only requests about missing unit/regression/e2e tests, coverage, or test strategy -> `test-authoring`, before reading files.
-- Any-language behavior-preserving refactor prompts about preserving behavior while cleaning up, simplifying, or restructuring -> `safe-refactor` before Glob/Read/file-existence checks; the selected skill owns missing-target clarification.
+- Any-language behavior-preserving refactor prompts about preserving behavior while cleaning up, simplifying, or restructuring -> `safe-refactor` (high-risk surface: `agentic-sdlc-pipeline`) before Glob/Read/file-existence checks; the selected skill owns missing-target clarification.
 - Any-language received-review-feedback prompts about PR comments, reviewer comments, bot feedback, or CI review output -> `feedback-triage`, not a fresh `code-quality-review`.
 - Any-language orchestration decision prompts comparing main loop, subagents, workflows, or agent-teams -> `dispatch-strategy` before answering. Do not choose a mechanism directly without activating the skill.
 - Any-language final audit or process audit prompt asking whether spec/plan/TDD/security flow was followed before the final response -> `implementation-control`. Treat it as an active audit task now, not a passive session preference; in Claude Code the audit intent requires a Skill call even when no implementation evidence exists, then report missing evidence. Codex activates the qualified skill or reads its instructions through the runtime adapter. Do not run `git diff`/`status`/`log` or read unrelated files first, and do not ask the user for branch/file/change details before activating — the skill gathers the diff and evidence for its read-only auditor.
-- Any-language clear implementation prompts that ask to add, build, develop, apply, or implement a feature/endpoint -> `feature-build` unless they explicitly ask only for brainstorming/spec/plan/tests/review or ask for the full pipeline.
+- Any-language clear implementation prompts that ask to add, build, develop, apply, or implement a feature/endpoint -> `feature-build` unless they explicitly ask only for brainstorming/spec/plan/tests/review, ask for the full pipeline, or touch a high-risk surface (`agentic-sdlc-pipeline`).
 - For final audit/process audit prompts, activate `implementation-control` with the runtime mechanism above; do not answer from memory or summarize without activation.
 - Implementation skills apply when the user asks to change files, fix behavior, add a feature, refactor, or write tests now.
 - If the selected focused skill is underspecified, invoke it anyway before clarifying. Do not defer activation by saying you will use the skill after the user provides details.
@@ -90,9 +91,9 @@ Resolve conflicts by semantic intent before domain nouns. Do not rely on exact k
 - Ambiguous idea, design, or build intent -> `mind-spark`.
 - Spec, acceptance criteria, WHAT document, or requirements contract only -> `spec-authoring`.
 - Plan, task breakdown, HOW document, or implementation steps only -> `plan-authoring`.
-- New feature or endpoint implementation -> `feature-build`.
-- Bug, failing behavior, or production issue -> `root-cause-fix`.
-- Behavior-preserving restructure -> `safe-refactor`.
+- New feature or endpoint implementation -> `feature-build` (high-risk surface: `agentic-sdlc-pipeline`).
+- Bug, failing behavior, or production issue -> `root-cause-fix` (high-risk surface: `agentic-sdlc-pipeline`).
+- Behavior-preserving restructure -> `safe-refactor` (high-risk surface: `agentic-sdlc-pipeline`).
 - Test-only work or test strategy -> `test-authoring`.
 - Security audit -> `security-audit`.
 - Code/diff quality review -> `code-quality-review`.

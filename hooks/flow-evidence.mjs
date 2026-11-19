@@ -9,11 +9,13 @@
 //   - branch   : the Stop-time working-directory branch is not main/master (warn-level step).
 //   - reviewResult : a dispatched reviewer returned a correlated non-error tool_result (warn-level).
 // Every reader fails OPEN (treats as allowed / satisfied) on its own error, matching the other guards.
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { programOnAbsolutePath } from './git-exec.mjs';
+import { blankHeredocBodies } from './codex-write-signal.mjs';
+import { splitBr6StatementJoins, currentEditTargets } from './codex-rollout.mjs';
 
 export const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = dirname(HOOK_DIR);
@@ -33,60 +35,232 @@ export function blockFlag() {
 // A2 SHAPE gate (cross-runtime, command-TEXT only): does a command actually INVOKE a test runner,
 // as opposed to merely mentioning one? A `{kind:command, matches:testCommand}` step used to be
 // satisfied by any command whose text matched the runner regex, so `echo pytest` (and even
-// `echo "...5 passed..."`) forged the evidence. Here we require a real invocation: split on shell
-// separators, strip a leading env-assignment prefix, and require SOME segment to actually START with
-// an allowlisted runner (or be `python[3] -m <runner>`), and to NOT be a no-op printer
-// (echo/printf/:/true/cat/head/tail/cd) or a `#` comment. Pure string/regex; every pattern is LINEAR
-// (disjoint classes, no nested quantifier) so an adversarial command cannot ReDoS the guard.
+// `echo "...5 passed..."`) forged the evidence. Here we require a real invocation: some simple command
+// must START with an allowlisted runner (or be `python[3] -m <runner>`), after its leading env
+// assignments, and must NOT be a no-op printer (echo/printf/:/true/cat/head/tail/cd).
+//   FH-3: heredoc BODIES are dropped first (shared heredoc grammar) and statements come from the BR6
+//   splitter, which skips `#` comments, so `cat > Makefile <<'EOF' ... pytest ... EOF` and `ls # ; pytest`
+//   run nothing.
+//   FH-9 / SK-10: a runner behind `time`, `timeout N`, `env`, `nice`, a path (`.venv/bin/pytest`,
+//   `./gradlew`), a launcher (`uv|poetry|pipenv run`, `npx`, `bunx`, `pnpm exec`), python interpreter
+//   flags (`python -I -X dev -m pytest`), or a shell wrapper (`bash -lc '...'`, `sh -c`,
+//   `powershell|pwsh -Command ...`, `cmd /c ...`) counts; the wrapped command is checked the same way.
+// Pure string work; every pass is linear and every regex is linear (disjoint classes, no nested
+// quantifier), and wrapper recursion is depth-bounded, so an adversarial command cannot ReDoS the guard.
 const NOOP_FIRST = /^(?:echo|printf|:|true|cat|head|tail|cd)$/;
-// python | python3 | python3.11 | py, an optional launcher version flag (`-3`, `-3.11`), then `-m <mod>`.
-const PYTHON_DASH_M = /^(?:python[0-9.]*|py)(?:\s+-[0-9.]+)?\s+-m\s+(\S+)/;
-// Strip ONE leading `VAR=value` env-assignment (value quoted, or bare WITHOUT shell metacharacters so
-// a command-substitution value like `$(echo pytest)` is NOT swallowed). LINEAR (disjoint classes).
-const ENV_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s"'$`(){}|&;<>]*)\s+/;
-// A segment that (still) STARTS with an assignment is a standalone `NAME=value`, not a command — so a
-// bare `pytest=1` must not qualify just because the runner regex matches at the `=` word boundary.
+// A word that is a `NAME=value` assignment. Its value is stripped only when it is quoted or bare WITHOUT
+// shell metacharacters, so a command-substitution value like `$(echo pytest)` is NOT swallowed and the
+// segment is then a standalone assignment, not a command (a bare `pytest=1` never qualifies).
 const ASSIGN_START = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const SAFE_ASSIGN_VALUE = /^(?:"[^"]*"|'[^']*'|[^\s"'$`(){}|&;<>]*)$/;
+const PYTHON_WORD = /^(?:python[0-9.]*|py)$/;
+const PY_SELECTOR = /^-[0-9.]+$/;                 // launcher version flag (`py -3`, `python -3.11`)
+const PY_FLAGS = /^-[bBdEIOPqRsSuv]+$/;            // interpreter flags without an argument (`-I`, `-B`, `-OO`)
+const PY_ARG_FLAG = /^-[WX]$/;                     // `-W arg`, `-X opt`
+const PY_GLUED_ARG_FLAG = /^-[WX]./;               // `-Wdefault`, `-Xdev`
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
+const POWERSHELLS = new Set(['powershell', 'pwsh']);
+const PS_COMMAND = /^[-/]c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i;
+const PS_VALUE_OPTION = /^[-/](?:executionpolicy|ex|ep|windowstyle|w|inputformat|inp|if|outputformat|o|of|version|v|configurationname|config|workingdirectory|wd|settingsfile|settings|custompipename)$/i;
+const RUN_LAUNCHERS = new Set(['uv', 'poetry', 'pipenv']); // `<launcher> run <command>`
+const EXEC_LAUNCHERS = new Set(['npx', 'bunx']);            // `<launcher> <command>`
+const DURATION = /^[0-9]+(?:\.[0-9]+)?[smhd]?$/;
+const MAX_WRAPPER_DEPTH = 3;
 
-// Quote-aware split on shell statement/pipe boundaries (&&, ||, ;, |, newline). A separator INSIDE
-// single/double quotes is DATA (`echo ';pytest'`), never a boundary, so it cannot spawn a fragment
-// that spuriously "starts with a runner". Single linear pass.
-function splitSegments(str) {
+// Quote-aware split of one BR6 statement into simple commands at `&&`, `|`, `|&` and a background `&`
+// (not the `&` of `>&`, `<&` or `&>`). A backslash escapes the next character. Single linear pass.
+function splitSimpleCommands(str) {
   const out = [];
   let cur = '';
-  let q = ''; // active quote char, '' when unquoted
-  for (let i = 0; i < str.length; i++) {
+  let q = null;
+  for (let i = 0; i < str.length; i += 1) {
     const c = str[i];
-    if (q) { cur += c; if (c === q) q = ''; continue; }
+    if (q === "'") { cur += c; if (c === q) q = null; continue; }
+    if (c === '\\') { cur += c; if (i + 1 < str.length) { cur += str[i + 1]; i += 1; } continue; }
+    if (q) { cur += c; if (c === q) q = null; continue; }
     if (c === "'" || c === '"') { q = c; cur += c; continue; }
-    if (c === '\n' || c === ';') { out.push(cur); cur = ''; continue; }
-    if (c === '|') { if (str[i + 1] === '|') i++; out.push(cur); cur = ''; continue; }
-    if (c === '&' && str[i + 1] === '&') { i++; out.push(cur); cur = ''; continue; }
+    if (c === '|') { if (str[i + 1] === '&' || str[i + 1] === '|') i += 1; out.push(cur); cur = ''; continue; }
+    if (c === '&') {
+      if (str[i + 1] === '&') { i += 1; out.push(cur); cur = ''; continue; }
+      const prev = cur[cur.length - 1];
+      if (prev === '>' || prev === '<' || str[i + 1] === '>') { cur += c; continue; }
+      out.push(cur); cur = ''; continue;
+    }
     cur += c;
   }
   out.push(cur);
   return out;
 }
 
+// Shell words of one simple command: {raw, value, quoted}. Blanks separate words outside quotes; quotes
+// are removed from `value`; backslashes are kept (a Windows path survives) except before a character
+// double quotes escape. Single linear pass.
+function shellWords(str) {
+  const words = [];
+  let raw = null;
+  let value = '';
+  let quoted = false;
+  let q = null;
+  const flush = () => { if (raw !== null) words.push({ raw, value, quoted }); raw = null; value = ''; quoted = false; };
+  for (let i = 0; i < str.length; i += 1) {
+    const c = str[i];
+    if (q === "'") { raw += c; if (c === "'") q = null; else value += c; continue; }
+    if (q === '"') {
+      raw += c;
+      if (c === '\\' && i + 1 < str.length && '"\\$`'.includes(str[i + 1])) { raw += str[i + 1]; value += str[i + 1]; i += 1; continue; }
+      if (c === '"') q = null; else value += c;
+      continue;
+    }
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') { flush(); continue; }
+    if (raw === null) raw = '';
+    if (c === "'" || c === '"') { q = c; quoted = true; raw += c; continue; }
+    if (c === '\\' && i + 1 < str.length) { raw += c + str[i + 1]; value += c + str[i + 1]; i += 1; continue; }
+    raw += c;
+    value += c;
+  }
+  flush();
+  return words;
+}
+
+// The program name of a command word: its basename (either slash), without a Windows launcher suffix.
+function programName(value) {
+  const base = String(value).split(/[\\/]/).pop() || '';
+  return base.replace(/\.(?:exe|cmd|bat|com)$/i, '');
+}
+
+function skipTimeoutPrefix(words, j) {
+  while (j < words.length && words[j].value.startsWith('-')) {
+    const v = words[j].value;
+    j += (v === '-k' || v === '-s') ? 2 : 1; // -k DURATION / -s SIGNAL take a value; long forms use `=`
+  }
+  return j < words.length && DURATION.test(words[j].value) ? j + 1 : -1;
+}
+
+function skipEnvPrefix(words, j) {
+  while (j < words.length && words[j].value.startsWith('-')) {
+    const v = words[j].value;
+    if (v === '-S' || v.startsWith('--split-string') || v.startsWith('-S')) return -1; // a split string: not read
+    j += (v === '-u' || v === '-C') ? 2 : 1;
+  }
+  return j;
+}
+
+function skipNicePrefix(words, j) {
+  if (j < words.length && words[j].value === '-n') return j + 2;
+  if (j < words.length && /^(?:-n?-?[0-9]+|--adjustment=.*)$/.test(words[j].value)) return j + 1;
+  return j;
+}
+
+function shellWrapperRuns(words, j, testRe, depth) {
+  let sawC = false;
+  for (; j < words.length; j += 1) {
+    const v = words[j].value;
+    if (v === '--') { j += 1; break; }
+    if (/^[-+]O$|^[-+]o$|^--(?:rcfile|init-file)$/.test(v)) { j += 1; continue; } // option with a value
+    if (/^--[a-z-]+$/.test(v)) continue;                                          // --login, --noprofile ...
+    if (/^[-+][A-Za-z]+$/.test(v)) { if (v[0] === '-' && v.includes('c')) sawC = true; continue; }
+    break;
+  }
+  if (!sawC || j >= words.length) return false; // `bash script.sh` runs a file this check cannot read
+  // `bash -lc 'pytest -q'` carries the command in one word. A Codex argv array is recorded joined by
+  // spaces, so an UNQUOTED command word is read together with the words after it.
+  const script = words[j].quoted ? words[j].value : words.slice(j).map((w) => w.value).join(' ');
+  return runnerIn(script, testRe, depth + 1);
+}
+
+function powershellWrapperRuns(words, j, testRe, depth) {
+  for (; j < words.length; j += 1) {
+    const v = words[j].value;
+    if (PS_COMMAND.test(v)) return runnerIn(words.slice(j + 1).map((w) => w.value).join(' '), testRe, depth + 1);
+    if (PS_VALUE_OPTION.test(v)) { j += 1; continue; }
+    if (/^[-/][A-Za-z]+$/.test(v) && !/^[-/](?:f|fi|fil|file|e|ec|en|enc|encodedcommand)$/i.test(v)) continue;
+    return false; // -File, -EncodedCommand or a positional argument: not a readable command
+  }
+  return false;
+}
+
+function cmdWrapperRuns(words, j, testRe, depth) {
+  for (; j < words.length; j += 1) {
+    const v = words[j].value.toLowerCase();
+    if (v === '/c' || v === '/k') return runnerIn(words.slice(j + 1).map((w) => w.value).join(' '), testRe, depth + 1);
+    if (!/^\/[a-z]$/.test(v)) return false;
+  }
+  return false;
+}
+
+function pythonModuleRuns(words, j, testRe) {
+  if (j < words.length && PY_SELECTOR.test(words[j].value)) j += 1;
+  while (j < words.length) {
+    const v = words[j].value;
+    if (PY_FLAGS.test(v) || PY_GLUED_ARG_FLAG.test(v)) j += 1;
+    else if (PY_ARG_FLAG.test(v)) j += 2;
+    else break;
+  }
+  return j + 1 < words.length && words[j].value === '-m' && testRe.test(words[j + 1].value); // HB7
+}
+
+// Does this simple command (its words) run a test runner?
+function simpleCommandRuns(words, testRe, depth) {
+  let i = 0;
+  for (;;) {
+    while (i < words.length && ASSIGN_START.test(words[i].raw)) {
+      const raw = words[i].raw;
+      if (!SAFE_ASSIGN_VALUE.test(raw.slice(raw.indexOf('=') + 1))) return false; // a standalone assignment
+      i += 1;
+    }
+    if (i >= words.length) return false;
+    const name = programName(words[i].value).toLowerCase();
+    let next = -1;
+    if (name === 'time') { next = i + 1; while (next < words.length && /^-p$|^--$/.test(words[next].value)) next += 1; }
+    else if (name === 'timeout') next = skipTimeoutPrefix(words, i + 1);
+    else if (name === 'env') next = skipEnvPrefix(words, i + 1);
+    else if (name === 'nice') next = skipNicePrefix(words, i + 1);
+    else if (RUN_LAUNCHERS.has(name) && words[i + 1]?.value === 'run') next = i + 2;
+    else if (EXEC_LAUNCHERS.has(name)) next = i + 1;
+    else if (name === 'pnpm' && words[i + 1]?.value === 'exec') next = i + 2;
+    else break;
+    if (next < 0) return false;
+    i = next; // every prefix consumes at least one word, so this loop is linear
+  }
+  const program = programName(words[i].value);
+  const lower = program.toLowerCase();
+  if (NOOP_FIRST.test(program)) return false;                 // echo/printf/cat/... never RUN the tests
+  if (depth < MAX_WRAPPER_DEPTH) {
+    if (SHELLS.has(lower)) return shellWrapperRuns(words, i + 1, testRe, depth);
+    if (POWERSHELLS.has(lower)) return powershellWrapperRuns(words, i + 1, testRe, depth);
+    if (lower === 'cmd') return cmdWrapperRuns(words, i + 1, testRe, depth);
+  }
+  if (PYTHON_WORD.test(program)) return pythonModuleRuns(words, i + 1, testRe);
+  // Otherwise the command must START with an allowlisted runner. testRe is non-global, so exec() is
+  // stateless and matches from the front; index 0 == "starts with the runner".
+  const text = [program].concat(words.slice(i + 1).map((w) => w.value)).join(' ');
+  const m = testRe.exec(text);
+  // A runner name followed by `.` inside the program word is a file name (`pytest.ini`, `tox.ini`).
+  return Boolean(m) && m.index === 0 && program[m[0].length] !== '.';
+}
+
+function runnerIn(command, testRe, depth) {
+  const str = blankHeredocBodies(String(command || '')); // FH-3: a heredoc body is data, not commands
+  for (const { text } of splitBr6StatementJoins(str)) {   // `;`, newline, `||`; comments skipped (FH-3)
+    for (const seg of splitSimpleCommands(text)) {
+      const words = shellWords(seg);
+      if (words.length && simpleCommandRuns(words, testRe, depth)) return true;
+    }
+  }
+  return false;
+}
+
+// R2-FH-1: the most bytes of one shell command the flow hooks analyse. A longer command is never evidence
+// (no test run, no write target): it is not read at all, so no shape of it can hold a hook past its
+// timeout, where it would fail open for the rest of the session. The current call of the flow-order
+// guard is the one exception (shellWriteTargets with no cap, bounded by the recognizer's own 512 KiB cap).
+export const SHELL_ANALYSIS_MAX = 128 * 1024;
+
 export function isRealRunnerInvocation(command, testRe) {
   if (!testRe) return false;
   const str = String(command || '');
-  for (let seg of splitSegments(str)) {                   // quote-aware shell statement/pipe boundaries
-    seg = seg.trim();
-    if (!seg || seg.startsWith('#')) continue;            // empty or a comment segment
-    while (ENV_ASSIGN.test(seg)) seg = seg.replace(ENV_ASSIGN, ''); // drop leading env-assignments
-    seg = seg.trim();
-    if (!seg || ASSIGN_START.test(seg)) continue;         // empty, or a standalone NAME=value assignment
-    const first = seg.split(/\s+/)[0] || '';
-    if (NOOP_FIRST.test(first)) continue;                 // echo/printf/cat/... never RUN the tests
-    const pym = PYTHON_DASH_M.exec(seg);
-    if (pym) { if (testRe.test(pym[1])) return true; continue; } // python -m <runner> (HB7)
-    // Otherwise the segment must literally START with an allowlisted runner. testRe is non-global,
-    // so exec() is stateless and matches from the front; index 0 == "starts with the runner".
-    const m = testRe.exec(seg);
-    if (m && m.index === 0) return true;
-  }
-  return false;
+  if (str.length > SHELL_ANALYSIS_MAX) return false;
+  return runnerIn(str, testRe, 0);
 }
 
 // A2 advisory result-signature scanner (DP-A2-SIG). A broad, LINEAR match for the summary line a
@@ -220,9 +394,49 @@ function exactNameFields(input) {
   return kept;
 }
 
+// FH-1: the files a Bash or PowerShell command writes, read by the ONE shared write-target recognizer
+// (codex-rollout.mjs currentEditTargets: extractWrittenContent plus the precise sed/tee/redirect reader)
+// that the Codex flow-order gate uses, so both runtimes see the same shell write forms. Fail-open: [].
+// A transcript command over SHELL_ANALYSIS_MAX yields no write target (R2-FH-1; parseTranscript records it as
+// a possible source edit instead, R3-FH-2); pass maxBytes = Infinity for the current call only.
+export function shellWriteTargets(command, maxBytes = SHELL_ANALYSIS_MAX) {
+  try {
+    const str = String(command || '');
+    if (str.length > maxBytes) return [];
+    return currentEditTargets('Bash', str);
+  } catch {
+    return [];
+  }
+}
+
+// A copy of `trace` without the given tool_use ids (their tools, commands and edits). A PreToolUse guard
+// drops the current call, which can already sit in the transcript but has not run yet (FH-1, the FH-6
+// shape). R2-FH-1: this filters the one parse instead of parsing (and analysing every command) again.
+export function withoutCalls(trace, ids) {
+  if (!ids || !ids.size) return trace;
+  const keep = (id) => !(typeof id === 'string' && ids.has(id));
+  const commandIds = trace.commandIds || [];
+  const editIds = trace.editIds || [];
+  return {
+    ...trace,
+    tools: (trace.tools || []).filter((t) => keep(t.id)),
+    turnTools: (trace.turnTools || []).filter((t) => keep(t.id)),
+    commands: (trace.commands || []).filter((_c, i) => keep(commandIds[i])),
+    commandIds: commandIds.filter((id) => keep(id)),
+    edits: (trace.edits || []).filter((_e, i) => keep(editIds[i])),
+    editIds: editIds.filter((id) => keep(id)),
+    opaqueShellIds: (trace.opaqueShellIds || []).filter((id) => keep(id)),
+    runnerCache: undefined,
+  };
+}
+
+// Each tool call is analysed once per parse (R2-FH-1): its shell write targets here, its runner shape once
+// per test pattern (evidenceSatisfied caches it on the trace). `commandIds`/`editIds` run parallel to
+// `commands`/`edits` so withoutCalls can drop a call without re-parsing. R3-FH-2: `opaqueShellIds` lists the
+// shell calls over SHELL_ANALYSIS_MAX; they are not read, so each may have written a source file.
 export function parseTranscript(transcriptPath) {
   const empty = {
-    tools: [], commands: [], edits: [], lastText: '', raw: '',
+    tools: [], commands: [], commandIds: [], edits: [], editIds: [], opaqueShellIds: [], lastText: '', raw: '',
     results: new Map(), receipts: new Map(), stringResults: new Set(), completions: new Map(),
     turnTools: [], lastRecordText: '', resultPos: new Map(), lastTopTextPos: -1,
     slashCommands: [], turnSlashCommands: [],
@@ -232,7 +446,10 @@ export function parseTranscript(transcriptPath) {
   try { raw = readFileSync(transcriptPath, 'utf8'); } catch { return empty; }
   const tools = [];
   const commands = [];
+  const commandIds = [];
   const edits = [];
+  const editIds = [];
+  const opaqueShellIds = [];
   const results = new Map(); // tool_use id -> { nonError } from native user tool_result records
   const receipts = new Map(); // tool_use id -> { status, error } for a single-result user record
   const stringResults = new Set(); // tool_use ids whose single-result user record has a string toolUseResult
@@ -310,22 +527,35 @@ export function parseTranscript(transcriptPath) {
         const inputStr = JSON.stringify(c.input || {});
         const tool = {
           name: c.name || '', inputStr, input: exactNameFields(c.input), id: typeof c.id === 'string' ? c.id : null,
+          topLevel, // FH-10: a sub-agent's (sidechain) call never activates the parent's flow
         };
         tools.push(tool);
         if (topLevel) turnTools.push(tool);
         if ((c.name === 'Bash' || c.name === 'PowerShell') && c.input?.command) {
-          commands.push(String(c.input.command));
+          const command = String(c.input.command);
+          commands.push(command);
+          commandIds.push(tool.id);
+          if (command.length > SHELL_ANALYSIS_MAX) opaqueShellIds.push(tool.id); // R3-FH-2: unread, may write
+          else for (const target of shellWriteTargets(command)) { edits.push(target); editIds.push(tool.id); } // FH-1
         }
         if (['Edit', 'Write', 'MultiEdit'].includes(c.name) && c.input?.file_path) {
           edits.push(String(c.input.file_path));
+          editIds.push(tool.id);
         }
       }
     }
   }
   return {
-    tools, commands, edits, lastText, raw, results, receipts, stringResults, completions, turnTools,
-    lastRecordText, resultPos, lastTopTextPos, slashCommands, turnSlashCommands,
+    tools, commands, commandIds, edits, editIds, opaqueShellIds, lastText, raw, results, receipts, stringResults,
+    completions, turnTools, lastRecordText, resultPos, lastTopTextPos, slashCommands, turnSlashCommands,
   };
+}
+
+// Did this session (possibly) edit a production source file? A recognised write of one, or (R3-FH-2) a shell
+// command too long to read, which is never evidence but may have written source, so Stop keeps the flow's
+// obligations for it.
+export function sourceEdited(trace, req, cwd) {
+  return anySourceFile(trace.edits, req, cwd) || (trace.opaqueShellIds || []).length > 0;
 }
 
 // Did the call with this tool_use id fail? Three shapes count (C6, amended by C17 item 6):
@@ -396,14 +626,34 @@ function slashStarted(names, marker) {
 // dispatch-strategy call whose args mention feature-build activates nothing. An errored call
 // (receiptHasError) still activates nothing; a call with no id or no result still counts. A slash-command
 // start of that skill (D7) activates the flow the same way.
+// FH-10: only a TOP-LEVEL Skill call activates a flow, the same scope as a slash-command start; a
+// sub-agent's (sidechain or parent_tool_use_id) Skill call belongs to that sub-agent.
 export function activeFlowNames(trace, req) {
   const out = [];
+  const topTools = (trace.tools || []).filter((t) => t.topLevel !== false);
   for (const [name, flow] of Object.entries(req.flows || {})) {
     const marker = flow?.activeWhen?.skill;
-    if (marker && (toolUsePresent(trace, { tool: 'Skill', exactName: marker })
+    if (marker && (toolUsePresent(trace, { tool: 'Skill', exactName: marker }, topTools)
       || slashStarted(trace.slashCommands, marker))) out.push(name);
   }
   return out;
+}
+
+// FH-7: did a non-errored Skill call to `name` (exact name, X or agentic-sdlc:X) run in this transcript?
+// The name inside another skill's args, an errored call, or a look-alike skill does not count.
+export function skillInvoked(trace, name) {
+  return toolUsePresent(trace, { tool: 'Skill', exactName: name });
+}
+
+// Ids of calls with this exact input that have no recorded result yet: at PreToolUse that is the current
+// call when the runtime did not pass its tool_use_id (FH-1).
+export function pendingCallIds(trace, toolInput) {
+  const want = JSON.stringify(toolInput || {});
+  const ids = new Set();
+  for (const t of trace.tools || []) {
+    if (t.id && t.inputStr === want && !trace.results?.has(t.id) && !trace.receipts?.has(t.id)) ids.add(t.id);
+  }
+  return ids;
 }
 
 // O4 dispatch-terminal check (pipeline v2.1 C6/C14), read by flow-step-guard on Stop: is the LAST
@@ -564,7 +814,42 @@ function specForPlan(planFile, specs, req) {
     if (want === planNorm) return null;
     return specs.find((s) => String(s).replace(/\\/g, '/') === want) || null;
   }
-  return specs.find((s) => perPackageRole(s, req) === null) || null; // first FLAT spec, or none
+  // FH-4: a flat plan pairs with the flat spec of the SAME work id (basename), never the first flat spec
+  // in directory order; without one it stays unpaired and the validator resolves its own `spec:` link.
+  const id = workIdOf(planFile);
+  return specs.find((s) => perPackageRole(s, req) === null && workIdOf(s) === id) || null;
+}
+
+// Reduce an artifact path to a bare work-id base-name; reject traversal/empty. Shared with the Codex
+// engine (codex-flow-evidence.mjs re-exports it), so both runtimes key work by the same id.
+export function workIdOf(target) {
+  const id = String(target).replace(/\\/g, '/').split('/').pop()
+    .replace(/\.md$/i, '')
+    .replace(/[^A-Za-z0-9._-]/g, '');
+  if (!id || id.includes('..')) return null;
+  return id;
+}
+
+// The role of a spec/plan artifact path ('spec' | 'plan'), flat root or per-package, else null.
+function artifactRoleOf(path, req) {
+  const norm = String(path).replace(/\\/g, '/');
+  for (const role of ['spec', 'plan']) {
+    const root = req.artifactRoots?.[role];
+    if (root && norm.includes(root)) return role;
+  }
+  return perPackageRole(path, req);
+}
+
+// FH-4: this session's work ids - the base-name of every spec or plan this transcript wrote (by a
+// Write/Edit tool or a shell write), the same rule as the Codex engine's activeWorkIds.
+function sessionWorkIds(trace, req) {
+  const ids = new Set();
+  for (const e of trace.edits || []) {
+    if (artifactRoleOf(e, req) === null) continue;
+    const id = workIdOf(e);
+    if (id) ids.add(id);
+  }
+  return ids;
 }
 
 function artifactSatisfied(item, trace, ctx) {
@@ -579,7 +864,10 @@ function artifactSatisfied(item, trace, ctx) {
       return perPackageRole(e, ctx.req) === item.role;          // or a per-package <slug>/<role>/ edit
     });
   }
-  const files = listArtifacts(ctx.cwd, item.role, ctx.req);
+  // FH-4: Stop validates only the artifacts of THIS session's work ids. An older valid package on disk
+  // neither satisfies a session that wrote none nor hides this session's stub spec/plan.
+  const ids = sessionWorkIds(trace, ctx.req);
+  const files = listArtifacts(ctx.cwd, item.role, ctx.req).filter((f) => ids.has(workIdOf(f)));
   if (!files.length) return false;
   if (!ctx.validate || !item.validate) return true; // cheap path: existence is enough
   const specs = item.validate.mode === 'plan' ? listArtifacts(ctx.cwd, 'spec', ctx.req) : null;
@@ -606,7 +894,13 @@ function evidenceSatisfied(item, trace, ctx) {
       // (`echo pytest` / `echo "...5 passed..."` no longer count). Claude's Bash exit/output substrate
       // is unverified (HB4), so only the command TEXT shape is enforced here; the Codex engine
       // additionally checks exit0 from its rollout `Exit code:` carrier (deliberate asymmetry).
-      return trace.commands.some((c) => isRealRunnerInvocation(c, re));
+      // R2-FH-1: one shape check per command per pattern, however many steps and flows ask.
+      if (!(trace.runnerCache instanceof Map)) trace.runnerCache = new Map();
+      const key = `${re.flags}/${re.source}`;
+      if (!trace.runnerCache.has(key)) {
+        trace.runnerCache.set(key, (trace.commands || []).some((c) => isRealRunnerInvocation(c, re)));
+      }
+      return trace.runnerCache.get(key);
     }
     case 'reviewResult':
       // Warn-level only: a reviewer group fails when a member was dispatched and no dispatched
@@ -679,16 +973,111 @@ export function stepSatisfied(step, trace, ctx) {
   return (step.evidence || []).some((item) => evidenceSatisfied(item, trace, ctx));
 }
 
-// A path is a production source file: extension in sourceGlobs, NOT an artifact root, NOT a test.
-export function isSourceFile(filePath, req) {
-  if (!filePath) return false;
-  const norm = String(filePath).replace(/\\/g, '/');
+// FH-2: a path inside the project is classified on its project-relative form, so a project that itself
+// lives under a `tests/` or `test_*` folder is still gated. A path outside `cwd` (or no `cwd`) is used as is;
+// `isSourceFile` may retry it with both sides resolved through links (`resolvedThroughLinks`).
+function projectRelative(norm, cwd) {
+  if (typeof cwd !== 'string' || !cwd) return norm;
+  let base = cwd.replace(/\\/g, '/');
+  while (base.length > 1 && base.endsWith('/')) base = base.slice(0, -1); // a loop, not a `/+$` regex
+  const prefix = base.endsWith('/') ? base : `${base}/`;
+  const fold = /^[A-Za-z]:/.test(base) ? (s) => s.toLowerCase() : (s) => s;
+  return fold(norm).startsWith(fold(prefix)) ? norm.slice(prefix.length) : norm;
+}
+
+// R2-FH-4: `.` and `..` segments resolved lexically, so `tests/../src/app.py` (or a path that walks out of
+// an artifact root) is classified as the file it names. A leading `..` that climbs above the start is
+// kept, and an absolute path stays absolute. One pass over the segments.
+function resolveDotSegments(norm) {
+  const absolute = norm.startsWith('/');
+  const out = [];
+  for (const seg of norm.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (out.length && out[out.length - 1] !== '..') out.pop();
+      else if (!absolute) out.push('..');
+      continue;
+    }
+    out.push(seg);
+  }
+  return (absolute ? '/' : '') + out.join('/');
+}
+
+// FH-2: one folder can be named through a link (macOS `/var` is `/private/var`), and a runtime that sends
+// no `cwd` leaves the hook's own working directory, which the OS gives resolved. A folder is resolved
+// through its nearest existing ancestor, because the folder of a file about to be written may not exist
+// yet. The work is bounded, because a hook that runs past its timeout is cancelled and the call goes
+// ahead: a folder of more than LINK_MAX_SEGMENTS segments or LINK_MAX_LENGTH characters is not resolved,
+// at most LINK_MAX_ANCESTORS folders are tried, and one process resolves at most LINK_MAX_RESOLVES
+// folders. A lookup that stalls in the filesystem (a dead network mount) is not bounded, which is why
+// `anySourceFile` reads every path as written before it resolves any (the byte-locked Claude pre-edit
+// guard still checks its targets one by one). Null when nothing resolves.
+const LINK_MAX_SEGMENTS = 128;
+const LINK_MAX_LENGTH = 4096;
+const LINK_MAX_ANCESTORS = 32;
+const LINK_MAX_RESOLVES = 64;
+const resolvedFolders = new Map();
+
+function resolvedThroughLinks(folder) {
+  if (resolvedFolders.has(folder)) return resolvedFolders.get(folder);
+  const segs = folder.split('/');
+  if (resolvedFolders.size >= LINK_MAX_RESOLVES || segs.length > LINK_MAX_SEGMENTS
+      || folder.length > LINK_MAX_LENGTH) return null;
+  let found = null;
+  for (let keep = segs.length; keep > Math.max(0, segs.length - LINK_MAX_ANCESTORS); keep -= 1) {
+    let head = segs.slice(0, keep).join('/');
+    if (head === '') head = '/';
+    else if (/^[A-Za-z]:$/.test(head)) head += '/';
+    let real;
+    try { real = realpathSync.native(head).replace(/\\/g, '/'); } catch { continue; }
+    const rest = segs.slice(keep).join('/');
+    found = rest ? `${real.endsWith('/') ? real.slice(0, -1) : real}/${rest}` : real;
+    break;
+  }
+  resolvedFolders.set(folder, found);
+  return found;
+}
+
+const isAbsolutePath = (norm) => norm.startsWith('/') || /^[A-Za-z]:\//.test(norm);
+
+const hasSourceExtension = (norm, req) =>
+  (req.sourceGlobs || []).includes((norm.split('.').pop() || '').toLowerCase());
+
+function classifiedAsSource(norm, req) {
   for (const root of Object.values(req.artifactRoots || {})) {
     if (norm.includes(root)) return false;
   }
   if (/(^|\/)tests?\//.test(norm) || /(^|\/)test_|_test\.|\.test\.|\.spec\./.test(norm)) return false;
-  const ext = (norm.split('.').pop() || '').toLowerCase();
-  return (req.sourceGlobs || []).includes(ext);
+  return hasSourceExtension(norm, req);
+}
+
+// A path is a production source file: extension in sourceGlobs, NOT an artifact root, NOT a test.
+// `resolveLinks: false` reads the path only as written.
+export function isSourceFile(filePath, req, cwd, resolveLinks = true) {
+  if (!filePath) return false;
+  const base = typeof cwd === 'string' && cwd ? resolveDotSegments(cwd.replace(/\\/g, '/')) : null;
+  const path = resolveDotSegments(String(filePath).replace(/\\/g, '/'));
+  const norm = projectRelative(path, base);
+  if (classifiedAsSource(norm, req)) return true;
+  if (!resolveLinks) return false;
+  // FH-2: a path that is not under `cwd` as written, and reads as a test or an artifact on its absolute
+  // form, is retried with its folder and `cwd` resolved through links. The retry can only make a path a
+  // source file, never the reverse, so a link cannot hide a source edit; the file name is kept as written.
+  if (norm !== path || !base || !isAbsolutePath(path) || !hasSourceExtension(path, req)) return false;
+  const cut = path.lastIndexOf('/');
+  const realBase = resolvedThroughLinks(base);
+  const realFolder = realBase && resolvedThroughLinks(path.slice(0, cut) || '/');
+  if (!realFolder) return false;
+  const realPath = `${realFolder.endsWith('/') ? realFolder.slice(0, -1) : realFolder}/${path.slice(cut + 1)}`;
+  const relative = projectRelative(realPath, realBase);
+  return relative !== realPath && classifiedAsSource(relative, req);
+}
+
+// Any of `paths` is a production source file. Every path is read as written before any link is
+// resolved, so a lookup that stalls on one path cannot keep a later source path from being found.
+export function anySourceFile(paths, req, cwd) {
+  const list = paths || [];
+  return list.some((p) => isSourceFile(p, req, cwd, false)) || list.some((p) => isSourceFile(p, req, cwd));
 }
 
 export function completionClaimPresent(trace, req, lastAssistantMessage) {

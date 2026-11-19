@@ -909,6 +909,14 @@ class TestBugfixPlans(unittest.TestCase):
         self.assertEqual(result["metrics"]["plan_tasks"], 1, result)
         self.assertIn("ac_not_covered:AC2", result["warnings"], result)
         self.assertNotIn("tasks_unordered", result["warnings"], result)
+        # VA-12: the same "Task 9" outside the fence is a task before Task 1, so the ordering check fires.
+        # Without this control the assertNotIn above held only because "## Task N" headings were never
+        # numbered, whatever the fence did.
+        unfenced = PLAN_UNCOVERED.replace("## Task 1", example.replace("```markdown\n", "").replace("```\n", "")
+                                          + "## Task 1", 1)
+        result = va.check_plan(unfenced, PLAN_SPEC)
+        self.assertEqual(result["metrics"]["plan_tasks"], 2, result)
+        self.assertIn("tasks_unordered", result["warnings"], result)
 
     def test_bugfix_unlabelled_criterion_is_reported(self):
         # The plan's own section is a bugfix plan's only criteria source and no spec check runs on

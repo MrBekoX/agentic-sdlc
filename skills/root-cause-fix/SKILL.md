@@ -60,11 +60,15 @@ Read the relevant code, tests, logs, and config. Check for prior patches/refacto
 
 ### 3. Spec (the WHAT — code-independent) — contract 02
 Problem definition · acceptance criteria (each testable) · edge cases · definition of done · **must-not-change behaviors**. For deep specs use the `spec-plan-author` -> `spec-plan-critic` adapter (`spec-plan-draft` in Claude Code; available subagents or main-loop degraded pass elsewhere).
-**Gate:** spec exists and criteria are testable.
+Save it with the file-edit tool (never a shell redirect) to `docs/agentic-sdlc/specs/<work_id>.md` with `work_id` and `status` frontmatter, then run `python3 "<runtime-root>/scripts/validate_artifacts.py" --mode spec --file docs/agentic-sdlc/specs/<work_id>.md --strict`. Give each criterion an `AC<n>` id that the plan's tasks cite. Step 13's resolver and the flow hooks read this file, not the chat.
+**Gate:** spec exists and criteria are testable. The validator exits 0 on the saved file.
 
 ### 4. Plan (the HOW) — contract 03
 Break into small single-purpose tasks; each maps to acceptance criteria, each is testable; name files + TDD points; flag risky steps; request approval if the fix is large/architectural.
-**Gate:** every acceptance criterion has a task.
+Save it to `docs/agentic-sdlc/plans/<work_id>.md` (the spec's `<work_id>`) with `work_id`, `spec: ../specs/<work_id>.md`, `branch` (the output of `git branch --show-current`) and `status` frontmatter, then run `python3 "<runtime-root>/scripts/validate_artifacts.py" --mode plan --file docs/agentic-sdlc/plans/<work_id>.md --spec docs/agentic-sdlc/specs/<work_id>.md --strict`. `status` is `reviewed` once drafted and `approved` after the user approves.
+**Gate:** every acceptance criterion has a task. The validator exits 0 on the saved file.
+
+**Plugin root (`<runtime-root>`):** the installed agentic-sdlc folder, two levels above this `SKILL.md` (`<runtime-root>/skills/<name>/SKILL.md`) — never the user's working directory. Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}`; Claude Code and ZCode substitute `${CLAUDE_SKILL_DIR}/../..`; Kimi Code substitutes `${KIMI_SKILL_DIR}/../..`; a SessionStart line `Plugin root (resolved by this hook…)` names it on Claude Code, Codex, ZCode and Cursor; Codex and Grok CLI show this skill's absolute path in the skill listing. A `${…}` token still shown literally is unresolved: never pass it to a shell. Confirm `<runtime-root>/scripts/validate_artifacts.py` exists and write that absolute path, quoted for your shell, into commands; if it cannot be confirmed, stop the step and report `plugin root unresolved` — never run a same-named file from the user's project. Run helpers with `python3` (Python 3.8+), or `py -3` on Windows when `python3` is missing or is the Microsoft Store alias.
 
 ### 5. Goal lock
 Use the runtime goal tool when available with a measurable end-state (e.g. *"the failing test in X passes, full suite green, no other behavior changed"*). Otherwise write the Goal Lock template inline and treat it as the scope lock.

@@ -34,7 +34,7 @@ const TEMPLATE_VALUE = [
   /^["']?\$[A-Za-z_]\w*["']?$/,                 // $DB_PASSWORD
   /^["']?%[A-Za-z_]\w*%["']?$/,                 // %DB_PASSWORD%
   /^\*+$/,                                       // ******
-  /^\*\*\*MASKED\*\*\*$/,
+  /^\*\*\*MASKED(?::[a-z0-9-]+)?\*\*\*$/,       // a mask this module wrote (R3-SW-1)
   /^["']?(?:process\.env|os\.environ|System\.getenv|getenv|env)\b/i,
   /^["']?(?:change[_-]?me|placeholder|dummy|todo|fixme|redacted|masked|secret_here)\b/i,
   /^["']?your[_-]?\w*\b/i,                      // your-client-secret-goes-here
@@ -95,14 +95,16 @@ export function isDegenerateToken(token) {
 // vendor-published shapes (not a keyword on the line), so a bare `TOKEN = ghp_...` is blocked
 // even with no password/secret keyword and no JSON wrapper.
 export const HIGH = [
-  { label: 'private-key', re: /-----BEGIN[A-Z0-9 ]*PRIVATE KEY-----/ },
+  // `(?: BLOCK)?`: an armored PGP secret key's header ends in `PRIVATE KEY BLOCK` and five dashes (SW-2).
+  { label: 'private-key', re: /-----BEGIN[A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----/ },
   // Vendor-prefix tokens: the LEFT anchor is `(?<![A-Za-z0-9])`, not `\b`, and there is no right
   // anchor. `\b` is a \w boundary and `_` is a \w character, so `\bghp_` never fires on the very
   // common `MYAPP_ghp_…` / `TOKEN_sk_live_…` env-var shape, and a trailing `\b` after a FIXED
   // length ({36}/{16}/{35}) drops the token whenever one more word character follows it — both
   // verified misses. gitleaks' vendor rules carry no boundary anchors at all for this reason;
   // the lookbehind is kept only to stop `sk-` matching inside a word such as `task-…`.
-  { label: 'aws-access-key-id', re: /(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}/ },
+  // AKIA: a long-term access key id; ASIA: a temporary (STS) one.
+  { label: 'aws-access-key-id', re: /(?<![A-Za-z0-9])(?:AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})/ },
   // GitHub: classic PAT/OAuth (ghp_/gho_/ghu_/ghs_/ghr_ + 36) and fine-grained (github_pat_ + 40+).
   { label: 'github-token', re: /(?<![A-Za-z0-9])(?:gh[posru]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,})/ },
   // Slack bot/user/app/refresh and app-level tokens.
@@ -111,10 +113,27 @@ export const HIGH = [
   { label: 'stripe-key', re: /(?<![A-Za-z0-9])(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}/ },
   // Google API key.
   { label: 'google-api-key', re: /(?<![A-Za-z0-9])AIza[0-9A-Za-z_\-]{35}/ },
-  // OpenAI secret / project key.
-  { label: 'openai-key', re: /(?<![A-Za-z0-9])sk-(?:proj-)?[A-Za-z0-9]{20,}/ },
+  // GitLab personal access token (the classic 20-character form and the longer routable form), npm
+  // access token, Hugging Face user access token. The Hugging Face body is letters only and has a right
+  // edge, so `hf_` + a long identifier with digits or underscores is not one.
+  // A key body whose class holds `-` stops before its own prefix (R3-SW-2): otherwise a placeholder run
+  // (`glpat-xxxx…-`) swallowed the real key glued after it into one match, judged degenerate as a whole.
+  // The lookahead is a fixed string, so the match stays linear.
+  { label: 'gitlab-token', re: /(?<![A-Za-z0-9])glpat-(?:(?!glpat-)[A-Za-z0-9_-]){20,}/ },
+  { label: 'npm-token', re: /(?<![A-Za-z0-9])npm_[A-Za-z0-9]{36}/ },
+  { label: 'huggingface-token', re: /(?<![A-Za-z0-9])hf_[A-Za-z]{34}(?![A-Za-z0-9_])/ },
+  // Anthropic API, admin and OAuth keys: `sk-ant-api03-…`, `sk-ant-admin01-…`, `sk-ant-oat01-…` (SW-1).
+  { label: 'anthropic-key', re: /(?<![A-Za-z0-9])sk-ant-(?:api|admin|oat|ort)\d{2}-(?:(?!sk-ant-)[A-Za-z0-9_-]){32,}/ },
+  // OpenAI: the current project, service-account and admin keys carry a base64url body (`-` and `_`
+  // occur anywhere in it); the legacy user key is `sk-` + alphanumerics (SW-1). The base64url body stops
+  // before another `sk-proj-` (or `svcacct`, `admin`, `None`) start, like the GitLab body above (R3-SW-2).
+  { label: 'openai-key', re: /(?<![A-Za-z0-9])sk-(?:(?:proj|svcacct|admin|None)-(?:(?!sk-(?:proj|svcacct|admin|None)-)[A-Za-z0-9_-]){20,}|[A-Za-z0-9]{20,})/ },
   // JWT: header.payload.signature, header+payload are base64url-encoded JSON objects -> 'eyJ'.
-  { label: 'jwt', re: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/ },
+  // It may start after `-` or `_` (`session-eyJ…`, ` --eyJ…`, `id_eyJ…`; R2-SW-4, R3-SW-3). lineMatches
+  // does not let the regex engine try every such start, which re-read one base64url run per `eyJ` in it
+  // and was quadratic on a long line with no `.` (SW-3): it tries one candidate per run and skips the
+  // later ones in a run that already failed or matched.
+  { label: 'jwt', re: /(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/ },
   // Authorization: Bearer <token>. In HIGH (not just BROAD) so commits are blocked, not only warned.
   { label: 'bearer-token', re: /\bbearer\s+[A-Za-z0-9._\-]{20,}/i },
   // Password=...  veya  PASSWORD: "..."  (connection string / compose / env)
@@ -134,13 +153,19 @@ export const HIGH = [
   // empty (`redis://:<password>@host`).
   { label: 'url-credential', re: /(?<![A-Za-z0-9])[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:@\/?#\[\]]{0,256}:([^\s@\/?#\[\]]{6,})@/i, valueGroup: 1 },
   // JSON credential:  "...Key|Secret|Password|Token|Credential...": "long-value" (>=16 chars)
-  { label: 'json-credential', re: /"[^"]*(?:password|secret|key|token|credential|signing)[^"]*"\s*:\s*"([^"]{16,})"/i, valueGroup: 1 },
+  // The keyword is tested by a lookahead and the key name is then read once (SW-3). The old form,
+  // `"[^"]*(?:keyword)[^"]*"`, tried every keyword position in the name and rescanned the rest of it
+  // for each one: quadratic on a long line with many keywords and no closing quote. A lookahead is
+  // atomic, so each start reads its name at most twice.
+  { label: 'json-credential', re: /"(?=[^"]*(?:password|secret|key|token|credential|signing))[^"]*"\s*:\s*"([^"]{16,})"/i, valueGroup: 1 },
 ];
 
 // Warning (broader) patterns.
 export const BROAD = [
   ...HIGH,
-  { label: 'assigned-secret', re: /\b(?:api[_-]?key|apikey|secret|access[_-]?token|client[_-]?secret|auth[_-]?token)\b\s*[:=]\s*["']?([A-Za-z0-9_\-.]{16,})/i, valueGroup: 1 },
+  // The left edge is `(?<![A-Za-z0-9])`, not `\b`: `\b` cannot sit after `_`, so `ANTHROPIC_API_KEY=` and
+  // `JWT_SECRET=` were never matched (SW-1). `secret[_-]?key` covers `SECRET_KEY=` (Django and others).
+  { label: 'assigned-secret', re: /(?<![A-Za-z0-9])(?:api[_-]?key|apikey|secret[_-]?key|secret|access[_-]?token|client[_-]?secret|auth[_-]?token)\b\s*[:=]\s*["']?([A-Za-z0-9_\-.]{16,})/i, valueGroup: 1 },
 ];
 
 // Per-match scanning (D22). A suppression hides only the match it judged. Inspecting only each
@@ -153,8 +178,12 @@ export const BROAD = [
 //     meaning, so a prefix inside an ordinary word still never matches.
 //   * A valueGroup pattern: every prefix start is examined. Its value runs from the prefix end to the
 //     end of the maximal value-class run, computed once per run, so the whole walk stays linear.
-// Recorded residuals, not closed here: a real token whose start lies strictly inside a suppressed
-// degenerate match of an unbounded pattern is not examined; and the template-word predicates of
+// Boundaries are taken smallest first, and a pattern is not re-run at a boundary that lies inside a match
+// it already made, nor (for the JWT shape) inside the base64url run of an attempt that failed: either
+// re-run would read the same run to its end again, which made a long line of glued tokens quadratic
+// (R2-SW-3).
+// Recorded residuals, not closed here: a real token whose start lies strictly inside a match of the
+// same unbounded pattern (suppressed as degenerate or not) is not examined; and the template-word predicates of
 // looksPlaceholder end in a word boundary, so a real value that merely starts with such a word stays
 // suppressed. Clones are cached per pattern object; `p.re` itself is never used or mutated here.
 const PLANS = new WeakMap();
@@ -198,9 +227,55 @@ function planFor(p) {
 // template heuristic belongs there; the whole match of a vendor-prefix pattern is a structurally
 // validated token, so only structural degeneracy or an exact published sample may suppress it.
 // Collapsing these two was the fail-open (see the header).
+// A token is degenerate only when its head is degenerate as well (R2-SW-5): an unbounded body class can
+// run on into a padding run (`sk-proj-<key>-aaaa…`), and the padding alone made the whole match read as
+// a placeholder.
+const DEGENERATE_HEAD = 64;
+
 function isSuppressedMatch(p, m) {
   if (p.valueGroup) return looksPlaceholder(m[p.valueGroup]);
-  return DOC_SAMPLES.has(m[0]) || isDegenerateToken(m[0]);
+  const token = m[0];
+  return DOC_SAMPLES.has(token)
+    || (isDegenerateToken(token) && isDegenerateToken(token.slice(0, DEGENERATE_HEAD)));
+}
+
+// A small binary min-heap of boundary offsets.
+function heapPush(heap, value) {
+  heap.push(value);
+  for (let i = heap.length - 1; i > 0;) {
+    const parent = (i - 1) >> 1;
+    if (heap[parent] <= heap[i]) break;
+    [heap[parent], heap[i]] = [heap[i], heap[parent]];
+    i = parent;
+  }
+}
+
+function heapPop(heap) {
+  const top = heap[0];
+  const last = heap.pop();
+  if (heap.length) {
+    heap[0] = last;
+    for (let i = 0; ;) {
+      const left = 2 * i + 1;
+      let small = i;
+      if (left < heap.length && heap[left] < heap[small]) small = left;
+      if (left + 1 < heap.length && heap[left + 1] < heap[small]) small = left + 1;
+      if (small === i) break;
+      [heap[small], heap[i]] = [heap[i], heap[small]];
+      i = small;
+    }
+  }
+  return top;
+}
+
+const BASE64URL_RUN = /[A-Za-z0-9_-]*/y;
+const JWT_START = /(?<![A-Za-z0-9])eyJ/g;
+
+// Where the base64url run starting at `at` ends.
+function base64urlRunEnd(line, at) {
+  BASE64URL_RUN.lastIndex = at;
+  BASE64URL_RUN.exec(line);
+  return BASE64URL_RUN.lastIndex;
 }
 
 // The value match whose prefix ends at valueStart, or null. `run` caches the last value-class run
@@ -229,9 +304,10 @@ function valueMatchAt(line, v, valueStart, run) {
 export function lineMatches(line, patterns) {
   const out = [];
   const seen = new Set();
-  const boundaries = [];
+  const boundaries = [];                         // a min-heap: boundaries are taken smallest first
   const queued = new Set();
   const runs = patterns.map(() => ({ from: -1, end: -2 }));
+  const spans = patterns.map(() => []);          // each pattern's global matches, in start order
   const push = (index, start, end, suppressed) => {
     const key = index + ':' + start;
     if (seen.has(key)) return;
@@ -241,7 +317,7 @@ export function lineMatches(line, patterns) {
   const boundaryAt = (end) => {
     if (end < line.length && LETTER_OR_DIGIT.test(line[end]) && !queued.has(end)) {
       queued.add(end);
-      boundaries.push(end);
+      heapPush(boundaries, end);
     }
   };
   patterns.forEach((p, index) => {
@@ -256,15 +332,39 @@ export function lineMatches(line, patterns) {
       }
       return;
     }
+    if (p.label === 'jwt' && plan.sticky) {
+      // One attempt per base64url run (R3-SW-3). A later `eyJ` in a run whose attempt failed sees the same
+      // run end and the same text after it, so it fails too; one inside a match is part of that match.
+      let skipUntil = -1;
+      JWT_START.lastIndex = 0;
+      for (let c = JWT_START.exec(line); c !== null; c = JWT_START.exec(line)) {
+        const at = c.index;
+        if (at < skipUntil) continue;
+        plan.sticky.lastIndex = at;
+        const m = plan.sticky.exec(line);
+        if (!m) { skipUntil = base64urlRunEnd(line, at); continue; }
+        push(index, at, at + m[0].length, isSuppressedMatch(p, m));
+        spans[index].push([at, at + m[0].length]);
+        boundaryAt(at + m[0].length);
+        skipUntil = at + m[0].length;
+      }
+      return;
+    }
     plan.global.lastIndex = 0;
     for (let m = plan.global.exec(line); m !== null; m = plan.global.exec(line)) {
       if (m[0].length === 0) { plan.global.lastIndex += 1; continue; }
       push(index, m.index, m.index + m[0].length, isSuppressedMatch(p, m));
+      spans[index].push([m.index, m.index + m[0].length]);
       if (!p.valueGroup) boundaryAt(m.index + m[0].length);
     }
   });
-  for (let k = 0; k < boundaries.length; k += 1) {
-    const at = boundaries[k];
+  // Per pattern: how far its matches starting at or before the current boundary reach, the next global
+  // match not yet counted, and where a failed JWT attempt's base64url run ends.
+  const covered = patterns.map(() => -1);
+  const nextSpan = patterns.map(() => 0);
+  const failedRun = patterns.map(() => -1);
+  while (boundaries.length) {
+    const at = heapPop(boundaries);
     patterns.forEach((p, index) => {
       const plan = planFor(p);
       if (plan.value && plan.value.stickyPrefix) {
@@ -274,11 +374,22 @@ export function lineMatches(line, patterns) {
         const hit = m ? valueMatchAt(line, v, at + m[0].length, runs[index]) : null;
         if (hit) push(index, at, hit.end, looksPlaceholder(hit.value));
       } else if (plan.sticky) {
+        const own = spans[index];
+        while (nextSpan[index] < own.length && own[nextSpan[index]][0] <= at) {
+          covered[index] = Math.max(covered[index], own[nextSpan[index]][1]);
+          nextSpan[index] += 1;
+        }
+        if (at < covered[index] || at < failedRun[index]) return;
         plan.sticky.lastIndex = at;
         const m = plan.sticky.exec(line);
         if (m && m[0].length) {
           push(index, at, at + m[0].length, isSuppressedMatch(p, m));
+          covered[index] = Math.max(covered[index], at + m[0].length);
           boundaryAt(at + m[0].length);
+        } else if (p.label === 'jwt' && line.startsWith('eyJ', at)) {
+          // The attempt got past `eyJ` and failed on what follows the header run. A later boundary in the
+          // same run sees the same run end and the same text after it, so it fails as well.
+          failedRun[index] = base64urlRunEnd(line, at);
         }
       }
     });
@@ -308,6 +419,51 @@ export function scanLines(text, patterns) {
   return out;
 }
 
+// A line scanner can see only the BEGIN header. Redact the complete PEM (or armored PGP) block first so
+// neither key material nor the END marker survives. An unterminated block is masked through EOF.
+// Exported for redact-sensitive.mjs, which must run this over its whole input before it splits lines.
+export function redactPrivateKeyBlocks(text) {
+  const pem = /-----BEGIN ([A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?(?:-----END \1-----|$)/g;
+  return String(text ?? '').replace(pem, '***MASKED:private-key***');
+}
+
+// Durable redaction only (SW-4): a password-literal value that opens with a quote ends at its closing
+// quote on the same line. The guard's value class stops at a blank, `;`, a quote or `\`, so redaction
+// kept the rest of a quoted value (`PASSWORD="Qm7 Tz2…"` kept `Tz2…`), all of it when the first word was
+// under the six-character floor, and all of a JSON-escaped `=\"…\"` value. The floor and the placeholder
+// test apply to the whole quoted value. Detection is unchanged. Each search stops at the next closing
+// delimiter, and consecutive starts of one delimiter share those stretches, so a line stays linear.
+function maskQuotedPasswords(line, patterns) {
+  const p = patterns.find((pattern) => pattern.label === 'password-literal');
+  const v = p ? planFor(p).value : null;
+  if (!v) return line;
+  let out = '';
+  let copied = 0;
+  v.prefix.lastIndex = 0;
+  for (let m = v.prefix.exec(line); m !== null; m = v.prefix.exec(line)) {
+    v.prefix.lastIndex = m.index + 1;
+    let open = m.index + m[0].length;
+    let close;
+    if (line[open - 1] === '"' || line[open - 1] === "'") {
+      close = line[open - 1];
+    } else if (line[open] === '\\' && (line[open + 1] === '"' || line[open + 1] === "'")) {
+      close = line.slice(open, open + 2);
+      open += 2;
+    } else {
+      continue;
+    }
+    const end = line.indexOf(close, open);
+    if (end - open < v.min || looksPlaceholder(line.slice(open, end))) continue;
+    if (m.index < copied) { // starts inside a span already masked: extend it
+      copied = Math.max(copied, end);
+      continue;
+    }
+    out += line.slice(copied, m.index) + `***MASKED:${p.label}***`;
+    copied = end;
+  }
+  return copied ? out + line.slice(copied) : line;
+}
+
 // Replace high-confidence matches before durable local persistence. Unlike the interactive guard,
 // durable redaction deliberately IGNORES per-line allow markers: an annotation may authorize a
 // fixture in source control, but it never authorizes copying a secret value into a transcript or
@@ -316,14 +472,12 @@ export function scanLines(text, patterns) {
 // disagree about which match is suppressed: each pattern pass, in array order, masks that pattern's
 // unsuppressed matches in start order and skips a start inside a span it already masked. A later pass
 // sees earlier masks, and a line with no hidden match gets exactly the masks a global replace gave.
+// The one redaction-only step is maskQuotedPasswords, which runs before the passes.
 export function redactSecrets(text, patterns = HIGH) {
-  // A line scanner can see only the BEGIN header. Redact the complete PEM block first so neither
-  // key material nor the END marker survives. An unterminated block is masked through EOF.
-  const pem = /-----BEGIN ([A-Z0-9 ]*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)/g;
-  const withoutPrivateKeys = String(text ?? '').replace(pem, '***MASKED:private-key***');
+  const withoutPrivateKeys = redactPrivateKeyBlocks(text);
   return withoutPrivateKeys.split(/(\r?\n)/).map((line) => {
     if (/^\r?\n$/.test(line)) return line;
-    let redacted = line;
+    let redacted = maskQuotedPasswords(line, patterns);
     let matches = null; // recomputed only after a pass changed the line
     patterns.forEach((p, index) => {
       if (matches === null) matches = lineMatches(redacted, patterns);

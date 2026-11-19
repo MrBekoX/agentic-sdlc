@@ -52,7 +52,7 @@ Codex wires blocking `PreToolUse` guards, `SessionStart`, and advisory/env-gated
 
 ## Codex hook trust
 
-Codex runs a non-managed plugin-bundled hook only after that hook is trusted. Trust each agentic-sdlc hook in the Codex `/hooks` view, then run the read-only post-install check from the installed plugin root and pass `--cwd <target-project>`, using the session project's path. Replace `agentic-sdlc@<marketplace-name>` below with your actual installed plugin ID. A fully trusted install prints `codex_hook_trust=trusted`.
+Codex runs a non-managed plugin-bundled hook only after that hook is trusted. Trust each agentic-sdlc hook in the Codex `/hooks` view, then run the read-only post-install check from the installed plugin root and pass `--cwd <target-project>`, using the session project's path. Replace `agentic-sdlc@<marketplace-name>` below with your actual installed plugin ID. Without `--plugin` the check reads `agentic-sdlc@mrbekox`, the README install id; an install from the personal catalog passes `--plugin agentic-sdlc@personal`. A fully trusted install prints `codex_hook_trust=trusted`.
 
 | Environment | Codex config location | Trust step | `node` requirement | Check command | Verification state |
 |---|---|---|---|---|---|
@@ -115,6 +115,8 @@ AGENTIC_BRANCH_GUARD_BLOCK=true
 
 Unknown local state remains nonblocking unless a protected destination is independently known, for example `HEAD:refs/heads/main`. This includes unavailable Git, nonrepositories, exhausted read budgets, command-supplied Git environment/include/path overrides and unsupported expansions. A tag source with an unqualified destination has an unknown remote namespace; use an explicit `refs/heads/` or `refs/tags/` destination. The guard does not connect to a remote to resolve uncertainty. See [push resolution boundaries](../hooks/README.md) for details.
 
+One exception: a git alias the guard cannot resolve (past 32 lookups or 4 seconds per command, defined in a config the call does not use, or past the resolver's work budget) is treated as a possible commit or push to a protected branch, on any branch. It warns, and is denied under `AGENTIC_BRANCH_GUARD_BLOCK=true`.
+
 Very large configured mapping queries can also exhaust the documented matching-work budget. Such a query remains unresolved rather than gaining a guessed upstream or same-name destination; later independently known explicit protected destinations still warn or deny. This client-side backstop preserves fail-open handling for unknown queries.
 
 ## Completion Claim Guard Only Warns
@@ -135,11 +137,11 @@ This is the default in Claude Code for `flow-order-guard.mjs` and `flow-step-gua
 AGENTIC_FLOW_GATE_BLOCK=true
 ```
 
-The flow guards re-derive evidence from the current transcript, validated `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/` artifacts, real tool calls, and real commands. Prose such as "I ran the gate" does not satisfy a required step.
+The flow guards re-derive evidence from the current transcript, validated `docs/agentic-sdlc/specs/` and `docs/agentic-sdlc/plans/` artifacts, real tool calls, and real commands. Prose such as "I ran the gate" does not satisfy a required step. A source file written through `Bash` or `PowerShell` (`sed -i`, a redirect, a heredoc, `tee`) is an edit like a `Write`; so is a shell write to a source-extension file outside the project (`cat > /tmp/probe.py <<'EOF'`). PowerShell cmdlet writes (`Set-Content`, `Out-File`) are not recognised. At Stop only the specs and plans this session wrote count: after resuming work whose artifacts an earlier session saved, save them again before the warning clears.
 
 `flow-step-guard.mjs` also warns when an `agentic-sdlc-pipeline` turn ends on the `dispatch-strategy` decision: the pipeline skill was invoked in the current turn (a `Skill` call or a slash-command start), the turn's last top-level tool call is that `Skill` call, and the final assistant text is known and contains no `?`. `AGENTIC_FLOW_GATE_BLOCK=true` blocks it with the same reason; a missing-step finding takes precedence and silences it.
 
-If the flow guards stay silent during a pipeline run, check how the run started. The hooks activate a flow from a `Skill` tool call or from a slash-command start (`/agentic-sdlc-pipeline` or `/agentic-sdlc:agentic-sdlc-pipeline`, recorded as `<command-name>/agentic-sdlc:agentic-sdlc-pipeline</command-name>` in headless `claude -p` on Claude Code 2.1.302; an interactive-session start was not captured). A run that only reads `SKILL.md`, or a prompt that mentions the command in prose, activates no flow.
+If the flow guards stay silent during a pipeline run, check how the run started. The hooks activate a flow from a top-level `Skill` tool call, not a sub-agent's, or from a slash-command start (`/agentic-sdlc-pipeline` or `/agentic-sdlc:agentic-sdlc-pipeline`, recorded as `<command-name>/agentic-sdlc:agentic-sdlc-pipeline</command-name>` in headless `claude -p` on Claude Code 2.1.302; an interactive-session start was not captured). A run that only reads `SKILL.md`, or a prompt that mentions the command in prose, activates no flow.
 
 The `branch` and `review-result` steps are warn-only by design: they never block, even with `AGENTIC_FLOW_GATE_BLOCK=true`. For strict Codex evaluation, run the offline `python3 scripts/strict_flow_evidence.py --rollout <path> --cwd <dir>`, or set `AGENTIC_FLOW_STRICT_EVIDENCE=true` to make the live Codex `tests` evidence strict.
 
@@ -159,6 +161,9 @@ The scanners never print secret values. If a warning is false positive:
 - forceful `git clean`
 - recursive `rm` forms such as `rm -r`, `rm -rf`, `rm --recursive`, `/bin/rm -rf`, `sudo rm -rf`, `sudo FOO=bar rm -rf`, `command rm -rf`, `env FOO=bar rm -rf`, and `env -u FOO rm -rf`
 - `Remove-Item -Recurse`, common aliases such as `ri`/`del`/`rd`/`rmdir`, and simple `powershell`/`pwsh -Command` wrappers
+- the same operations spelled with a unique long-option prefix (`rm --rec`, `git reset --ha`, `git clean --fo`), `git clean` under `clean.requireForce=false` or a `clean.requireForce` the guard cannot read, and a git alias that expands to one of them
+
+A here-document body is read as commands, by this guard and by the git guards, so `cat > notes.md <<EOF` whose text mentions a recursive delete or a push to `main` can be denied. Only a whole command of one exact shape keeps its body out: `cat > PATH <<'EOF'`, `cat >> PATH <<'EOF'`, `cat <<'EOF' > PATH`, `cat <<'EOF' >> PATH`, `tee PATH <<'EOF'`, or `git commit -F - <<'EOF'`. The shape needs a quoted delimiter, a plain relative `PATH`, and nothing before the opener or after the closing line, and it never applies under the PowerShell tool. Otherwise write the file with the file-write tool.
 
 Use a scoped, reviewed command and get explicit approval for destructive cleanup.
 

@@ -13,11 +13,13 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_cursor_plugin import validate
+from build_release import ReleaseError, local_package_files
+from check_cursor_plugin import _relative_path, validate
 
 
 RECEIPT = ".cursor-plugin/install-receipt.json"
@@ -80,45 +82,89 @@ def _inside(parent: Path, child: Path) -> bool:
 
 
 def _package_files(package: Path) -> list[str]:
-    files = []
-    for dirpath, dirnames, filenames in os.walk(package, followlinks=False):
-        current = Path(dirpath)
-        dirnames[:] = sorted(
-            name for name in dirnames
-            if name not in SKIP_DIRECTORIES and not (current / name).is_symlink()
-        )
-        for name in sorted(filenames):
-            if name in SKIP_FILES or name.endswith(".pyc"):
-                continue
-            path = current / name
-            if path.is_symlink():
-                try:
-                    path.resolve().relative_to(package.resolve())
-                except ValueError:
-                    continue
-            if not path.is_file():
-                continue
-            files.append(path.relative_to(package).as_posix())
-    return files
+    """The files a Cursor copy takes (RL-3): a checkout's committed tree, never a private or local file.
+
+    Selection is the release builder's: `git ls-files` for a checkout, a walk for an extracted
+    package, and no path in a release exclusion class (`.env`, `settings.local.json`, `AGENTS.md`,
+    `CLAUDE.md`, session reports, audit dumps, symlinks).
+    """
+    return [relative for relative in local_package_files(package, skip=SKIP_DIRECTORIES)
+            if relative.rsplit("/", 1)[-1] not in SKIP_FILES and not relative.endswith(".pyc")]
 
 
-def _load_receipt(dest: Path) -> list[str]:
+def _read_receipt(dest: Path) -> list[str] | None:
+    """The managed paths of a valid agentic-sdlc receipt, or None when there is none."""
     file = dest / RECEIPT
     if not file.is_file():
-        return []
+        return None
     try:
         data = json.loads(file.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
-        return []
-    managed = data.get("managed") if isinstance(data, dict) else None
+        return None
+    if not isinstance(data, dict) or data.get("name") != "agentic-sdlc":
+        return None
+    managed = data.get("managed")
     if not isinstance(managed, list):
-        return []
+        return None
     return [item for item in managed if isinstance(item, str) and _safe_receipt_path(item)]
 
 
+def _load_receipt(dest: Path) -> list[str]:
+    return _read_receipt(dest) or []
+
+
 def _safe_receipt_path(value: str) -> bool:
-    parts = value.split("/")
-    return bool(value) and ".." not in parts and not value.startswith("/") and "\\" not in value
+    # RL-10: the manifest checker's rule rejects drive paths (C:/, c:x), UNC and rooted forms,
+    # '..' and control characters; a backslash is never part of a path this installer writes.
+    return _relative_path(value) and "\\" not in value
+
+
+def _managed_target(dest: Path, relative: str) -> Path | None:
+    """dest/relative, or None when a symlinked folder would place it outside the destination."""
+    target = dest / relative
+    return target if _inside(dest, target.parent) else None
+
+
+# Deleting through folder descriptors opened with O_NOFOLLOW never follows a link, even one swapped
+# in after a check (R2-RL-2). Windows has no dir_fd support and keeps the checked path-based delete.
+_NO_FOLLOW_DELETE = (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                     and {os.open, os.stat, os.unlink, os.rmdir} <= os.supports_dir_fd)
+
+
+def _remove_managed(dest: Path, relative: str) -> None:
+    """Delete dest/relative (a file or a link, never what a link points to), then its emptied folders."""
+    if not _NO_FOLLOW_DELETE:
+        target = _managed_target(dest, relative)
+        if target is not None and (target.is_file() or target.is_symlink()):
+            target.unlink()
+            _prune_empty(dest, relative)
+        return
+    parts = [part for part in relative.split("/") if part not in ("", ".")]
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    folders = []
+    try:
+        folders.append(os.open(str(dest), flags))
+        for part in parts[:-1]:
+            # A link in place of a folder fails here (ELOOP or ENOTDIR), so nothing outside is touched.
+            folders.append(os.open(part, flags, dir_fd=folders[-1]))
+        mode = os.stat(parts[-1], dir_fd=folders[-1], follow_symlinks=False).st_mode
+        if not (stat.S_ISREG(mode) or stat.S_ISLNK(mode)):
+            return
+        os.unlink(parts[-1], dir_fd=folders[-1])
+        for index in range(len(parts) - 2, -1, -1):
+            os.rmdir(parts[index], dir_fd=folders[index])  # stops at the first folder that is not empty
+    except OSError:
+        return
+    finally:
+        for folder in folders:
+            os.close(folder)
+
+
+def _write_receipt(dest: Path, managed: list[str]) -> None:
+    receipt_path = dest / RECEIPT
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(json.dumps({"name": "agentic-sdlc", "managed": managed}, indent=2) + "\n",
+                            encoding="utf-8")
 
 
 def _prune_empty(dest: Path, relative: str) -> None:
@@ -144,26 +190,42 @@ def install(package: Path, dest: Path) -> tuple[int, list[str]]:
             "error=cursor_dest_overlaps_package: choose a destination outside the package directory",
             "cursor_install=failed",
         ]
-    previous = set(_load_receipt(dest))
-    managed = _package_files(package)
+    receipt = _read_receipt(dest)
+    # RL-1: never write over, and so never later delete, a file this installer did not write. A
+    # destination without our receipt must be empty; on an update, a path the new package adds must
+    # not already hold a user's file.
+    if receipt is None and dest.is_dir() and any(dest.iterdir()):
+        return 1, [
+            "error=cursor_dest_not_empty: the destination holds files but no agentic-sdlc install receipt; "
+            "choose an empty or new directory",
+            "cursor_install=failed",
+        ]
+    previous = set(receipt or [])
+    try:
+        managed = _package_files(package)
+    except ReleaseError:
+        return 1, ["error=cursor_package_unreadable: git could not list the package checkout", "cursor_install=failed"]
+    # A path the receipt does not own must not exist yet, and no path may land outside the
+    # destination through a symlinked folder or be a link itself, which copy2 and the receipt write
+    # would follow (R2-RL-2).
+    conflicts = [relative for relative in [*managed, RECEIPT] if _managed_target(dest, relative) is None
+                 or (dest / relative).is_symlink()
+                 or (relative not in previous and relative != RECEIPT and (dest / relative).exists())]
+    if conflicts:
+        return 1, [f"error=cursor_dest_file_unmanaged:{relative}" for relative in conflicts] + [
+            "cursor_install=failed"]
     dest.mkdir(parents=True, exist_ok=True)
+    # The receipt names every path this run may write before the first copy, so an interrupted
+    # install leaves a destination that the next install or an uninstall still recognises.
+    _write_receipt(dest, sorted(previous | set(managed)))
     for relative in managed:
         target = dest / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(package / relative, target)
     stale = previous - set(managed) - {RECEIPT}
     for relative in sorted(stale):
-        target = dest / relative
-        if target.is_file() or target.is_symlink():
-            target.unlink()
-            _prune_empty(dest, relative)
-    receipt = {
-        "name": "agentic-sdlc",
-        "managed": managed,
-    }
-    receipt_path = dest / RECEIPT
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+        _remove_managed(dest, relative)
+    _write_receipt(dest, managed)
     return 0, [
         f"cursor_plugin_dest={dest}",
         f"managed_files={len(managed)}",
@@ -188,14 +250,8 @@ def uninstall(dest: Path) -> tuple[int, list[str]]:
             "cursor_uninstall=failed",
         ]
     for relative in managed:
-        target = dest / relative
-        if target.is_file() or target.is_symlink():
-            target.unlink()
-            _prune_empty(dest, relative)
-    receipt = dest / RECEIPT
-    if receipt.is_file():
-        receipt.unlink()
-    _prune_empty(dest, RECEIPT)
+        _remove_managed(dest, relative)
+    _remove_managed(dest, RECEIPT)
     if dest.is_dir():
         try:
             dest.rmdir()

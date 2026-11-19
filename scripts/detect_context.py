@@ -172,15 +172,23 @@ def detect(paths):
 # Step 6 — --probe deps
 # ---------------------------------------------------------------------------
 
-def _parse_package_json(text):
-    """Return True if package.json declares >=1 external dependency."""
+def _load_json_object(text):
+    """The JSON object `text` holds, or None: unparsable text, nesting deeper than the parser's stack, or a
+    top-level value that is not an object (`[]`, a string) declares nothing. A manifest is the user's file,
+    so its shape is never trusted; a probe that crashed on it would break the exit-0 contract."""
     try:
         data = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
+    except (ValueError, RecursionError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _parse_package_json(text):
+    """Return True if package.json declares >=1 external dependency (a non-empty object)."""
+    data = _load_json_object(text)
+    if data is None:
         return False
-    deps = data.get("dependencies", {})
-    dev_deps = data.get("devDependencies", {})
-    return bool(deps) or bool(dev_deps)
+    return any(isinstance(data.get(key), dict) and bool(data[key]) for key in ("dependencies", "devDependencies"))
 
 
 def _parse_requirements_txt(text):
@@ -264,13 +272,11 @@ def _parse_pom_xml(text):
 
 def _parse_composer_json(text):
     """Return True if composer.json has a non-empty require (ignoring sole `php` key)."""
-    try:
-        data = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        return False
-    require = data.get("require", {})
-    non_php = {k: v for k, v in require.items() if k.lower() != "php"}
-    return bool(non_php)
+    data = _load_json_object(text)
+    require = data.get("require") if data is not None else None
+    if not isinstance(require, dict):
+        return False  # PHP writes an empty `require` as `[]`
+    return any(k.lower() != "php" for k in require)
 
 
 # Map manifest filenames to their parsers.  Glob patterns handled separately.
@@ -351,12 +357,12 @@ def _node_toolchain(root):
     pkg = root / "package.json"
     if pkg.is_file():
         try:
-            data = json.loads(pkg.read_text(encoding="utf-8-sig", errors="replace"))
-            scripts = data.get("scripts", {})
-            if any(k in _NODE_SCRIPT_KEYS for k in scripts):
-                return True
-        except (OSError, json.JSONDecodeError, ValueError):
-            pass
+            data = _load_json_object(pkg.read_text(encoding="utf-8-sig", errors="replace"))
+        except OSError:
+            data = None
+        scripts = data.get("scripts") if data is not None else None
+        if isinstance(scripts, dict) and any(k in _NODE_SCRIPT_KEYS for k in scripts):
+            return True
 
     # tsconfig.json
     if (root / "tsconfig.json").is_file():

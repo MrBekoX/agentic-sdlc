@@ -15,7 +15,7 @@ import re
 import types
 from pathlib import Path
 
-from . import RUNNER_VERSION, engine, fingerprint, frontmatter, gitinfo, logs, manifest, mask, paths, probes
+from . import RUNNER_VERSION, checks, engine, fingerprint, frontmatter, gitinfo, logs, manifest, mask, paths, probes
 from . import runexec
 from . import state as state_mod
 from . import strategy as strategy_mod
@@ -423,6 +423,22 @@ def escalate(args) -> int:
 
 # --- external ----------------------------------------------------------------------------------
 
+def _external_artifacts_missing(ctx, step) -> list:
+    """The package's spec and plan that `step` writes (its outputs) and that are absent or empty.
+
+    A step another plugin did still leaves the run's spec and plan where the review gate and the
+    implement step read them (RN-5): without them the gate would approve `absent` bodies and
+    implement would start with no plan. An external intent writes neither, so it needs none.
+    """
+    wanted = {checks.artifact_rel(ctx, "spec"), checks.artifact_rel(ctx, "plan")}
+    missing = []
+    for rel in sorted(checks.step_outputs(ctx, step) & wanted):
+        target = Path(ctx.pkg).joinpath(*rel.split("/"))
+        if not target.is_file() or target.stat().st_size == 0:
+            missing.append(rel)
+    return missing
+
+
 def external(args) -> int:
     pkg, held = _locked(args)
     with held:
@@ -434,7 +450,7 @@ def external(args) -> int:
         if step is None:
             raise SdlcError(2, "unknown_step:" + args.step)
         if args.step not in EXTERNAL_STEPS:
-            raise SdlcError(4, "external_not_allowed:%s (design, spec or plan only)" % args.step)
+            raise SdlcError(4, "external_not_allowed:%s (%s only)" % (args.step, " or ".join(EXTERNAL_STEPS)))
         if not _OWNER_RE.match(args.owner or ""):
             raise SdlcError(2, "bad_owner (plugin:skill)")
         entry = engine._entry(ctx, step)
@@ -449,6 +465,10 @@ def external(args) -> int:
             raise SdlcError(2, "artifact_outside_project") from None
         if not artifact.is_file():
             raise SdlcError(2, "artifact_missing:" + rel)
+        missing = _external_artifacts_missing(ctx, step)
+        if missing:
+            raise SdlcError(4, "external_artifacts_missing:%s (save the other plugin's result at these package "
+                               "paths first: the gate and the later steps read them there)" % ",".join(missing))
         quote = _quote_needed(args.quote, "external")
         artifact_fp = fingerprint.file_fp(artifact)
         entry["external"] = {"owner": args.owner, "artifact": rel, "fp": artifact_fp, "ts": now_iso()}

@@ -571,11 +571,27 @@ def current_sets(ctx) -> dict:
         head = None
     changed, _ignored = fingerprint.classify(changed, shared.get("ignore_globs") or [])
     source, tests = fingerprint.classify(changed, shared.get("test_globs") or [])
+    gitlinks = _gitlinks(project, changed) if head is not None else {}
     return {
         "head": head, "changed": changed, "source": source, "tests": tests,
-        "source_fp": fingerprint.set_fp(project, source, head),
-        "tests_fp": fingerprint.set_fp(project, tests, head),
+        "source_fp": fingerprint.set_fp(project, source, gitlinks),
+        "tests_fp": fingerprint.set_fp(project, tests, gitlinks),
     }
+
+
+def _gitlinks(project: Path, names) -> dict:
+    """{path: checked-out commit or None} for each changed path that is a folder holding a repository
+    (`.git` inside: a submodule, or a nested repository git lists as one path). The set fingerprint
+    has no HEAD in it (RN-6), so the commit is what tells two checkouts of a submodule apart."""
+    found = {}
+    for name in names:
+        if not fingerprint._inside(name):
+            continue
+        folder = project.joinpath(*name.split("/"))
+        if textio.is_link_like(folder) or not folder.is_dir() or not os.path.lexists(str(folder / ".git")):
+            continue
+        found[name] = gitinfo.head_sha(folder)
+    return found
 
 
 def _sets_or_error(ctx):

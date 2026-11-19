@@ -2,8 +2,8 @@
   "_comment": "Live trigger eval-set for root-cause-fix. Positives = natural-language bug/root-cause fix requests; negatives = feature/refactor/review-feedback near misses.",
   "queries": [
     {"query": "Login sayfasinda null reference hatasi aliyorum; root cause'u bulup duzelt.", "should_trigger": true},
-    {"query": "Production'da odeme webhook'u bazen cift kayit atiyor; kok nedeni bul ve duzelt.", "should_trigger": true},
-    {"query": "Find and fix the expired-token failing test bug at its root cause.", "should_trigger": true},
+    {"query": "Production'da rapor ekrani bazen ayni satiri iki kez gosteriyor; kok nedeni bul ve duzelt.", "should_trigger": true},
+    {"query": "Find and fix the root cause of the CSV export test that fails when a row is empty.", "should_trigger": true},
     {"query": "Sifirdan bir bildirim ayarlari ekrani ekle.", "should_trigger": false},
     {"query": "order.py modulunu okunabilirlik icin yeniden yapilandir, davranis degismesin.", "should_trigger": false},
     {"query": "Bu PR yorumlarini uygula.", "should_trigger": false}

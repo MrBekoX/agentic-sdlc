@@ -50,7 +50,8 @@ function plainAbsolute(value: unknown, what: string): string {
 }
 
 const slug = String(args.slug ?? "").trim();
-if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(slug)) {
+// scripts/resolve_work_package.py SLUG_RE, the rule the runner's packages follow (a trailing hyphen is valid).
+if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) {
   throw new Error(`spec-plan-draft: slug must be the package's kebab-case slug (got "${slug}")`);
 }
 const pluginRoot = plainAbsolute(args.pluginRoot, "pluginRoot").replace(/[\\/]+$/, "");

@@ -199,6 +199,12 @@ REPORT_CHECKS = {
 # security-review flow only reports.
 SECURITY_VERDICT = {"full": "Verdict: pass", "feature": "Verdict: pass", "bugfix": "Verdict: pass",
                     "refactor": "Verdict: pass", "security-review": None}
+# The audit step of every flow that implements blocks on `allow-final` under `## Final Decision`; the
+# one-step audit flow reports `block-final` as a result (audit SK-5: the implement flows' audit once
+# completed on a `block-final` report).
+AUDIT_VERDICT = {"full": ("allow-final", "## Final Decision"), "feature": ("allow-final", "## Final Decision"),
+                 "bugfix": ("allow-final", "## Final Decision"), "refactor": ("allow-final", "## Final Decision"),
+                 "audit": (None, None)}
 # Design §5.11 escalate lattice (light -> gated is a form change, not an edge): (from, to, work type the
 # target runs with; "keep" carries the package's own work type).
 DESIGN_LATTICE = [
@@ -694,8 +700,12 @@ class TestFlows(unittest.TestCase):
                     path, header = REPORT_CHECKS[step["id"]]
                     self.assertEqual((reports[0]["path"], reports[0]["header"]), (path, header))
                     self.assertIn(path, step["outputs"])
-                    verdict = SECURITY_VERDICT[flow_id] if step["id"] == "security" else None
-                    self.assertEqual(reports[0].get("verdict"), verdict)
+                    verdict, under = None, None
+                    if step["id"] == "security":
+                        verdict = SECURITY_VERDICT[flow_id]
+                    elif step["id"] == "audit":
+                        verdict, under = AUDIT_VERDICT[flow_id]
+                    self.assertEqual((reports[0].get("verdict"), reports[0].get("under")), (verdict, under))
                     self.assertNotIn("fresh", reports[0])  # default true: an earlier visit's report never counts
 
     def test_gates_and_red_green_evidence(self):

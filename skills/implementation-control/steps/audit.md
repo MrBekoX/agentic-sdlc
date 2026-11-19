@@ -60,13 +60,13 @@ Put `# Implementation audit` first, in place of the role's own title line, then 
     allow-final
 
 - `# Implementation audit` is the first line, exactly.
-- One value under `## Overall Status` (PASS, PARTIAL or FAIL) and one under `## Final Decision` (`allow-final`, or `block-final` with its reason).
+- One value under `## Overall Status` (PASS, PARTIAL or FAIL) and one line under `## Final Decision`: `allow-final`, or `block-final` with its reason.
 - For an inline run: `Auditor: inline (degraded: <the card's degraded= value>), not independent`.
 - Never mark a step PASS from memory or from the implementer's notes. An empty `## Missing Steps` while an artifact is absent is a false report.
 
 ## When the decision is block-final
 - With an implement step in this package, a gap in the work (a missing test, an out-of-scope edit, an unmet criterion): fix it, then run `then=` before you write the report. The runner re-opens the steps the change affects and brings you back here.
-- Any other gap (it needs the user, or a past step's evidence is lost): write the report with `block-final` and the reason. Never write `allow-final` to move on.
+- Any other gap (it needs the user, or a past step's evidence is lost): write the report with `block-final` and the reason. Never write `allow-final` to move on. If `done_when=` asks for `allow-final`, tell the user what blocks and end your turn; on their word, run `then=` with `next` replaced by `halt --reason "<their words>"` (`resume` returns here).
 
 ## Finish
 Write the report, then run the card's `then=` command.

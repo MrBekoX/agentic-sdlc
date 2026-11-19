@@ -90,7 +90,7 @@ DATA_HANDLING_FACTS = (
     ("read Git alias definitions through `hooks/git-invocation.mjs`", "hooks/branch-guard.mjs", "from './git-invocation.mjs'"),
     ("read Git alias definitions through `hooks/git-invocation.mjs`", "hooks/scan-commit.mjs", "from './git-invocation.mjs'"),
     ("`hooks/branch-guard.mjs` runs `git` to read the current branch", "hooks/branch-guard.mjs", "'branch', '--show-current'"),
-    ("`hooks/scan-commit.mjs` runs `git diff` to read the added diff lines of a commit", "hooks/scan-commit.mjs", "gitDiff(['diff', '--cached', '--unified=0'], cwd)"),
+    ("`hooks/scan-commit.mjs` runs `git diff` to read the added diff lines of a commit", "hooks/scan-commit.mjs", "patchDiff(['diff', '--cached', '--unified=0'], cwd)"),
     ("takes the commit message from the `-m` text in the command", "hooks/scan-commit.mjs", "...commitMessages(text),"),
     ("reads the contents of any file named by `-F` or `--file`", "hooks/git-invocation.mjs", "if (a === '-F' || a === '--file')"),
     ("reads the contents of any file named by `-F` or `--file`", "hooks/scan-commit.mjs", "commitMessageFiles(text).map((f) =>"),

@@ -1971,7 +1971,9 @@ class TestFindingsRecord(HistoryTestCase):
 
 CI_WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 SOURCE_STEPS = [
-    ("Version consistency", "python3 scripts/bump_version.py --release-check"),
+    # RL-4: every run checks the declarations; only a release run also checks the CHANGELOG.
+    ("Version consistency", "python3 scripts/bump_version.py --check"),
+    ("Release consistency", "python3 scripts/bump_version.py --release-check"),
     ("Manifest coverage", "python3 scripts/bump_version.py --audit"),
     ("Static checks", "python3 scripts/check_all.py"),
     ("Skill harness", "python3 tests/skills/harness.py"),
@@ -2256,6 +2258,15 @@ class TestArchiveGateCoverage(ScratchTestCase):
         code, text = self.check(log, self.source_tree())
         self.assertEqual(code, 1, text)
         self.assertIn("archive_coverage=failed", text.splitlines())
+
+    def test_skip_reason_with_an_apostrophe_is_parsed(self):
+        # unittest prints the reason's repr, which takes double quotes when the reason holds an apostrophe.
+        log = GOOD_ARCHIVE_LOG.replace("skipped 'named reason'", 'skipped "the workflow\'s reason"')
+        code, text = self.check(log, self.source_tree())
+        lines = text.splitlines()
+        self.assertEqual(code, 0, text)
+        self.assertIn("skip_reason=test_sample.Sample.test_skipped:the workflow's reason", lines)
+        self.assertEqual(lines[-1], "archive_coverage=passed")
 
     def test_empty_skip_reason_fails(self):
         log = GOOD_ARCHIVE_LOG.replace("skipped 'named reason'", "skipped ''")

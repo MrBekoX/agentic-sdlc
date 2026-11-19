@@ -9,15 +9,19 @@
 // entirely. Narrow patterns + warn-by-default keep false positives low. Fail-open on any error.
 import { readFileSync } from 'node:fs';
 import { readStdin } from './secret-patterns.mjs';
+import { parseTranscript, skillInvoked } from './flow-evidence.mjs';
+import { completionClaimed } from './codex-rollout.mjs';
 
 const BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_COMPLETION_GATE_BLOCK || ''));
 
 // Strong, final-sounding completion claims (kept narrow to avoid false positives on casual "done").
+// FH-8: read through completionClaimed (codex-rollout.mjs), which scopes NEGATED to the claim's sentence
+// and skips questions, conditionals and quoted spans; the Codex guard and the offline reader share it.
 const CLAIM =
-  /\b(all\s+tests?\s+(pass|passing|green)|all\s+green|ready\s+to\s+(merge|ship)|ready\s+for\s+review|implementation\s+(is\s+)?complete|feature\s+complete|task\s+(is\s+)?complete|done\s+and\s+verified|fixed\s+and\s+verified|verified\s+and\s+(complete|done)|everything\s+(works|passes))\b/i;
+  /\b(?:all\s+(?:the\s+)?(?:\d+\s+)?tests?\s+(?:(?:are|have)\s+(?:now\s+)?)?(?:pass|passes|passed|passing|green)|all\s+green|ready\s+to\s+(?:merge|ship)|ready\s+for\s+review|implementation\s+(?:is\s+)?(?:now\s+)?completed?|feature\s+(?:is\s+)?completed?|task\s+(?:is\s+)?completed?|done\s+and\s+verified|fixed\s+and\s+verified|verified\s+and\s+(?:complete|done)|everything\s+(?:works|passes))\b|(?<![A-Za-zÇĞİÖŞÜçğıöşü])(?:(?:tüm|bütün)\s+(?:\d+\s+)?test(?:ler)?\s+(?:başarıyla\s+)?(?:geçti|geçiyor)|testlerin\s+(?:hepsi|tamamı)\s+(?:başarıyla\s+)?(?:geçti|geçiyor)|(?:uygulama|görev|geliştirme|özellik|düzeltme)\s+(?:başarıyla\s+)?tamamlandı|(?:birleştirmeye|incelemeye|yayına)\s+hazır|(?:düzeltildi|tamamlandı)\s+ve\s+doğrulandı|her\s+şey\s+çalışıyor)(?![A-Za-zÇĞİÖŞÜçğıöşü])/i;
 
 // Phrases that signal the work is explicitly NOT finished — suppress to avoid false positives.
-const NEGATED = /\b(not\s+(yet\s+)?(done|complete|ready|passing)|still\s+(failing|broken|todo)|incomplete|do\s+not\s+claim)\b/i;
+const NEGATED = /\b(?:not\s+(?:yet\s+)?(?:all|done|complete|completed|ready|passing|passed|green)|still\s+(?:failing|broken|todo)|incomplete|do\s+not\s+claim)\b|n['’]t\s+(?:yet\s+)?(?:been\s+)?(?:all\s+)?(?:done|complete|completed|ready|pass|passing|passed|green|work|working)\b|(?<![A-Za-zÇĞİÖŞÜçğıöşü])(?:hazır\s+değil|tamamlanmadı|geçmedi|geçmiyor)(?![A-Za-zÇĞİÖŞÜçğıöşü])/i;
 
 function recordText(e) {
   const content = e?.message?.content;
@@ -63,12 +67,6 @@ function transcriptCaughtUp(events, lastAssistantMessage) {
   return collapseWs(lastAssistantCaughtUpText(events)) === collapseWs(lastAssistantMessage);
 }
 
-// True if a Skill tool_use referencing completion-claim-gate appears anywhere in the transcript.
-function gateInvoked(raw) {
-  return /"skill"\s*:\s*"[^"]*completion-claim-gate"/.test(raw)
-    || /"name"\s*:\s*"Skill"[\s\S]{0,400}?completion-claim-gate/.test(raw);
-}
-
 const raw = await readStdin();
 let input = {};
 try { input = JSON.parse(raw || '{}'); } catch { /* ignore */ }
@@ -95,8 +93,9 @@ try {
   process.exit(0); // fail-open: cannot read transcript
 }
 
-if (!text || !CLAIM.test(text) || NEGATED.test(text)) process.exit(0);
-if (gateInvoked(transcriptRaw)) process.exit(0); // gate ran — nothing to do
+if (!text || !completionClaimed(text, CLAIM, NEGATED)) process.exit(0);
+// FH-7: the gate ran only if a non-errored Skill call names it exactly (not args, a look-alike or a prompt).
+if (skillInvoked(parseTranscript(tpath), 'completion-claim-gate')) process.exit(0); // gate ran — nothing to do
 
 const msg =
   'Final message claims completion but completion-claim-gate was not invoked this session ' +

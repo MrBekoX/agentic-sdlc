@@ -743,6 +743,15 @@ class TestEngine(EngineCase):
                                "--artifact", "notes/spec-from-superpowers.md", "--quote", "Use superpowers for this.")
         self.assertEqual(code, 4, text)
         self.assertIn("error=external_not_allowed:implement", text)
+        # The other plugin's spec and plan must be in the package: the review gate and implement read
+        # them there (audit RN-5: without them the gate approved `absent` bodies).
+        code, text = self.sdlc("external", "draft", "--owner", "superpowers:brainstorming",
+                               "--artifact", "notes/spec-from-superpowers.md", "--quote", "Use superpowers for this.")
+        self.assertEqual(code, 4, text)
+        self.assertIn("error=external_artifacts_missing:plan/demo.md,spec/demo.md", text)
+        self.assertNotEqual(self.state()["steps"]["draft"]["state"], "done")
+        self.put("spec/demo.md", SPEC_BODY)
+        self.put("plan/demo.md", PLAN_BODY)
         code, text = self.sdlc("external", "draft", "--owner", "superpowers:brainstorming",
                                "--artifact", "notes/spec-from-superpowers.md", "--quote", "Use superpowers for this.")
         self.assertEqual(code, 0, text)

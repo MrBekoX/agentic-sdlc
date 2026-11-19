@@ -35,7 +35,8 @@ import sys
 import threading
 import time
 
-DEFAULT_PLUGIN = "agentic-sdlc@personal"
+# The README install id (`codex plugin add agentic-sdlc@mrbekox`); a personal catalog passes --plugin.
+DEFAULT_PLUGIN = "agentic-sdlc@mrbekox"
 ACCEPTED = ('trusted', 'managed')
 STATUSES = ("trusted", "managed", "untrusted", "modified")
 CLIENT_INFO = {"name": "agentic_sdlc_trust_check", "version": "1"}

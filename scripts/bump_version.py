@@ -5,10 +5,12 @@ Usage:
   python3 scripts/bump_version.py --check
   python3 scripts/bump_version.py --audit
 
-A bump writes the shared VERSION, every runtime plugin/marketplace manifest and every
-visible README and docs version declaration (including the release verdict template's
-``version=`` line), replacing only the declared values, then runs --check on the result.
---check compares the manifests and every visible declaration to VERSION.
+A bump writes the shared VERSION, every runtime plugin manifest, this plugin's entries in every
+marketplace catalog, and every visible README, docs and SECURITY.md version declaration (including
+the release verdict template's ``version=`` line and the supported ``X.Y.x`` line), replacing only
+the declared values, then runs --check on the result.
+--check compares the manifests and every visible declaration to VERSION (the SECURITY.md line to
+its ``X.Y`` minor line). A catalog entry of another plugin is neither checked nor bumped.
 --audit answers a different question: is any shipped manifest missing from that comparison?
 """
 
@@ -26,6 +28,8 @@ REPO = Path(__file__).resolve().parents[1]
 README = REPO / "README.md"
 CHANGELOG = REPO / "CHANGELOG.md"
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
+# The catalog entries that are this plugin's (RL-9). Kimi-style catalogs name an entry by ``id``.
+PLUGIN_NAME = "agentic-sdlc"
 # Every runtime manifest that declares this plugin's version, with how the version is nested.
 # The adapter manifests (Kimi, ZCode, Grok) are optional members: a skills-only archive and any future
 # adapter removal leave them absent, and an absent file is not drift. That each one exists in the
@@ -63,6 +67,8 @@ PLUGIN_README_VERSION_RE = re.compile(r"(?m)^> Version: `([^`]*)`\.")
 RELEASE_READINESS_VERSION_RE = re.compile(r"This file is the publish gate for `agentic-sdlc` version `([^`]*)`\.")
 # The release verdict template keeps exactly one bare ``version=<semver>`` line.
 VERDICT_TEMPLATE_VERSION_RE = re.compile(r"(?m)^version=(\d+\.\d+\.\d+)$")
+# RL-8: the security policy names the supported minor line (``0.7.x``); group 1 is ``0.7``.
+SECURITY_SUPPORTED_RE = re.compile(r"Security fixes are provided for the latest `([^`]*)\.x` release\.")
 # (path, declaration, pattern); each pattern captures the declared value in group 1.
 DECLARATIONS = (
     ("README.md", "version-badge", README_BADGE_RE),
@@ -71,7 +77,17 @@ DECLARATIONS = (
     ("docs/plugin-readme.md", "version-line", PLUGIN_README_VERSION_RE),
     ("docs/release-readiness.md", "publish-gate-sentence", RELEASE_READINESS_VERSION_RE),
     ("docs/release-readiness.md", "verdict-template-version", VERDICT_TEMPLATE_VERSION_RE),
+    ("SECURITY.md", "supported-minor-line", SECURITY_SUPPORTED_RE),
 )
+# Declarations that state a value derived from VERSION rather than VERSION itself.
+MINOR_LINE_DECLARATIONS = frozenset({("SECURITY.md", "supported-minor-line")})
+
+
+def declared_value(path: str, declaration: str, version: str) -> str:
+    """The value a declaration must hold for ``version``: VERSION itself, or its X.Y minor line."""
+    if (path, declaration) in MINOR_LINE_DECLARATIONS:
+        return ".".join(version.split(".")[:2])
+    return version
 
 
 def read_json(path: Path) -> dict:
@@ -87,15 +103,30 @@ def version_declarations(root: Path = REPO) -> dict[tuple[str, str], list[str]]:
     return {(path, declaration): pattern.findall(texts[path]) for path, declaration, pattern in DECLARATIONS}
 
 
+def plugin_entries(data) -> list:
+    """This plugin's entries in a marketplace catalog, in catalog order (RL-9)."""
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if not isinstance(plugins, list):
+        return []
+    return [entry for entry in plugins if isinstance(entry, dict)
+            and (entry.get("name") if "name" in entry else entry.get("id")) == PLUGIN_NAME]
+
+
 def manifest_version(root: Path, path: str, kind: str) -> str | None:
-    """The version declared by one manifest, or None when the file is absent."""
+    """The version declared by one manifest, or None when the file is absent.
+
+    A catalog reports every entry of this plugin: one value when they agree, the distinct values
+    joined by commas when they do not (never equal to VERSION, so --check fails), and an empty
+    value when the catalog has no entry for this plugin.
+    """
     file = root / path
     if not file.is_file():
         return None
     data = read_json(file)
     if kind == "marketplace":
-        entries = data.get("plugins") or [{}]
-        return entries[0].get("version", "")
+        versions = list(dict.fromkeys("" if entry.get("version") is None else str(entry["version"])
+                                      for entry in plugin_entries(data)))
+        return ",".join(versions)
     return data.get("version", "")
 
 
@@ -120,6 +151,7 @@ def current_versions(root: Path = REPO) -> dict[str, str]:
         "docs/plugin-readme.md": first("docs/plugin-readme.md", "version-line"),
         "docs/release-readiness.md": first("docs/release-readiness.md", "publish-gate-sentence"),
         "docs/release-readiness.md:verdict-template-version": first("docs/release-readiness.md", "verdict-template-version"),
+        "SECURITY.md:supported-minor-line": first("SECURITY.md", "supported-minor-line"),
     }
 
 
@@ -141,7 +173,8 @@ def declaration_failures(versions: dict[str, str], root: Path = REPO) -> list[st
             continue
         if not values and declaration != "version-token":
             failures.append(f"version_missing={path}:{declaration}")
-        failures.extend(f"version_mismatch={path}:{declaration}:{value}" for value in values if value != version)
+        expected = declared_value(path, declaration, version)
+        failures.extend(f"version_mismatch={path}:{declaration}:{value}" for value in values if value != expected)
     return failures
 
 
@@ -195,18 +228,17 @@ def bump(version: str, root: Path = REPO) -> int:
             continue
         data = read_json(file)
         if kind == "marketplace":
-            # Every entry, not just the first: a catalog that lists this plugin twice would
-            # otherwise keep a stale version on the entries the check does not read.
-            for entry in data.get("plugins", []):
+            # Every entry of this plugin and no other (RL-9): --check reads the same entries.
+            for entry in plugin_entries(data):
                 entry["version"] = version
         else:
             data["version"] = version
         updated.append((file, data))
     texts: dict[str, str] = {}
-    for path, _, pattern in DECLARATIONS:
+    for path, declaration, pattern in DECLARATIONS:
         if path not in texts:
             texts[path] = (root / path).read_text(encoding="utf-8")
-        texts[path] = replace_declared_values(texts[path], pattern, version)
+        texts[path] = replace_declared_values(texts[path], pattern, declared_value(path, declaration, version))
     (root / "VERSION").write_text(version + "\n", encoding="utf-8", newline="\n")
     for file, data in updated:
         write_json(file, data)

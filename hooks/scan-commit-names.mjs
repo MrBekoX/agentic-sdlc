@@ -101,3 +101,98 @@ export function addedDiffLines(diff) {
   }
   return added.join('\n');
 }
+
+// True when a git call failed only because its output passed the caller's maxBuffer.
+function overflowed(err) {
+  return Boolean(err) && (err.code === 'ENOBUFS' || /maxBuffer/i.test(String(err.message)));
+}
+
+// `--numstat -z` records as { weight, paths }: weight is added + deleted lines (a binary or unknown count
+// is 0), and a rename or copy keeps both of its names, so a pathspec limited to the group still pairs them.
+function numstatUnits(out) {
+  const fields = String(out ?? '').split('\0');
+  const units = [];
+  for (let i = 0; i < fields.length; i += 1) {
+    const record = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/.exec(fields[i]);
+    if (!record) continue;
+    const weight = (Number(record[1]) || 0) + (Number(record[2]) || 0);
+    if (record[3] !== '') {
+      units.push({ weight, paths: [record[3]] });
+    } else {
+      units.push({ weight, paths: [fields[i + 1], fields[i + 2]].filter(Boolean) });
+      i += 2;
+    }
+  }
+  return units.filter((unit) => unit.paths.length);
+}
+
+// Pathspec groups stay far below the Windows command-line limit.
+const GROUP_FILES = 64;
+const GROUP_CHARS = 8000;
+
+/**
+ * A unified diff that stays under the caller's output cap, with the files it had to leave out (SW-6).
+ *
+ * `git(args)` is the caller's runner (its maxBuffer is the per-call cap) and `base` the diff argv, such as
+ * `['diff', '--cached', '--unified=0']`. The whole diff is one call when it fits. When it does not, one
+ * oversized file used to drop the scan of every other file; now the changed files are listed with
+ * `--numstat -z`, smallest first, and diffed in groups. A group that overflows is split until one file is
+ * left, and that file is skipped and named. The text this fallback collects never passes `maxTotal`: the
+ * files that would pass it are skipped and named too, so the total work stays bounded. Once `deadline` (a
+ * Date.now() value) has passed, the groups not yet diffed are skipped and named the same way, so a caller
+ * with a hook timeout keeps time for its other stages (R2-SW-7). The listing keeps unmerged (`U`) paths.
+ * `pathspec` limits the diff (and the fallback listing) to those paths; it is never part of `base`,
+ * because the fallback appends its own options and `--` group after `base`.
+ */
+export function boundedDiff(git, base, { maxTotal = Infinity, pathspec = [], deadline = Infinity } = {}) {
+  const limit = pathspec.length ? ['--', ...pathspec] : [];
+  try {
+    return { text: git([...base, ...limit]), skipped: [] };
+  } catch (err) {
+    if (!overflowed(err)) throw err;
+  }
+  // `--unified` implies `--patch`, which would print the whole oversized diff next to the counts.
+  const listing = base.filter((arg) => !/^(?:-U\d*|--unified(?:=\d+)?)$/.test(arg));
+  const units = numstatUnits(git([...listing, '--numstat', '-z', '--diff-filter=ACMRTU', ...limit]))
+    .sort((a, b) => a.weight - b.weight);
+  const skipped = [];
+  const skip = (group) => { for (const unit of group) skipped.push(unit.paths[unit.paths.length - 1]); };
+  let text = '';
+  let full = false;
+  const run = (group) => {
+    if (full || Date.now() > deadline) { skip(group); return; }
+    let out = null;
+    try {
+      out = git([...base, '--', ...group.flatMap((unit) => unit.paths.map((p) => ':(top,literal)' + p))]);
+    } catch (err) {
+      if (!overflowed(err)) throw err;
+    }
+    if (out !== null && text.length + out.length <= maxTotal) {
+      text += out.endsWith('\n') || !out ? out : out + '\n';
+      return;
+    }
+    if (group.length > 1) {
+      run(group.slice(0, group.length >> 1));
+      run(group.slice(group.length >> 1));
+      return;
+    }
+    skip(group);
+    // One file that fits a call but not what is left of maxTotal: the files after it are larger (they
+    // are sorted), so they are skipped without another git call.
+    if (out !== null) full = true;
+  };
+  let group = [];
+  let chars = 0;
+  for (const unit of units) {
+    const size = unit.paths.reduce((sum, p) => sum + p.length + 16, 0);
+    if (group.length && (group.length >= GROUP_FILES || chars + size > GROUP_CHARS)) {
+      run(group);
+      group = [];
+      chars = 0;
+    }
+    group.push(unit);
+    chars += size;
+  }
+  if (group.length) run(group);
+  return { text, skipped };
+}

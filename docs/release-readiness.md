@@ -92,7 +92,7 @@ python3 tests/skills/harness.py
 python3 -m unittest discover -s tests -v
 ```
 
-Use the repository's `python3` entry point on both platforms and verify it resolves to the intended Python installation. CI uses `actions/setup-python`; its [Windows installer](https://github.com/actions/python-versions/blob/main/installers/win-setup-template.ps1) supplies the python3 executable link.
+`--release-check` also needs an empty `## Unreleased` and a dated `CHANGELOG.md` section for `VERSION`, so it passes only on the release pull request that moves the accumulated notes under that heading; CI runs it only when a pull request or a push to `main` changes `VERSION`, for a `chore/release-*` branch, or for a tag. Use the repository's `python3` entry point on both platforms and verify it resolves to the intended Python installation. CI uses `actions/setup-python`; its [Windows installer](https://github.com/actions/python-versions/blob/main/installers/win-setup-template.ps1) supplies the python3 executable link.
 
 The local gate proves metadata consistency, Codex manifest shape, static skill wiring, fixture health, hook/workflow syntax, flow-evidence config wiring, and unit behavior. It does not prove live model routing or live tool-use obedience.
 
@@ -184,6 +184,8 @@ git diff --cached
 ```
 
 Scan staged and unstaged diffs for tokens, private keys, connection strings, and machine-specific absolute paths. If a secret is found, mask it in reports as `***MASKED***` and do not publish until rotated and removed.
+
+`python3 scripts/build_release.py --verify <zip>` and `--scan-history` scan every decoding of a member: a member with no NUL byte in its first 8000 bytes is read as UTF-8, even behind a UTF-16 byte-order mark; a member with a NUL is read as UTF-8 and also with the UTF-16 or UTF-32 codec its byte-order mark or NUL lane names; a member with a NUL and neither sign counts as binary. No archive holds a member of a BR13 exclusion class, even a force-added one. Class 3 (local agent instructions) covers `AGENTS.md`, `CLAUDE.md` and `CLAUDE.local.md`. Class 8 covers local session and tool state: `session-reports/`, `.video_agent/`, `.codegraph/`, `.zcode/`, `.opencode/`, `.omo/`, `.sdd/`, `.worktrees/`, `.tmp-superpowers-compare/`, `_tmp_superpowers_benchmark/` and `mcps/` at any depth, `debug.txt`, `scheduled_tasks.lock`, and dated `YYYY-MM-DD-*.txt` files at the root. The Cursor installer and `scripts/check_native_lifecycle.py` apply the same classes to their local copies.
 
 ## Known Limitations
 

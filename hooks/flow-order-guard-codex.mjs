@@ -26,9 +26,8 @@
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { readStdin } from './secret-patterns.mjs';
-import { extractWrittenContent } from './codex-write-signal.mjs';
-import { readRolloutSignals, preciseWriteTargetsOf } from './codex-rollout.mjs';
-import { loadRequirements, isSourceFile, isRealRunnerInvocation, runValidator } from './flow-evidence.mjs';
+import { readRolloutSignals, currentEditTargets } from './codex-rollout.mjs';
+import { loadRequirements, anySourceFile, isRealRunnerInvocation, runValidator } from './flow-evidence.mjs';
 import { findArtifactFile, perPackageRole, workIdOf } from './codex-flow-evidence.mjs';
 
 // A2/DP-ENV decouple: flow-order has its OWN opt-in switch, independent of the flow-step Stop guard's
@@ -116,6 +115,17 @@ export function orderDecision(signals, req, cwd) {
   return { satisfied: false, missing };
 }
 
+// FH-6: the current call is not prior evidence. Codex may persist its function_call before PreToolUse
+// fires, and its own `&& pytest` runs AFTER the edit, so it must not satisfy the before-edit test run.
+// Drop the run whose call_id is this call's tool_use_id; without an id, drop a run of the identical
+// command that has no recorded output yet. `commands` stays parallel to `commandRuns`.
+export function withoutCurrentCall(signals, toolUseId, command) {
+  if (!signals || !signals.readable || !Array.isArray(signals.commandRuns)) return signals;
+  const runs = signals.commandRuns.filter((r) => !((toolUseId && r.callId === toolUseId)
+    || (r.command === command && r.output == null && r.exitCode == null)));
+  return { ...signals, commandRuns: runs, commands: runs.map((r) => r.command) };
+}
+
 // Deny payload: the same live-verified Codex shape scan-write-codex.mjs uses (confirmed to block on
 // codex-cli 0.142.0). The reason is a FIXED preamble + a SINGLE bracketed `Missing this session`
 // clause that is the ONLY place the dynamic roles appear (drawn solely from {spec, plan}); it
@@ -159,17 +169,17 @@ async function main() {
     // UNION the precise sed/tee/`>`,`>>` recognizer — but ONLY for genuine Bash commands, never over
     // apply_patch text (BR8/DP4: a `>` inside added patch content must not be read as a redirect). The
     // precise recognizer is quote/heredoc/expansion-aware, so a quoted/argument/expansion write-looking
-    // token never over-approximates into a spurious DENY (BR7). extractWrittenContent (byte-locked, shared
-    // with the secret guard) is untouched — precision is a filter layered on top, so recognition breadth
-    // matches the prior-evidence detector and the two cannot drift apart (the #5 root cause).
+    // token never over-approximates into a spurious DENY (BR7). extractWrittenContent is shared with the
+    // secret guard; precision is a filter layered on top, so recognition breadth matches the prior-evidence
+    // detector and the two cannot drift apart (the #5 root cause).
+    // FH-5: currentEditTargets is that union, shared with the Claude flow guards (FH-1).
     const toolName = String(input?.tool_name || '');
-    const isPatch = toolName === 'apply_patch';
-    const base = extractWrittenContent(toolName, command).targets;
-    const targets = isPatch ? base : base.concat(preciseWriteTargetsOf(command));
+    const targets = currentEditTargets(toolName, command);
     const req = loadRequirements();
-    if (!targets.some((t) => isSourceFile(t, req))) process.exit(0); // BR2/AC6/AC9 no source target
     const cwd = (typeof input?.cwd === 'string' && input.cwd) ? input.cwd : process.cwd(); // DP-CWD
-    const signals = readRolloutSignals(input?.transcript_path);
+    if (!anySourceFile(targets, req, cwd)) process.exit(0); // BR2/AC6/AC9 no source target (FH-2: project-relative)
+    const toolUseId = (typeof input?.tool_use_id === 'string' && input.tool_use_id) ? input.tool_use_id : null;
+    const signals = withoutCurrentCall(readRolloutSignals(input?.transcript_path), toolUseId, command); // FH-6
     const d = orderDecision(signals, req, cwd);
     if (d.unconfirmable || d.satisfied) process.exit(0);
     process.stdout.write(JSON.stringify(denyPayload(d.missing)), () => process.exit(0));

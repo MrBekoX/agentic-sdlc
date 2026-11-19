@@ -31,6 +31,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable
@@ -170,6 +171,10 @@ def load_trace(path: Path, strict: bool) -> Trace:
     return trace
 
 
+# Tools that only read the path they name: their `file_path` is no write (a `Read` of a spec never produced it).
+READ_TOOLS = frozenset({"Read", "NotebookRead"})
+
+
 def _record_tool(trace: Trace, name: str, input_obj: Any) -> None:
     payload = input_obj if isinstance(input_obj, dict) else {}
     trace.tools.append(name)
@@ -178,7 +183,7 @@ def _record_tool(trace: Trace, name: str, input_obj: Any) -> None:
     if isinstance(command, str):
         trace.commands.append(command)
     file_path = payload.get("file_path") if isinstance(payload, dict) else None
-    if isinstance(file_path, str):
+    if isinstance(file_path, str) and name not in READ_TOOLS:
         trace.writes.append(file_path)
     content = payload.get("content") if isinstance(payload, dict) else None
     if isinstance(file_path, str) and isinstance(content, str):
@@ -866,8 +871,24 @@ def _anchored_pattern(pattern: str) -> bool:
     return bool(PureWindowsPath(pattern).anchor or PurePosixPath(pattern).anchor)
 
 
+def _produced_paths(trace: Trace) -> list[str]:
+    """`trace.writes` without the calls whose every correlated result is an error (`_failed_call_ids`): a write
+    that failed produced nothing. `trace.writes` holds one `file_path` per top-level call that is not a read
+    (`_record_tool`), so the failed calls' paths are taken out once each and a path written again after a failure
+    stays."""
+    failed = _failed_call_ids(trace)
+    failed_paths = Counter(
+        record["input"]["file_path"] for record in trace.timeline
+        if record["kind"] == "tool_call" and record.get("id") in failed and not record.get("parent_tool_use_id")
+        and isinstance(record.get("input"), dict) and isinstance(record["input"].get("file_path"), str)
+        and record.get("name") not in READ_TOOLS)
+    return list((Counter(trace.writes) - failed_paths).elements())
+
+
 def artifact_present(pattern: str, trace: Trace, cwd: Path) -> bool:
-    if any(pattern.replace("\\", "/") in w.replace("\\", "/") for w in trace.writes):
+    """A required artifact is present when the run wrote it (`_produced_paths`) or it exists under `cwd`. A Read
+    of the path, or a write whose result is an error, produced nothing."""
+    if any(pattern.replace("\\", "/") in w.replace("\\", "/") for w in _produced_paths(trace)):
         return True
     require_relative_pattern(pattern, "required artifact")
     if _anchored_pattern(pattern):  # require_relative_pattern's error, also where Path.is_absolute() says no (SEC-10)
@@ -2551,12 +2572,13 @@ def tdd_evidence_errors(trace: Trace, reviewers: list[dict[str, Any]], writes: l
 
 
 def _fragment_statuses(text: str) -> list[str]:
-    """`status:` values on the lines of an edit fragment, read line by line as parse_frontmatter reads a line."""
+    """`status:` values on the lines of an edit fragment, read line by line as parse_frontmatter reads a line:
+    surrounding quotes are dropped, so `status: "approved"` is `approved` here as it is to the validator."""
     statuses = []
     for line in text.splitlines():
         key, sep, value = line.partition(":")
         if sep and key.strip() == "status":
-            statuses.append(value.strip())
+            statuses.append(value.strip().strip("\"'"))
     return statuses
 
 

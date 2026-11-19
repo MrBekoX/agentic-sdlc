@@ -65,8 +65,21 @@ export function parsePushArguments(args) {
   return options;
 }
 
+// The full destination ref git selects. A destination that does not start with `refs/` is matched
+// against the remote's refs with rev-parse's rules, so `heads/main` selects `refs/heads/main` (a
+// dry-run prints `HEAD -> main`). Reading `heads/main` as the branch `heads/main` let
+// `git push origin HEAD:heads/main` through. `refs/heads/heads/main` stays the branch `heads/main`.
+function destinationRef(ref) {
+  const text = String(ref || '');
+  if (text.startsWith('refs/')) return text;
+  if (text.startsWith('heads/')) return `refs/${text}`;
+  return `refs/heads/${text}`;
+}
+
 function protectedName(ref) {
-  const name = String(ref || '').replace(/^refs\/heads\//, '');
+  const destination = destinationRef(ref);
+  if (!destination.startsWith('refs/heads/')) return null;
+  const name = destination.slice('refs/heads/'.length);
   return /^(main|master)$/i.test(name) ? name.toLowerCase() : null;
 }
 
@@ -144,7 +157,7 @@ export function resolvePushTargets(invocation, state = {}) {
   let pruneDeletion = false;
   const add = (ref, forced = false) => {
     const name = protectedName(ref);
-    const destination = String(ref).startsWith('refs/') ? ref : `refs/heads/${ref}`;
+    const destination = destinationRef(ref);
     // PUSH negatives filter the final destination table, after mapping and pruning.
     if (name && !excludedDestinations.has(destination)) {
       targets.add(name); force ||= forced;

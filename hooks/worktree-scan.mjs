@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { createHash } from 'node:crypto';
 import { HIGH, scanLines, readStdin } from './secret-patterns.mjs';
-import { addedDiffLines, displayPath, isCredentialFilename } from './scan-commit-names.mjs';
+import { addedDiffLines, boundedDiff, displayPath, isCredentialFilename } from './scan-commit-names.mjs';
 
 const BLOCK = /^(true|1|yes)$/i.test(String(process.env.AGENTIC_WORKTREE_SCAN_BLOCK || ''));
 
@@ -41,6 +41,13 @@ const VENDOR_PATHSPECS = VENDOR_DIR.source.split('(?:')[2].split(')')[0].split('
 const MAX_UNTRACKED_FILES = 200;
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+// Wall-clock budget for the per-file diff fallback (R2-SW-7). The Stop hook times out at 20 s, and a
+// timed-out hook reports nothing: thousands of small changed files would spend it on git calls and lose
+// the untracked-file and credential-name findings of the later stages.
+const DIFF_FALLBACK_MS = 6000;
+const STARTED = Date.now();
+// At most this many not-scanned files are named one by one; the rest are counted.
+const MAX_NAMED = 10;
 
 function quiet() { process.exit(0); }
 
@@ -48,15 +55,32 @@ const raw = await readStdin();
 let input = {};
 try { input = JSON.parse(raw || '{}'); } catch { quiet(); }
 
-// Loop protection: if this Stop already blocked once, do not block again on the same turn.
-if (input?.stop_hook_active) quiet();
+// Loop protection: if this Stop already blocked once, do not block again on the same turn. Only a
+// blocking scan can cause that loop; the advisory one never continues the turn, so it still scans when
+// another Stop hook set the flag (SW-10).
+if (BLOCK && input?.stop_hook_active) quiet();
 
 const cwd = typeof input?.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
 
-function git(args, dir = cwd) {
+function rawGit(args, dir = cwd) {
   return runGit(args, {
     cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: MAX_TOTAL_BYTES,
   });
+}
+
+// Files whose diff could not be scanned within the limits (SW-6): named, never treated as clean.
+const notScanned = [];
+
+// A patch diff (`--unified=0`) goes through boundedDiff. One oversized file used to overflow the buffer
+// and drop the whole tracked-change stage (SW-6); now only the files over the limits are skipped and
+// named. Its per-file fallback may use half the byte budget, so the untracked and ignored files
+// (stage 2) keep the rest.
+function git(args, dir = cwd) {
+  if (args[0] !== 'diff' || !args.includes('--unified=0')) return rawGit(args, dir);
+  const part = boundedDiff((a) => rawGit(a, dir), args,
+    { maxTotal: MAX_TOTAL_BYTES / 2, deadline: STARTED + DIFF_FALLBACK_MS });
+  notScanned.push(...part.skipped);
+  return part.text;
 }
 
 let root;
@@ -106,7 +130,7 @@ try {
 // string as a file failed silently, so nothing under such a folder was scanned.
 let changed = [];
 try {
-  changed = trackedDelta(['--name-only', '-z', '--diff-filter=ACMRT']).split('\0').filter(Boolean);
+  changed = trackedDelta(['--name-only', '-z', '--diff-filter=ACMRTU']).split('\0').filter(Boolean);
 } catch { changed = []; }
 
 let listed = [];
@@ -175,6 +199,15 @@ for (const rel of [...changed, ...listed]) {
   if (isCredentialFilename(rel)) findings.push({ what: 'credential file', where: displayPath(rel), fp: '' });
 }
 
+const unscanned = [...new Set(notScanned)];
+for (const rel of unscanned.slice(0, MAX_NAMED)) {
+  findings.push({ what: 'not scanned (diff over the scan limit)', where: displayPath(rel), fp: '', notice: true });
+}
+if (unscanned.length > MAX_NAMED) {
+  findings.push({ what: 'not scanned (diff over the scan limit)', where: `${unscanned.length - MAX_NAMED} more file(s)`,
+    fp: '', notice: true });
+}
+
 if (!findings.length) quiet();
 
 // Per-session dedup. A Stop hook fires every turn; re-reporting an unchanged finding each time
@@ -208,16 +241,26 @@ try {
 } catch { /* dedup is a convenience; losing it must never change the verdict */ }
 
 // Values are never printed, only the pattern label and where it was seen.
-const list = fresh.map((f) => '  - ' + f.what + ' (' + f.where + ')').join('\n');
-const msg =
-  'agentic-sdlc worktree scan: possible secret(s) present in the working tree (values masked).\n'
-  + list + '\n'
-  + 'These bytes are already on disk, so this is a detection, not a block. Remove and rotate the '
-  + 'value before committing; the repo pre-commit hook (scripts/install_git_hooks.py) is what '
-  + 'stops it entering history.';
+const secretsFound = fresh.filter((f) => !f.notice);
+const notices = fresh.filter((f) => f.notice);
+const listOf = (items) => items.map((f) => '  - ' + f.what + ' (' + f.where + ')').join('\n');
+const parts = [];
+if (secretsFound.length) {
+  parts.push(
+    'agentic-sdlc worktree scan: possible secret(s) present in the working tree (values masked).\n'
+    + listOf(secretsFound) + '\n'
+    + 'These bytes are already on disk, so this is a detection, not a block. Remove and rotate the '
+    + 'value before committing; the repo pre-commit hook (scripts/install_git_hooks.py) is what '
+    + 'stops it entering history.');
+}
+if (notices.length) {
+  parts.push('agentic-sdlc worktree scan: these changed files were NOT scanned.\n' + listOf(notices));
+}
+const msg = parts.join('\n');
 
+// A file that could not be scanned is reported, but only a detected secret blocks.
 process.stdout.write(JSON.stringify(
-  BLOCK
+  BLOCK && secretsFound.length
     ? { decision: 'block', reason: msg, systemMessage: 'agentic-sdlc: secret detected in the working tree.' }
     : { systemMessage: msg },
 ));

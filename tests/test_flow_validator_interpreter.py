@@ -50,11 +50,13 @@ The flow hook must fail open when no Python 3 interpreter exists.
 - The validator command line and its exit-code meaning stay unchanged.
 """
 
-# Evaluates ONE artifact evidence item through the real exported engine API.
+# Evaluates ONE artifact evidence item through the real exported engine API. The trace records this
+# session's write of the spec: since the 2026-11-18 bug audit (FH-4) Stop validates only the artifacts
+# of the session's own work ids, so an on-disk file nobody wrote this session never reaches the validator.
 DRIVER = """
 import { loadRequirements, stepSatisfied } from %s;
 const step = { evidence: [ { kind: 'artifact', role: 'spec', validate: { mode: 'spec', strict: true } } ] };
-const trace = { edits: [], commands: [], tools: [] };
+const trace = { edits: ['docs/agentic-sdlc/specs/interp.md'], commands: [], tools: [] };
 const ok = stepSatisfied(step, trace, { cwd: process.argv[1], req: loadRequirements(), validate: true, sessionScoped: false });
 process.stdout.write(JSON.stringify({ ok }));
 """

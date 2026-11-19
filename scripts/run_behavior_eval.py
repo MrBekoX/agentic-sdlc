@@ -4,6 +4,13 @@ This is the procedure layer above trigger evals. It can run `claude -p` when the
 CLI is available, but also supports `--dry-run` so local automation can validate fixture shape
 without requiring a live model.
 
+A run that produced no answer to grade (the CLI exited non-zero, its `result` event is an error, it
+timed out, or it could not be started) is unmeasured, never passed or failed: an "Invalid API key -
+Please run /login" result used to satisfy a required pattern such as `run`. Output ends with
+behavior_eval=passed|failed|unmeasured. Exit 0 passed; 1 a measured case failed; 2 claude missing
+(without --allow-missing-claude); 3 some case was unmeasured and no measured case failed, the code
+scripts/run_trigger_eval.py uses for the same outcome.
+
 Eval-set JSON:
 {
   "cases": [
@@ -35,6 +42,30 @@ except ModuleNotFoundError:
     from eval_safety import require_slug
 
 
+EXIT_UNMEASURED = 3
+
+
+class UnmeasuredRun(Exception):
+    """A live run that yielded nothing to grade, as opposed to an answer that misses a pattern."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def result_error(transcript: str) -> bool:
+    """True when a main-session stream-json `result` event is flagged `is_error` (no model answer to judge)."""
+    for raw in transcript.split("\n"):
+        try:
+            event = json.loads(raw)
+        except (ValueError, RecursionError):
+            continue
+        if (isinstance(event, dict) and event.get("type") == "result" and not event.get("parent_tool_use_id")
+                and event.get("is_error") is True):
+            return True
+    return False
+
+
 def load_eval(path: Path) -> list[dict]:
     data = json.loads(path.read_text(encoding="utf-8"))
     cases = data.get("cases")
@@ -61,18 +92,28 @@ def run_claude(prompt: str, cwd: Path, timeout: int, model: str | None, effort: 
     if effort:
         cmd += ["--effort", effort]
     env = {key: value for key, value in os.environ.items() if key != "CLAUDE_CODE_SIMPLE"}
-    proc = subprocess.run(
-        cmd,
-        cwd=cwd,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-    )
-    return (proc.stdout or "") + "\n" + (proc.stderr or "")
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise UnmeasuredRun("timeout") from exc
+    except OSError as exc:
+        raise UnmeasuredRun("claude_missing" if isinstance(exc, FileNotFoundError) else "spawn_failed") from exc
+    transcript = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    if proc.returncode != 0:
+        raise UnmeasuredRun(f"exit_{proc.returncode}")
+    if result_error(proc.stdout or ""):
+        raise UnmeasuredRun("result_error")
+    return transcript
 
 
 def behavior_text(transcript: str) -> str:
@@ -148,17 +189,28 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if args.allow_missing_claude else 2
 
     errors = []
+    unmeasured = []
     with tempfile.TemporaryDirectory(prefix="agentic-sdlc-behavior-") as td:
         project_root = args.project_root.resolve() if args.project_root else Path(td)
         for case in cases:
-            transcript = run_claude(case["prompt"], project_root, args.timeout, args.model, effort=args.effort)
+            try:
+                transcript = run_claude(case["prompt"], project_root, args.timeout, args.model, effort=args.effort)
+            except UnmeasuredRun as exc:
+                unmeasured.append(f"{case['id']}:unmeasured:{exc.reason}")
+                continue
             errors.extend(check_case(case, transcript))
-    for err in errors:
+    for err in errors + unmeasured:
         print(f"error={err}")
     print(f"effort={args.effort or 'profile-default'}")
     print(f"cases={len(cases)}")
-    print("behavior_eval=failed" if errors else "behavior_eval=passed")
-    return 1 if errors else 0
+    if errors:
+        print("behavior_eval=failed")
+        return 1
+    if unmeasured:
+        print("behavior_eval=unmeasured")
+        return EXIT_UNMEASURED
+    print("behavior_eval=passed")
+    return 0
 
 
 if __name__ == "__main__":
