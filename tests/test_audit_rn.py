@@ -17,6 +17,7 @@ import time
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 TESTS = REPO / "tests"
@@ -480,6 +481,23 @@ class TestR2RN1LockPidSpace(unittest.TestCase):
         old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600))
         self._hold(pid=os.getppid(), space="win:29000000", ts=old)  # that pid is alive here, by chance
         self._acquire(timeout=5)
+
+    def test_r2_rn1_an_old_lock_naming_a_pid_space_is_broken_where_the_platform_gives_none(self):
+        # macOS records no PID space: a lock that names one came from another PID space, so its age
+        # frees it even though its pid happens to be alive here.
+        old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600))
+        with mock.patch.object(lock, "_pid_space", return_value=None):
+            for space in ("win:29000000", "linux:another-boot:4026531836"):
+                with self.subTest(space=space):
+                    self._hold(pid=os.getppid(), space=space, ts=old)
+                    self._acquire(timeout=5)
+
+    def test_r2_rn1_an_old_live_lock_naming_no_space_is_kept_where_the_platform_gives_none(self):
+        # Two runners of a platform without PID spaces: the old lock's live holder still holds it.
+        old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600))
+        with mock.patch.object(lock, "_pid_space", return_value=None):
+            self._hold(pid=os.getppid(), ts=old)
+            self._assert_kept()
 
     def test_r2_rn1_the_lock_records_this_runners_pid_space(self):
         space = lock._pid_space()

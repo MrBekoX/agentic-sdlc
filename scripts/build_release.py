@@ -1450,7 +1450,9 @@ def _history_mirror(argument: str, emit) -> Path | None:
 # that way is missing from the parsed skips, so the parsed skip count differs from the summary's
 # skipped=N and the comparison fails closed: a possible false failure, never a false pass.
 _RESULT_LINE = re.compile(
-    r"^\S+ \(([\w.]+)\)(?:\n[^\n]*?)? \.\.\. (ok|skipped '.*'|FAIL|ERROR|expected failure|unexpected success)$",
+    # unittest prints a skip reason's repr: double-quoted when the reason holds an apostrophe.
+    r"^\S+ \(([\w.]+)\)(?:\n[^\n]*?)? \.\.\. "
+    r"(ok|skipped '.*'|skipped \".*\"|FAIL|ERROR|expected failure|unexpected success)$",
     re.M,
 )
 _FAILURE_HEADER = re.compile(r"^(?:FAIL|ERROR): \S+ \(([\w.]+)\)", re.M)

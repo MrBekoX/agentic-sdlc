@@ -16,7 +16,8 @@ process (`start` differs; pids are reused). A lock without `start` is judged by 
 a live holder in this space is never stale. Any other lock (another host or PID space, no `space`,
 or content that cannot be read yet, such as a file just created and not yet written) is stale only
 once it is older than `stale_seconds`, and then when it came from another host or PID space or its
-holder is gone. A stale lock is broken by moving it aside and checking that what was moved is
+holder is gone. A lock that names a PID space is from another one for a runner on a platform that
+gives none (macOS). A stale lock is broken by moving it aside and checking that what was moved is
 what was judged stale, so two runners breaking the same lock cannot remove a fresh one. Readers
 (`card`, `status`) never lock. Release removes the file only while it still holds this lock's own
 content.
@@ -326,8 +327,8 @@ class PackageLock:
         age = self._age(meta)
         if age is None or age <= self.stale_seconds:
             return False  # another host or PID space, or no space recorded: its pid means nothing yet
-        if not same_host or (isinstance(recorded_space, str) and mine is not None and recorded_space != mine):
-            return True
+        if not same_host or (isinstance(recorded_space, str) and recorded_space != mine):
+            return True  # another host, or a PID space this runner is not in (macOS records none)
         return self._holder_gone(meta)  # an old lock of this host that names no space
 
     @staticmethod

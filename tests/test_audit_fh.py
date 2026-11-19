@@ -271,7 +271,8 @@ class _Tmp(unittest.TestCase):
 
     def step(self, events, *, cwd=None, block=True, last=None):
         cwd = cwd or self.project()
-        payload = {"transcript_path": self.transcript(events), "stop_hook_active": False}
+        # Claude Code sends `cwd` with every hook payload, Stop included.
+        payload = {"transcript_path": self.transcript(events), "stop_hook_active": False, "cwd": str(cwd)}
         if last is not None:
             payload["last_assistant_message"] = last
         return _run_hook(STEP_GUARD, payload, cwd=str(cwd),
@@ -408,6 +409,18 @@ class TestFH2TestPathIsRelativeToProject(_Tmp):
 
     def test_fh2_project_under_a_tests_folder_is_gated_at_stop(self):
         cwd = self.project("tests", "myapp")
+        events = _Calls().skill(PIPE).edit(str(cwd / "src" / "app.py")).text("Done.").events
+        self.assertEqual(self.step(events, cwd=cwd).get("decision"), "block")
+
+    @unittest.skipIf(os.name == "nt", "symlink creation needs a privilege on Windows")
+    def test_fh2_project_reached_through_a_symlink_is_gated_at_stop(self):
+        # macOS temp folders sit under /var, a link to /private/var: the hook process's own working
+        # directory is the resolved path, while the transcript names the linked one. The Stop payload's
+        # `cwd` names the folder the way the session does.
+        self.project("tests", "myapp")
+        link = self.tmp / "linked"
+        os.symlink(str(self.tmp / "proj"), str(link))
+        cwd = link / "tests" / "myapp"
         events = _Calls().skill(PIPE).edit(str(cwd / "src" / "app.py")).text("Done.").events
         self.assertEqual(self.step(events, cwd=cwd).get("decision"), "block")
 

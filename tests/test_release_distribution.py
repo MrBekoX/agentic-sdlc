@@ -2259,6 +2259,15 @@ class TestArchiveGateCoverage(ScratchTestCase):
         self.assertEqual(code, 1, text)
         self.assertIn("archive_coverage=failed", text.splitlines())
 
+    def test_skip_reason_with_an_apostrophe_is_parsed(self):
+        # unittest prints the reason's repr, which takes double quotes when the reason holds an apostrophe.
+        log = GOOD_ARCHIVE_LOG.replace("skipped 'named reason'", 'skipped "the workflow\'s reason"')
+        code, text = self.check(log, self.source_tree())
+        lines = text.splitlines()
+        self.assertEqual(code, 0, text)
+        self.assertIn("skip_reason=test_sample.Sample.test_skipped:the workflow's reason", lines)
+        self.assertEqual(lines[-1], "archive_coverage=passed")
+
     def test_empty_skip_reason_fails(self):
         log = GOOD_ARCHIVE_LOG.replace("skipped 'named reason'", "skipped ''")
         code, text = self.check(log, self.source_tree())
