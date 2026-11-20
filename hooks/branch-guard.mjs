@@ -101,18 +101,33 @@ const isPush = info.subcommands.has('push');
 const unresolvedNote = info.unresolved
   ? 'this command names git subcommands that could not be resolved (alias lookup budget, a different config, or the work budget); one of them may commit or push to a protected branch.'
   : '';
-function reportUnresolved() {
-  if (BLOCK) {
+// R1-d: statements a resolver budget dropped unread (payload depth, payload statement budget, alias
+// walk budget) may hold a commit or a push. Reported, never a deny on its own.
+const skippedNote = (info.skippedReads || 0) > 0
+  ? 'part of this command was not inspected (shell payload depth, payload statement budget or alias walk budget); a commit or push inside it was not checked against protected branches.'
+  : '';
+// Exactly one hook result per run: a decision and every note travel in one JSON object, because a
+// second object on stdout is not a result any runtime reads. On ZCode only `hookSpecificOutput`
+// survives a deny, so the notes go into its reason too.
+function emitResult(denyReason, denyMessage, notes) {
+  const extra = notes.filter(Boolean);
+  if (BLOCK && denyReason) {
     emitHookResult({
-      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: unresolvedNote },
-      systemMessage: '🚧 branch-guard: blocked (unresolved git alias).',
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny',
+        permissionDecisionReason: [denyReason, ...extra].join(' ') },
+      systemMessage: [denyMessage, ...extra].join(' '),
     }, 'PreToolUse');
-  } else {
-    emitHookResult({ systemMessage: `🚧 branch-guard: ${unresolvedNote}` }, 'PreToolUse');
+  } else if (extra.length) {
+    emitHookResult({ systemMessage: `🚧 branch-guard: ${extra.join(' ')}` }, 'PreToolUse');
   }
+}
+function reportUnresolved() {
+  if (BLOCK) emitResult(unresolvedNote, '🚧 branch-guard: blocked (unresolved git alias).', [skippedNote]);
+  else emitResult('', '', [unresolvedNote, skippedNote]);
 }
 if (!info.subcommands.has('commit') && !isPush) {
   if (unresolvedNote) reportUnresolved();
+  else emitResult('', '', [skippedNote]);
   process.exit(0);
 }
 
@@ -132,16 +147,12 @@ if (branch && PROTECTED.test(branch)) {
     + (protectedPush?.mirror ? ' Mirror push may delete protected remote refs even when they are absent locally.' : '')
     + (protectedPush?.prune ? ' Prune push may delete protected remote refs even when they are absent locally.' : '')
     + (forcePush ? ' FORCE-PUSH detected — extra caution.' : '');
-  if (BLOCK) {
-    emitHookResult({
-      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: msg },
-      systemMessage: `🚧 branch-guard: blocked on '${branch}'.`,
-    }, 'PreToolUse');
-  } else {
-    emitHookResult({ systemMessage: `🚧 branch-guard: ${msg}` }, 'PreToolUse');
-  }
+  if (BLOCK) emitResult(msg, `🚧 branch-guard: blocked on '${branch}'.`, [skippedNote]);
+  else emitResult('', '', [msg, skippedNote]);
 } else if (unresolvedNote) {
   reportUnresolved();
+} else {
+  emitResult('', '', [skippedNote]);
 }
 
 process.exit(0);

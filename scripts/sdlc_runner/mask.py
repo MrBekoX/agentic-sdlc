@@ -189,6 +189,25 @@ def looks_placeholder(value) -> bool:
     return any(rx.search(text) for rx in _TEMPLATE_VALUE)
 
 
+# The same templates without their leading `^`, matched at an index range of the line (R2-e): many
+# prefix hits share one long value run, and slicing each hit's value copied O(K*L) characters.
+# `pattern.match(line, start, end)` anchors at `start`, and `\Z` matches at `end`.
+_TEMPLATE_VALUE_AT = [_compile(_split_literal(s)[0][1:], re.ASCII | (re.IGNORECASE if _split_literal(s)[1] else 0))
+                      for s in TEMPLATE_VALUE_SOURCES]
+assert all(_split_literal(s)[0].startswith("^") for s in TEMPLATE_VALUE_SOURCES)
+
+
+def _looks_placeholder_at(line: str, start: int, end: int) -> bool:
+    """`looks_placeholder(line[start:end])` without copying the value."""
+    if start >= end:
+        return True
+    while start < end and line[start] in _TRIM:
+        start += 1
+    while end > start and line[end - 1] in _TRIM:
+        end -= 1
+    return any(rx.match(line, start, end) for rx in _TEMPLATE_VALUE_AT)
+
+
 def is_degenerate_token(token: str) -> bool:
     """A repeated or sequential run rather than a random token (Meli et al., NDSS 2019)."""
     t = str(token)
@@ -243,7 +262,7 @@ def _value_match_at(line: str, v: _ValuePlan, value_start: int, run: list):
         if t is None:
             return None
         end += len(t.group(0))
-    return end, line[value_start:run[1]]
+    return end, value_start, run[1]
 
 
 def line_matches(line: str, patterns) -> list:
@@ -276,7 +295,7 @@ def line_matches(line: str, patterns) -> list:
                     break
                 hit = _value_match_at(line, v, m.end(), runs[index])
                 if hit:
-                    push(index, m.start(), hit[0], looks_placeholder(hit[1]))
+                    push(index, m.start(), hit[0], _looks_placeholder_at(line, hit[1], hit[2]))
                 pos = m.start() + 1  # every prefix start, not only the one after a whole match
             continue
         if p.label == "jwt" and p.sticky is not None:
@@ -319,7 +338,7 @@ def line_matches(line: str, patterns) -> list:
                 m = v.sticky_prefix.match(line, at)
                 hit = _value_match_at(line, v, at + len(m.group(0)), runs[index]) if m else None
                 if hit:
-                    push(index, at, hit[0], looks_placeholder(hit[1]))
+                    push(index, at, hit[0], _looks_placeholder_at(line, hit[1], hit[2]))
             elif p.sticky is not None:
                 own = spans[index]
                 while next_span[index] < len(own) and own[next_span[index]][0] <= at:
@@ -346,6 +365,9 @@ def _redact_quoted_passwords(line: str, patterns) -> str:
     out = []
     copied = 0
     pos = 0
+    # The closing quote last found from a position, per quote: a later start up to that quote finds the
+    # same one, and after a failed search none is found. One search per quote instead of one per hit.
+    found = {}
     while True:
         m = v.prefix.search(line, pos)
         if m is None:
@@ -359,8 +381,14 @@ def _redact_quoted_passwords(line: str, patterns) -> str:
             start += 2
         else:
             continue
-        end = line.find(close, start)
-        if end == -1 or _utf16_len(line[start:end]) < v.min or looks_placeholder(line[start:end]):
+        cached = found.get(close)
+        if cached is not None and cached[0] <= start and (cached[1] == -1 or cached[1] >= start):
+            end = cached[1]
+        else:
+            end = line.find(close, start)
+            found[close] = (start, end)
+        if end == -1 or (end - start < v.min and _utf16_len(line[start:end]) < v.min) \
+                or _looks_placeholder_at(line, start, end):
             continue
         if m.start() < copied:  # starts inside a span already masked: extend it
             copied = max(copied, end)

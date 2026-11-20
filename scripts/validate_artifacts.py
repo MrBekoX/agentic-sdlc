@@ -110,6 +110,110 @@ SECRET_PATTERNS = [
     re.compile(r"(?<![A-Za-z0-9])sk-(?:proj|svcacct|admin|None)-[A-Za-z0-9_-]{20,}"),
 ]
 
+# Value-checked shapes (R1-c). The label patterns above need `:` or `=` right after the label, so a
+# JSON- or Python-quoted key (`"api_key": "..."`) was missed, and there was no bearer-token or
+# URL-credential pattern. These three are checked on their value, which keeps a template, a mask and,
+# under D15, a type name or a prose word (an all-lowercase word of at most three hyphen-joined parts,
+# such as `string` or `token-refresh-handling`) out of the report.
+#
+# The bearer and URL patterns and the template list are mirrored from hooks/secret-patterns.mjs, not
+# imported: the flow hooks run this script with `python -I`, which drops its folder from sys.path.
+# The one difference is the capture group around the bearer token. They are compiled with the
+# JS-to-Python rules of scripts/sdlc_runner/mask.py (`_translate`): JS `\s` is wider than ASCII
+# whitespace, `$` without the `m` flag is the end of input, and ASCII `\b`/`\w`/case folding.
+# tests/test_audit_residuals_r1.py pins the sources against the .mjs and the translation against mask.py.
+_JS_WS_BODY = "\t\n\x0b\x0c\r \xa0  -     　﻿"
+_JS_PASSTHROUGH_ESCAPES = set("bBwWdD.-/\\[](){}*+?|^$'\"")
+
+
+def _js_translate(js):
+    """JS regex body (no `u` flag) -> Python regex body under re.ASCII (as mask._translate)."""
+    out = []
+    in_class = False
+    i = 0
+    while i < len(js):
+        c = js[i]
+        if c == "\\":
+            nxt = js[i + 1]
+            if nxt == "s":
+                out.append(_JS_WS_BODY if in_class else "[" + _JS_WS_BODY + "]")
+            elif nxt in _JS_PASSTHROUGH_ESCAPES:
+                out.append(c + nxt)
+            else:
+                raise ValueError("untranslated JS escape \\%s in %r" % (nxt, js))
+            i += 2
+            continue
+        if c == "[" and not in_class:
+            in_class = True
+        elif c == "]" and in_class:
+            in_class = False
+        elif c == "$" and not in_class:
+            out.append(r"\Z")
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _js_compile(literal):
+    end = literal.rindex("/")
+    body, flags = literal[1:end], literal[end + 1:]
+    return re.compile(_js_translate(body), re.ASCII | (re.IGNORECASE if "i" in flags else 0))
+
+
+BEARER_TOKEN_SOURCE = r"/\bbearer\s+([A-Za-z0-9._\-]{20,})/i"
+URL_CREDENTIAL_SOURCE = r"""/(?<![A-Za-z0-9])[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:@\/?#\[\]]{0,256}:([^\s@\/?#\[\]]{6,})@/i"""
+TEMPLATE_VALUE_SOURCES = (
+    r"""/^["']?<[^<>]*>["']?$/""",
+    r"""/^["']?\$\{[^{}]*\}["']?$/""",
+    r"""/^["']?\$[A-Za-z_]\w*["']?$/""",
+    r"""/^["']?%[A-Za-z_]\w*%["']?$/""",
+    r"/^\*+$/",
+    r"/^\*\*\*MASKED(?::[a-z0-9-]+)?\*\*\*$/",
+    r"""/^["']?(?:process\.env|os\.environ|System\.getenv|getenv|env)\b/i""",
+    r"""/^["']?(?:change[_-]?me|placeholder|dummy|todo|fixme|redacted|masked|secret_here)\b/i""",
+    r"""/^["']?your[_-]?\w*\b/i""",
+    r"""/^["']?x+["']?$/i""",
+)
+BEARER_TOKEN_RE = _js_compile(BEARER_TOKEN_SOURCE)
+URL_CREDENTIAL_RE = _js_compile(URL_CREDENTIAL_SOURCE)
+TEMPLATE_VALUE_RES = [_js_compile(s) for s in TEMPLATE_VALUE_SOURCES]
+# A quoted label: a closing quote sits between the label and `:` or `=`. The value is read for at
+# most 256 characters (a quoted one up to its closing quote), so each start reads a bounded run.
+QUOTED_LABEL_RE = re.compile(
+    r"""(?:api[_-]?key|secret|password)["']\s*[:=]\s*"""
+    r"""(?:"([^"\n]{1,256})|'([^'\n]{1,256})|`([^`\n]{1,256})|([^\s"'`,;{}\[\]]{1,256}))""",
+    re.IGNORECASE)
+# D15: a type name or a prose word is not a secret value for these three shapes.
+_PROSE_VALUE = re.compile(r"[a-z]{1,24}(?:-[a-z]{1,24}){0,2}\Z")
+_JS_TRIM = "\t\n\x0b\x0c\r \xa0 " + "".join(chr(c) for c in range(0x2000, 0x200B)) + "    　﻿"
+# In URL userinfo a lowercase word is a weak real password more often than prose, so there only these
+# placeholder words stay clean (the D15 prose rule covers the quoted keys and prose after `Bearer`).
+_URL_PLACEHOLDER_WORDS = frozenset({"password", "passwd", "pass", "secret", "changeme", "example", "pwd"})
+VALUE_CHECKED_PATTERNS = ((BEARER_TOKEN_RE, 20, True), (URL_CREDENTIAL_RE, 6, False), (QUOTED_LABEL_RE, 6, True))
+
+
+def _secret_value(value, min_len, prose_exempt=True):
+    """True when a captured value is long enough and is neither a template nor a prose word."""
+    v = (value or "").strip(_JS_TRIM)
+    if len(v) < min_len:
+        return False
+    if any(rx.search(v) for rx in TEMPLATE_VALUE_RES):
+        return False
+    if not prose_exempt:
+        return v.lower() not in _URL_PLACEHOLDER_WORDS
+    return not _PROSE_VALUE.match(v)
+
+
+def _value_checked_secret(line):
+    for pattern, min_len, prose_exempt in VALUE_CHECKED_PATTERNS:
+        for match in pattern.finditer(line):
+            value = next((g for g in match.groups() if g is not None), "")
+            if _secret_value(value, min_len, prose_exempt):
+                return True
+    return False
+
 # A heading line: one-or-more '#' then text. We also accept the task forms below.
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$")
 
@@ -825,10 +929,8 @@ def scan_placeholders_and_secrets(text):
         if not in_fence and PLACEHOLDER_RE.search(_strip_inline_code(line)):
             warnings.append(f"placeholder:{lineno}")
         # Secrets: always scan the full line — a secret in a code block is still a leak.
-        for pat in SECRET_PATTERNS:
-            if pat.search(line):
-                errors.append(f"possible_secret:{lineno}={_mask(line)}")
-                break  # one report per line is enough
+        if any(pat.search(line) for pat in SECRET_PATTERNS) or _value_checked_secret(line):
+            errors.append(f"possible_secret:{lineno}={_mask(line)}")  # one report per line is enough
     return {"errors": errors, "warnings": warnings}
 
 

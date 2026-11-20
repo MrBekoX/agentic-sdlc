@@ -632,11 +632,23 @@ class TestFH5CodexWriteFormsBothReaders(_Tmp):
                 self.assertIn(spec, self._signals(lines)["editTargets"])
 
     def test_fh5_recognizer_is_linear_on_long_single_line_input(self):
-        body = ("m.writeTargetsOf(s); m.preciseWriteTargetsOf(s); m.currentEditTargets('Bash', s);"
-                "m.currentEditTargets('apply_patch', s);")
-        inputs = [chunk * (400000 // len(chunk)) for chunk in
-                  ("> ", "<<\\", "'a' ", '>"', "<<'E' ", "a <<E\n", "*** Move to: ", "apply_patch <<P ")]
-        self.assertLess(_node_timed(ROLLOUT, body, inputs), 3000)
+        # The `_assert_linear` rule of tests/test_audit_residuals_r2.py, per recognizer: the 4x input under
+        # 3000 ms, and under 9x the 1x input once it is long enough to measure. One shared 3000 ms budget
+        # for all four recognizers measured runner speed, not growth: the second heredoc reading (Round 2)
+        # put the batch over it on the macOS Intel runner while every recognizer stayed linear.
+        chunks = ("> ", "<<\\", "'a' ", '>"', "<<'E' ", "a <<E\n", "*** Move to: ", "apply_patch <<P ")
+
+        def inputs(size):
+            return [chunk * (size // len(chunk)) for chunk in chunks]
+
+        for body in ("m.writeTargetsOf(s);", "m.preciseWriteTargetsOf(s);", "m.currentEditTargets('Bash', s);",
+                     "m.currentEditTargets('apply_patch', s);"):
+            with self.subTest(recognizer=body):
+                small = _node_timed(ROLLOUT, body, inputs(100000))
+                large = _node_timed(ROLLOUT, body, inputs(400000))
+                self.assertLess(large, 3000, "the 4x input took %d ms" % large)
+                if large > 1000:
+                    self.assertLess(large, 9 * max(small, 1), "4x input cost %d ms vs %d ms" % (large, small))
 
 
 # ================================================================================================

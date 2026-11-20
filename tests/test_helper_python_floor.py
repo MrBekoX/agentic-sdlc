@@ -91,6 +91,15 @@ def _newer_method_calls(tree):
                    and node.func.attr in NEWER_METHODS})
 
 
+# `Path.write_text(..., newline=...)` is Python 3.10+: on the floor the call parses and raises
+# TypeError when it runs (the git-hook installer's `--install` did, R1-e Task 5).
+def _write_text_newline_calls(tree):
+    return sorted(node.lineno for node in ast.walk(tree)
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                  and node.func.attr == "write_text"
+                  and any(kw.arg == "newline" for kw in node.keywords))
+
+
 class TestHelperPythonFloor(unittest.TestCase):
     def test_user_facing_helpers_parse_with_the_floor_grammar(self):
         for rel in USER_FACING:
@@ -119,6 +128,19 @@ class TestHelperPythonFloor(unittest.TestCase):
         tree = ast.parse("a = p.removeprefix('./')\nb = s.removesuffix('\\r')\nc = x.is_relative_to(y)\n"
                          "d = getattr(s, 'removeprefix', None)\n")
         self.assertEqual(_newer_method_calls(tree), [(1, "removeprefix"), (2, "removesuffix"), (3, "is_relative_to")])
+
+    def test_no_user_facing_helper_passes_newline_to_write_text(self):
+        for rel in USER_FACING:
+            with self.subTest(helper=rel):
+                tree = ast.parse((REPO / rel).read_text(encoding="utf-8"), filename=rel)
+                self.assertEqual(_write_text_newline_calls(tree), [],
+                                 rel + " passes newline= to Path.write_text, which needs Python 3.10")
+
+    def test_the_write_text_newline_check_fires(self):
+        # Negative control: the keyword is seen; a plain write_text and an open(newline=) are not.
+        tree = ast.parse("p.write_text(s, encoding='utf-8', newline='\\n')\np.write_text(s)\n"
+                         "open(f, 'w', newline='\\n')\n")
+        self.assertEqual(_write_text_newline_calls(tree), [1])
 
     def test_the_check_fires_on_an_undeferred_union(self):
         # Negative control: the detector must see the construct that broke 3.9 imports.

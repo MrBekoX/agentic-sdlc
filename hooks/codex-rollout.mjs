@@ -9,7 +9,7 @@
 // envelope), across the whole rollout (user- and assistant-authored carriers alike).
 import { statSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { extractWrittenContent, blankHeredocBodies, unquoteWord, HEREDOC_OPENER_CAP } from './codex-write-signal.mjs';
+import { extractWrittenContent, blankHeredocBodies, legacyHeredocPattern, unquoteWord, HEREDOC_OPENER_CAP } from './codex-write-signal.mjs';
 
 // Single source of truth for the gate's self-signature. The completion-claim-gate SKILL.md emits this
 // exact literal when it runs; AC17's drift test asserts the two copies stay byte-identical.
@@ -515,9 +515,11 @@ export function preciseWriteTargetsOf(command) {
   const cmd = String(command || '');
   if (!cmd || cmd.length > CMD_MAX) return [];
   if ((cmd.match(/<</g) || []).length > HEREDOC_OPENER_CAP) return []; // `<<` flood -> fail-open (shared cap)
-  const work = blankHeredocs(cmd);
   const targets = [];
-  for (const rawSeg of splitSegmentsQA(work)) {
+  // Both heredoc readings (codex-write-signal.mjs): their targets are unioned, so a grammar change never
+  // drops a write target the earlier reading saw. More targets is the safe side for the flow-order gate.
+  const views = [blankHeredocs(cmd), blankHeredocBodies(cmd, legacyHeredocPattern)];
+  for (const work of views[0] === views[1] ? views.slice(0, 1) : views) for (const rawSeg of splitSegmentsQA(work)) {
     const stmt = stripWrappingSubshell(rawSeg);
     if (!stmt) continue;
     // The OPERATOR is found over the QUOTE-BLANKED statement (a quoted `>` is data); FH-5: the target word

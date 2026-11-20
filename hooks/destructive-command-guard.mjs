@@ -41,7 +41,7 @@ import { emitHookResult } from './hook-output.mjs';
 import { runGit } from './git-exec.mjs';
 import {
   commandCwd, resolveGitCommands, resolveTargetCwd, unwrapCommand, shellPayloadAt, shortCluster,
-  exactHeredocShape, powershellCommentRanges,
+  exactHeredocShape, powershellCommentRanges, powershellHereStringRanges,
 } from './git-invocation.mjs';
 import { scanShell } from './shell-quoting.mjs';
 
@@ -668,6 +668,19 @@ function commandVariants(cmd, view, depth = 0) {
       const comments = powershellCommentRanges(cmd);
       if (comments.length) variants.push(rewriteRanges(cmd, comments, []));
     }
+    // R2-a: the command with its single-quoted here-strings blanked, so an apostrophe in a body no
+    // longer pairs with the `'` of `@'` and hides the line after `'@`. The variants are a union.
+    if (cmd.includes("@'")) {
+      const bodies = powershellHereStringRanges(cmd);
+      if (bodies.length) {
+        const stripped = rewriteRanges(cmd, bodies, []);
+        variants.push(stripped);
+        if (stripped.includes('#')) {
+          const comments = powershellCommentRanges(stripped);
+          if (comments.length) variants.push(rewriteRanges(stripped, comments, []));
+        }
+      }
+    }
   } else if (cmd.includes('#') || cmd.includes('<<')) {
     const lex = scanShell(cmd);
     if (lex.commentRanges.length || lex.bodyRanges.length) {
@@ -703,11 +716,15 @@ function commandTokensOne(cmd, view, depth = 0) {
   if (WALK.budget <= 0) { WALK.unresolved = true; return []; }
   WALK.budget -= 1;
   let all = [];
-  for (const text of commandVariants(cmd, view, depth)) all = all.concat(tokensOfText(text, view, depth));
+  // A payload is walked once per level, whichever variant shows it: the here-string and comment
+  // variants repeat the same payloads, and walking each copy multiplied the cost per level (security
+  // review of Round 2). The same payload text gives the same tokens, so the union is unchanged.
+  const walked = new Set();
+  for (const text of commandVariants(cmd, view, depth)) all = all.concat(tokensOfText(text, view, depth, walked));
   return all;
 }
 
-function tokensOfText(text, view, depth) {
+function tokensOfText(text, view, depth, walked = new Set()) {
   const bash = view === 'bash';
   const decoded = view === 'ps' ? psUnescape(text) : text;
   const source = bash ? expandAnsiCQuotes(removeBashLineContinuations(decoded)) : decoded;
@@ -731,6 +748,9 @@ function tokensOfText(text, view, depth) {
   }
   const wrapped = [];
   for (const payload of payloads) {
+    const key = payload.view + '\u0000' + payload.text;
+    if (walked.has(key)) continue;
+    walked.add(key);
     // Charge by LENGTH, not by call: the cost and the memory are both in the payload text,
     // and a handful of very long payloads is as expensive as many short ones.
     const cost = 1 + (payload.text.length >> 6);

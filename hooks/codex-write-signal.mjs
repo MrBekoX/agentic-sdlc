@@ -37,22 +37,67 @@ const EXPANSION = /\$[\w{(]|`/;
 // `<<aaaa...` with no newline. Per opener the match is now linear; the lazy body still scans to the end
 // once per UNTERMINATED opener, so callers skip heredoc parsing above HEREDOC_OPENER_CAP openers.
 export const HEREDOC_OPENER_CAP = 24;
-const HEREDOC_SOURCE = String.raw`(<<-?[ \t]*(\\?)(['"]?)([A-Za-z_]\w*)(?!\w)\3(\r?)(?!\r)([^\n]*))\n([\s\S]*?)\n\4\5(?=\n|$)`;
+// R2-b: the delimiter may be any word of letters, digits, `_`, `.` and `-` (`<<EOF-1`, `<<'END.1'`,
+// `<<1EOF`), not only an identifier, which ended `EOF-1` at `EOF` and left the body unread. The set is
+// deliberately small: those characters read the same inside and outside quotes, so the delimiter word
+// never makes the grammar read a body LONGER than bash does, which would swallow the commands after it (security reviews of
+// Round 2). Any other word - a `\` or an expansion inside quotes (`<<"E\"F"`, `<<"A$(x "`), a word bash
+// continues (`<<'EOF'X`, `<<EOF$x`), a CR inside the word (`<<EOF\rX`), an escaped quote (`<<\'EOF'`)
+// - is left unread, and so is a here-string (`<<<`). `<<` takes its `-` only as the `<<-` operator.
+// An empty quote pair after the word (`<<EOF''`) leaves bash's word unchanged, so it is read as 1905c15
+// read it; an escaped `\<<` is no operator.
+const HEREDOC_SOURCE = String.raw`(?<![<\\])(<<(?:-|(?!-))[ \t]*(\\?)((?<!\\)['"]|)([A-Za-z0-9_.-]+)\3(?:''|"")*(\r?)(?=[ \t\n<>|&;()]|$)([^\n]*))\n([\s\S]*?)\n\4\5(?=\n|$)`;
 
 export function heredocPattern() {
   return new RegExp(HEREDOC_SOURCE, 'g'); // a fresh global regex per use: no shared lastIndex state
 }
 
+// 1905c15's grammar, kept as a second reading. A change to the grammar above reads some lines
+// differently, and a reviewer found a new spelling each round where the new reading saw less than the
+// old one. So every check runs both readings and combines them on its safe side: the written content
+// and the write targets are the union, and a test run counts only when both readings count it. No check
+// can then be narrower than 1905c15 by construction. Same group order (1 head .. 7 body); linear under
+// the same opener cap.
+const LEGACY_HEREDOC_SOURCE = String.raw`(<<-?[ \t]*(\\?)(['"]?)([A-Za-z_]\w*)(?!\w)\3(\r?)(?!\r)([^\n]*))\n([\s\S]*?)\n\4\5(?=\n|$)`;
+export function legacyHeredocPattern() {
+  return new RegExp(LEGACY_HEREDOC_SOURCE, 'g');
+}
 function overHeredocCap(cmd) {
   return (cmd.match(/<</g) || []).length > HEREDOC_OPENER_CAP;
 }
 
+// The offset of the first `<<` the grammar does NOT read as a heredoc (an opener outside its small
+// delimiter set, an unterminated one, an even backslash run before it such as `\\<<`, a second opener
+// on a read opener's line, or any opener past the opener cap), or -1. A `<<` inside a body the grammar
+// did read is data and is skipped; `<<<` and an odd backslash run (`\<<`) are no heredoc operators.
+// Bash's body for such an opener is unknown, so callers err to their safe side: the Codex write guard
+// scans every byte from here on, and the test-run check reads no line after this one as a command.
+// Linear: one pass of the (capped) heredoc grammar plus one scan for `<<`; the backslash runs counted
+// back from distinct `<<` never overlap.
+const HEREDOC_OPERATOR = /(?<!<)<<(?!<)/g;
+export function firstUnreadHeredoc(command) {
+  const cmd = String(command || '');
+  const spans = overHeredocCap(cmd) ? []
+    : [...cmd.matchAll(heredocPattern())].map((m) => [m.index, m.index + m[1].length, m.index + m[0].length]);
+  let k = 0;
+  for (const m of cmd.matchAll(HEREDOC_OPERATOR)) {
+    let j = m.index;
+    while (j > 0 && cmd[j - 1] === '\\') j -= 1;
+    if ((m.index - j) % 2 === 1) continue;                      // `\<<`: an escaped `<`, no operator
+    while (k < spans.length && spans[k][2] <= m.index) k += 1;
+    const span = spans[k];
+    if (span && (m.index === span[0] || (span[1] <= m.index && m.index < span[2]))) continue; // read opener or body
+    return m.index;
+  }
+  return -1;
+}
+
 // Drop every heredoc BODY and closing delimiter, keeping the opener line (its redirect target and any
 // `&& next` command on it run). Over the opener cap the command is returned unchanged.
-export function blankHeredocBodies(command) {
+export function blankHeredocBodies(command, pattern = heredocPattern) {
   const cmd = String(command || '');
   if (overHeredocCap(cmd)) return cmd;
-  return cmd.replace(heredocPattern(), (_full, head) => `${head} `);
+  return cmd.replace(pattern(), (_full, head) => `${head} `);
 }
 
 // One shell word with its quote DELIMITERS removed when the whole word is quoted (`"src/app.py"`).
@@ -146,7 +191,21 @@ function parseApplyPatch(cmd) {
   return { addedContent: added.join('\n'), targets, parsed: true };
 }
 
+// Both readings (see LEGACY_HEREDOC_SOURCE): the content and the targets are the union, with the
+// current reading first and unchanged; `parsed` is the current reading's.
 function parseBash(cmd) {
+  const now = readBash(cmd, heredocPattern, false);
+  const before = readBash(cmd, legacyHeredocPattern, true);
+  const seenParts = new Set(now.added);
+  const seenTargets = new Set(now.targets);
+  const added = now.added.concat(before.added.filter((part) => !seenParts.has(part)));
+  const targets = now.targets.concat(before.targets.filter((t) => !seenTargets.has(t)));
+  return { addedContent: added.join('\n'), targets, parsed: now.parsed };
+}
+
+// One reading of a Bash command under one heredoc grammar. `legacy` reproduces 1905c15's reader: none
+// of the Round 2 additions (the unread-opener slice, raw multi-line segments, the opener line's rest).
+function readBash(cmd, pattern, legacy) {
   const targets = [];
   const added = [];
   // PER-SEGMENT: an expansion-dependent write segment/heredoc contributes NO scannable content (its
@@ -171,8 +230,10 @@ function parseBash(cmd) {
   // delimiter rather than a redirect, and no UNREAD_WRITE token appeared -> parsed:true with empty
   // content. The same CWE-636 shape as `sed --in-place`, one review round later.
   // The grammar is the shared heredocPattern (SW-7: `<<"EOF"`, `<<\EOF` and CRLF are read as well).
-  const work = overHeredocCap(cmd) ? cmd : cmd.replace(heredocPattern(), (full, _head, bs, q, _delim, _cr, rest, body, offset) => {
-    const literal = Boolean(bs || q);          // any quoted delimiter => no expansion of the body
+  const work = overHeredocCap(cmd) ? cmd : cmd.replace(pattern(), (full, head, bs, q, _delim, _cr, rest, body, offset) => {
+    // Any quoting of the delimiter word => no expansion of the body; that includes an empty quote pair
+    // after the word (`<<EOF''`), which the word class (no quote characters) leaves outside group 3.
+    const literal = Boolean(bs || q) || /['"]/.test(head.slice(0, head.length - rest.length));
     const tgt = /(?:>>?)\s*(\S+)/.exec(rest);
     // The redirect target is known whatever the body expands to; only the CONTENT depends on it.
     if (tgt) targets.push(unquoteWord(tgt[1]));
@@ -181,8 +242,18 @@ function parseBash(cmd) {
     }
     if (!literal && EXPANSION.test(body)) { hasExpansion = true; }
     else { added.push(body); }
+    // The rest of the opener line can hold more commands (`; printf … > b`); they leave `work` with the
+    // match, so scan their raw text too (a superset; the deny stays exact).
+    if (!legacy && rest.trim()) added.push(rest);
     return ' ';
   });
+
+  // An opener the grammar cannot read still writes its body, which bash ends at a delimiter line this
+  // grammar cannot name (or never). 1905c15 read some of these spellings (`<<'EOF'X`) with a shorter
+  // delimiter, so scan every byte from the opener on: a superset of what lands on disk, while the deny
+  // stays exact because a HIGH pattern is a vendor-shaped token that neighbouring text cannot make.
+  const unread = legacy ? -1 : firstUnreadHeredoc(cmd);
+  if (unread >= 0) added.push(cmd.slice(unread));
 
   // 2) Segment on statement boundaries (quote-aware): ; && || | — NOT on \n (heredocs gone) and not
   //    structurally on (){}; strip a wrapping subshell so an in-subshell redirect is still seen.
@@ -195,6 +266,10 @@ function parseBash(cmd) {
     if (seg.startsWith('(')) seg = seg.slice(1);
     if (seg.endsWith(')')) seg = seg.slice(0, -1);
     seg = seg.trim();
+    // A segment that spans lines or still holds a `<<` can write in ways this reader does not follow
+    // (`true` LF `echo … > f`, the lines after `<<<` or `\<<`, a body bash ends later than the grammar).
+    // Scan its raw text as well: a superset of what lands on disk, with the deny still exact (HIGH).
+    if (!legacy && (seg.includes('\n') || seg.includes('<<'))) added.push(seg);
     if (!seg || /^cd\b/.test(seg)) continue;            // a `cd` prefix is not a write
     // A `<<` still here means a heredoc the reader above could NOT consume (unterminated, over the
     // opener cap, or an opener shape outside its grammar). Its body never reached `added`, so this
@@ -239,7 +314,7 @@ function parseBash(cmd) {
     if (escaped !== literal) added.push(escaped);
   }
 
-  return { addedContent: added.join('\n'), targets, parsed: !hasExpansion && !unreadWrite };
+  return { added, targets, parsed: !hasExpansion && !unreadWrite };
 }
 
 // Quote-stripping reader for a printf/echo argument list: drop quote DELIMITERS and backslash

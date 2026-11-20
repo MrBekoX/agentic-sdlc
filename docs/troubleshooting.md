@@ -117,7 +117,30 @@ Unknown local state remains nonblocking unless a protected destination is indepe
 
 One exception: a git alias the guard cannot resolve (past 32 lookups or 4 seconds per command, defined in a config the call does not use, or past the resolver's work budget) is treated as a possible commit or push to a protected branch, on any branch. It warns, and is denied under `AGENTIC_BRANCH_GUARD_BLOCK=true`.
 
+A git call past one of the resolver's budgets (more than 128 statements in a shell payload, four shells deep, or more than 64 statements in a `!` alias) is not checked. The guard says `part of this command was not inspected … a commit or push inside it was not checked against protected branches`, and `scan-commit.mjs` says the same for the secret scan. Neither denies for it. Split the command, or run the commit or push on its own line.
+
 Very large configured mapping queries can also exhaust the documented matching-work budget. Such a query remains unresolved rather than gaining a guessed upstream or same-name destination; later independently known explicit protected destinations still warn or deny. This client-side backstop preserves fail-open handling for unknown queries.
+
+## Git Hooks Warn That The Scanner Is Missing
+
+The repository hooks that `scripts/install_git_hooks.py --install` writes record no plugin path. The installer copies the scanner and the modules it imports into an `agentic-sdlc-scanner` folder next to the hooks (`.git/hooks/agentic-sdlc-scanner/`, or under `core.hooksPath`), and each hook finds that folder from its own location. So one install works when the same checkout is used from Windows (`D:/repo`) and from WSL (`/mnt/d/repo`), on macOS and on Linux, and after the repository moves.
+
+If a commit prints `agentic-sdlc: WARNING - guard scanner missing at …/agentic-sdlc-scanner/git-hook-scan.mjs`, the folder is gone or the hooks are from an older release that named an absolute path. Run `python3 <plugin-root>/scripts/install_git_hooks.py --install --repo <repo>` (or `py -3` on Windows). Hooks from 0.7.0 migrate in place.
+
+`--check` prints a `scanner=` summary:
+
+| `scanner=` | Meaning | What to do |
+|---|---|---|
+| `current` | the copy matches the plugin | nothing |
+| `stale` | the plugin was updated after the install | run `--install` to refresh the copy |
+| `missing` | a vendored file is absent | run `--install` |
+| `unclaimed` | the copy matches but no manifest records it (a lost or moved record) | run `--install` to record it |
+| `modified` | a recorded copy was edited | move the edit aside; `--install` and `--uninstall` leave it in place |
+| `foreign` | an unknown file, folder or symlink sits in the folder | remove it; `--install` refuses until then |
+
+After a plugin update the hooks still run the old copy, and `--check` prints `scanner=stale` until `--install` refreshes it.
+
+A hook also needs `node` on `PATH` in every environment that commits: WSL and Windows each need their own. Without it the hook prints `node not found on PATH; this commit was NOT scanned` and lets the commit through.
 
 ## Completion Claim Guard Only Warns
 
@@ -166,6 +189,8 @@ The scanners never print secret values. If a warning is false positive:
 A here-document body is read as commands, by this guard and by the git guards, so `cat > notes.md <<EOF` whose text mentions a recursive delete or a push to `main` can be denied. Only a whole command of one exact shape keeps its body out: `cat > PATH <<'EOF'`, `cat >> PATH <<'EOF'`, `cat <<'EOF' > PATH`, `cat <<'EOF' >> PATH`, `tee PATH <<'EOF'`, or `git commit -F - <<'EOF'`. The shape needs a quoted delimiter, a plain relative `PATH`, and nothing before the opener or after the closing line, and it never applies under the PowerShell tool. Otherwise write the file with the file-write tool.
 
 Use a scoped, reviewed command and get explicit approval for destructive cleanup.
+
+Under the PowerShell tool a single-quoted here-string (`@'` on its own line end, closed by a line that starts with `'@`) is also read as data: the guards check one more view of the command with its body blanked, so an apostrophe inside it (`it's done`) does not hide the command on the line after `'@`. The raw command is still checked as well, so a destructive-looking line inside the body can still be denied. A double-quoted here-string (`@"` ... `"@`) is not modelled; its body can run `$( )`.
 
 ## Tests Skip Node Checks
 

@@ -20,6 +20,18 @@ Each entry includes:
 
 ---
 
+## 2026-11-20 — A grammar change in a guard must add a reading, not replace the old one
+
+- **Date:** 2026-11-20
+- **Task / context:** Round 2 of the audit residuals (R2-b): the Codex heredoc grammar was widened from an identifier delimiter to a bash word so `<<EOF-1` bodies are read.
+- **Symptom:** Six security-review rounds in a row each found a new spelling where the new grammar read a line differently from 1905c15 and a guard saw less: a written secret went unscanned (`<<'EOF'X`, `\\<<`, the lines after `<<<` or `\<<`, `<<EOF.txt`), a write target dropped out, or a test run was counted that 1905c15 did not count (a quoted `<<1`, `<<<<`). Each spelling patch passed its own tests and the next review found another.
+- **Root cause:** The new grammar REPLACED the old reading. Any two grammars disagree on some inputs, and wherever the new one is on the unsafe side of a consumer, that consumer regresses. Patching spellings one at a time cannot close a set defined by the difference of two regexes.
+- **Correct fix:** Keep the old grammar byte-identical (`LEGACY_HEREDOC_SOURCE`) and run both readings in every consumer, combined on that consumer's safe side: union for scanned content and write targets, intersection for a counted test run. "Never narrower than the old version" then holds by construction, and the regression test runs the old version's denials against the new code.
+- **Preventive rule / automated check:** When a guard's parser changes, list each consumer and its safe direction first. If the new parser can disagree with the old one in the unsafe direction, keep the old parser as a second reading instead of replacing it. Pin the old source text, and add a test whose cases pass on the old checkout and must pass on the new one (`test_no_reading_is_narrower_than_1905c15`). After two failed spelling fixes on one consumer, stop patching and re-plan (AGENTS.md step 9).
+- **Related files & tests:** `hooks/codex-write-signal.mjs` (`LEGACY_HEREDOC_SOURCE`, `parseBash`, `firstUnreadHeredoc`), `hooks/codex-rollout.mjs` (`preciseWriteTargetsOf`), `hooks/flow-evidence.mjs` (`isRealRunnerInvocation`); `tests/test_audit_residuals_r2.py` (`TestR2AuditFollowUps`); `docs/agentic-sdlc/evidence/audit-residuals.security-r2*.md` (gitignored).
+
+---
+
 ## 2026-11-19 — A gate reads its verdict from one exact field, never from a substring of wider text
 
 - **Date:** 2026-11-19

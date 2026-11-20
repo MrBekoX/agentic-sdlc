@@ -188,7 +188,7 @@ Judgment-based gates remain in skills and contracts. A script cannot decide whet
 | `bump_version.py` | Sync version across manifests and `VERSION`. |
 | `task_brief.py` | Extract a plan task into a handoff file. |
 | `review_package.py` | Produce a git diff review package. |
-| `install_git_hooks.py` | Install the effect-layer git guards into a repository. Git runs those on the OPERATION, after it has resolved aliases, quoting and `$PATH`, so they see what the command-string guards structurally cannot. Ownership is recorded in the repository's git directory; foreign/modified hooks are preserved, `--check` / `--uninstall` are supported, and an external/shared `core.hooksPath` requires `--allow-external-hooks-path`. |
+| `install_git_hooks.py` | Install the effect-layer git guards into a repository. Git runs those on the OPERATION, after it has resolved aliases, quoting and `$PATH`, so they see what the command-string guards structurally cannot. Ownership is recorded in the repository's git directory; foreign/modified hooks are preserved, `--check` / `--uninstall` are supported, and an external/shared `core.hooksPath` requires `--allow-external-hooks-path`. The hooks record no plugin path: the scanner is copied into `agentic-sdlc-scanner/` next to them and found from `$0`, so one install works on Windows, WSL, macOS and Linux; `--check` reports `scanner=stale` after a plugin update. |
 
 ## Testing And Evidence
 

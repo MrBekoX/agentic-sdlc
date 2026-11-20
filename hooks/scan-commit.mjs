@@ -112,6 +112,17 @@ function readNamed(full) {
   try { return readFileSync(full, 'utf8'); } catch { return ''; }
 }
 
+// Each named message or patch file is read once per run: its text is scanned once whichever records
+// name it. A piped here-document adds one invocation record per body with the consumer's own `-F
+// <file>`, so reading per record let 60 repeats of a 1.6 MB file run the heap out and crash the hook
+// (security review 5); 1905c15 read the same line's file once or twice.
+const namedAlreadyRead = new Set();
+function readNamedOnce(full) {
+  if (namedAlreadyRead.has(full)) return '';
+  namedAlreadyRead.add(full);
+  return readNamed(full);
+}
+
 // SW-6: a patch diff goes through boundedDiff, so one oversized file is skipped and named instead of
 // overflowing the single call and dropping the scan of every other file. MAX_PATCH_TOTAL bounds the text
 // one diff contributes, which keeps the scan inside the hook's time budget. `lastPatchCut` says that the
@@ -226,9 +237,18 @@ try {
 // if `commit -a` runs: the staged and the unstaged changes of the repositories involved.
 const unresolved = !!info.unresolved;
 
+// R1-d: statements a resolver budget dropped unread (payload depth, payload statement budget, alias
+// walk budget) may hold a commit. The decision does not change, but the gap is reported, never silent.
+const SKIPPED_NOTICE = (info.skippedReads || 0) > 0
+  ? '⚠️ secret scan: part of this command was not inspected (shell payload depth, payload statement budget or alias walk budget); a commit inside it was NOT scanned for secrets.'
+  : '';
+
 // Resolve what git will ACTUALLY run, expanding git aliases the way git does: `git ci` where
 // `alias.ci = commit -a` is a commit, and the old raw-substring gate never saw it.
-if (!info.subcommands.has('commit') && !unresolved) process.exit(0);
+if (!info.subcommands.has('commit') && !unresolved) {
+  if (SKIPPED_NOTICE) emitHookResult({ systemMessage: SKIPPED_NOTICE }, 'PreToolUse');
+  process.exit(0);
+}
 
 // EVERY repository the command commits into, not just the first one it names. A command line can
 // carry two commits with different `-C` targets (`git -C a commit ... && git -C b commit ...`);
@@ -323,15 +343,10 @@ if (sweepsUnstaged) {
 // Searching every repo in order and taking the first readable hit let a clean `repoA/msg.txt` mask
 // the secret in `repoB/msg.txt` for `git -C repoA commit -F msg.txt && git -C repoB commit -F msg.txt`.
 const messageText = (info.calls || []).flatMap((call) => {
-  const cwd = resolveTargetCwd(baseCwd, call.dirs);
+  const cwd = resolveTargetCwd(baseCwd, call.orderedDirs || call.dirs);  // R2-d: git's own -C chain
   return call.texts.flatMap((text) => [
     ...commitMessages(text),
-    ...commitMessageFiles(text).map((f) => {
-      const kind = namedFileKind(resolvePath(cwd, f));
-      if (kind === 'bounded') return readBounded(resolvePath(cwd, f));
-      if (kind !== 'regular') return '';
-      try { return readFileSync(resolvePath(cwd, f), 'utf8'); } catch { return ''; }
-    }),
+    ...commitMessageFiles(text).map((f) => readNamedOnce(resolvePath(cwd, f))),
   ]);
 }).concat(
   // A git call found INSIDE an inner shell payload (`bash -c "git commit -m ..."`). Its
@@ -352,7 +367,7 @@ const messageText = (info.calls || []).flatMap((call) => {
   (info.invocations || []).filter((call) => call.subcommand === 'commit').flatMap((call) => {
     const parsed = parseCommitArgs(call.args);
     const files = call.viaPayload ? [] : parsed.files.filter((f) => !isStdinPath(f));
-    return [...parsed.messages, ...files.map((f) => readNamed(resolvePath(call.cwd, f)))];
+    return [...parsed.messages, ...files.map((f) => readNamedOnce(resolvePath(call.cwd, f)))];
   }),
 ).join('\n');
 denyOnFindings(addedDiffLines(diff), names, messageText);
@@ -383,7 +398,7 @@ for (const call of info.invocations || []) {
   for (const patch of scope.patches) {
     // Same rule as `-F`: a file named inside an inner shell payload is never opened.
     if (call.viaPayload || isStdinPath(patch)) continue;
-    const text = readNamed(resolvePath(call.cwd, patch));
+    const text = readNamedOnce(resolvePath(call.cwd, patch));
     scannedBytes += text.length;
     diff += text + '\n';
   }
@@ -465,31 +480,24 @@ denyOnFindings(addedDiffLines(diff) + (untrackedText ? '\n' + untrackedText : ''
 
 // Fail-open is deliberate (never break a commit), but surface it: if a git read failed, the commit
 // was not actually scanned, so don't let its silence read as "scanned & clean". Non-blocking.
+// One result per hook run: the notice of the chain below and the skipped-read notice travel in one
+// message, because a second JSON object on stdout is not a hook result any runtime reads.
+let chainNotice = '';
 if (gitReadFailed) {
-  emitHookResult({
-    systemMessage: '⚠️ secret scan: could not read `git diff` — this commit was NOT scanned for secrets.',
-  }, 'PreToolUse');
+  chainNotice = '⚠️ secret scan: could not read `git diff` — this commit was NOT scanned for secrets.';
 } else if (budgetExceeded) {
-  emitHookResult({
-    systemMessage: '⚠️ secret scan: this command stages more than the hook can read within its time budget — some staged changes were NOT scanned for secrets.',
-  }, 'PreToolUse');
+  chainNotice = '⚠️ secret scan: this command stages more than the hook can read within its time budget — some staged changes were NOT scanned for secrets.';
 } else if (skippedCommitCwd) {
-  emitHookResult({
-    systemMessage: '⚠️ secret scan: a commit target directory does not exist at check time — it was NOT scanned for secrets.',
-  }, 'PreToolUse');
+  chainNotice = '⚠️ secret scan: a commit target directory does not exist at check time — it was NOT scanned for secrets.';
 } else if (skippedFiles.length) {
   const shown = skippedFiles.slice(0, 10).map(displayPath).join(', ') + (skippedFiles.length > 10 ? ', ...' : '');
-  emitHookResult({
-    systemMessage: `⚠️ secret scan: ${skippedFiles.length} file(s) with a diff too large to read were NOT scanned for secrets: ${shown}.`,
-  }, 'PreToolUse');
+  chainNotice = `⚠️ secret scan: ${skippedFiles.length} file(s) with a diff too large to read were NOT scanned for secrets: ${shown}.`;
 } else if (partialRead) {
-  emitHookResult({
-    systemMessage: '⚠️ secret scan: some files this command stages were too large or unreadable — they were NOT scanned for secrets.',
-  }, 'PreToolUse');
+  chainNotice = '⚠️ secret scan: some files this command stages were too large or unreadable — they were NOT scanned for secrets.';
 } else if (unresolved) {
-  emitHookResult({
-    systemMessage: '⚠️ secret scan: some git subcommands on this line could not be resolved (alias lookup budget or a different config) — staged and unstaged changes were scanned as if they were committed.',
-  }, 'PreToolUse');
+  chainNotice = '⚠️ secret scan: some git subcommands on this line could not be resolved (alias lookup budget or a different config) — staged and unstaged changes were scanned as if they were committed.';
 }
+const notices = [chainNotice, SKIPPED_NOTICE].filter(Boolean);
+if (notices.length) emitHookResult({ systemMessage: notices.join('\n') }, 'PreToolUse');
 
 process.exit(0);
