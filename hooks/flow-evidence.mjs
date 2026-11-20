@@ -14,7 +14,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { programOnAbsolutePath } from './git-exec.mjs';
-import { blankHeredocBodies } from './codex-write-signal.mjs';
+import { blankHeredocBodies, firstUnreadHeredoc, legacyHeredocPattern } from './codex-write-signal.mjs';
 import { splitBr6StatementJoins, currentEditTargets } from './codex-rollout.mjs';
 
 export const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
@@ -239,8 +239,20 @@ function simpleCommandRuns(words, testRe, depth) {
   return Boolean(m) && m.index === 0 && program[m[0].length] !== '.';
 }
 
+// The test-run check counts a run only when BOTH heredoc readings count it, the current grammar and
+// 1905c15's (codex-write-signal.mjs), so a grammar change cannot count a run the earlier reading did not.
+// Missing evidence is the safe side here. Set only inside isRealRunnerInvocation (synchronous).
+let legacyReading = false;
 function runnerIn(command, testRe, depth) {
-  const str = blankHeredocBodies(String(command || '')); // FH-3: a heredoc body is data, not commands
+  // A heredoc the grammar leaves unread has a body of unknown length, so no line after its opener's
+  // line is read as a command: a body line never counts as a test run (missing evidence is the safe side).
+  let raw = String(command || '');
+  if (!legacyReading) {
+    const unread = firstUnreadHeredoc(raw);
+    if (unread >= 0) { const end = raw.indexOf('\n', unread); if (end >= 0) raw = raw.slice(0, end); }
+  }
+  // FH-3: a heredoc body is data, not commands.
+  const str = legacyReading ? blankHeredocBodies(raw, legacyHeredocPattern) : blankHeredocBodies(raw);
   for (const { text } of splitBr6StatementJoins(str)) {   // `;`, newline, `||`; comments skipped (FH-3)
     for (const seg of splitSimpleCommands(text)) {
       const words = shellWords(seg);
@@ -260,7 +272,9 @@ export function isRealRunnerInvocation(command, testRe) {
   if (!testRe) return false;
   const str = String(command || '');
   if (str.length > SHELL_ANALYSIS_MAX) return false;
-  return runnerIn(str, testRe, 0);
+  if (!runnerIn(str, testRe, 0)) return false;
+  legacyReading = true;
+  try { return runnerIn(str, testRe, 0); } finally { legacyReading = false; }
 }
 
 // A2 advisory result-signature scanner (DP-A2-SIG). A broad, LINEAR match for the summary line a

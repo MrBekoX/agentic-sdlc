@@ -343,7 +343,7 @@ if (sweepsUnstaged) {
 // Searching every repo in order and taking the first readable hit let a clean `repoA/msg.txt` mask
 // the secret in `repoB/msg.txt` for `git -C repoA commit -F msg.txt && git -C repoB commit -F msg.txt`.
 const messageText = (info.calls || []).flatMap((call) => {
-  const cwd = resolveTargetCwd(baseCwd, call.dirs);
+  const cwd = resolveTargetCwd(baseCwd, call.orderedDirs || call.dirs);  // R2-d: git's own -C chain
   return call.texts.flatMap((text) => [
     ...commitMessages(text),
     ...commitMessageFiles(text).map((f) => readNamedOnce(resolvePath(cwd, f))),

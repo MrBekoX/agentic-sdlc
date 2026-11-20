@@ -824,8 +824,8 @@ class TestR2CG4HeredocBoundaries(_RepoCase):
 
     def test_r2cg4_powershell_here_string_controls(self):
         # A PowerShell here-string that mentions `<<EOF` must not turn the script after it into a
-        # here-document body. (An apostrophe inside a single-quoted here-string is a separate,
-        # pre-existing quote-reading gap of the raw splitter; base f430715 allows that shape too.)
+        # here-document body. (An apostrophe inside a single-quoted here-string is covered by
+        # tests/test_audit_residuals_r2.py, R2-a.)
         for command in ("$s = @'\n<<EOF\n'@\nRemove-Item -Recurse C:\\x\nEOF",
                         "$s = @\"\nnote <<EOF\n\"@\nRemove-Item -Recurse C:\\x\nEOF",
                         "$s = @'\ncat > n <<EOF\n'@\nRemove-Item -Recurse C:\\x\nEOF"):

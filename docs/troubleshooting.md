@@ -190,6 +190,8 @@ A here-document body is read as commands, by this guard and by the git guards, s
 
 Use a scoped, reviewed command and get explicit approval for destructive cleanup.
 
+Under the PowerShell tool a single-quoted here-string (`@'` on its own line end, closed by a line that starts with `'@`) is also read as data: the guards check one more view of the command with its body blanked, so an apostrophe inside it (`it's done`) does not hide the command on the line after `'@`. The raw command is still checked as well, so a destructive-looking line inside the body can still be denied. A double-quoted here-string (`@"` ... `"@`) is not modelled; its body can run `$( )`.
+
 ## Tests Skip Node Checks
 
 `tests/test_static_node.py` skips JavaScript syntax checks if `node` is unavailable. A skip is not a pass. Install Node before release verification.

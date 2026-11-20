@@ -530,6 +530,85 @@ export function powershellCommentRanges(text) {
   return out;
 }
 
+/**
+ * [start, end) ranges of PowerShell single-quoted here-strings (`@'` ... `'@`), from the `@` of the
+ * opener through the `'@` of the terminator. The raw splitters read a here-string's body as code: an
+ * apostrophe in it (`it's done`) paired with the `'` of `@'`, and the `'` of `'@` then opened a quote
+ * that swallowed the next command (R2-a). An opener is `@'` followed only by blanks and a line end,
+ * outside quotes and comments; the body ends at the first later line whose first non-blank
+ * characters are `'@`, which is never later than PowerShell ends it. An unterminated opener yields
+ * no range. Linear: a terminator search that fails ends the scan, because no later opener could
+ * find a terminator either.
+ */
+export function powershellHereStringRanges(text) {
+  const out = [];
+  const s = String(text ?? '');
+  const n = s.length;
+  const blank = (ch) => ch === ' ' || ch === '\t';
+  let i = 0;
+  let wordStart = true;
+  while (i < n) {
+    const c = s[i];
+    if (c === '@' && s[i + 1] === "'") {
+      let j = i + 2;
+      while (j < n && blank(s[j])) j += 1;
+      if (s[j] === '\n' || (s[j] === '\r' && s[j + 1] === '\n')) {
+        let line = s[j] === '\r' ? j + 2 : j + 1;
+        let end = -1;
+        while (line < n) {
+          let p = line;
+          while (p < n && blank(s[p])) p += 1;
+          if (s[p] === "'" && s[p + 1] === '@') { end = p + 2; break; }
+          const nl = s.indexOf('\n', line);
+          if (nl < 0) break;
+          line = nl + 1;
+        }
+        if (end < 0) return out;
+        out.push([i, end]);
+        i = end;
+        wordStart = false;
+        continue;
+      }
+    }
+    if (c === "'") {
+      let j = i + 1;
+      while (j < n) {
+        if (s[j] === "'") {
+          if (s[j + 1] === "'") { j += 2; continue; }  // '' is an apostrophe inside the string
+          break;
+        }
+        j += 1;
+      }
+      i = Math.min(n, j + 1);
+      wordStart = false;
+      continue;
+    }
+    if (c === '"') {
+      let j = i + 1;
+      while (j < n && s[j] !== '"') j += s[j] === '`' ? 2 : 1;
+      i = Math.min(n, j + 1);
+      wordStart = false;
+      continue;
+    }
+    if (c === '`') { i += 2; wordStart = false; continue; }
+    if (c === '<' && s[i + 1] === '#') {
+      const close = s.indexOf('#>', i + 2);
+      i = close < 0 ? n : close + 2;
+      wordStart = true;
+      continue;
+    }
+    if (c === '#' && wordStart) {
+      const nl = s.indexOf('\n', i);
+      i = nl < 0 ? n : nl;
+      continue;
+    }
+    wordStart = c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === ';' || c === '|'
+      || c === '&' || c === '(' || c === ')' || c === '{' || c === '}';
+    i += 1;
+  }
+  return out;
+}
+
 /** `text` with the given [start, end) ranges replaced by spaces (newlines kept). */
 export function blankRanges(text, ranges) {
   const s = String(text ?? '');
@@ -598,6 +677,19 @@ export function statementsOf(text, { powershell = false } = {}) {
   if (powershell && String(text).includes('#')) {
     const ranges = powershellCommentRanges(text);
     if (ranges.length) for (const t of baseStatements(blankRanges(text, ranges))) add({ text: t, heredocs: [] });
+  }
+  // R2-a: also the statements of the text with its single-quoted here-strings blanked, so the line
+  // after `'@` is read as the command it is. The union can only add.
+  if (powershell && String(text).includes("@'")) {
+    const bodies = powershellHereStringRanges(text);
+    if (bodies.length) {
+      const stripped = blankRanges(text, bodies);
+      for (const t of baseStatements(stripped)) add({ text: t, heredocs: [] });
+      if (stripped.includes('#')) {
+        const ranges = powershellCommentRanges(stripped);
+        if (ranges.length) for (const t of baseStatements(blankRanges(stripped, ranges))) add({ text: t, heredocs: [] });
+      }
+    }
   }
   return out;
 }
@@ -781,15 +873,18 @@ function topLevelTexts(text) {
 // them completely. destructive-command-guard.mjs has stripped these for a long time; this resolver
 // simply never re-asked the question. LINEAR single-char slices, deliberately not a regex with a
 // greedy quantifier before an anchor (see lessons.md).
-function stripGroupWrappers(seg) {
-  let s = String(seg).trim();
-  for (let i = 0; i < 8; i += 1) {
-    const before = s;
-    if (s.startsWith('(') || s.startsWith('{')) s = s.slice(1).trim();
-    if (s.endsWith(')') || s.endsWith('}')) s = s.slice(0, -1).trim();
-    if (s === before) break;
-  }
-  return s;
+// R2-c: no round limit. Eight rounds left a ninth spaced `( ` in front, and since `(` is not a
+// reserved word the call was not read. One front index past every `(`, `{` and blank, one back index
+// past every `)`, `}` and blank (never below the front), one slice: the old loop's fixed point, in
+// linear time. A blank is what String.prototype.trim removes, as the old loop's trim() did.
+export function stripGroupWrappers(seg) {
+  const s = String(seg);
+  const blank = (c) => c.trim() === '';
+  let front = 0;
+  let back = s.length;
+  while (front < back && (s[front] === '(' || s[front] === '{' || blank(s[front]))) front += 1;
+  while (back > front && (s[back - 1] === ')' || s[back - 1] === '}' || blank(s[back - 1]))) back -= 1;
+  return s.slice(front, back);
 }
 
 // Given the tokens of ONE command (redirections already removed), return
@@ -1088,6 +1183,7 @@ export function resolveGitCommands(command, opts = {}) {
         subcommand: sub, args: effectiveArgs, inlineConfig,
         cwd: viaPayload ? baseCwd : resolveTargetCwd(baseCwd, orderedDirs),
         viaPayload, readContextKnown: contextKnown && !viaPayload, stdin, depth,
+        orderedDirs: viaPayload ? [] : orderedDirs,
       });
       // A literal here-document piped into this statement (R1-b): one more record per body, from this
       // same reading. Not passed to alias children, whose stdin is the statement's own.
@@ -1136,7 +1232,12 @@ export function resolveGitCommands(command, opts = {}) {
           orderedDirs, inlineConfig, extraArgs: effectiveArgs, readContextKnown: contextKnown, stdin });
       }
     }
-    return { subcommands, texts, payloadTexts, dirs, invocations, aliasShellTexts };
+    // R2-d: the ordered `-C` chain of this root statement's first non-payload git call. `dirs` is the
+    // de-duplicated view existing readers rely on; git resolves each later relative `-C` against the
+    // previous one, so `git -C sub -C sub commit` runs in `sub/sub`, not `sub`.
+    const firstCall = invocations.find((inv) => !inv.viaPayload);
+    return { subcommands, texts, payloadTexts, dirs, invocations, aliasShellTexts,
+      orderedDirs: firstCall ? firstCall.orderedDirs : [] };
   }
 
   const lex = { truncated: false };
@@ -1204,8 +1305,20 @@ export function targetCwdFor(info, subcommands, baseCwd) {
  */
 export function targetCwdsFor(info, subcommands, baseCwd) {
   const wanted = Array.isArray(subcommands) ? subcommands : [subcommands];
+  // R2-d (D11): each target is the `cwd` of an invocation that runs the subcommand, resolved from its
+  // full ordered `-C` chain. The de-duplicated `calls[].dirs` named `sub` for `git -C sub -C sub
+  // commit`, which git runs in `sub/sub`. Payload invocations keep the hook's own cwd.
+  // The call-level target stays too (resolved from the call's ordered chain): a commit run by a shell
+  // inside a `!` alias is a payload invocation with the hook's own cwd, while git runs the alias in the
+  // call's `-C` directory (security review of Round 2).
+  const fromInvocations = (info.invocations || []).filter((inv) => wanted.includes(inv.subcommand))
+    .map((inv) => inv.cwd);
+  // Round 1's call target (`dirs`) stays in the set too, so the targets are a superset of what Round 1
+  // scanned: a nested `!` alias with its own `-C` commits in a directory only that list names.
   const matched = (info.calls || []).filter((c) => wanted.some((s) => c.subcommands.has(s)));
-  const cwds = matched.map((c) => resolveTargetCwd(baseCwd, c.dirs));
+  const fromCalls = matched.flatMap((c) => [resolveTargetCwd(baseCwd, c.orderedDirs || c.dirs),
+    resolveTargetCwd(baseCwd, c.dirs)]);
+  const cwds = [...fromInvocations, ...fromCalls];
   const seen = new Set();
   const out = [];
   for (const c of cwds) if (!seen.has(c)) { seen.add(c); out.push(c); }
