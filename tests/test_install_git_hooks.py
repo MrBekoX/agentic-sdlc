@@ -35,22 +35,20 @@ class TestGitHookInstaller(unittest.TestCase):
     def _repo(self, root: Path) -> None:
         subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
 
-    def test_scanner_path_is_one_posix_shell_literal(self):
+    def test_hook_body_holds_no_plugin_path(self):
+        # R1-e: the hook finds its vendored scanner from $0, so the body is the same for any plugin
+        # location and names none (an absolute path broke under another spelling of the checkout).
         installer = load_installer()
-        path = Path('/tmp/plugin $() `tick` \' " quote/hooks/git-hook-scan.mjs')
-        with mock.patch.object(installer, "SCANNER", path):
-            body = installer.hook_body("pre-commit")
-        assignment = next(line for line in body.splitlines() if line.startswith("SCANNER="))
-        self.assertNotIn('SCANNER="', assignment)
-        if os.name != "nt" and shutil.which("sh"):
-            proc = subprocess.run(
-                ["sh", "-c", assignment + "\nprintf '%s' \"$SCANNER\""],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-            )
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(proc.stdout, path.as_posix())
+        paths = (Path('/tmp/plugin $() `tick` \' " quote/hooks/git-hook-scan.mjs'),
+                 Path("/opt/other-plugin/hooks/git-hook-scan.mjs"))
+        bodies = []
+        for path in paths:
+            with mock.patch.object(installer, "SCANNER", path):
+                bodies.append(installer.hook_body("pre-commit"))
+        self.assertEqual(bodies[0], bodies[1])
+        for path in paths:
+            self.assertNotIn(path.parent.parent.as_posix(), bodies[0])
+        self.assertIn('SCANNER="$HOOK_DIR/' + installer.VENDOR_DIR + '/git-hook-scan.mjs"', bodies[0])
 
     def test_modified_managed_hook_is_never_overwritten_or_deleted(self):
         installer = load_installer()

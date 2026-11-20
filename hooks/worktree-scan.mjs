@@ -16,7 +16,11 @@
 // block, matching the opt-in pattern of the other gates in this plugin.
 
 import { runGit } from './git-exec.mjs';
-import { readFileSync, statSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
+import {
+  statSync, lstatSync, mkdirSync, chmodSync, openSync, fstatSync, fchmodSync, ftruncateSync, readSync, writeSync,
+  closeSync,
+  constants as fsConstants,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -50,6 +54,32 @@ const STARTED = Date.now();
 const MAX_NAMED = 10;
 
 function quiet() { process.exit(0); }
+
+// Only a regular file is ever opened. A FIFO blocks a read until a writer closes it, a device such
+// as /dev/zero never ends, and a link or a git listing can name either; a blocked Stop hook is killed
+// by the runtime and renders no decision at all. Callers check `statSync(path).isFile()` before the
+// open; the open itself does not block (O_NONBLOCK, where the platform has it) and the descriptor is
+// checked again, so a path swapped for a special file between the two checks is still not read.
+const NONBLOCK = fsConstants.O_NONBLOCK ?? 0;
+// The dedup state file is opened without following a link (O_NOFOLLOW where the platform has it, and
+// an lstat first): a link planted at the state path made the scan truncate and rewrite its target.
+const NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
+function readRegularFile(path, limit, extraFlags = 0, accept = (info) => info.isFile()) {
+  const fd = openSync(path, fsConstants.O_RDONLY | NONBLOCK | extraFlags);
+  try {
+    if (!accept(fstatSync(fd))) return null;
+    const buf = Buffer.alloc(limit + 1);  // one byte over the limit tells an over-cap file apart
+    let total = 0;
+    while (total < buf.length) {
+      const n = readSync(fd, buf, total, buf.length - total, null);
+      if (n === 0) break;
+      total += n;
+    }
+    return buf.subarray(0, total);
+  } finally {
+    closeSync(fd);
+  }
+}
 
 const raw = await readStdin();
 let input = {};
@@ -173,8 +203,12 @@ try {
       if (used >= maxFiles || spent >= maxBytes) break;
       let text = '';
       try {
-        if (statSync(resolvePath(root, rel)).size > MAX_FILE_BYTES) continue;  // over-cap, before taking a slot
-        const buf = readFileSync(resolvePath(root, rel));
+        const path = resolvePath(root, rel);
+        const info = statSync(path);                    // follows a link to its target
+        if (!info.isFile()) continue;                   // FIFO, socket or device: never opened, takes no slot
+        if (info.size > MAX_FILE_BYTES) continue;       // over-cap, before taking a slot
+        const buf = readRegularFile(path, MAX_FILE_BYTES);
+        if (!buf) continue;                             // swapped for a special file after the stat
         if (buf.length > MAX_FILE_BYTES) continue;      // over-cap: skipped to keep the Stop hook bounded
         used += 1;
         if (buf.includes(0)) continue;                  // binary: no text lines to scan
@@ -217,7 +251,35 @@ const stateFile = process.env.AGENTIC_WORKTREE_SCAN_STATE
   || join(tmpdir(), 'agentic-sdlc', 'worktree-scan-' + sessionId + '.json');
 
 let seen = [];
-try { seen = JSON.parse(readFileSync(stateFile, 'utf8')); } catch { seen = []; }
+// The state path may name a FIFO or a link (it is an environment setting, and the default folder sits in
+// the shared temporary directory): only a regular file, never through a link, is read or written. The
+// default folder is used only when it is a real folder the user owns with no group or other access;
+// another user could pre-create it, and its keys digest secret-bearing lines.
+const stateDir = join(tmpdir(), 'agentic-sdlc');
+function ownPrivateFolder(dir) {
+  try {
+    const info = lstatSync(dir);
+    if (!info.isDirectory()) return false;          // a link or a file
+    if (typeof process.getuid !== 'function') return true;  // Windows: the temp folder is per user
+    return info.uid === process.getuid() && (info.mode & 0o077) === 0;
+  } catch {
+    return false;
+  }
+}
+const customState = Boolean(process.env.AGENTIC_WORKTREE_SCAN_STATE);
+// The state file itself: a regular file with one link that the user owns (POSIX). A hard link at the
+// state path lost its target's content to O_TRUNC, and a file another user planted could pre-seed
+// keys that suppress findings.
+const ownStateFile = (info) => info.isFile() && info.nlink === 1
+  && (typeof process.getuid !== 'function' || info.uid === process.getuid());
+const regularStateFile = () => {
+  try { return lstatSync(stateFile).isFile(); } catch { return false; }
+};
+try {
+  const usable = customState || ownPrivateFolder(stateDir);
+  const buf = usable && regularStateFile() ? readRegularFile(stateFile, MAX_TOTAL_BYTES, NOFOLLOW, ownStateFile) : null;
+  seen = buf ? JSON.parse(buf.toString('utf8')) : [];
+} catch { seen = []; }
 const seenSet = new Set(Array.isArray(seen) ? seen : []);
 
 const keyed = findings.map((f) => ({
@@ -233,11 +295,39 @@ try {
   // The keys are digests of secret-bearing lines, so the directory and file are owner-only (POSIX; the
   // mode is ignored on Windows, where the temp directory is per-user). chmod covers a file or folder an
   // earlier version created with the default umask.
-  const stateDir = join(tmpdir(), 'agentic-sdlc');
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  try { chmodSync(stateDir, 0o700); } catch { /* not ours to change */ }
-  writeFileSync(stateFile, JSON.stringify([...seenSet, ...fresh.map((f) => f.key)]), { encoding: 'utf8', mode: 0o600 });
-  try { chmodSync(stateFile, 0o600); } catch { /* best effort */ }
+  let usable = customState;
+  if (!customState) {
+    try {
+      mkdirSync(stateDir, { mode: 0o700 });
+    } catch { /* it exists: judged below */ }
+    // chmod only a real folder the user already owns: another user cannot swap an entry the user owns
+    // in a sticky temporary directory, so the chmod cannot be redirected to a link target.
+    const dirInfo = lstatSync(stateDir);
+    if (dirInfo.isDirectory() && (typeof process.getuid !== 'function' || dirInfo.uid === process.getuid())) {
+      try { chmodSync(stateDir, 0o700); } catch { /* not ours to change */ }
+    }
+    usable = ownPrivateFolder(stateDir);
+  }
+  let regular = usable;
+  if (usable) {
+    try { regular = lstatSync(stateFile).isFile(); } catch { /* absent: created below */ }
+  }
+  if (regular) {
+    // O_NONBLOCK: a FIFO swapped in without a reader fails the open instead of blocking it.
+    // O_NOFOLLOW: a link swapped in after the lstat fails the open instead of being written through.
+    // No O_TRUNC: the file is truncated only after the descriptor passes the check.
+    const fd = openSync(stateFile, fsConstants.O_WRONLY | fsConstants.O_CREAT | NONBLOCK | NOFOLLOW, 0o600);
+    try {
+      if (ownStateFile(fstatSync(fd))) {
+        ftruncateSync(fd, 0);
+        writeSync(fd, JSON.stringify([...seenSet, ...fresh.map((f) => f.key)]));
+        // On the open descriptor, not the path: a link swapped in after the open is never followed.
+        try { fchmodSync(fd, 0o600); } catch { /* best effort */ }
+      }
+    } finally {
+      closeSync(fd);
+    }
+  }
 } catch { /* dedup is a convenience; losing it must never change the verdict */ }
 
 // Values are never printed, only the pattern label and where it was seen.

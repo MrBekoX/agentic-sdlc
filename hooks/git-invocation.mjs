@@ -33,6 +33,12 @@ import { resolve as resolvePath, parse as parsePath, sep } from 'node:path';
 import { skipCommandPrefix, redirectOperatorLength } from './shell-prefix.mjs';
 import { expandAnsiCQuotes, scanShell, expansionEnd } from './shell-quoting.mjs';
 
+// The hooks' cheap probe (`scan-commit.mjs`, `branch-guard.mjs`): could this text run git? Used to
+// count only the dropped statements that matter (R1-d), so a long payload without git stays quiet.
+function mayNameGit(text) {
+  return /\bgit\b/i.test(expandAnsiCQuotes(String(text ?? '')).replace(/['"\\]/g, ''));
+}
+
 // ---------------------------------------------------------------------------------------------
 // Shared command resolution: ONE wrapper table and ONE payload reader for both resolvers.
 //
@@ -544,17 +550,50 @@ export function blankRanges(text, ranges) {
  * here-document or substitution model: every here-document body line is a statement), without
  * exact duplicates. For PowerShell, base's statements of the text with PowerShell comments blanked
  * are added too (`<#x#> git push` is a block comment and a push). The union can only add (R3-CG-1).
+ *
+ * A statement that a literal here-document reaches through a pipe carries that body as `stdin`:
+ * in `cat <<'EOF' | git commit -F -` the body is the commit's message, but the lexer keeps it on
+ * the `cat` statement, so the commit read no stdin and its message went unscanned (R1-b). Only the
+ * exact producer `cat <<WORD` (one here-document, no other word or redirect) is followed; `cat -`,
+ * `/bin/cat`, `echo` and `printf` are not, and neither is anything under the PowerShell tool.
+ * The body RIDES ON the consumer statement (`pipedStdins`), never replaces its own stdin: a redirect
+ * on the consumer (`... | git commit -F - <<'B'`) wins over the pipe, so git reads B, and B must still
+ * be scanned. It is not a second queue item: an extra item was read even when its statement was
+ * dropped by a budget, an uncharged re-read (security reviews 2-4). On the statement's one reading,
+ * each body adds one more invocation record with that body as stdin; a dropped statement drops its
+ * bodies with it.
  */
+const PIPED_HEREDOC_PRODUCER = /^cat[ \t]+<<-?[ \t]*(?:'[^'\n]*'|"[^"\n]*"|[^\s'"<>|;&()]+)$/;
+
 export function statementsOf(text, { powershell = false } = {}) {
   const out = [];
-  const seen = new Set();
-  const add = (st) => {
+  const byKey = new Map();
+  const add = (st, pipedStdin) => {
     const key = st.text.trim();
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    out.push(st);
+    if (!key) return;
+    let kept = byKey.get(key);
+    if (!kept) {
+      kept = st;
+      byKey.set(key, kept);
+      out.push(kept);
+    }
+    // Two `git commit -F -` statements fed different bodies are two messages: a repeated statement
+    // adds its body to the one already kept, so the second message is still scanned.
+    if (pipedStdin !== undefined) (kept.pipedStdins || (kept.pipedStdins = [])).push(pipedStdin);
   };
-  for (const st of scanShell(text).statements) add({ text: st.text, heredocs: st.heredocs });
+  const lexed = scanShell(text).statements;
+  // The producer is the previous statement of the same region and depth: a substitution inside the
+  // consumer (`... | git commit --date="$(date -R)" -F -`) is lexed before it and is not the producer.
+  const lastIn = new Map();
+  for (const st of lexed) {
+    const key = st.region + ':' + st.depth;
+    const prev = lastIn.get(key);
+    lastIn.set(key, st);
+    const piped = !powershell && prev && prev.sep === '|'
+      && prev.heredocs.length === 1 && !prev.heredocs[0].uncertain
+      && PIPED_HEREDOC_PRODUCER.test(prev.text.trim());
+    add({ text: st.text, heredocs: st.heredocs }, piped ? prev.heredocs[0].body : undefined);
+  }
   for (const t of baseStatements(text)) add({ text: t, heredocs: [] });
   if (powershell && String(text).includes('#')) {
     const ranges = powershellCommentRanges(text);
@@ -935,6 +974,9 @@ export function resolveGitCommands(command, opts = {}) {
   // statement is still always walked, so a plain `git push` later on the line is still seen.
   const workLimit = 1024 * 1024 + 8 * String(command ?? '').length;
   let work = 0;
+  // R1-d skipped-read probe, shared by every walk of this command line (see `dropped` in walk()).
+  let skippedReads = 0;
+  let probedChars = 0;
   let workExhausted = false;
   const spend = (size) => {
     work += size;
@@ -964,11 +1006,23 @@ export function resolveGitCommands(command, opts = {}) {
     const dirSeen = new Set();
     const seen = new Set();
     const queue = [{ text: root.text, heredocs: root.heredocs, depth: 0, viaPayload: !!root.viaPayload,
-      payloadDepth: root.viaPayload ? 1 : 0, root: !root.viaPayload }];
+      payloadDepth: root.viaPayload ? 1 : 0, root: !root.viaPayload,
+      ...(root.pipedStdins ? { pipedStdins: root.pipedStdins } : {}) }];
     let budget = 64;                                     // hard bound: alias chains cannot spin
     // SEPARATE from the alias budget above. Sharing one means a payload chain can exhaust the
     // budget an alias expansion needs, and exhaustion in this loop is a silent allow.
     let payloadBudget = 128;
+    // R1-d: a statement a budget drops is not read, so a commit or push inside it is neither checked
+    // nor seen. A dropped text that could name git (the hooks' own cheap probe) is reported. The
+    // hooks need only whether one exists, so probing stops at the first hit, and all walks share one
+    // character cap: past it a drop counts without a probe (the notice errs toward "not scanned").
+    const dropped = (t) => {
+      if (skippedReads > 0) return;
+      const s = String(t ?? '');
+      if (probedChars + s.length > workLimit) { probedChars = workLimit; skippedReads = 1; return; }
+      probedChars += s.length;
+      if (mayNameGit(s)) skippedReads = 1;
+    };
     while (queue.length) {
       const item = queue.shift();
       const { text, depth, viaPayload, payloadDepth } = item;
@@ -976,10 +1030,10 @@ export function resolveGitCommands(command, opts = {}) {
       // to the alias budget made the separation nominal: a payload chain starved the alias
       // walk at 61 fillers, and running out of THAT budget is a silent allow.
       if (viaPayload) {
-        if (payloadBudget <= 0) continue;
+        if (payloadBudget <= 0) { dropped(text); continue; }
         payloadBudget -= 1;
       } else {
-        if (budget <= 0) continue;
+        if (budget <= 0) { dropped(text); continue; }
         budget -= 1;
       }
       if (depth > 5) continue;                           // git itself bounds alias recursion
@@ -992,12 +1046,14 @@ export function resolveGitCommands(command, opts = {}) {
       if (!call) {
         // Not a git call itself - but it may HAND one to another shell. Re-analyze the inline
         // payload as its own statement, bounded independently of the alias walk.
-        const inner = payloadDepth < 3 && payloadBudget > 0 ? innerShellPayload(detailed.tokens) : null;
+        const inner = innerShellPayload(detailed.tokens);
+        if (inner !== null && !(payloadDepth < 3 && payloadBudget > 0)) { dropped(inner); continue; }
         if (inner && spend(inner.length)) {
           payloadBudget -= 1;
           for (const st of statementsOf(inner, { powershell })) {
             queue.push({ text: st.text, heredocs: st.heredocs, depth, viaPayload: true,
-              payloadDepth: payloadDepth + 1 });
+              payloadDepth: payloadDepth + 1,
+              ...(st.pipedStdins ? { pipedStdins: st.pipedStdins } : {}) });
           }
         }
         continue;
@@ -1033,6 +1089,15 @@ export function resolveGitCommands(command, opts = {}) {
         cwd: viaPayload ? baseCwd : resolveTargetCwd(baseCwd, orderedDirs),
         viaPayload, readContextKnown: contextKnown && !viaPayload, stdin, depth,
       });
+      // A literal here-document piped into this statement (R1-b): one more record per body, from this
+      // same reading. Not passed to alias children, whose stdin is the statement's own.
+      for (const body of item.pipedStdins || []) {
+        invocations.push({
+          subcommand: sub, args: effectiveArgs, inlineConfig,
+          cwd: viaPayload ? baseCwd : resolveTargetCwd(baseCwd, orderedDirs),
+          viaPayload, readContextKnown: contextKnown && !viaPayload, stdin: body, depth,
+        });
+      }
       const key = depth + ':' + sub;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1086,7 +1151,8 @@ export function resolveGitCommands(command, opts = {}) {
     // R3-CG-1: the lexer's statements (substitutions, comments, here-document stdin) AND base's
     // statements (every body line a top-level statement), without exact duplicates.
     for (const st of statementsOf(command, { powershell })) {
-      roots.push({ text: st.text, heredocs: st.heredocs, viaPayload: false });
+      roots.push({ text: st.text, heredocs: st.heredocs, viaPayload: false,
+        ...(st.pipedStdins ? { pipedStdins: st.pipedStdins } : {}) });
     }
   }
   const calls = roots
@@ -1112,6 +1178,10 @@ export function resolveGitCommands(command, opts = {}) {
   }
   return { subcommands, texts, payloadTexts, dirs, calls, invocations, aliasShellTexts,
     aliasLookupsExhausted: exhausted, aliasesUnresolved, workExhausted, truncated: lex.truncated,
+    // Statements a budget dropped unread that could name git (R1-d). Not `unresolved`: the hooks
+    // report them, but they do not change a decision.
+    skippedReads,
+    probedChars, probeLimit: workLimit,
     // Some git subcommand on this line may hide a commit or push that was not resolved.
     unresolved: exhausted || aliasesUnresolved || workExhausted };
 }

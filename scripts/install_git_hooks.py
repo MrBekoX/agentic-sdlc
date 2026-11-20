@@ -18,8 +18,14 @@ WHAT THIS INSTALLER PROMISES
     nothing.
   * A shared/external `core.hooksPath` requires `--allow-external-hooks-path` before any write or
     delete.
-  * The generated hook FAILS OPEN, loudly, if the scanner is missing (a moved plugin must never
-    wedge your commits) - it prints a warning rather than exiting non-zero.
+  * The hooks record no path to the plugin. `--install` copies the scanner and the modules it
+    imports into an `agentic-sdlc-scanner` folder next to the hooks, and each hook finds that
+    folder from its own location (`$0`). So the same hooks work when the checkout is reached under
+    another spelling (Windows `D:/repo` and WSL `/mnt/d/repo`), moved or renamed, on Windows
+    (Git for Windows sh), macOS and Linux. After a plugin update, `--check` reports
+    `scanner=stale` and `--install` refreshes the copy.
+  * The generated hook FAILS OPEN, loudly, if the scanner or `node` is missing (a moved plugin must
+    never wedge your commits) - it prints a warning rather than exiting non-zero.
 
 WHAT IT DOES NOT PROMISE
 `git commit --no-verify` skips `pre-commit` and `commit-msg`; Git still runs the installed
@@ -33,7 +39,6 @@ import hashlib
 import json
 import os
 import shlex
-import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -49,13 +54,30 @@ MANIFEST_NAME = "agentic-sdlc-hooks.json"
 #                        both the staged index and the message file
 HOOKS = ("pre-commit", "pre-merge-commit", "commit-msg", "prepare-commit-msg")
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-SCANNER = PLUGIN_ROOT / "hooks" / "git-hook-scan.mjs"
+HOOK_SOURCES = PLUGIN_ROOT / "hooks"
+SCANNER = HOOK_SOURCES / "git-hook-scan.mjs"
+# The scanner and its transitive local imports, copied next to the hooks (R1-e). The hooks find this
+# folder from `$0`, so no absolute path is recorded anywhere a different spelling of the same
+# checkout (a WSL `/mnt/d/...` view of a Windows `D:/...` install), a moved repository or an updated
+# plugin could break. tests/test_git_hook_portability.py pins the set to the import closure.
+VENDOR_DIR = "agentic-sdlc-scanner"
+VENDORED = ("git-hook-scan.mjs", "git-exec.mjs", "secret-patterns.mjs", "scan-commit-names.mjs")
+# Every name any release vendored. A recorded file a later release no longer vendors is removed by
+# `--install` instead of blocking the upgrade; anything else in the folder is foreign.
+KNOWN_VENDORED = ("git-hook-scan.mjs", "git-exec.mjs", "secret-patterns.mjs", "scan-commit-names.mjs")
+MANIFEST_VERSION = 2
+# Bodies older releases wrote named the scanner by an absolute path ending here (AC16).
+ABSOLUTE_SCANNER_SUFFIX = "/hooks/git-hook-scan.mjs"
 
 
-def _unsigned_hook_body(name: str, *, safe_quote: bool) -> str:
-    """Return the generated POSIX-sh shim without its integrity marker."""
-    scanner = str(SCANNER).replace("\\", "/")
-    assignment = "SCANNER=" + (shlex.quote(scanner) if safe_quote else '"' + scanner + '"')
+def _unsigned_hook_body(name: str) -> str:
+    """Return the generated POSIX-sh shim without its integrity marker. It names no path.
+
+    `$0` is the hook as git runs it, from the top of the work tree (or the git directory of a bare
+    repository): a path with a `/` (or a backslash on a Windows spelling). Its folder holds the vendored
+    scanner. The assignments are not word-split or re-evaluated, so a folder name holding `$(...)`,
+    a backtick, quotes or spaces runs nothing.
+    """
     return (
         "#!/bin/sh\n"
         "# " + SENTINEL + "\n"
@@ -63,7 +85,73 @@ def _unsigned_hook_body(name: str, *, safe_quote: bool) -> str:
         "# Scans what git is ABOUT TO RECORD, so command-string tricks (aliases, eval, $PATH,\n"
         "# quoting) are irrelevant here. --no-verify skips pre-commit/commit-msg;\n"
         "# prepare-commit-msg remains an additional backstop by Git's design.\n"
-        + assignment + "\n"
+        "# The scanner is a copy in the " + VENDOR_DIR + " folder next to this hook, found from $0:\n"
+        "# no plugin path is recorded, so the hook runs under any spelling of this folder.\n"
+        'case "$0" in\n'
+        "  */*) HOOK_DIR=${0%/*} ;;\n"
+        "  *\\\\*) HOOK_DIR=${0%\\\\*} ;;\n"
+        # No folder in $0: never fall back to the current directory, which is repository content.
+        "  *) printf '%s\\n' \"agentic-sdlc: WARNING - cannot find this hook's folder from \\$0; this commit was NOT scanned\" >&2\n"
+        "     exit 0 ;;\n"
+        "esac\n"
+        'SCANNER="$HOOK_DIR/' + VENDOR_DIR + '/git-hook-scan.mjs"\n'
+        # printf, not echo: dash's echo reads backslashes, and a `\\c` in the path cut the warning off.
+        'if [ ! -f "$SCANNER" ]; then\n'
+        "  printf '%s\\n' \"agentic-sdlc: WARNING - guard scanner missing at $SCANNER (run scripts/install_git_hooks.py --install); this commit was NOT scanned\" >&2\n"
+        "  exit 0\n"
+        "fi\n"
+        'if ! command -v node >/dev/null 2>&1; then\n'
+        "  printf '%s\\n' \"agentic-sdlc: WARNING - node not found on PATH; this commit was NOT scanned\" >&2\n"
+        "  exit 0\n"
+        "fi\n"
+        'exec node "$SCANNER" ' + name + ' "$@"\n'
+    )
+
+
+def _write_lf(path: Path, text: str, mode: int | None = None) -> None:
+    """Write text with LF line ends on every host and on the Python 3.8 floor.
+
+    `Path.write_text(newline=...)` exists only from Python 3.10 (it raised TypeError on 3.8 and 3.9),
+    and a plain text-mode write turns `\n` into CRLF on Windows, which a POSIX sh reading the hook
+    from WSL or Git for Windows would then see as part of each command.
+    """
+    # A new file in the same folder, then a rename over the target: a link (symbolic or hard) planted
+    # at the target is replaced, never written through. "x" refuses a planted temp name.
+    temp = path.with_name("." + path.name + ".agentic-sdlc-tmp")
+    if temp.is_symlink() or temp.exists():
+        temp.unlink()
+    with open(str(temp), "x", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    if mode is not None:
+        # Before the rename: a hook put in place without its execute bit is skipped by git.
+        os.chmod(str(temp), mode)
+    os.replace(str(temp), str(path))
+
+
+def _body_digest(body: str) -> str:
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _signed(unsigned: str) -> str:
+    marker = "# " + SENTINEL + "\n"
+    return unsigned.replace(marker, marker + DIGEST_PREFIX + _body_digest(unsigned) + "\n", 1)
+
+
+def hook_body(name: str) -> str:
+    """A self-identifying POSIX-sh shim. Git for Windows ships sh."""
+    return _signed(_unsigned_hook_body(name))
+
+
+def _absolute_unsigned_body(name: str, scanner: str) -> str:
+    """The body 0.7.0 wrote: the scanner named by an absolute, shell-quoted path. Migration only."""
+    return (
+        "#!/bin/sh\n"
+        "# " + SENTINEL + "\n"
+        "# Generated by scripts/install_git_hooks.py - re-run it to refresh, or use --uninstall.\n"
+        "# Scans what git is ABOUT TO RECORD, so command-string tricks (aliases, eval, $PATH,\n"
+        "# quoting) are irrelevant here. --no-verify skips pre-commit/commit-msg;\n"
+        "# prepare-commit-msg remains an additional backstop by Git's design.\n"
+        "SCANNER=" + shlex.quote(scanner) + "\n"
         'if [ ! -f "$SCANNER" ]; then\n'
         '  echo "agentic-sdlc: WARNING - guard scanner missing at $SCANNER; this commit was NOT scanned" >&2\n'
         "  exit 0\n"
@@ -76,24 +164,18 @@ def _unsigned_hook_body(name: str, *, safe_quote: bool) -> str:
     )
 
 
-def _body_digest(body: str) -> str:
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+def _absolute_digest_body(name: str, scanner: str) -> str:
+    return _signed(_absolute_unsigned_body(name, scanner))
 
 
-def hook_body(name: str) -> str:
-    """A self-identifying POSIX-sh shim. Git for Windows ships sh."""
-    unsigned = _unsigned_hook_body(name, safe_quote=True)
-    marker = "# " + SENTINEL + "\n"
-    return unsigned.replace(marker, marker + DIGEST_PREFIX + _body_digest(unsigned) + "\n", 1)
-
-
-def _legacy_hook_body(name: str) -> str:
+def _legacy_hook_body(name: str, scanner: str | None = None) -> str:
     """Exact pre-digest body accepted only for a one-time safe migration.
 
     Its embedded no-verify sentence is intentionally historical data; new hooks use the accurate
     per-hook wording produced by _unsigned_hook_body().
     """
-    scanner = str(SCANNER).replace("\\", "/")
+    if scanner is None:
+        scanner = str(SCANNER).replace("\\", "/")
     return (
         "#!/bin/sh\n"
         "# " + SENTINEL + "\n"
@@ -111,6 +193,41 @@ def _legacy_hook_body(name: str) -> str:
         "fi\n"
         'exec node "$SCANNER" ' + name + ' "$@"\n'
     )
+
+
+def _named_scanner(text: str) -> str | None:
+    """The scanner path an older body names on its `SCANNER=` line, or None."""
+    for line in text.split("\n"):
+        if not line.startswith("SCANNER="):
+            continue
+        value = line[len("SCANNER="):]
+        if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+            return value[1:-1]
+        try:
+            words = shlex.split(value)
+        except ValueError:
+            return None
+        return words[0] if len(words) == 1 else None
+    return None
+
+
+def is_generator_body(text: str, name: str) -> bool:
+    """True only for bytes this installer (any release) writes for this hook name.
+
+    The current body, or an older body naming an absolute scanner path that ends in
+    `/hooks/git-hook-scan.mjs` and is byte-identical to what that release wrote for it. A recorded
+    hash alone proves nothing: a manifest can record the hash of a user's own hook (AC16).
+    """
+    if text == hook_body(name):
+        return True
+    scanner = _named_scanner(text)
+    if not scanner or not scanner.endswith(ABSOLUTE_SCANNER_SUFFIX):
+        return False
+    # The legacy body put the path in double quotes, where sh still runs `$(...)` and backticks: such a
+    # body is no generator output this installer would trust.
+    if any(c in scanner for c in '"$`\\\n'):
+        return False
+    return text in {_absolute_digest_body(name, scanner), _legacy_hook_body(name, scanner)}
 
 
 def _rev_parse_path(repo: Path, *args: str) -> Path:
@@ -151,39 +268,66 @@ def _file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_ownership(repo: Path, expected_hooks_dir: Path) -> dict[str, str]:
-    """Load only a well-formed, path-bound repository-local ownership record."""
+def _hooks_binding(repo: Path, hooks_path: Path) -> dict[str, str]:
+    """Where the hooks folder sits, relative to the repository when it can be (Task 9, AC18).
+
+    An absolute path recorded under one spelling of a checkout (Windows `D:/repo`) never matches
+    another (WSL `/mnt/d/repo`) or a moved repository, and an unmatched record loses ownership.
+    Relative to the git common folder or the work tree, the record stays valid. POSIX separators.
+    """
+    target = hooks_path.resolve()
+    for base, root in (("common", git_common_dir(repo).resolve()), ("worktree", _work_tree(repo).resolve())):
+        try:
+            return {"base": base, "path": target.relative_to(root).as_posix()}
+        except ValueError:
+            continue
+    return {"base": "absolute", "path": target.as_posix()}
+
+
+def _sha256_map(value, names) -> dict[str, str]:
+    """Only known names with a 64-character digest; anything else in a manifest is ignored."""
+    if not isinstance(value, dict):
+        return {}
+    return {name: digest for name, digest in value.items()
+            if name in names and isinstance(digest, str) and len(digest) == 64}
+
+
+def load_ownership(repo: Path, expected_hooks_dir: Path) -> dict[str, dict[str, str]]:
+    """Load only a well-formed, path-bound repository-local ownership record.
+
+    Version 2 is bound to `_hooks_binding`; version 1 to the absolute folder it recorded. A record
+    that does not bind is no record: its hooks and files fall back to the adoption rules.
+    """
+    empty = {"hooks": {}, "vendored": {}}
     path = ownership_manifest_path(repo)
     if not path.is_file():
-        return {}
+        return empty
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if (
-        not isinstance(data, dict)
-        or data.get("version") != 1
-        or data.get("hooks_dir") != str(expected_hooks_dir.resolve())
-        or not isinstance(data.get("hooks"), dict)
-    ):
-        return {}
-    return {
-        name: digest
-        for name, digest in data["hooks"].items()
-        if name in HOOKS and isinstance(digest, str) and len(digest) == 64
-    }
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    if data.get("version") == 1:
+        if data.get("hooks_dir") != str(expected_hooks_dir.resolve()):
+            return empty
+        return {"hooks": _sha256_map(data.get("hooks"), HOOKS), "vendored": {}}
+    if data.get("version") == MANIFEST_VERSION and data.get("hooks_dir") == _hooks_binding(repo, expected_hooks_dir):
+        return {"hooks": _sha256_map(data.get("hooks"), HOOKS),
+                "vendored": _sha256_map(data.get("vendored"), KNOWN_VENDORED)}
+    return empty
 
 
-def save_ownership(repo: Path, hooks_path: Path, hashes: dict[str, str]) -> None:
+def save_ownership(repo: Path, hooks_path: Path, hashes: dict[str, str],
+                   vendored: dict[str, str] | None = None) -> None:
     path = ownership_manifest_path(repo)
     payload = {
-        "version": 1,
-        "hooks_dir": str(hooks_path.resolve()),
+        "version": MANIFEST_VERSION,
+        "hooks_dir": _hooks_binding(repo, hooks_path),
         "hooks": {name: hashes[name] for name in HOOKS if name in hashes},
+        "vendored": {name: vendored[name] for name in KNOWN_VENDORED if name in (vendored or {})},
     }
-    temp = path.with_name(path.name + ".tmp")
-    temp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temp, path)
+    _write_lf(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _is_below(path: Path, root: Path) -> bool:
@@ -236,20 +380,105 @@ def hook_state(path: Path, name: str, recorded_hash: str | None = None) -> str:
         return "foreign"
     if not path.exists():
         return "absent"
+    if not path.is_file():
+        return "foreign"  # a FIFO named like a hook blocked every read of it
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+        data = path.read_bytes()
+        text = data.decode("utf-8")
+    except (OSError, UnicodeDecodeError):
         return "foreign"
-    actual_hash = _file_digest(path)
     if recorded_hash:
-        if actual_hash != recorded_hash:
+        if hashlib.sha256(data).hexdigest() != recorded_hash:
             return "modified"
-        return "current" if text == hook_body(name) else "stale"
-    # Exact historical generator output may be adopted during install, but is not deleted until an
-    # ownership manifest has been written. An arbitrary sentinel/self-digest body remains foreign.
-    if text in {hook_body(name), _legacy_hook_body(name)}:
-        return "adoptable"
-    return "foreign"
+        if text == hook_body(name):
+            return "current"
+        # Replaceable only when it is generator output; any other recorded-hash match is a manifest
+        # that names a user's own hook, which must be neither overwritten nor deleted (AC16).
+        return "stale" if is_generator_body(text, name) else "modified"
+    # Exact generator output (this release's body, or an older one for the path it names, D2) may be
+    # adopted during install, but is not deleted until an ownership manifest has been written. An
+    # arbitrary sentinel/self-digest body remains foreign.
+    return "adoptable" if is_generator_body(text, name) else "foreign"
+
+
+def _vendored_source(name: str) -> bytes:
+    """The plugin's copy of a vendored module, LF-normalized (a Windows checkout may hold CRLF)."""
+    return (HOOK_SOURCES / name).read_bytes().replace(b"\r\n", b"\n")
+
+
+def vendored_states(hooks_path: Path, recorded: dict[str, str]):
+    """(state per known name, foreign entries) of the vendored folder.
+
+    | state     | rule                                                              |
+    | absent    | the file is not there                                             |
+    | current   | recorded; bytes equal the record and the plugin's source          |
+    | stale     | recorded; bytes equal the record but not the plugin's source (an  |
+    |           | update, or a name this release no longer vendors)                 |
+    | modified  | recorded; bytes differ from the record                            |
+    | adoptable | unrecorded; bytes equal the plugin's source                       |
+    | foreign   | unrecorded with other bytes, a symlink, or not a regular file     |
+
+    Any other entry in the folder is foreign: the vendored git-exec.mjs would run git with
+    `core.hooksPath=<folder>/no-repository-hooks`, so a planted one must not be trusted.
+    """
+    folder = hooks_path / VENDOR_DIR
+    # A symlink, or a Windows junction (which is_symlink() does not report but resolve() follows).
+    if folder.is_symlink() or (folder.exists() and (not folder.is_dir()
+                                                    or folder.resolve() != hooks_path.resolve() / VENDOR_DIR)):
+        return {name: "foreign" for name in KNOWN_VENDORED}, [folder]
+    if not folder.exists():
+        return {name: "absent" for name in KNOWN_VENDORED}, []
+    extras = sorted(entry for entry in folder.iterdir()
+                    if entry.name not in KNOWN_VENDORED and not _write_leftover(entry))
+    states = {}
+    for name in KNOWN_VENDORED:
+        path = folder / name
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            states[name] = "foreign"
+            continue
+        if not path.exists():
+            states[name] = "absent"
+            continue
+        data = path.read_bytes()
+        source = _vendored_source(name) if name in VENDORED else None
+        if name in recorded:
+            if hashlib.sha256(data).hexdigest() != recorded[name]:
+                states[name] = "modified"
+            else:
+                states[name] = "current" if data == source else "stale"
+        else:
+            states[name] = "adoptable" if source is not None and data == source else "foreign"
+    return states, extras
+
+
+def _write_leftover(entry: Path) -> bool:
+    """`.<name>.agentic-sdlc-tmp` from an interrupted `_write_lf`: our own scratch file, not foreign."""
+    return (entry.name in {"." + name + ".agentic-sdlc-tmp" for name in KNOWN_VENDORED}
+            and (entry.is_symlink() or entry.is_file()))
+
+
+def _remove_write_leftovers(folder: Path) -> None:
+    if folder.is_dir() and not folder.is_symlink():
+        for entry in folder.iterdir():
+            if _write_leftover(entry):
+                entry.unlink()  # a link is removed itself, never followed
+
+
+SCANNER_SUMMARY_ORDER = ("foreign", "modified", "missing", "stale", "unclaimed", "current")
+
+
+def scanner_summary(states: dict[str, str], extras) -> str:
+    """The `scanner=` line of --check: the first state that applies (AC17)."""
+    seen = set()
+    if extras:
+        seen.add("foreign")
+    for name, state in states.items():
+        if state == "absent":
+            if name in VENDORED:
+                seen.add("missing")
+        else:
+            seen.add({"adoptable": "unclaimed"}.get(state, state))
+    return next((s for s in SCANNER_SUMMARY_ORDER if s in seen), "current")
 
 
 def cmd_check(repo: Path) -> int:
@@ -258,19 +487,23 @@ def cmd_check(repo: Path) -> int:
     print("hooks_dir=" + str(d))
     print("hooks_path_scope=" + ("external" if external_hooks_path(repo, d) else "repository"))
     print("ownership_manifest=" + str(ownership_manifest_path(repo)))
-    print("scanner=" + str(SCANNER) + (" (present)" if SCANNER.is_file() else " (MISSING)"))
+    print("scanner_source=" + str(SCANNER) + (" (present)" if SCANNER.is_file() else " (MISSING)"))
+    labels = {
+        "absent": "absent",
+        "current": "installed",
+        "adoptable": "unclaimed-known-body (install to adopt; uninstall will not remove)",
+        "stale": "installed-stale",
+        "modified": "modified (will not be touched)",
+        "foreign": "foreign (will not be touched)",
+    }
     for name in HOOKS:
-        p = d / name
-        state = hook_state(p, name, ownership.get(name))
-        labels = {
-            "absent": "absent",
-            "current": "installed",
-            "adoptable": "unclaimed-known-body (install to adopt; uninstall will not remove)",
-            "stale": "installed-stale",
-            "modified": "modified (will not be touched)",
-            "foreign": "foreign (will not be touched)",
-        }
-        print(name + "=" + labels[state])
+        print(name + "=" + labels[hook_state(d / name, name, ownership["hooks"].get(name))])
+    states, extras = vendored_states(d, ownership["vendored"])
+    for name in KNOWN_VENDORED:
+        print("vendored/" + name + "=" + {"adoptable": "unclaimed"}.get(states[name], states[name]))
+    for entry in extras:
+        print("vendored/" + entry.name + "=foreign (not a vendored name)")
+    print("scanner=" + scanner_summary(states, extras))
     return 0
 
 
@@ -282,33 +515,56 @@ def cmd_install(repo: Path, *, allow_external_hooks_path: bool = False) -> int:
             "--allow-external-hooks-path: " + str(d) + "\n"
         )
         return 2
-    d.mkdir(parents=True, exist_ok=True)
     ownership = load_ownership(repo, d)
-    refused = [
-        n for n in HOOKS
-        if hook_state(d / n, n, ownership.get(n)) in {"foreign", "modified"}
-    ]
+    hook_states = {n: hook_state(d / n, n, ownership["hooks"].get(n)) for n in HOOKS}
+    states, extras = vendored_states(d, ownership["vendored"])
+    # Every state is judged before anything is written or deleted.
+    refused = [str(d / n) for n in HOOKS if hook_states[n] in {"foreign", "modified"}]
+    refused += [str(d / VENDOR_DIR / n) for n in KNOWN_VENDORED if states[n] in {"foreign", "modified"}]
+    refused += [str(e) for e in extras]
     if refused:
         sys.stderr.write(
-            "refusing to install: these hooks are foreign or were modified after generation:\n"
-            + "".join("  " + str(d / n) + "\n" for n in refused)
-            + "Chain them yourself, or move them aside, then re-run.\n"
+            "refusing to install: these files are foreign or were modified after generation:\n"
+            + "".join("  " + path + "\n" for path in sorted(set(refused)))
+            + "Chain or move the hooks yourself, or move the files aside, then re-run.\n"
         )
         return 2
+    d.mkdir(parents=True, exist_ok=True)
+    folder = d / VENDOR_DIR
+    folder.mkdir(exist_ok=True)
+    _remove_write_leftovers(folder)
+    # The scanner first, so no hook ever runs without it.
+    vendored = {}
+    for name in VENDORED:
+        path = folder / name
+        source = _vendored_source(name)
+        if states[name] != "current":
+            _write_lf(path, source.decode("utf-8"))
+            print("vendored/" + name + "=installed")
+        vendored[name] = hashlib.sha256(source).hexdigest()
+    for name in KNOWN_VENDORED:
+        if name not in VENDORED and states[name] == "stale":
+            (folder / name).unlink()
+            print("vendored/" + name + "=removed (no longer vendored)")
     for name in HOOKS:
         p = d / name
-        body = hook_body(name)
-        if hook_state(p, name, ownership.get(name)) == "current":
+        if hook_states[name] == "current":
             print(name + "=unchanged")
             continue
-        p.write_text(body, encoding="utf-8", newline="\n")
-        p.chmod(p.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        _write_lf(p, hook_body(name), mode=0o755)
         print(name + "=installed")
-    save_ownership(repo, d, {name: _file_digest(d / name) for name in HOOKS})
+    save_ownership(repo, d, {name: _file_digest(d / name) for name in HOOKS}, vendored)
     return 0
 
 
 def cmd_uninstall(repo: Path, *, allow_external_hooks_path: bool = False) -> int:
+    """Remove only what this installer verifiably wrote (AC20).
+
+    A hook goes when its bytes match the record and are generator output; a vendored file when its
+    bytes match the record AND the plugin's current bytes. So a manifest copied from elsewhere, or
+    one naming paths outside the known names, can remove only files byte-identical to generated
+    ones. Exit 2 only when a recorded entry is kept.
+    """
     d = hooks_dir(repo)
     if external_hooks_path(repo, d) and not allow_external_hooks_path:
         sys.stderr.write(
@@ -317,25 +573,44 @@ def cmd_uninstall(repo: Path, *, allow_external_hooks_path: bool = False) -> int
         )
         return 2
     ownership = load_ownership(repo, d)
-    refused = False
+    kept = False
     for name in HOOKS:
         p = d / name
-        state = hook_state(p, name, ownership.get(name))
+        state = hook_state(p, name, ownership["hooks"].get(name))
         if state == "absent":
             print(name + "=absent")
         elif state in {"current", "stale"}:
             p.unlink()
             print(name + "=removed")
         elif state == "modified":
-            refused = True
+            kept = True
             print(name + "=modified (left in place)")
         elif state == "adoptable":
             print(name + "=unclaimed-known-body (left in place)")
         else:
             print(name + "=foreign (left in place)")
-    if not refused and ownership:
+    states, extras = vendored_states(d, ownership["vendored"])
+    folder = d / VENDOR_DIR
+    for name in KNOWN_VENDORED:
+        state = states[name]
+        if state == "current":
+            (folder / name).unlink()
+            print("vendored/" + name + "=removed")
+        elif state in {"stale", "modified"}:
+            kept = True
+            advice = " (run --install first to refresh it)" if state == "stale" else ""
+            print("vendored/" + name + "=" + state + " (left in place)" + advice)
+        elif state != "absent":
+            print("vendored/" + name + "=" + {"adoptable": "unclaimed"}.get(state, state) + " (left in place)")
+    # A folder judged foreign as a whole (a symlink or a junction) is never cleaned or removed.
+    if extras != [folder]:
+        if not kept:
+            _remove_write_leftovers(folder)
+        if folder.is_dir() and not folder.is_symlink() and not any(folder.iterdir()):
+            folder.rmdir()
+    if not kept and (ownership["hooks"] or ownership["vendored"]):
         ownership_manifest_path(repo).unlink(missing_ok=True)
-    return 2 if refused else 0
+    return 2 if kept else 0
 
 
 def main() -> int:
