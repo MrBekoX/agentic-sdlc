@@ -26,8 +26,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Keep macOS coverage when hosted ARM capacity leaves jobs unacquired.
-        os: [ubuntu-latest, windows-latest, macos-15-intel]
+        # The standard Arm64 macOS 15 image. A hosted label has no fallback: macos-latest (Arm64)
+        # jobs went unacquired in 2026-10 and macos-15-intel jobs on 2026-11-18, so move the label
+        # when one runner pool stays empty.
+        os: [ubuntu-latest, windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
     # Three suite passes per OS: source, extracted archive, then source again for archive coverage.
     # Intel macOS passes took 26 to 32 minutes on 2026-11-16, so three can need 96 minutes; 90 cut
