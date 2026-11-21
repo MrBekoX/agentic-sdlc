@@ -10,7 +10,7 @@ Two kinds of guard live here:
 | Runtime | Config | Wired events in this release |
 |---|---|---|
 | Claude Code | `hooks/hooks-claude.json` via `.claude-plugin/plugin.json` | `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop` |
-| Codex | `hooks/hooks-codex.json` via `.codex-plugin/plugin.json`, after hook review/trust; portable root manifests are not hook-equivalent on CLI 0.154.0 | `PreToolUse`, `SessionStart`, `Stop` |
+| Codex | `hooks/hooks-codex.json` via `.codex-plugin/plugin.json`, after hook review/trust; portable root manifests are not hook-equivalent on CLI 0.154.0 or 0.171.0 (re-tested 2026-11-21) | `PreToolUse`, `SessionStart`, `Stop` |
 | ZCode (Z.ai) (experimental adapter, not a 0.4.3 release target) | `hooks/hooks-zcode.json` via `.zcode-plugin/plugin.json`; `hooks/hooks.json` is never created | `PreToolUse` (`Bash`), `PostToolUse` (`Write\|Edit`), `SessionStart` (`startup\|resume\|clear\|compact`); Stop guards and `flow-order-guard` unwired |
 | Grok CLI (experimental adapter, not a 0.4.3 release target) | `hooks/hooks-grok.json` via `.grok-plugin/plugin.json`; `hooks/hooks.json` is never created | `PreToolUse` only (`Bash\|run_terminal_command`); write-scan / Stop / SessionStart unwired |
 | Cursor | `hooks/hooks-cursor.json` via `.cursor-plugin/plugin.json`; `hooks/hooks.json` is never created | `beforeShellExecution` command guards, `preToolUse` write scan and flow-order, `sessionStart` bootstrap, `stop` worktree scan, each launched through `cursor-launch.mjs`. The shell guards fail closed: a guard that crashes or prints anything but a JSON object denies the command (empty output stays an allow); the other events fail open. Claude transcript Stop readers stay unwired |
@@ -23,12 +23,37 @@ Two kinds of guard live here:
 > `if` best-effort and say to use the permission system, not a hook filter, for a hard allow/deny. The
 > decision therefore lives inside each guard, which self-gates cheaply on `git`.
 
-
 The hook scripts are shared in this directory, but being present as a script is not the same as being wired by every runtime.
 
-Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex exports `PLUGIN_ROOT`; its fixed Node launch code reads `process.env.PLUGIN_ROOT` and imports the handler through `pathToFileURL()`, keeping installed paths out of shell code. `commandWindows` selects `node.exe` on Windows; the default selects `node` on POSIX/WSL. Hook cwd remains the session project, independent of the installed package. Node must be on the hook PATH and hooks require native review/trust; see the [marketplace launch contract](../docs/runtime-adapter.md#codex-marketplace-hook-launch-contract).
+Claude Code paths resolve through `${CLAUDE_PLUGIN_ROOT}`. Codex exports `PLUGIN_ROOT` (0.171.0 also exports `CLAUDE_PLUGIN_ROOT`, but still replaces `${...}` tokens as raw text before shell parsing, so the loader below stays); its fixed Node launch code reads `process.env.PLUGIN_ROOT` and imports the handler through `pathToFileURL()`, keeping installed paths out of shell code. `commandWindows` selects `node.exe` on Windows; the default selects `node` on POSIX/WSL. Hook cwd remains the session project, independent of the installed package. Node must be on the hook PATH and hooks require native review/trust; see the [marketplace launch contract](../docs/runtime-adapter.md#codex-marketplace-hook-launch-contract).
 
 Grok CLI exports `GROK_PLUGIN_ROOT` to hooks (plus a Claude root alias). Its command strings read the root inside fixed Node code and import a file URL; `commandWindows` is not a Grok field. ZCode passes `${ZCODE_PLUGIN_ROOT}` in shell-free `args[]` using `type: process` and `timeoutMs`. Kimi declares inline hooks, running relative handler paths with plugin-root cwd; the git checks take the Bash tool's `tool_input.cwd` (resolved against the session cwd) and fall back to stdin `cwd`. Grok command stdin uses `toolInput.command`, while Kimi/ZCode use `tool_input.command`. All require Node on the runtime hook PATH; no maintainer checkout is required. Output channels are runtime-adaptive through `hooks/hook-output.mjs`: the ZCode wire passes a literal `--zcode-runtime` argv element (and ZCode injects `ZCODE_PLUGIN_ROOT` as an environment variable), under which the scripts emit only ZCode-documented keys — a decision as `hookSpecificOutput` alone, a warn as `hookSpecificOutput.additionalContext` — because the advisory top-level `systemMessage` channel is a Claude Code convention outside ZCode's documented set (the live 2026-10-08 hook doc reports unknown fields ignored; the bundled `diagnosing-hooks` skill reports them as a failed run with the effect discarded). Every other runtime receives the payload unchanged.
+
+### Claude Code wiring notes (`hooks-claude.json`)
+
+`hooks-claude.json` carries no inline comments. It used to hold three `$comment` keys: two at
+matcher-group level and one inside the `Stop` worktree-scan handler. Claude Code 2.1.330 logged a WARN
+and an ERROR line on every plugin load for the two matcher-group keys
+(`hooks.json: unknown keys "$comment" in hooks.PreToolUse[0], "$comment" in hooks.PreToolUse[1] ignored`; observed 2026-11-21 with
+`claude -p --plugin-dir <package> --debug-file <log>` in an isolated `CLAUDE_CONFIG_DIR`). The log did
+not name the handler-level key, and `claude plugin validate --strict` reported none of them. The current
+[plugins reference](https://code.claude.com/docs/en/plugins-reference) (read 2026-11-21) documents no
+comment field inside a matcher group or handler, so all three were removed, the rationale lives here, and
+`tests/test_hooks_policy.py` fails if a `$comment` key comes back at any depth:
+
+- **`PreToolUse` `Bash|PowerShell`** (scan-commit, destructive-command guard, branch guard): a
+  Windows host without Git Bash registers no Bash tool, so a `Bash`-only matcher would leave the guards
+  inert; and an `if` narrowed to a git subcommand never starts the hook for an alias such as `git ci`.
+  Each guard self-gates on `git` instead (see the note under Runtime Wiring).
+- **`PreToolUse` `Write|Edit|MultiEdit|Bash|PowerShell`** (flow-order guard): a source file written by
+  a shell command (sed -i, a redirect, a heredoc, tee) is an edit like a Write/Edit, read by the shared
+  write-target recognizer. No `if` filter, for the same reason as the command guards; the guard exits
+  early when a command writes no source file.
+- **`Stop` `worktree-scan.mjs`**: effect-layer detection. It scans the bytes that actually landed in
+  the working tree, so the write form (tee/dd/base64/python -c/any redirect) does not matter; that is
+  the class the command-string write guard documents as out of reach. Advisory by default;
+  `AGENTIC_WORKTREE_SCAN_BLOCK=true` escalates it.
+- The top-level `description` key stays: the 2.1.330 load log reported only the `$comment` keys.
 
 ## Real Hook Scripts
 
