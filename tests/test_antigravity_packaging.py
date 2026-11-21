@@ -105,26 +105,39 @@ class TestAntigravityPackaging(unittest.TestCase):
             "https://antigravity.google/schemas/v1/plugin.json",
             "`additionalProperties`: `false`",
             "invoke_subagent",
-            "October 19, 2026",
             "Not a supported release target",
             "hooks.json",
-            # The staging commands copy the runner's flows/ next to scripts/, as the staged-plugin test does.
-            'cp -R skills contracts scripts flows assets commands LICENSE "$TARGET/"',
-            '@("skills", "contracts", "scripts", "flows", "assets", "commands", "LICENSE")',
+            "python3 scripts/build_release.py --output <zip> --antigravity",
+            "agy plugin install <package-dir>",
+            "agy plugin uninstall agentic-sdlc",
+            "no `agy plugin update`",
+            "deprecated (no removal date announced)",
+            "agy-launch.mjs",
+            "PLUGIN_ROOT",
+            "inheritMcp: false",
+            "24000",
         ):
             with self.subTest(readme_required=required):
                 self.assertIn(required, self.readme)
 
         runtime_adapter = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
+        section = runtime_adapter.split(
+            "## Google Antigravity adapter (experimental — not a supported release target)", 1)[1].split("\n## ", 1)[0]
         for required in (
-            "## Google Antigravity adapter (experimental — not a supported release target)",
-            "VERSIONLESS_PLUGIN_MANIFESTS",
             "invoke_subagent",
-            "October 19, 2026",
             "toolCall",
+            "deprecated (no removal date announced)",
+            ".antigravity-plugin/hooks.json",
+            "agy-launch.mjs",
+            "SessionStart",
+            "Stop",
+            "PreInvocation",
+            "PostInvocation",
+            "fails closed",
+            "--antigravity",
         ):
             with self.subTest(runtime_adapter_required=required):
-                self.assertIn(required, runtime_adapter)
+                self.assertIn(required, section)
 
         router = (REPO / "skills" / "using-agentic-sdlc" / "SKILL.md").read_text(encoding="utf-8")
         dispatch = (REPO / "skills" / "dispatch-strategy" / "SKILL.md").read_text(encoding="utf-8")
@@ -132,7 +145,24 @@ class TestAntigravityPackaging(unittest.TestCase):
         self.assertIn("In Google Antigravity (experimental adapter)", router)
         self.assertIn("invoke_subagent", dispatch)
         self.assertIn("invoke_subagent", pipeline)
-        self.assertIn("October 19, 2026", pipeline)
+        for text in (router, dispatch, pipeline):
+            self.assertIn("deprecated (no removal date announced)", text)
+
+    def test_retired_antigravity_claims_are_gone(self):
+        # agy 1.5.14 (2026-11-21): workflows are deprecated with no removal date, the manifest
+        # schema has more than two keys and accepts `version`, and hooks.json supports SessionStart
+        # and Stop. These sentences must not come back.
+        docs = [REPO / ".antigravity-plugin" / "README.md", REPO / "README.md", REPO / "docs" / "runtime-adapter.md",
+                REPO / "docs" / "publication" / "multi-platform-distribution.md", REPO / "docs" / "testing.md",
+                REPO / "skills" / "using-agentic-sdlc" / "SKILL.md", REPO / "skills" / "dispatch-strategy" / "SKILL.md",
+                REPO / "skills" / "agentic-sdlc-pipeline" / "SKILL.md"]
+        for path in docs:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(doc=str(path.relative_to(REPO))):
+                for retired in ("October 19, 2026", "two-key", "VERSIONLESS_PLUGIN_MANIFESTS",
+                                "without `SessionStart`, `Stop`", "does not support `SessionStart`",
+                                "staged to `<plugin-dir>/plugin.json`", "cp -R skills"):
+                    self.assertNotIn(retired, text)
 
 
 def quiet(fn, *args, **kwargs):
