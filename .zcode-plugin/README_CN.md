@@ -22,7 +22,8 @@ DMG）和 Linux（x64 AppImage）版本。
 2. 将根目录的 `marketplace.json`（ZCode marketplace 模式）**作为文件源**添加。ZCode 文档将
    marketplace 源列为 GitHub 仓库、Git URL 或本地 marketplace 文件或目录，并说明共享目录应是
    仓库根目录下的 `marketplace.json`（[插件文档](https://zcode.z.ai/en/docs/plugin)，2026-11-21 获取），
-   因此以目录或 GitHub 源添加本仓库时，按文档使用的也是同一个根目录 `marketplace.json`。本仓库
+   因此以目录或 GitHub 源添加本仓库时，预期使用的也是同一个根目录 `marketplace.json`（未经原生观察：
+   该页面并未说明如何解析源）。本仓库
    另有 `.claude-plugin/marketplace.json`（Claude 目录）；ZCode 是否会从目录或 GitHub 源读取该文件、
    或优先于根目录文件读取它，文档未记载，也未经观察。ZCode 会在添加前进行校验。
 3. 请先查看下方「信任与副作用」中的 Hook 表：新安装的插件**默认即启用**，其 Hook 会立即

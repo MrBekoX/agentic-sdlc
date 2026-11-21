@@ -138,7 +138,8 @@ print Claude-style `decision`/`systemMessage` JSON and exit 0, which is not a
 documented Kimi block. The guards read a transcript Kimi does not provide, and
 their `stop_hook_active` loop guard would never fire. `session-start.mjs` prints
 `hookSpecificOutput.additionalContext` JSON and runs Git in the process cwd,
-which for a Kimi plugin hook is the plugin root. Routing is already done by
+which the Kimi plugins page sets to the plugin root (the hooks page says the session's
+project directory; the docs do not reconcile them, checked 2026-11-21). Routing is already done by
 `sessionStart.skill`, so a SessionStart hook would add nothing.
 
 A future Kimi mode would need Stop results as exit 2 with a stderr reason (or the

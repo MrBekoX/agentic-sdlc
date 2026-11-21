@@ -278,6 +278,13 @@ class TestKimiStopAndSessionStartStayUnwired(unittest.TestCase):
             ):
                 self.assertIn(marker, flat, f"{name} missing {marker}")
 
+    def test_readme_does_not_settle_the_hook_cwd_the_docs_leave_open(self):
+        # K3: plugins.html says hook cwd is the plugin root, hooks.html says the session's
+        # project directory; the docs do not reconcile the two.
+        flat = " ".join((REPO / ".kimi-plugin" / "README.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("which for a Kimi plugin hook is the plugin root", flat)
+        self.assertIn("the docs do not reconcile them", flat)
+
 
 class TestAdapterFilesKeepHouseContracts(unittest.TestCase):
     def test_no_root_portable_manifest_and_no_auto_discovered_hook_file(self):

@@ -260,6 +260,19 @@ class TestGrokDocsRecordTheVendorFacts(unittest.TestCase):
         # The old wording said the Stop fields were not documented/captured; the guide documents them.
         self.assertNotIn("were not captured this session", section)
 
+    def test_require_sha_is_named_in_its_marketplace_table_and_stop_readers_are_split(self):
+        text = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
+        start = text.index("\n## Grok CLI adapter")
+        section = " ".join(text[start:text.find("\n## ", start + 1)].split())
+        readme = " ".join((REPO / ".grok-plugin" / "README.md").read_text(encoding="utf-8").split())
+        for name, flat in (("docs/runtime-adapter.md#Grok", section), (".grok-plugin/README.md", readme)):
+            # 09-plugins.md documents the key inside a [marketplace] table.
+            self.assertIn("`[marketplace] require_sha = true`", flat, name)
+            # worktree-scan.mjs reads payload cwd and git state; only the guards read transcripts.
+            self.assertIn("the completion and flow guards read Claude transcripts or Codex rollouts", flat, name)
+            self.assertNotIn("Stop handlers read Claude transcripts", flat, name)
+            self.assertNotIn("— they read Claude transcripts", flat, name)
+
     def test_stop_and_session_start_stay_unwired(self):
         events = set(read_json(GROK_HOOKS)["hooks"])
         self.assertNotIn("Stop", events)

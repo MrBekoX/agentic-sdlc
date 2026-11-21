@@ -26,8 +26,9 @@ Windows (x64/ARM64), macOS (Apple Silicon/Intel DMG) and Linux (x64 AppImage).
    ZCode documents a marketplace source as a GitHub repository, a Git URL, or a local
    marketplace file or directory, and a shared catalog as a `marketplace.json` at the
    repository root ([plugin docs](https://zcode.z.ai/en/docs/plugin), fetched 2026-11-21),
-   so a directory or GitHub source of this repository is documented to use the same root
-   `marketplace.json`. The repository also carries `.claude-plugin/marketplace.json` (the
+   so a directory or GitHub source of this repository is expected to use the same root
+   `marketplace.json` (not natively observed: the page does not say how a source is
+   resolved). The repository also carries `.claude-plugin/marketplace.json` (the
    Claude catalog); whether ZCode reads that file from a directory or GitHub source, or
    prefers it over the root file, is undocumented and has not been observed. ZCode
    validates before adding.

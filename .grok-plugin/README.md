@@ -59,8 +59,8 @@ Grok names a marketplace after its source's last path segment, not the catalog
 organization policy still apply. See [distribution details](../docs/publication/grok-marketplace.md).
 The shipped `url` source carries no `sha`. A personal `grok plugin marketplace add`
 accepts that, but the official xai-org/plugin-marketplace requires a full
-40-character `sha` on every `url` source, and an install under `require_sha = true` or
-`GROK_MARKETPLACE_REQUIRE_SHA=1` refuses an unpinned source (marketplace README and
+40-character `sha` on every `url` source, and an install under `[marketplace] require_sha = true`
+(a `[marketplace]` table in the Grok config) or `GROK_MARKETPLACE_REQUIRE_SHA=1` refuses an unpinned source (marketplace README and
 `09-plugins.md`, checked 2026-11-21). Pin a real commit before any official submission.
 
 Installation requires `--trust`. Pick up changes with `r` in the Plugins tab
@@ -93,11 +93,11 @@ Write scanning, startup and Stop/flow readers remain unwired: this candidate
 does not verify their Grok payload/reader contracts. The Grok hook guide
 (`10-hooks.md`, checked 2026-11-21) gives `Stop` a camelCase payload with
 `stopHookActive` and `lastAssistantMessage` (a script reading `.stop_hook_active`
-must switch to `.stopHookActive`), and for `SessionStart` stdout is ignored. The
-shared Stop handlers read Claude transcripts or Codex rollouts and test the
-snake_case `stop_hook_active`, and `session-start.mjs` delivers its context on
-stdout, so neither works on Grok as written; both stay unwired until a Grok output
-mode exists. The Claude and Codex transcript readers must not be wired merely
+must switch to `.stopHookActive`), and for `SessionStart` stdout is ignored. Among
+the shared Stop handlers, the completion and flow guards read Claude transcripts or
+Codex rollouts, and all three (they and `worktree-scan.mjs`) test the snake_case
+`stop_hook_active`. `session-start.mjs` delivers its context on stdout. Neither
+works on Grok as written, so both stay unwired until a Grok output mode exists. The Claude and Codex transcript readers must not be wired merely
 because Grok exposes a Stop event.
 
 Grok workflows live in project `.grok/workflows/*.rhai` or user
