@@ -1608,3 +1608,49 @@ class OptionalNativeLifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AntigravityWorkflowTests(unittest.TestCase):
+    """The manual agy workflow: it installs an unpinned, self-updating CLI, so it stays out of ci.yml."""
+
+    WORKFLOW = REPO / ".github" / "workflows" / "native-lifecycle-linux-agy.yml"
+
+    def setUp(self):
+        self.text = self.WORKFLOW.read_text(encoding="utf-8")
+
+    def test_manual_dispatch_only_with_read_permission(self):
+        self.assertRegex(self.text, r"(?m)^on:\n  workflow_dispatch:\n\n")
+        for trigger in ("push:", "pull_request", "schedule:"):
+            self.assertNotIn(trigger, self.text)
+        self.assertRegex(self.text, r"(?m)^permissions:\n  contents: read\n")
+        self.assertIn("persist-credentials: false", self.text)
+
+    def test_actions_use_the_same_pins_as_the_other_native_workflows(self):
+        zcode = (REPO / ".github" / "workflows" / "native-lifecycle-linux-zcode.yml").read_text(encoding="utf-8")
+        pins = set(re.findall(r"uses: (\S+@[0-9a-f]{40})", self.text))
+        self.assertTrue(pins)
+        self.assertLessEqual(pins, set(re.findall(r"uses: (\S+@[0-9a-f]{40})", zcode)))
+        self.assertNotRegex(self.text, r"uses: \S+@(?![0-9a-f]{40}\b)")
+
+    def test_steps_install_build_validate_and_run_the_lifecycle(self):
+        for required in (
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+            "agy --version",
+            "python3 scripts/build_release.py --output \"$RUNNER_TEMP/agy.zip\" --antigravity",
+            "python3 scripts/build_release.py --verify \"$RUNNER_TEMP/agy.zip\"",
+            "agy plugin validate --json",
+            "only the first 24000 are loaded",
+            "skills/agentic-sdlc-pipeline/SKILL.md",
+            "python3 scripts/check_native_lifecycle.py --package \"$RUNNER_TEMP/package\" "
+            "--platform antigravity --require antigravity",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, self.text)
+        self.assertNotIn("-p ", self.text.replace("mkdir -p ", ""))
+        self.assertNotIn("GEMINI_API_KEY", self.text)
+        self.assertNotIn("secrets.", self.text)
+
+    def test_the_required_ci_does_not_install_agy(self):
+        ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertNotIn("antigravity.google/cli/install.sh", ci)
+        self.assertNotIn("--platform antigravity", ci)
