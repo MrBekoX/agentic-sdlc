@@ -38,21 +38,16 @@ docs/codex-plugin-runtime-debug-report/
 docs/publication/*
 !docs/publication/*.md
 !docs/publication/link-checks.json
-# Dated status analyses that plan the next phases (YYYY-MM-DD-<topic>.md); tracked on purpose.
-!docs/analysis/
-docs/analysis/*
-!docs/analysis/*.md
-!docs/agentic-sdlc/
-docs/agentic-sdlc/*
-!docs/agentic-sdlc/evidence/
-docs/agentic-sdlc/evidence/*
-!docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md
+# Status analyses (docs/analysis/) and work-package specs, plans and evidence (docs/agentic-sdlc/)
+# fall under docs/* and stay local; the repository tracks only plugin source and plugin docs.
 # Model-generated audit write-ups stay local; never distributed.
 audit-docs/
 # Maintainer prompt and plan inputs for agent sessions; local only, never distributed.
 agentic-sdlc-prompts/
 # Session reports that agent sessions write for the maintainer; local only, never distributed.
 session-reports/
+# Reports written at the repository root (<topic>-report.md); local only, never distributed.
+/*-report.md
 # Contract test for a prompt in agentic-sdlc-prompts/; it reads that folder, so it can only
 # run where the folder exists and must stay out of clean clones and CI.
 tests/test_superpowers_referenced_eval_prompt.py
@@ -82,6 +77,8 @@ mcps/
 .opencode/
 # Omo local run-continuation state (per-session tool state, not distributed)
 .omo/
+# Remember plugin session memory (per-machine tool state, not distributed)
+.remember/
 settings.local.json
 scheduled_tasks.lock
 .handoffs/

@@ -108,8 +108,8 @@ class TestEvidenceTrackingGate(unittest.TestCase):
         self.assertEqual(offenders, [], f"tracked per-package evidence found: {offenders}")
 
     def test_legacy_evidence_dir_not_flagged(self):
-        # AC22 exclusion: the legacy docs/agentic-sdlc/evidence/ file (no slug segment,
-        # referenced from docs/release-readiness.md) is outside the gate by construction.
+        # AC22 exclusion: a legacy docs/agentic-sdlc/evidence/ file (no slug segment) is outside
+        # the gate by construction.
         self.assertFalse(
             matcher("docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md")
         )

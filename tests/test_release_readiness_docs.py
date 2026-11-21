@@ -40,6 +40,13 @@ BASELINE_GITIGNORE_NEGATIONS = (
     "!docs/agentic-sdlc/evidence/",
     "!docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md",
 )
+# Baseline negations dropped when the repository stopped tracking anything but plugin source and
+# plugin docs (2026-11-20): the 2026-06-20 Codex evidence summary now stays local under docs/*.
+DROPPED_GITIGNORE_NEGATIONS = (
+    "!docs/agentic-sdlc/",
+    "!docs/agentic-sdlc/evidence/",
+    "!docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md",
+)
 
 
 # Each docs/data-handling.md statement below is bound to the source text that implements it:
@@ -188,7 +195,6 @@ class TestReleaseReadinessDocs(unittest.TestCase):
             "docs/publication/openai-skills-only.md",
             "docs/publication/agent-skills-record.md",
             "docs/publication/link-checks.json",
-            "docs/analysis/2026-11-14-durum-analizi.md",
         ):
             self.assertEqual(check_ignore_exit(rel), 1, f"{rel} must not be ignored")
         for rel in (
@@ -196,6 +202,11 @@ class TestReleaseReadinessDocs(unittest.TestCase):
             "docs/publication/sub/x.md",
             "docs/analysis/notes.json",
             "docs/analysis/sub/x.md",
+            "docs/analysis/2026-11-14-durum-analizi.md",
+            "docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md",
+            "session-reports/x.md",
+            "agentic-sdlc-technical-marketing-readiness-report.md",
+            ".remember/now.md",
             "docs/new-report.md",
             "docs/codex-plugin-runtime-debug-report/x.md",
             "docs/agentic-sdlc/publication-readiness/spec/x.md",
@@ -207,7 +218,7 @@ class TestReleaseReadinessDocs(unittest.TestCase):
         negations = {line for line in gitignore.splitlines() if line.startswith("!")}
         self.assertEqual(
             negations,
-            set(BASELINE_GITIGNORE_NEGATIONS)
+            (set(BASELINE_GITIGNORE_NEGATIONS) - set(DROPPED_GITIGNORE_NEGATIONS))
             | {
                 "!docs/data-handling.md",
                 "!docs/release-evidence-0.5.0.md",
@@ -217,8 +228,6 @@ class TestReleaseReadinessDocs(unittest.TestCase):
                 "!docs/publication/*.md",
                 "!docs/publication/link-checks.json",
                 "!docs/zcode-runtime-adapter.md",
-                "!docs/analysis/",
-                "!docs/analysis/*.md",
             },
         )
 
@@ -272,7 +281,6 @@ class TestReleaseReadinessDocs(unittest.TestCase):
             "Codex wires native blocking `PreToolUse` guards",
             "Historical evidence — 2026-06-20 Codex 0.3.0 live low smoke",
             f"not live evidence for the current `{version}` worktree",
-            "docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md",
             "gpt-5.3-codex-spark",
             "model_reasoning_effort=\"low\"",
             "RED->GREEN",
@@ -406,19 +414,20 @@ class TestReleaseReadinessDocs(unittest.TestCase):
         readme = (REPO / "README.md").read_text(encoding="utf-8")
         self.assertTrue("(docs/data-handling.md)" in readme, "README documentation list does not link docs/data-handling.md")
 
-    def test_linked_codex_live_evidence_is_release_visible(self):
-        target = REPO / "docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md"
-        self.assertTrue(target.is_file())
-        ignored = subprocess.run(
-            ["git", "check-ignore", "-q", str(target)], cwd=REPO, capture_output=True
-        )
-        self.assertNotEqual(ignored.returncode, 0, "release evidence is still git-ignored")
-        tracked = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", str(target.relative_to(REPO))],
-            cwd=REPO,
-            capture_output=True,
-        )
-        self.assertEqual(tracked.returncode, 0, "release evidence is not present in the Git index")
+    def test_internal_reports_stay_local(self):
+        # The repository tracks only plugin source and plugin docs: the 2026-11-14 status analysis
+        # and the 2026-06-20 Codex evidence summary stay local, and no tracked doc links them.
+        _require_git_checkout(self)
+        for rel in ("docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md",
+                    "docs/analysis/2026-11-14-durum-analizi.md"):
+            tracked = subprocess.run(["git", "ls-files", "--error-unmatch", rel], cwd=REPO, capture_output=True)
+            self.assertNotEqual(tracked.returncode, 0, f"{rel} is still in the Git index")
+            ignored = subprocess.run(["git", "check-ignore", "--no-index", "-q", rel], cwd=REPO,
+                                     capture_output=True)
+            self.assertEqual(ignored.returncode, 0, f"{rel} is not git-ignored")
+        release = (REPO / "docs/release-readiness.md").read_text(encoding="utf-8")
+        self.assertNotIn("](agentic-sdlc/evidence/", release)
+        self.assertIn("Historical evidence — 2026-06-20 Codex 0.3.0 live low smoke", release)
 
 
 if __name__ == "__main__":

@@ -145,8 +145,7 @@ prompt aligned with the routing classifier.
 
 ## Historical evidence — 2026-06-20 Codex 0.3.0 live low smoke
 
-Sanitized summary: [`docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md`](agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md).
-Raw transcript/final report are local generated artifacts under `tests/artifacts/codex-procedure/` and are intentionally gitignored.
+This section carries the run's details. The sanitized summary (`docs/agentic-sdlc/evidence/codex-live-low-strict-2026-06-20.md`) and the raw transcript and final report under `tests/artifacts/codex-procedure/` are local files and are intentionally gitignored.
 Fixture: `<temp-fixture-root>` (isolated copy of `tests/fixtures/agentic-sdlc-pipeline-basic`).
 
 Run shape:
