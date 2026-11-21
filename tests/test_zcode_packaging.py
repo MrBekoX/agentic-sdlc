@@ -142,6 +142,82 @@ class TestZcodeMarketplace(unittest.TestCase):
         self.assertNotIn("sha256", entry)
 
 
+def runtime_adapter_section(heading_prefix):
+    """The `## <heading_prefix>...` section of docs/runtime-adapter.md, up to the next `## `."""
+    text = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
+    start = text.index("\n## " + heading_prefix)
+    end = text.find("\n## ", start + 1)
+    return text[start:end if end >= 0 else len(text)]
+
+
+def tracked_markdown():
+    git = shutil.which("git")
+    if git is None:
+        return None
+    proc = subprocess.run([git, "ls-files", "-z", "--", "*.md"], cwd=str(REPO),
+                          capture_output=True, text=True, encoding="utf-8")
+    return [name for name in proc.stdout.split("\0") if name]
+
+
+class TestRootMarketplaceStaysTheZcodeCatalog(unittest.TestCase):
+    """The root marketplace.json is ZCode's only documented catalog location.
+
+    zcode.z.ai/en/docs/plugin (fetched 2026-11-21): "list them in a marketplace.json at the
+    root, and push to GitHub"; a marketplace source is "A GitHub repository", "A Git URL" or
+    "A local marketplace file or directory". `.claude-plugin` appears there only in the
+    plugin-manifest lookup (.zcode-plugin/plugin.json -> .claude-plugin/plugin.json), never as
+    a catalog location. Removing the root file removes the documented ZCode install path.
+    """
+
+    def test_root_marketplace_is_present_and_the_zcode_schema_catalog(self):
+        self.assertTrue(ZCODE_MARKETPLACE.is_file(),
+                        "root marketplace.json is ZCode's only documented catalog; keep it")
+        market = read_json(ZCODE_MARKETPLACE)
+        self.assertEqual(market["name"], "mrbekox")
+        self.assertEqual(len(market["plugins"]), 1)
+        entry = market["plugins"][0]
+        self.assertEqual(entry["name"], "agentic-sdlc")
+        self.assertEqual(entry["source"], "./")
+        self.assertEqual(entry["category"], "developer-tools")
+        i18n = entry.get("description_i18n")
+        self.assertIsInstance(i18n, dict, "description_i18n is the ZCode-only catalog field")
+        self.assertTrue(i18n.get("en"))
+        self.assertTrue(i18n.get("zh-CN"))
+
+    def test_no_tracked_doc_says_zcode_reads_the_claude_catalog_first(self):
+        # The claim "a directory or GitHub source is read through .claude-plugin/marketplace.json
+        # first" was never observed natively (git history and the E9/E14/E15 lifecycle runs
+        # show no such observation) and the vendor doc does not document it.
+        files = tracked_markdown()
+        if files is None:
+            self.skipTest("git not available - cannot list tracked docs")
+        stale = (
+            re.compile(r"\.claude-plugin/marketplace\.json`?\s+first"),
+            re.compile(r"先读取\s*`\.claude-plugin/marketplace\.json`"),
+            re.compile(r"先通过\s*`\.claude-plugin/marketplace\.json`"),
+        )
+        for name in files:
+            text = (REPO / name).read_text(encoding="utf-8")
+            for pattern in stale:
+                self.assertIsNone(pattern.search(text), f"{name} repeats the undocumented claim")
+
+    def test_zcode_docs_name_the_documented_catalog_and_flag_the_fallback(self):
+        docs = {
+            ".zcode-plugin/README.md": (REPO / ".zcode-plugin" / "README.md").read_text(encoding="utf-8"),
+            "docs/runtime-adapter.md#ZCode": runtime_adapter_section("ZCode adapter"),
+            "docs/zcode-runtime-adapter.md": (REPO / "docs" / "zcode-runtime-adapter.md").read_text(encoding="utf-8"),
+        }
+        for name, text in docs.items():
+            flat = " ".join(text.split())
+            self.assertIn("zcode.z.ai/en/docs/plugin", flat, name)
+            self.assertIn("2026-11-21", flat, name)
+            self.assertIn("root `marketplace.json`", flat, name)
+            self.assertIn("is undocumented", flat, name)
+        cn = (REPO / ".zcode-plugin" / "README_CN.md").read_text(encoding="utf-8")
+        self.assertIn("2026-11-21", cn)
+        self.assertIn("文档未记载", cn)
+
+
 class TestZcodeHookWire(unittest.TestCase):
     def setUp(self):
         self.wire = read_json(ZCODE_HOOKS)

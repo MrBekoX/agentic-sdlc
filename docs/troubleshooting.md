@@ -99,7 +99,7 @@ Then press `r` in the Plugins tab or start a new session.
 
 Check:
 
-1. The marketplace was added from the root `marketplace.json` as a file source (Settings → Plugins → Add marketplace). A directory or GitHub source is read through `.claude-plugin/marketplace.json` first and shows the Claude entry without ZCode's category, tags and translations; remove that marketplace and add the file instead. A GitHub source uses the public repository and has not been verified natively.
+1. The marketplace was added from the root `marketplace.json` as a file source (Settings → Plugins → Add marketplace). ZCode documents a directory or GitHub source as reading its root `marketplace.json` ([plugin docs](https://zcode.z.ai/en/docs/plugin), fetched 2026-11-21); whether it ever falls back to `.claude-plugin/marketplace.json` is undocumented. If the card lacks ZCode's category, tags and translations, remove that marketplace and add the file instead. A GitHub source uses the public repository and has not been verified natively.
 2. `node` is on the `PATH` the ZCode app itself sees. On macOS, an app started from the Dock or Finder may not inherit the `PATH` a shell profile sets (for example nvm, or a Homebrew path added in `.zshrc`); without `node` the hooks fail open and no guard runs.
 3. An update is offered only when the catalog version changes; after applying it, start a new session.
 

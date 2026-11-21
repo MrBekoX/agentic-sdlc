@@ -23,9 +23,14 @@ Windows (x64/ARM64), macOS (Apple Silicon/Intel DMG) and Linux (x64 AppImage).
 1. Open ZCode **Settings → Plugins**, **Discover** tab, and click **+**
    (**Create → Add marketplace**).
 2. Add the root `marketplace.json` (the ZCode marketplace schema) **as a file source**.
-   A directory or GitHub source is read through `.claude-plugin/marketplace.json` first,
-   which still installs the plugin but shows the Claude entry without the ZCode category,
-   tags and translations. ZCode validates before adding.
+   ZCode documents a marketplace source as a GitHub repository, a Git URL, or a local
+   marketplace file or directory, and a shared catalog as a `marketplace.json` at the
+   repository root ([plugin docs](https://zcode.z.ai/en/docs/plugin), fetched 2026-11-21),
+   so a directory or GitHub source of this repository is documented to use the same root
+   `marketplace.json`. The repository also carries `.claude-plugin/marketplace.json` (the
+   Claude catalog); whether ZCode reads that file from a directory or GitHub source, or
+   prefers it over the root file, is undocumented and has not been observed. ZCode
+   validates before adding.
 3. Review the hook table under **Trust and side effects** first: newly installed plugins
    are **enabled by default**, which lets their hooks run. In the **Personal** segment,
    find the `agentic-sdlc` card (name, version, category `developer-tools`) and click
@@ -35,9 +40,10 @@ Windows (x64/ARM64), macOS (Apple Silicon/Intel DMG) and Linux (x64 AppImage).
 Without a local package directory, add the GitHub repository `MrBekoX/agentic-sdlc` (or
 its URL) as the marketplace source in step 2. The repository is public since
 2026-10-12; this route has not been natively verified. The vendor plugin page lists a GitHub
-repository as a marketplace source (checked 2026-10-08). ZCode reads that source through
-`.claude-plugin/marketplace.json` first, as step 2 describes: the plugin installs with the
-Claude entry, without the ZCode category, tags and translations.
+repository as a marketplace source (checked 2026-10-08) and names the root
+`marketplace.json` as the catalog of a GitHub marketplace (checked 2026-11-21); that is
+this repository's ZCode-schema catalog, with its category, tags and translations. A
+`.claude-plugin/marketplace.json` fallback for ZCode is undocumented, as step 2 says.
 
 Prerequisites: `node` must be on `PATH` — every hook executor is `node <script>` via argv.
 Helper workflows also need Python 3 (3.12 is tested; the helpers skills run are kept

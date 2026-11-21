@@ -19,9 +19,12 @@ DMG）和 Linux（x64 AppImage）版本。
 
 1. 打开 ZCode **Settings → Plugins**，**Discover** 标签页，点击 **+**
    （**Create → Add marketplace**）。
-2. 将根目录的 `marketplace.json`（ZCode marketplace 模式）**作为文件源**添加。若以目录或
-   GitHub 源添加，ZCode 会先读取 `.claude-plugin/marketplace.json`，虽然仍可安装插件，但显示的是
-   Claude 条目，没有 ZCode 的类别、标签与翻译。ZCode 会在添加前进行校验。
+2. 将根目录的 `marketplace.json`（ZCode marketplace 模式）**作为文件源**添加。ZCode 文档将
+   marketplace 源列为 GitHub 仓库、Git URL 或本地 marketplace 文件或目录，并说明共享目录应是
+   仓库根目录下的 `marketplace.json`（[插件文档](https://zcode.z.ai/en/docs/plugin)，2026-11-21 获取），
+   因此以目录或 GitHub 源添加本仓库时，按文档使用的也是同一个根目录 `marketplace.json`。本仓库
+   另有 `.claude-plugin/marketplace.json`（Claude 目录）；ZCode 是否会从目录或 GitHub 源读取该文件、
+   或优先于根目录文件读取它，文档未记载，也未经观察。ZCode 会在添加前进行校验。
 3. 请先查看下方「信任与副作用」中的 Hook 表：新安装的插件**默认即启用**，其 Hook 会立即
    运行。在 **Personal** 分区找到 `agentic-sdlc` 卡片（名称、版本、类别 `developer-tools`），
    点击 **Install**。只有在停用后才需要在「Manage installed」中再次点击 **Enable**。
@@ -29,9 +32,9 @@ DMG）和 Linux（x64 AppImage）版本。
 
 没有本地包目录时，在第 2 步改为将 GitHub 仓库 `MrBekoX/agentic-sdlc`（或其 URL）添加为
 marketplace 源。仓库自 2026-10-12 起已公开；该方式尚未经过原生验证。厂商插件页面将
-GitHub 仓库列为 marketplace 源（2026-10-08 核对）。如第 2 步所述，ZCode 会先通过
-`.claude-plugin/marketplace.json` 读取该源：插件以 Claude 条目安装，没有 ZCode 的类别、
-标签与翻译。
+GitHub 仓库列为 marketplace 源（2026-10-08 核对），并将仓库根目录的 `marketplace.json` 作为
+GitHub marketplace 的目录（2026-11-21 核对），即本仓库带类别、标签与翻译的 ZCode 模式目录。
+如第 2 步所述，ZCode 回退读取 `.claude-plugin/marketplace.json` 一事文档未记载。
 
 前提条件：`node` 必须在 `PATH` 上——每个 Hook 执行器都是通过 argv 运行
 `node <script>`。辅助工作流还需要 Python 3（已测试 3.12；技能运行的辅助脚本经静态检查
