@@ -23,6 +23,29 @@ Two kinds of guard live here:
 > `if` best-effort and say to use the permission system, not a hook filter, for a hard allow/deny. The
 > decision therefore lives inside each guard, which self-gates cheaply on `git`.
 
+### Claude Code wiring notes (`hooks-claude.json`)
+
+`hooks-claude.json` carries no inline comments. Claude Code 2.1.330 logged a WARN and an ERROR line on
+every plugin load for the three `$comment` keys it used to hold (`hooks.json: unknown keys "$comment"
+in hooks.PreToolUse[0], "$comment" in hooks.PreToolUse[1] ignored`; observed 2026-11-21 with
+`claude -p --plugin-dir <package> --debug-file <log>` in an isolated `CLAUDE_CONFIG_DIR`), while
+`claude plugin validate --strict` reported nothing. The current
+[plugins reference](https://code.claude.com/docs/en/plugins-reference) (read 2026-11-21) documents no
+comment field inside a matcher group or handler, so the rationale lives here, and
+`tests/test_hooks_policy.py` fails if a `$comment` key comes back at any depth:
+
+- **`PreToolUse` `Bash|PowerShell`** (scan-commit, destructive-command guard, branch guard): the
+  matcher and no-`if` rationale is the note above.
+- **`PreToolUse` `Write|Edit|MultiEdit|Bash|PowerShell`** (flow-order guard): a source file written by
+  a shell command (sed -i, a redirect, a heredoc, tee) is an edit like a Write/Edit, read by the shared
+  write-target recognizer. No `if` filter, for the same reason as the command guards; the guard exits
+  early when a command writes no source file.
+- **`Stop` `worktree-scan.mjs`**: effect-layer detection. It scans the bytes that actually landed in
+  the working tree, so the write form (tee/dd/base64/python -c/any redirect) does not matter; that is
+  the class the command-string write guard documents as out of reach. Advisory by default;
+  `AGENTIC_WORKTREE_SCAN_BLOCK=true` escalates it.
+- The top-level `description` key stays: the 2.1.330 load log reported only the `$comment` keys.
+
 
 The hook scripts are shared in this directory, but being present as a script is not the same as being wired by every runtime.
 

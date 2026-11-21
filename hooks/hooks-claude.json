@@ -3,7 +3,6 @@
   "hooks": {
     "PreToolUse": [
       {
-        "$comment": "Matcher covers BOTH shell tools. On Windows without Git Bash, Claude Code does not register the Bash tool at all, so a Bash-only matcher leaves every command guard inert (code.claude.com/docs/en/hooks). No `if` filter: it is documented as best-effort ('use the permission system rather than a hook to enforce a hard allow or deny'), and a subcommand-level filter such as Bash(git commit*) never starts the hook for a git alias like `git ci`. Each guard makes its own cheap early-exit decision instead.",
         "matcher": "Bash|PowerShell",
         "hooks": [
           {
@@ -30,7 +29,6 @@
         ]
       },
       {
-        "$comment": "Bash and PowerShell too: a source file written by a shell command (sed -i, a redirect, a heredoc, tee) is an edit like a Write/Edit, read by the shared write-target recognizer. No `if` filter, for the same reason as the command guards above; the guard exits early when a command writes no source file.",
         "matcher": "Write|Edit|MultiEdit|Bash|PowerShell",
         "hooks": [
           {
@@ -87,7 +85,6 @@
             "statusMessage": "Flow-step guard..."
           },
           {
-            "$comment": "Effect-layer DETECTION: scans the bytes that actually landed in the working tree, so the write form (tee/dd/base64/python -c/any redirect) is irrelevant — the class the command-string write guard documents as out of reach. Advisory by default; AGENTIC_WORKTREE_SCAN_BLOCK=true escalates it.",
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/worktree-scan.mjs"],

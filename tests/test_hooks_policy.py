@@ -607,6 +607,40 @@ class TestRuntimeHookConfigSeparation(unittest.TestCase):
         self.assertNotIn("${PLUGIN_ROOT}", text)
 
 
+def _keys_at_any_depth(node, path="$"):
+    """Yield (json path, key) for every object key in a parsed JSON value."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield path, key
+            yield from _keys_at_any_depth(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _keys_at_any_depth(value, f"{path}[{index}]")
+
+
+class TestClaudeHookConfigCarriesNoCommentKeys(unittest.TestCase):
+    """Claude Code 2.1.330 logs a WARN and an ERROR line at every plugin load for each
+    "$comment" key in hooks-claude.json ('hooks.json: unknown keys "$comment" in
+    hooks.PreToolUse[0] ... ignored'), and `claude plugin validate --strict` does not report it.
+    The rationale those keys carried lives in hooks/README.md instead."""
+
+    CONFIG = REPO / "hooks" / "hooks-claude.json"
+
+    def test_no_comment_key_at_any_depth(self):
+        data = json.loads(self.CONFIG.read_text(encoding="utf-8"))
+        found = [f"{path}.{key}" for path, key in _keys_at_any_depth(data) if key == "$comment"]
+        self.assertEqual(found, [], "hooks-claude.json must not carry $comment keys")
+
+    def test_moved_rationale_is_in_the_hooks_readme(self):
+        readme = (REPO / "hooks" / "README.md").read_text(encoding="utf-8")
+        for phrase in ("`Write|Edit|MultiEdit|Bash|PowerShell`",
+                       "sed -i, a redirect, a heredoc, tee",
+                       "AGENTIC_WORKTREE_SCAN_BLOCK=true",
+                       "unknown keys \"$comment\""):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, readme)
+
+
 @unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")
 class TestScanCommitSecretScan(unittest.TestCase):
     """scan-commit.mjs blocks secrets ADDED in a commit, scanning with the HIGH set. The HIGH
