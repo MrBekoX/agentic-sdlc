@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 import check_cursor_plugin
 import check_plugin_portability
 import install_cursor_plugin
+import project_roles
 
 
 def _run(command, payload, env, cwd):
@@ -204,6 +205,11 @@ class CursorRoleFileTests(unittest.TestCase):
 
     def test_the_cursor_checker_accepts_the_mirrors(self):
         self.assertEqual([e for e in check_cursor_plugin.validate(REPO) if "agent" in e], [])
+
+    def test_the_committed_mirror_equals_the_generated_projection(self):
+        # AC11 drift gate: cursor/agents/ is generated from agents/*.md by scripts/project_roles.py.
+        # Regenerate with `python3 scripts/project_roles.py --target cursor --write`.
+        self.assertEqual(project_roles.check_mirror(REPO, "cursor"), [])
 
 
 class CursorLauncherFailClosedTests(unittest.TestCase):
