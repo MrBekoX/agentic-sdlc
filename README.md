@@ -365,7 +365,7 @@ hooks/                 Deterministic guard scripts, flow evidence, and runtime h
 contracts/skills/      Durable behavior contracts
 commands/              Manual slash-command definitions
 flows/                 The flow runner's JSON flows, loop definition and schemas (read by scripts/sdlc.py)
-scripts/               26 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check, native lifecycle check, Cursor package check and install, the middleware-chain runner entry
+scripts/               27 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check, native lifecycle check, Cursor package check and install, the middleware-chain runner entry
 tests/                 Unit tests, harness, fixtures, golden refs, eval seeds
 docs/                  Component reference, boundaries, testing, release notes
 ```
