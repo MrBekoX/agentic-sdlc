@@ -1636,6 +1636,8 @@ class AntigravityWorkflowTests(unittest.TestCase):
         for required in (
             "curl -fsSL https://antigravity.google/cli/install.sh | bash",
             "agy --version",
+            # The run log identifies the agy binary bytes that ran (the installer is unpinned).
+            'sha256sum "$(command -v agy)"',
             "python3 scripts/build_release.py --output \"$RUNNER_TEMP/agy.zip\" --antigravity",
             "python3 scripts/build_release.py --verify \"$RUNNER_TEMP/agy.zip\"",
             "agy plugin validate --json",

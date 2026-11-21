@@ -86,12 +86,21 @@ class AgyReplayTests(unittest.TestCase):
             with self.subTest(handler=handler):
                 self.assertEqual(answer(launch("PreToolUse", handler, payload)), {"decision": "allow"})
 
-    def test_cwd_argument_selects_the_command_folder(self):
-        payload = fixture("pre-run-command", self.work)
-        payload["cwd"] = str(Path(self.tmp.name) / "gone")
+    def test_payload_cwd_selects_the_repository_and_an_args_cwd_is_ignored(self):
+        # run_command carries CommandLine, WaitMsBeforeAsync and toolSummary in the live capture
+        # (agy 1.5.14, 2026-11-21); no `Cwd` argument was seen, so the payload `cwd` alone decides.
+        protected = git_repo(Path(self.tmp.name) / "protected")
+        subprocess.run(["git", "checkout", "-q", "-b", "main"], cwd=protected, check=True, capture_output=True)
+        payload = fixture("pre-run-command", protected)
         payload["toolCall"]["args"]["Cwd"] = str(self.work)
-        payload["toolCall"]["args"]["CommandLine"] = "git clean -fdx"
-        self.assertEqual(answer(launch("PreToolUse", "destructive-command-guard.mjs", payload))["decision"], "deny")
+        payload["toolCall"]["args"]["CommandLine"] = "git commit -q --allow-empty -m x"
+        env = {"AGENTIC_BRANCH_GUARD_BLOCK": "true"}
+        out = answer(launch("PreToolUse", "branch-guard.mjs", payload, env=env))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("main", out["reason"])
+        payload = fixture("pre-run-command", self.work)
+        payload["toolCall"]["args"]["CommandLine"] = "git commit -q --allow-empty -m x"
+        self.assertEqual(answer(launch("PreToolUse", "branch-guard.mjs", payload, env=env)), {"decision": "allow"})
 
     def test_payload_text_is_never_run_by_a_shell(self):
         marker = Path(self.tmp.name) / "pwned"
@@ -197,6 +206,33 @@ class AgyBadPayloadTests(unittest.TestCase):
                 self.assertEqual(out["decision"], "deny")
                 self.assertTrue(out["reason"].startswith("agentic-sdlc:"))
 
+    def test_a_missing_or_non_string_tool_argument_denies(self):
+        # The guards cannot check a command or a write whose content is not a string, so it must
+        # not reach them as an empty value and be allowed.
+        cases = []
+        for value in (["git", "reset", "--hard"], None, 7):
+            payload = fixture("pre-run-command", self.work)
+            payload["toolCall"]["args"]["CommandLine"] = value
+            cases.append(("destructive-command-guard.mjs", payload))
+        missing = fixture("pre-run-command", self.work)
+        del missing["toolCall"]["args"]["CommandLine"]
+        cases.append(("branch-guard.mjs", missing))
+        for name, key, value in (("pre-write-file", "Content", ["x"]), ("pre-write-file", "Path", None),
+                                 ("pre-edit-file", "Replacement", {"a": 1}), ("pre-edit-file", "Path", 3)):
+            payload = fixture(name, self.work)
+            payload["toolCall"]["args"][key] = value
+            cases.append(("scan-write.mjs", payload))
+        for name, key in (("pre-write-file", "Content"), ("pre-edit-file", "Replacement")):
+            payload = fixture(name, self.work)
+            del payload["toolCall"]["args"][key]
+            cases.append(("scan-write.mjs", payload))
+        for handler, payload in cases:
+            with self.subTest(handler=handler, args=payload["toolCall"]["args"]):
+                out = answer(launch("PreToolUse", handler, payload))
+                self.assertEqual(out["decision"], "deny")
+                self.assertTrue(out["reason"].startswith("agentic-sdlc:"))
+                self.assertIn(handler, out["reason"])
+
     def test_unreadable_input_on_other_events_is_an_empty_answer(self):
         for event, handler in (("SessionStart", "session-start.mjs"), ("Stop", "worktree-scan.mjs")):
             with self.subTest(event=event):
@@ -244,10 +280,10 @@ class AgyFailClosedTests(unittest.TestCase):
         shutil.copy2(LAUNCHER, self.hooks / "agy-launch.mjs")
         self.work = git_repo(Path(self.tmp.name) / "project")
 
-    def run_standin(self, handler, body, event, payload):
+    def run_standin(self, handler, body, event, payload, env=None):
         (self.hooks / handler).write_text(body, encoding="utf-8")
         return launch(event, handler, payload, launcher=self.hooks / "agy-launch.mjs",
-                      extra=("--handler-timeout", "2"))
+                      extra=("--handler-timeout", "2"), env=env)
 
     def test_pretooluse_guard_failures_deny(self):
         payload = fixture("pre-run-command", self.work)
@@ -285,6 +321,31 @@ class AgyFailClosedTests(unittest.TestCase):
         body = "process.stdout.write(JSON.stringify({decision: 'block', reason: 'r'}));\n"
         out = answer(self.run_standin("worktree-scan.mjs", body, "Stop", fixture("stop", self.work)))
         self.assertEqual(out, {})
+
+    def test_stop_never_continues_twice_even_if_the_handler_blocks_again(self):
+        # The launcher's own loop guard: a handler that ignores stop_hook_active still cannot keep
+        # agy going while continuationActive is true.
+        body = "process.stdout.write(JSON.stringify({decision: 'block', reason: 'again'}));\n"
+        env = {"AGENTIC_WORKTREE_SCAN_BLOCK": "true"}
+        payload = fixture("stop", self.work)
+        self.assertEqual(answer(self.run_standin("worktree-scan.mjs", body, "Stop", payload, env=env)),
+                         {"decision": "continue", "reason": "again"})
+        payload["continuationActive"] = True
+        self.assertEqual(answer(self.run_standin("worktree-scan.mjs", body, "Stop", payload, env=env)), {})
+
+    def test_a_legacy_block_decision_denies_the_tool_call(self):
+        body = "process.stdout.write(JSON.stringify({decision: 'block', reason: 'blocked by stand-in'}));\n"
+        out = answer(self.run_standin("branch-guard.mjs", body, "PreToolUse", fixture("pre-run-command", self.work)))
+        self.assertEqual(out, {"decision": "deny", "reason": "blocked by stand-in"})
+
+    def test_a_no_opinion_answer_is_an_explicit_allow_never_an_empty_object(self):
+        # agy 1.5.14 denied a run_command whose PreToolUse hook printed `{}` ("tool call denied by
+        # pre-tool hook", probe 2026-11-21), so `{}` is not a neutral answer there.
+        for body in ("", "process.stdout.write('{}');\n"):
+            with self.subTest(body=body):
+                out = answer(self.run_standin("branch-guard.mjs", body, "PreToolUse",
+                                              fixture("pre-run-command", self.work)))
+                self.assertEqual(out, {"decision": "allow"})
 
 
 class AgyWireTests(unittest.TestCase):

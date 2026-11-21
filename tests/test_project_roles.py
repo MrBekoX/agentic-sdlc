@@ -84,6 +84,16 @@ class CursorProjectionTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             self.assertEqual(mirror.read_bytes(), (REPO / "cursor" / "agents" / "debugger.md").read_bytes())
 
+    def test_write_removes_a_stale_mirror_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._copy_tree(tmp)
+            stale = root / "cursor" / "agents" / "retired-role.md"
+            stale.write_text("---\nname: retired-role\n---\n", encoding="utf-8")
+            proc = _run("--target", "cursor", "--write", "--root", str(root))
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertFalse(stale.exists())
+            self.assertEqual(_run("--target", "cursor", "--check", "--root", str(root)).returncode, 0)
+
     def test_mixed_read_and_write_role_is_not_read_only_on_cursor(self):
         text = "---\nname: mix\ndescription: d\ntools: Read, Grep, Edit\nmodel: inherit\n---\nbody\n"
         self.assertEqual(project_roles.project_cursor(text),
@@ -149,6 +159,20 @@ class AntigravityProjectionTests(unittest.TestCase):
         self.assertEqual(out, "---\nname: w\ndescription: d\ntools:\n  - read_file\n  - search_web\n"
                               "  - write_file\n  - edit_file\n  - run_command\nmodel: inherit\n"
                               "subagent: true\nmainAgent: false\n---\nB\n")
+
+    def test_a_powershell_only_role_gets_run_command_and_is_not_read_only(self):
+        text = "---\nname: ps\ndescription: d\ntools: Read, PowerShell\nmodel: inherit\n---\nB\n"
+        self.assertEqual(project_roles.project_antigravity(text),
+                         "---\nname: ps\ndescription: d\ntools:\n  - read_file\n  - run_command\n"
+                         "model: inherit\nsubagent: true\nmainAgent: false\n---\nB\n")
+
+    def test_a_role_model_other_than_inherit_is_an_error_not_overwritten(self):
+        # agy model names differ from Claude's; a pinned role model must not silently become inherit.
+        text = "---\nname: m\ndescription: d\ntools: Read\nmodel: sonnet\n---\nB\n"
+        with self.assertRaises(project_roles.RoleError) as ctx:
+            project_roles.project_antigravity(text)
+        self.assertIn("model_unsupported:sonnet", str(ctx.exception))
+        self.assertIn("model: sonnet", project_roles.project_cursor(text))
 
     def test_unknown_claude_tool_is_an_error(self):
         text = "---\nname: x\ndescription: d\ntools: Read, NotebookEdit\nmodel: inherit\n---\nB\n"

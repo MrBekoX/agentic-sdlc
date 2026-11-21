@@ -3,7 +3,8 @@ name: Native lifecycle (Google Antigravity on Linux)
 # Manual only. The official agy installer (https://antigravity.google/cli/install.sh) has no version
 # pin option and the CLI self-updates in the background during regular runs (install.sh and
 # docs/getting-started.md, read 2026-11-21), so this job is not reproducible and is a supply-chain
-# risk: it is kept out of the required ci.yml and prints `agy --version` for the record. It builds
+# risk: it is kept out of the required ci.yml and prints `agy --version` and the binary's sha256 for
+# the record. It builds
 # the agy package, runs `agy plugin validate --json` (no error, no warning outside the allow-list),
 # and drives scripts/check_native_lifecycle.py --platform antigravity in an isolated HOME. No login,
 # no secret and no model prompt is used. The result line feeds the Antigravity row of
@@ -34,9 +35,11 @@ jobs:
         run: |
           curl -fsSL https://antigravity.google/cli/install.sh | bash
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Record the agy version
+      - name: Record the agy version and binary hash
         shell: bash
-        run: agy --version
+        run: |
+          agy --version
+          sha256sum "$(command -v agy)"
       - name: Build and verify the Antigravity package
         shell: bash
         run: |

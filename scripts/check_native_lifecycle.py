@@ -31,7 +31,8 @@ HOME/.gemini; a second install of the bumped copy replaces the first, as there i
 command in agy 1.5.14).
 
 It never sends a model prompt: every argv must start with an allowlisted plugin-management word,
-each subcommand is probed with `--help` first (an older CLI never receives plugin argv), and the
+each subcommand is probed with `--help` first (an older CLI never receives plugin argv; agy is the
+exception: its plugin group help is read once, see _agy_probe), and the
 child environment is built from an allowlist that carries no provider key or cloud credential.
 
 Output: exactly one line per selected platform, in the order claude, codex, grok, kimi, zcode,

@@ -15,7 +15,8 @@ Cursor rules: keep `name`, `description` and `model` verbatim, drop `tools`, and
 `readonly: true` and `permissionMode: readonly` when the role has no tool from WRITING_TOOLS.
 Antigravity rules (agy 1.5.14): `tools` is a YAML list of agy runtime names (a comma string makes
 the agy loader skip the agent), `subagent: true`, `mainAgent: false`, `model: inherit`, and
-read-only roles add `inheritMcp: false`. agy has no grep or glob tool, so a read-only role reads
+read-only roles add `inheritMcp: false`. A role model other than `inherit` is an error: agy model
+names are not Claude's, so a pinned model is never silently replaced. agy has no grep or glob tool, so a read-only role reads
 only the files the orchestrating skill names. The body is copied byte for byte in both.
 
 Output: key=value lines, error=<code>:<detail> lines; exit 0 pass, 1 check failure or bad role,
@@ -81,6 +82,9 @@ def project_cursor(text: str) -> str:
 
 def project_antigravity(text: str) -> str:
     fields, body = parse_role(text)
+    model = fields["model"].split(":", 1)[1].strip()
+    if model != "inherit":
+        raise RoleError(f"model_unsupported:{model}")
     mapped = set()
     for tool in _tools(fields):
         if tool not in AGY_TOOLS:

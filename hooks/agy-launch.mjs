@@ -10,8 +10,10 @@
 //
 // Output contract: exactly one JSON object on stdout and exit code 0, always. A PreToolUse guard
 // that cannot answer (crash, timeout, unreadable answer, unreadable tool call) denies the tool call.
-// agy also fails closed on a non-zero exit or invalid JSON from a PreToolUse hook (probe
-// 2026-11-21), but that is not relied on here. SessionStart and Stop failures answer `{}`.
+// agy blocked the call on exit status 2 and on invalid JSON from a PreToolUse hook (one probe each,
+// 2026-11-21; other exit codes are unverified), but that is not relied on here. A PreToolUse answer
+// always names a decision: agy 1.5.14 denied a call whose hook printed `{}` (probe 2026-11-21), so
+// "nothing to say" is `{"decision":"allow"}`. SessionStart and Stop failures answer `{}`.
 import { spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -57,8 +59,9 @@ function text(value) {
   return typeof value === 'string' ? value : '';
 }
 
-function projectCwd(input, args) {
-  if (args && text(args.Cwd)) return args.Cwd;
+// The payload `cwd` is the agent's working directory. run_command has no `Cwd` argument in the live
+// capture (CommandLine, WaitMsBeforeAsync, toolSummary; agy 1.5.14, 2026-11-21), so none is read.
+function projectCwd(input) {
   if (text(input.cwd)) return input.cwd;
   const roots = input.workspacePaths;
   if (Array.isArray(roots) && text(roots[0])) return roots[0];
@@ -90,21 +93,27 @@ function toolCallOf(input) {
   return { name: call.name, args };
 }
 
+// The argument a guard must read, or Unreadable: a missing or non-string value cannot be checked,
+// so it must not reach the guard as an empty string and be allowed.
+function stringArg(args, key, tool) {
+  if (typeof args[key] !== 'string') throw new Unreadable(`the ${tool} argument ${key} is not a string`);
+  return args[key];
+}
+
 function translateTool(call, cwd) {
   const { name, args } = call;
   if (name === 'run_command') {
     // Bash selects the shared guards' union of POSIX and PowerShell readings.
-    return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: text(args.CommandLine) }, cwd };
+    const command = stringArg(args, 'CommandLine', name);
+    return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, cwd };
   }
   if (name === 'write_file') {
-    const content = typeof args.Content === 'string' ? args.Content : undefined;
-    return { hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: text(args.Path), content }, cwd };
+    const tool_input = { file_path: stringArg(args, 'Path', name), content: stringArg(args, 'Content', name) };
+    return { hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input, cwd };
   }
   if (name === 'edit_file') {
-    const replacement = typeof args.Replacement === 'string' ? args.Replacement : undefined;
-    return {
-      hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: text(args.Path), new_string: replacement }, cwd,
-    };
+    const tool_input = { file_path: stringArg(args, 'Path', name), new_string: stringArg(args, 'Replacement', name) };
+    return { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input, cwd };
   }
   return undefined;
 }
@@ -129,6 +138,8 @@ function translatePreToolUse(handler, payload) {
     return { decision: 'deny', reason: message || `agentic-sdlc: ${handler} denied this tool call.` };
   }
   // A warning (the write scanner, a skipped-scan notice) lets the call run and tells the agent why.
+  // agy documents "allow" as auto-approving the call; in agy 1.5.14 probes (2026-11-21) it did not
+  // override a user `permissions.ask` or `permissions.deny` rule, and `{}` is not neutral (it denies).
   return message ? { decision: 'allow', reason: message } : { decision: 'allow' };
 }
 
@@ -224,8 +235,13 @@ async function main() {
       return denied(handler, error.message);
     }
     if (!HANDLER_TOOLS[handler].includes(call.name)) return { decision: 'allow' };
-    cwd = projectCwd(input, call.args);
-    translated = translateTool(call, cwd);
+    cwd = projectCwd(input);
+    try {
+      translated = translateTool(call, cwd);
+    } catch (error) {
+      if (!(error instanceof Unreadable)) throw error;
+      return denied(handler, error.message);
+    }
   } else {
     cwd = projectCwd(input);
     translated = event === 'Stop'

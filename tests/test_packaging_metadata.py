@@ -1013,6 +1013,9 @@ class TestVersionDeclarations(unittest.TestCase):
 
     def test_antigravity_manifest_is_a_versioned_manifest(self):
         self.assertIn(".antigravity-plugin/plugin.json", self.bump_version.MANIFEST_KEYS)
+        # The versionless-manifest mechanism existed only for the Antigravity manifest; with it
+        # versioned, the empty mechanism is retired rather than kept as untested code.
+        self.assertFalse(hasattr(self.bump_version, "VERSIONLESS_PLUGIN_MANIFESTS"))
 
     def test_audit_discovers_named_marketplace_plugin_version(self):
         with tempfile.TemporaryDirectory() as tmp:
