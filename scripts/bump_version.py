@@ -45,16 +45,16 @@ MANIFESTS = (
     (".grok-plugin/marketplace.json", "marketplace"),
     (".cursor-plugin/plugin.json", "plugin"),
     (".cursor-plugin/marketplace.json", "marketplace"),
+    # agy 1.5.14 reads `version` here and, without one, falls back to .claude-plugin/plugin.json
+    # (probe 2026-11-21); the schema https://antigravity.google/schemas/v1/plugin.json allows it.
+    (".antigravity-plugin/plugin.json", "plugin"),
 )
 MANIFEST_KEYS = tuple(path for path, _kind in MANIFESTS)
-# Adapter manifests whose upstream schema forbids a plugin ``version`` property:
-# https://antigravity.google/schemas/v1/plugin.json sets ``additionalProperties: false`` and allows
-# only ``name`` and ``description``. Registered here so ``--check`` rejects an unsupported
-# ``version`` field, ``bump`` preserves the schema without injecting ``version``, and ``--audit``
-# covers the Antigravity manifest alongside the versioned manifests.
-VERSIONLESS_PLUGIN_MANIFESTS = (
-    ".antigravity-plugin/plugin.json",
-)
+# Adapter manifests whose upstream schema forbids a plugin ``version`` property. ``--check`` rejects a
+# ``version`` field in one, ``bump`` leaves it unversioned and ``--audit`` still counts it as
+# registered. None today: the Antigravity manifest moved to MANIFESTS once agy's schema was shown
+# to accept ``version``.
+VERSIONLESS_PLUGIN_MANIFESTS: tuple = ()
 # Directories that never hold a shipped manifest. tests/ is pruned because its fixtures write
 # synthetic plugin.json files that would otherwise read as unregistered manifests.
 AUDIT_SKIP_DIRS = frozenset({".git", "__pycache__", ".venv", "venv", "node_modules", "tests", "out", "mcps", ".claude"})

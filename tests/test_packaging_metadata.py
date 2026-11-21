@@ -977,42 +977,42 @@ class TestVersionDeclarations(unittest.TestCase):
             self.assertEqual(json.loads((root / ".kimi-plugin/plugin.json").read_bytes())["version"], "0.4.4")
             self.assertEqual(marketplace.read_bytes(), before)
 
-    def test_antigravity_bump_preserves_versionless_plugin_schema(self):
+    def test_antigravity_bump_writes_the_manifest_version(self):
+        # agy 1.5.14 reads `version` from .antigravity-plugin/plugin.json and, without it, falls back
+        # to .claude-plugin/plugin.json (probe 2026-11-21), so the adapter manifest is versioned.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.write_tree(root, manifests=self.ADAPTER_MANIFESTS)
             antigravity = root / ".antigravity-plugin" / "plugin.json"
             antigravity.parent.mkdir(parents=True, exist_ok=True)
             antigravity.write_text(
-                '{"name": "agentic-sdlc", "description": "Agentic SDLC skill library."}\n',
+                '{"name": "agentic-sdlc", "version": "0.4.3", "description": "Agentic SDLC skill library."}\n',
                 encoding="utf-8",
                 newline="\n",
             )
-            before = antigravity.read_bytes()
             with contextlib.redirect_stdout(io.StringIO()):
                 code = self.bump_version.bump("0.4.4", root=root)
             self.assertEqual(code, 0)
-            self.assertEqual(antigravity.read_bytes(), before)
-            self.assertNotIn("version", json.loads(antigravity.read_text(encoding="utf-8")))
+            data = json.loads(antigravity.read_text(encoding="utf-8"))
+            self.assertEqual(data, {"name": "agentic-sdlc", "version": "0.4.4",
+                                    "description": "Agentic SDLC skill library."})
             audit_out = io.StringIO()
             with contextlib.redirect_stdout(audit_out):
                 audit_code = self.bump_version.audit(root=root)
             self.assertEqual(audit_code, 0, audit_out.getvalue())
             self.assertIn("audit_manifest=.antigravity-plugin/plugin.json:registered", audit_out.getvalue())
 
-    def test_antigravity_version_field_rejected_by_check(self):
-        code, out = self.run_check(
-            manifests={
-                ".antigravity-plugin/plugin.json": {
-                    "name": "agentic-sdlc",
-                    "description": "Agentic SDLC skill library.",
-                    "version": "0.4.3",
-                }
-            }
-        )
-        self.assertEqual(code, 1, out)
-        self.assertIn("version_unsupported=.antigravity-plugin/plugin.json:version:0.4.3", out)
-        self.assertIn("version_check=failed", out)
+    def test_antigravity_version_drift_rejected_by_check(self):
+        for manifest, value in (({"name": "agentic-sdlc", "version": "0.4.2"}, "0.4.2"),
+                                ({"name": "agentic-sdlc"}, "")):
+            with self.subTest(value=value):
+                code, out = self.run_check(manifests={".antigravity-plugin/plugin.json": manifest})
+                self.assertEqual(code, 1, out)
+                self.assertIn(f"version_mismatch=.antigravity-plugin/plugin.json:version:{value}", out)
+                self.assertIn("version_check=failed", out)
+
+    def test_antigravity_manifest_is_a_versioned_manifest(self):
+        self.assertIn(".antigravity-plugin/plugin.json", self.bump_version.MANIFEST_KEYS)
 
     def test_audit_discovers_named_marketplace_plugin_version(self):
         with tempfile.TemporaryDirectory() as tmp:

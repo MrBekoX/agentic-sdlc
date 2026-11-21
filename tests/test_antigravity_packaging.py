@@ -10,8 +10,18 @@ import unittest
 
 
 REPO = Path(__file__).resolve().parents[1]
-ANTIGRAVITY_MANIFEST_KEYS = frozenset({"name", "description"})
-ANTIGRAVITY_NAME_RE = re.compile(r"^[a-zA-Z0-9-_]+$")
+# https://antigravity.google/schemas/v1/plugin.json (agy 1.5.14 bundled build-plugins.md, read
+# 2026-11-21): `required: ["name"]`, `additionalProperties: false`, and these properties.
+ANTIGRAVITY_SCHEMA_KEYS = frozenset({
+    "$schema", "name", "displayName", "description", "version", "disabled", "logo", "suggestedPrompts",
+    "skills", "author", "homepage", "repository", "license", "keywords", "extensions",
+})
+# The keys this adapter's manifest carries (the documented metadata keys, versioned from VERSION).
+ANTIGRAVITY_MANIFEST_KEYS = frozenset({
+    "name", "displayName", "version", "description", "author", "homepage", "repository", "license",
+    "keywords", "logo",
+})
+ANTIGRAVITY_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 RUNTIME_ROOT_REF_RE = re.compile(r"<runtime-root>/([A-Za-z0-9_./-]+)")
 
 
@@ -19,19 +29,21 @@ def antigravity_manifest_violations(manifest):
     """Validate against https://antigravity.google/schemas/v1/plugin.json (additionalProperties: false)."""
     if not isinstance(manifest, dict):
         return ["manifest_not_object"]
-    violations = []
-    extra = sorted(set(manifest) - ANTIGRAVITY_MANIFEST_KEYS)
-    missing = sorted(ANTIGRAVITY_MANIFEST_KEYS - set(manifest))
-    if extra:
-        violations.extend(f"unsupported_key:{key}" for key in extra)
-    if missing:
-        violations.extend(f"missing_key:{key}" for key in missing)
+    violations = [f"unsupported_key:{key}" for key in sorted(set(manifest) - ANTIGRAVITY_SCHEMA_KEYS)]
     name = manifest.get("name")
     if not isinstance(name, str) or not ANTIGRAVITY_NAME_RE.fullmatch(name):
         violations.append("invalid_name")
-    description = manifest.get("description")
-    if not isinstance(description, str) or not description.strip():
-        violations.append("invalid_description")
+    for key in ("displayName", "description", "version", "logo", "homepage", "repository", "license"):
+        if key in manifest and (not isinstance(manifest[key], str) or not manifest[key].strip()):
+            violations.append(f"invalid_{key}")
+    author = manifest.get("author")
+    if author is not None and not (isinstance(author, str) or (
+            isinstance(author, dict) and set(author) <= {"name", "email", "url"}
+            and all(isinstance(v, str) for v in author.values()))):
+        violations.append("invalid_author")
+    keywords = manifest.get("keywords")
+    if keywords is not None and not (isinstance(keywords, list) and all(isinstance(k, str) for k in keywords)):
+        violations.append("invalid_keywords")
     return violations
 
 
@@ -42,31 +54,41 @@ class TestAntigravityPackaging(unittest.TestCase):
         self.manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         self.readme = self.readme_path.read_text(encoding="utf-8")
 
-    def test_manifest_conforms_to_strict_antigravity_schema(self):
+    def test_manifest_conforms_to_the_antigravity_schema_and_carries_the_version(self):
         self.assertEqual(antigravity_manifest_violations(self.manifest), [])
-        self.assertEqual(set(self.manifest.keys()), {"name", "description"})
+        self.assertEqual(set(self.manifest), ANTIGRAVITY_MANIFEST_KEYS)
         self.assertEqual(self.manifest["name"], "agentic-sdlc")
+        self.assertEqual(self.manifest["displayName"], "Agentic SDLC")
+        self.assertEqual(self.manifest["version"], (REPO / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertEqual(self.manifest["logo"], "assets/logo.png")
+        self.assertTrue((REPO / self.manifest["logo"]).is_file())
+        self.assertEqual(set(self.manifest["author"]), {"name", "url"})
         self.assertNotIn("Claude Code skill library", self.manifest["description"])
+        for word in ("Antigravity", "Gemini", "Claude", "Cursor"):
+            self.assertFalse(self.manifest["displayName"].startswith(word))
         raw = self.manifest_path.read_bytes()
         self.assertNotIn(b"\r", raw)
         self.assertTrue(raw.endswith(b"\n"))
+        # bump_version.py rewrites the manifest with json.dumps(indent=2); keep the committed bytes in that form.
+        self.assertEqual(raw.decode("utf-8"), json.dumps(self.manifest, indent=2, ensure_ascii=False) + "\n")
 
     def test_manifest_validator_rejects_extra_or_invalid_fields(self):
+        self.assertEqual(antigravity_manifest_violations({**self.manifest, "version": "0.5.0"}), [])
         self.assertIn(
-            "unsupported_key:version",
-            antigravity_manifest_violations({**self.manifest, "version": "0.5.0"}),
+            "unsupported_key:hooks",
+            antigravity_manifest_violations({**self.manifest, "hooks": "./hooks.json"}),
         )
         self.assertIn(
-            "unsupported_key:skills",
-            antigravity_manifest_violations({**self.manifest, "skills": "./skills/"}),
+            "unsupported_key:interface",
+            antigravity_manifest_violations({**self.manifest, "interface": {}}),
         )
         self.assertIn(
             "invalid_name",
-            antigravity_manifest_violations({**self.manifest, "name": "bad name!"}),
+            antigravity_manifest_violations({**self.manifest, "name": "Bad_Name"}),
         )
         self.assertIn(
-            "missing_key:description",
-            antigravity_manifest_violations({"name": "agentic-sdlc"}),
+            "invalid_author",
+            antigravity_manifest_violations({**self.manifest, "author": {"name": "x", "twitter": "y"}}),
         )
 
     def test_root_plugin_json_and_default_hooks_json_remain_absent(self):
