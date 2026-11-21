@@ -3,7 +3,7 @@
 
 Usage:
   python3 scripts/check_native_lifecycle.py --package <dir>
-      [--platform claude|codex|grok|kimi|zcode|all] [--require <platform>]... [--keep-temp]
+      [--platform claude|codex|grok|kimi|zcode|antigravity|all] [--require <platform>]... [--keep-temp]
       [--timeout <seconds>]
 
 `--package` is an extracted release package or a checkout. For each selected platform the check
@@ -25,13 +25,17 @@ Codex a personal catalog under the isolated HOME with `codex plugin add|list|rem
 read-only `skills/list` request of `codex app-server --stdio`; Grok `grok plugin
 install|list|uninstall` and `grok inspect --json`; Kimi Code the local `kimi web` REST API (bound to
 127.0.0.1) with the bearer token from its startup banner, or else from the token file it keeps in
-the isolated profile; ZCode has no supported headless installer (see run_platform).
+the isolated profile; ZCode has no supported headless installer (see run_platform); Google
+Antigravity `agy plugin install|list|uninstall` with an isolated HOME (agy keeps its profile in
+HOME/.gemini; a second install of the bumped copy replaces the first, as there is no plugin update
+command in agy 1.5.14).
 
 It never sends a model prompt: every argv must start with an allowlisted plugin-management word,
 each subcommand is probed with `--help` first (an older CLI never receives plugin argv), and the
 child environment is built from an allowlist that carries no provider key or cloud credential.
 
-Output: exactly one line per selected platform, in the order claude, codex, grok, kimi, zcode:
+Output: exactly one line per selected platform, in the order claude, codex, grok, kimi, zcode,
+antigravity:
   native_<platform>=passed | native_<platform>=failed:<reason> | native_<platform>=not-run:<reason>
 Reasons are short slugs without paths, user names or host names. Exit codes: 0 when no line is
 failed and every --require'd platform passed; 1 otherwise; 2 for usage errors. `--keep-temp`
@@ -63,7 +67,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_release import ReleaseError, local_package_files  # noqa: E402
 
-PLATFORMS = ("claude", "codex", "grok", "kimi", "zcode")
+PLATFORMS = ("claude", "codex", "grok", "kimi", "zcode", "antigravity")
+# The CLI program of a platform whose program name differs from the platform name.
+CLI_NAMES = {"antigravity": "agy"}
 HOSTILE_SEGMENT = "plug in \u011f \u76ee\u5f55"
 # Codex splits marketplace sources on '#', Grok sources on '@' and '#'; cmd.exe expands '%' and '&'.
 PATH_HAZARDS = "#&%@"
@@ -86,6 +92,7 @@ ALLOWED_HEADS = {
     "codex": ("plugin", "app-server"),
     "grok": ("plugin", "inspect"),
     "kimi": ("web",),
+    "antigravity": ("plugin",),
 }
 FORBIDDEN_TOKENS = frozenset({"-p", "--prompt", "exec", "e", "agent", "--host", "--rc",
                               "--remote-control", "--dangerous-bypass-auth"})
@@ -97,6 +104,7 @@ MANIFESTS = {
     "codex": (".codex-plugin/plugin.json",),
     "grok": (".grok-plugin/plugin.json", ".grok-plugin/marketplace.json"),
     "kimi": (".kimi-plugin/plugin.json",),
+    "antigravity": (".antigravity-plugin/plugin.json",),
 }
 
 _PASS_THROUGH = ("SystemRoot", "ComSpec", "PATHEXT", "LANG", "LC_ALL")
@@ -432,6 +440,9 @@ SENTINELS = {
     "codex": ("CODEX_HOME", "config.toml", '[profiles.native_lifecycle_sentinel]\nmodel = "sentinel-model"\n'),
     "grok": ("GROK_HOME", "config.toml", "[cli]\nauto_update = false\n\n[ui]\nvim_mode = true\n"),
     "kimi": ("KIMI_CODE_HOME", "tui.toml", 'theme = "dark"\n'),
+    # agy's own settings schema is not documented for this use, so the sentinel is a plain file in
+    # its profile folder; the plugin manager must leave it alone.
+    "antigravity": ("HOME", ".gemini/agentic-native-lifecycle-sentinel.txt", "keep\n"),
 }
 
 
@@ -447,6 +458,8 @@ def _sentinel_holds(platform: str, text: str) -> bool:
         return _toml_value(text, ("profiles", "native_lifecycle_sentinel"), "model") == "sentinel-model"
     if platform == "grok":
         return _toml_value(text, ("ui",), "vim_mode") is True
+    if platform == "antigravity":
+        return text == "keep\n"
     return _toml_value(text, (), "theme") == "dark"
 
 
@@ -460,7 +473,12 @@ class Lifecycle:
         self.package = package
         self.timeout = timeout
         self.plugin = _plugin_name(package, platform)
-        self.cli = resolve_cli(platform)
+        try:
+            self.cli = resolve_cli(CLI_NAMES.get(platform, platform))
+        except NotRun as exc:
+            if platform == "antigravity" and exc.reason == "cli_absent":
+                raise NotRun("agy_missing") from None
+            raise
         self.skills, self.commands = package_counts(package)
         self.marker = None
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -551,7 +569,9 @@ class Lifecycle:
 
     def write_sentinel(self) -> None:
         variable, name, text = SENTINELS[self.platform]
-        (self.folder(variable) / name).write_bytes(text.encode("utf-8"))
+        path = self.folder(variable) / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(text.encode("utf-8"))
 
     def check_sentinel(self) -> None:
         variable, name, _ = SENTINELS[self.platform]
@@ -962,7 +982,66 @@ def check_kimi(lc: Lifecycle) -> None:
     lc.verify_isolation(lc.folder("KIMI_CODE_HOME") / "plugins" / "installed.json")
 
 
-CHECKS = {"claude": check_claude, "codex": check_codex, "grok": check_grok, "kimi": check_kimi}
+# ---------------------------------------------------------------- Google Antigravity
+
+AGY_SUBCOMMANDS = ("list [--json]", "install <target>", "uninstall <name>")
+
+
+def _agy_probe(lc: Lifecycle) -> None:
+    """`agy plugin --help` must list the plugin subcommands the recipe uses.
+
+    Unlike the other CLIs, agy 1.5.14 does not treat a trailing `--help` on a plugin subcommand as
+    help (`agy plugin uninstall --help` uninstalls a plugin named "--help"), so only the plugin
+    command group's own help is read.
+    """
+    try:
+        code, out, err = lc.run(["plugin", "--help"], "probe", check=False)
+    except Failed as exc:
+        raise NotRun("cli_unresponsive" if exc.reason == "probe_timeout" else "cli_unusable") from None
+    text = out + "\n" + err
+    if code != 0 or not re.search(r"Usage:\s+agy\s+plugin\s", text) or any(s not in text for s in AGY_SUBCOMMANDS):
+        raise NotRun("cli_too_old")
+
+
+def _agy_record(lc: Lifecycle):
+    _, out, _ = lc.run(["plugin", "list", "--json"], "list")
+    entries = _parse_json(out, "list")
+    if not isinstance(entries, list):
+        raise Failed("list_unparseable")
+    return next((e for e in entries if isinstance(e, dict) and e.get("name") == lc.plugin), None)
+
+
+def check_antigravity(lc: Lifecycle) -> None:
+    _agy_probe(lc)
+    lc.prepare_source()
+    lc.write_sentinel()
+    lc.run(["plugin", "install", str(lc.source)], "install")
+    lc.check_sentinel()
+    record = _agy_record(lc)
+    if record is None:
+        raise Failed("install_not_recorded")
+    lc.check_bytes(lc.installed_root(record.get("path")), "installed_bytes_mismatch")
+    skills = record.get("skills")
+    if not isinstance(skills, list):
+        raise Failed("discovery_failed")
+    # agy lists skill directories; a command it migrates into a skill is not among them.
+    lc.expect(len(skills), lc.skills)
+    version = lc.refresh_source()
+    lc.run(["plugin", "install", str(lc.source)], "refresh")
+    lc.check_sentinel()
+    record = _agy_record(lc)
+    if record is None or record.get("version") != version:
+        raise Failed("refresh_not_applied")
+    lc.check_bytes(lc.installed_root(record.get("path"), "refresh_not_applied"), "refresh_not_applied")
+    lc.run(["plugin", "uninstall", lc.plugin], "uninstall")
+    lc.check_sentinel()
+    if _agy_record(lc) is not None:
+        raise Failed("record_not_removed")
+    lc.verify_isolation(lc.folder("HOME") / ".gemini" / "config" / "plugins")
+
+
+CHECKS = {"claude": check_claude, "codex": check_codex, "grok": check_grok, "kimi": check_kimi,
+          "antigravity": check_antigravity}
 
 
 def run_platform(platform: str, package: Path, timeout: float, keep_temp: bool) -> tuple:
