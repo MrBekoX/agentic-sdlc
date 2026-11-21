@@ -143,7 +143,10 @@ jobs:
   # The manifest checks Anthropic's own review pipeline runs on a submission. Verified to need no
   # credentials: with an empty HOME, an empty config directory and no API key, both calls exit 0.
   # The CLI is pinned so a new release cannot turn an unrelated day's run red; bumping the pin is
-  # a reviewable change, like any other dependency.
+  # a reviewable change, like any other dependency. The pin is the newest release at least 14 days
+  # old: 2.1.319 (published 2026-11-06), checked on 2026-11-21 with both strict targets passing on a
+  # build_release package. Keep `engines` (2.1.323+) and `network` (2.1.328+) out of the manifest
+  # while the pin is below those versions.
   plugin-validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -155,7 +158,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install the pinned Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code@2.1.293
+        run: npm install -g @anthropic-ai/claude-code@2.1.319
       - name: Validate the marketplace and plugin manifests
         shell: bash
         run: |
