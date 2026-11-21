@@ -192,6 +192,58 @@ class TestGrokRhaiCatalog(unittest.TestCase):
         self.assertNotIn("workflows", manifest)
 
 
+def _runtime_adapter_section(heading_prefix):
+    text = _read(REPO / "docs" / "runtime-adapter.md")
+    start = text.index("\n## " + heading_prefix)
+    end = text.find("\n## ", start + 1)
+    return text[start:end if end >= 0 else len(text)]
+
+
+class TestGrokSpecPlanDraftHasTwoPrograms(unittest.TestCase):
+    """Two spec-plan-draft.rhai files exist on purpose: different programs, different consumers.
+
+    .grok/workflows/spec-plan-draft.rhai is the 0.6.0 project-catalog script reached by
+    `/workflow spec-plan-draft`; workflows/grok/spec-plan-draft.rhai is the 0.7.0 runner
+    engine that scripts/sdlc_runner/loop.py stages byte for byte with its sha256. Merging
+    them breaks the engine pins in TestGrokRunnerEngine and the catalog behaviour above.
+    """
+
+    CATALOG = GROK_WF / "spec-plan-draft.rhai"
+    ENGINE = REPO / "workflows" / "grok" / "spec-plan-draft.rhai"
+
+    def test_both_files_exist_and_are_different_programs(self):
+        self.assertTrue(self.CATALOG.is_file())
+        self.assertTrue(self.ENGINE.is_file())
+        self.assertNotEqual(_read(self.CATALOG), _read(self.ENGINE))
+
+    def test_each_file_has_its_own_consumer(self):
+        loop = _read(REPO / "scripts" / "sdlc_runner" / "loop.py")
+        # The runner stages only the engine; it never reads the project catalog.
+        self.assertIn('"workflows" / "grok" / "spec-plan-draft.rhai"', loop)
+        self.assertNotIn(".grok", loop)
+        # The catalog script is named for `/workflow spec-plan-draft` by its meta name.
+        self.assertRegex(_read(self.CATALOG), r'name:\s*"spec-plan-draft"')
+
+    def test_docs_record_both_roles_and_the_follow_up(self):
+        docs = {
+            ".grok-plugin/README.md": _read(REPO / ".grok-plugin" / "README.md"),
+            "docs/runtime-adapter.md#Grok": _runtime_adapter_section("Grok CLI adapter"),
+        }
+        for name, text in docs.items():
+            flat = " ".join(text.split())
+            for marker in (
+                "Two `spec-plan-draft.rhai` files",
+                "`.grok/workflows/spec-plan-draft.rhai` is the 0.6.0 project-catalog script",
+                "`/workflow spec-plan-draft`",
+                "not delivered by `grok plugin install`",
+                "`workflows/grok/spec-plan-draft.rhai` is the 0.7.0 runner engine",
+                "sha256",
+                "byte for byte",
+                "follow-up",
+            ):
+                self.assertIn(marker, flat, f"{name} missing {marker}")
+
+
 class TestGrokSkillInvocationColumn(unittest.TestCase):
     def test_named_skills_instruct_grok_workflow_tool(self):
         for skill in GROK_SKILLS:

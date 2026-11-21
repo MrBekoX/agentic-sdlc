@@ -239,6 +239,33 @@ class TestAdapterFilesKeepHouseContracts(unittest.TestCase):
         self.assertIn("run_terminal_command", adapter)
 
 
+class TestGrokDocsRecordTheVendorFacts(unittest.TestCase):
+    """Grok user guide facts (09-plugins.md, 10-hooks.md, xai-org/plugin-marketplace README,
+    checked 2026-11-21) that change what the repository says about Grok."""
+
+    def test_stop_and_session_start_contract_and_official_sha_are_recorded(self):
+        text = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
+        start = text.index("\n## Grok CLI adapter")
+        section = " ".join(text[start:text.find("\n## ", start + 1)].split())
+        readme = " ".join((REPO / ".grok-plugin" / "README.md").read_text(encoding="utf-8").split())
+        for name, flat in (("docs/runtime-adapter.md#Grok", section), (".grok-plugin/README.md", readme)):
+            for marker in (
+                "checked 2026-11-21",
+                "`stopHookActive`",
+                "`lastAssistantMessage`",
+                "stdout is ignored",
+                "40-character `sha`",
+            ):
+                self.assertIn(marker, flat, f"{name} missing {marker}")
+        # The old wording said the Stop fields were not documented/captured; the guide documents them.
+        self.assertNotIn("were not captured this session", section)
+
+    def test_stop_and_session_start_stay_unwired(self):
+        events = set(read_json(GROK_HOOKS)["hooks"])
+        self.assertNotIn("Stop", events)
+        self.assertNotIn("SessionStart", events)
+
+
 def load_lifecycle_checker():
     spec = importlib.util.spec_from_file_location(
         "check_native_lifecycle", REPO / "scripts" / "check_native_lifecycle.py")
