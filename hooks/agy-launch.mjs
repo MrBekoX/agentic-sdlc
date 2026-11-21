@@ -16,7 +16,7 @@
 // "nothing to say" is `{"decision":"allow"}`. SessionStart and Stop failures answer `{}`.
 import { spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -59,13 +59,33 @@ function text(value) {
   return typeof value === 'string' ? value : '';
 }
 
-// The payload `cwd` is the agent's working directory. run_command has no `Cwd` argument in the live
-// capture (CommandLine, WaitMsBeforeAsync, toolSummary; agy 1.5.14, 2026-11-21), so none is read.
+// The payload `cwd` is the agent's working directory, where its commands run by default.
 function projectCwd(input) {
   if (text(input.cwd)) return input.cwd;
   const roots = input.workspacePaths;
   if (Array.isArray(roots) && text(roots[0])) return roots[0];
   return process.cwd();
+}
+
+// The folder a run_command runs in. The live capture sent no `Cwd` argument (CommandLine,
+// WaitMsBeforeAsync, toolSummary; agy 1.5.14, 2026-11-21), but the web docs list one. When it is
+// sent the command runs there, so the guards check that folder: a relative one resolves against the
+// payload `cwd`, and one that is not a string or names no folder is Unreadable (the call is denied)
+// rather than judged in another folder.
+function commandCwd(input, call) {
+  const base = projectCwd(input);
+  const args = call.args;
+  if (call.name !== 'run_command' || !Object.prototype.hasOwnProperty.call(args, 'Cwd')) return base;
+  if (typeof args.Cwd !== 'string' || !args.Cwd) throw new Unreadable('run_command Cwd is not a folder name');
+  const target = resolve(base, args.Cwd);
+  let folder = false;
+  try {
+    folder = statSync(target).isDirectory();
+  } catch {
+    folder = false;
+  }
+  if (!folder) throw new Unreadable('run_command Cwd names no folder');
+  return target;
 }
 
 // A folder that no longer exists would make the spawn itself fail and lock every command out, so
@@ -235,8 +255,8 @@ async function main() {
       return denied(handler, error.message);
     }
     if (!HANDLER_TOOLS[handler].includes(call.name)) return { decision: 'allow' };
-    cwd = projectCwd(input);
     try {
+      cwd = commandCwd(input, call);
       translated = translateTool(call, cwd);
     } catch (error) {
       if (!(error instanceof Unreadable)) throw error;

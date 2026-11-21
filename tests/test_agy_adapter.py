@@ -86,13 +86,12 @@ class AgyReplayTests(unittest.TestCase):
             with self.subTest(handler=handler):
                 self.assertEqual(answer(launch("PreToolUse", handler, payload)), {"decision": "allow"})
 
-    def test_payload_cwd_selects_the_repository_and_an_args_cwd_is_ignored(self):
+    def test_payload_cwd_selects_the_repository_when_no_args_cwd_is_sent(self):
         # run_command carries CommandLine, WaitMsBeforeAsync and toolSummary in the live capture
-        # (agy 1.5.14, 2026-11-21); no `Cwd` argument was seen, so the payload `cwd` alone decides.
+        # (agy 1.5.14, 2026-11-21); with no `Cwd` argument the payload `cwd` decides.
         protected = git_repo(Path(self.tmp.name) / "protected")
         subprocess.run(["git", "checkout", "-q", "-b", "main"], cwd=protected, check=True, capture_output=True)
         payload = fixture("pre-run-command", protected)
-        payload["toolCall"]["args"]["Cwd"] = str(self.work)
         payload["toolCall"]["args"]["CommandLine"] = "git commit -q --allow-empty -m x"
         env = {"AGENTIC_BRANCH_GUARD_BLOCK": "true"}
         out = answer(launch("PreToolUse", "branch-guard.mjs", payload, env=env))
@@ -101,6 +100,38 @@ class AgyReplayTests(unittest.TestCase):
         payload = fixture("pre-run-command", self.work)
         payload["toolCall"]["args"]["CommandLine"] = "git commit -q --allow-empty -m x"
         self.assertEqual(answer(launch("PreToolUse", "branch-guard.mjs", payload, env=env)), {"decision": "allow"})
+
+    def test_an_args_cwd_is_the_folder_the_guard_checks(self):
+        # The web docs list a `Cwd` argument for run_command. When one is sent, the command runs
+        # there, so the guard must check that folder, never only the payload `cwd`.
+        protected = git_repo(Path(self.tmp.name) / "protected")
+        subprocess.run(["git", "checkout", "-q", "-b", "main"], cwd=protected, check=True, capture_output=True)
+        env = {"AGENTIC_BRANCH_GUARD_BLOCK": "true"}
+        payload = fixture("pre-run-command", self.work)
+        payload["toolCall"]["args"]["Cwd"] = str(protected)
+        payload["toolCall"]["args"]["CommandLine"] = "git commit -q --allow-empty -m x"
+        out = answer(launch("PreToolUse", "branch-guard.mjs", payload, env=env))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("main", out["reason"])
+        # A relative `Cwd` resolves against the payload `cwd`, where agy runs commands by default.
+        payload = fixture("pre-run-command", Path(self.tmp.name))
+        payload["toolCall"]["args"]["Cwd"] = "protected"
+        payload["toolCall"]["args"]["CommandLine"] = "git commit -q --allow-empty -m x"
+        out = answer(launch("PreToolUse", "branch-guard.mjs", payload, env=env))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("main", out["reason"])
+
+    def test_an_unusable_args_cwd_denies(self):
+        # A `Cwd` that is not a string or names no folder cannot be checked, so the call is denied
+        # instead of being judged in another folder.
+        for value in (7, ["x"], None, str(Path(self.tmp.name) / "missing")):
+            with self.subTest(cwd=value):
+                payload = fixture("pre-run-command", self.work)
+                payload["toolCall"]["args"]["Cwd"] = value
+                payload["toolCall"]["args"]["CommandLine"] = "echo hi"
+                for handler in COMMAND_GUARDS:
+                    out = answer(launch("PreToolUse", handler, payload))
+                    self.assertEqual(out["decision"], "deny", (handler, out))
 
     def test_payload_text_is_never_run_by_a_shell(self):
         marker = Path(self.tmp.name) / "pwned"
