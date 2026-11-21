@@ -165,10 +165,14 @@ function translatePreToolUse(handler, payload) {
   if (decision === 'deny' || decision === 'block') {
     return { decision: 'deny', reason: message || `agentic-sdlc: ${handler} denied this tool call.` };
   }
-  // A warning (the write scanner, a skipped-scan notice) lets the call run and tells the agent why.
-  // agy documents "allow" as auto-approving the call; in agy 1.5.14 probes (2026-11-21) it did not
-  // override a user `permissions.ask` or `permissions.deny` rule, and `{}` is not neutral (it denies).
-  return message ? { decision: 'allow', reason: message } : { decision: 'allow' };
+  // agy documents "allow" as auto-approving the call, so it is kept for a call the guard has nothing
+  // to say about: `{}` is not neutral in agy 1.5.14 (it denied the call, probe 2026-11-21). A
+  // warning must not approve: the shared write scanner only warns on a secret, so its finding stops
+  // the write, and a shell guard's warning (a protected branch, a skipped scan) asks the user. Both
+  // match the Cursor adapter.
+  if (!message) return { decision: 'allow' };
+  if (handler === 'scan-write.mjs') return { decision: 'deny', reason: message };
+  return { decision: 'ask', reason: message };
 }
 
 function translateSessionStart(payload) {

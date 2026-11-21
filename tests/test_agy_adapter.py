@@ -141,7 +141,9 @@ class AgyReplayTests(unittest.TestCase):
             answer(launch("PreToolUse", handler, payload))
         self.assertFalse(marker.exists())
 
-    def test_write_and_edit_with_a_secret_are_allowed_with_a_reason(self):
+    def test_write_and_edit_with_a_secret_are_denied(self):
+        # The shared write scanner only warns; on agy, as on Cursor, a finding stops the write,
+        # because an allow would auto-approve writing the secret.
         secret = "ghp_" + "a1B2" * 9
         write = fixture("pre-write-file", self.work)
         write["toolCall"]["args"]["Content"] = f'token = "{secret}"\n'
@@ -151,9 +153,20 @@ class AgyReplayTests(unittest.TestCase):
             with self.subTest(tool=name):
                 proc = launch("PreToolUse", "scan-write.mjs", payload)
                 out = answer(proc)
-                self.assertEqual(out["decision"], "allow")
+                self.assertEqual(out["decision"], "deny")
                 self.assertIn("secret", out["reason"].lower())
                 self.assertNotIn(secret, proc.stdout + proc.stderr)
+
+    def test_a_shell_guard_warning_asks_instead_of_approving(self):
+        # branch-guard only warns on a protected branch unless AGENTIC_BRANCH_GUARD_BLOCK is set. An
+        # allow would auto-approve the call; ask leaves the decision to the user, as on Cursor.
+        protected = git_repo(Path(self.tmp.name) / "protected")
+        subprocess.run(["git", "checkout", "-q", "-b", "main"], cwd=protected, check=True, capture_output=True)
+        payload = fixture("pre-run-command", protected)
+        payload["toolCall"]["args"]["CommandLine"] = "git commit -q --allow-empty -m x"
+        out = answer(launch("PreToolUse", "branch-guard.mjs", payload))
+        self.assertEqual(out["decision"], "ask")
+        self.assertIn("main", out["reason"])
 
     def test_captured_write_and_edit_are_allowed_silently(self):
         for name in ("pre-write-file", "pre-edit-file"):
