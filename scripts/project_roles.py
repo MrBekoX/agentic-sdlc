@@ -50,9 +50,12 @@ class RoleError(Exception):
 
 def parse_role(text: str) -> tuple:
     """(fields, body): the frontmatter `key: value` lines as a dict and the body after it."""
-    if not text.startswith("---\n") or "\n---\n" not in text[3:]:
+    # The closing fence is searched from index 3, so an empty frontmatter (`---\n---\n`) is found
+    # too; its head is then empty and the required-field checks below name what is missing.
+    end = text.find("\n---\n", 3) if text.startswith("---\n") else -1
+    if end < 0:
         raise RoleError("frontmatter_missing")
-    head, body = text[4:].split("\n---\n", 1)
+    head, body = text[4:end] if end > 3 else "", text[end + 5:]
     fields = {}
     for line in head.splitlines():
         key, sep, _value = line.partition(":")

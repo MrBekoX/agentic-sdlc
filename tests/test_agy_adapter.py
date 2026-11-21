@@ -286,10 +286,36 @@ class AgyBadPayloadTests(unittest.TestCase):
     def test_unknown_event_is_an_empty_answer(self):
         self.assertEqual(answer(launch("PostToolUse", "scan-write.mjs", fixture("post-write-file", self.work))), {})
 
-    def test_a_vanished_project_folder_still_gets_a_decision(self):
+    def test_a_vanished_project_folder_still_gets_the_guards_own_decision(self):
+        # The handler is spawned from the launcher's folder when the project folder is gone, so the
+        # guard still answers: its own deny for a destructive command, and an allow for a harmless
+        # one (a failed spawn would deny everything with the launcher's "could not check" reason).
         payload = fixture("pre-run-command", str(Path(self.tmp.name) / "gone"))
         payload["toolCall"]["args"]["CommandLine"] = "git reset --hard"
-        self.assertEqual(answer(launch("PreToolUse", "destructive-command-guard.mjs", payload))["decision"], "deny")
+        out = answer(launch("PreToolUse", "destructive-command-guard.mjs", payload))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("reset --hard", out["reason"])
+        self.assertNotIn("could not check", out["reason"])
+        payload["toolCall"]["args"]["CommandLine"] = "ls"
+        self.assertEqual(answer(launch("PreToolUse", "destructive-command-guard.mjs", payload)), {"decision": "allow"})
+
+    def test_a_tool_call_with_no_project_folder_is_denied(self):
+        # With neither a payload `cwd` nor a `workspacePaths[0]` the guards would judge the plugin's
+        # own folder, so the PreToolUse call is denied instead.
+        for drop in (("cwd", "workspacePaths"), ("cwd",)):
+            with self.subTest(dropped=drop):
+                payload = fixture("pre-run-command", self.work)
+                for key in drop:
+                    payload.pop(key, None)
+                if drop == ("cwd",):
+                    payload["workspacePaths"] = [7]
+                for handler in COMMAND_GUARDS:
+                    out = answer(launch("PreToolUse", handler, payload))
+                    self.assertEqual(out["decision"], "deny", (handler, out))
+        payload = fixture("pre-run-command", self.work)
+        payload.pop("cwd")
+        payload["workspacePaths"] = [str(self.work)]
+        self.assertEqual(answer(launch("PreToolUse", "destructive-command-guard.mjs", payload)), {"decision": "allow"})
 
 
 @unittest.skipUnless(NODE, "node is required")
@@ -351,6 +377,14 @@ class AgyFailClosedTests(unittest.TestCase):
     def test_stop_block_without_the_flag_is_not_a_continue(self):
         body = "process.stdout.write(JSON.stringify({decision: 'block', reason: 'r'}));\n"
         out = answer(self.run_standin("worktree-scan.mjs", body, "Stop", fixture("stop", self.work)))
+        self.assertEqual(out, {})
+
+    def test_a_notice_only_stop_answer_is_not_a_continue_even_when_blocking(self):
+        # worktree-scan prints a non-block systemMessage for notices (a diff over the limit, files not
+        # scanned); only a block may keep agy going.
+        body = "process.stdout.write(JSON.stringify({systemMessage: 'notice'}));\n"
+        env = {"AGENTIC_WORKTREE_SCAN_BLOCK": "true"}
+        out = answer(self.run_standin("worktree-scan.mjs", body, "Stop", fixture("stop", self.work), env=env))
         self.assertEqual(out, {})
 
     def test_stop_never_continues_twice_even_if_the_handler_blocks_again(self):

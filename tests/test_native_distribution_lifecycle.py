@@ -1606,10 +1606,6 @@ class OptionalNativeLifecycleTests(unittest.TestCase):
             self.assertFalse((profile / "sessions").exists())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class AntigravityWorkflowTests(unittest.TestCase):
     """The manual agy workflow: it installs an unpinned, self-updating CLI, so it stays out of ci.yml."""
 
@@ -1656,3 +1652,7 @@ class AntigravityWorkflowTests(unittest.TestCase):
         ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertNotIn("antigravity.google/cli/install.sh", ci)
         self.assertNotIn("--platform antigravity", ci)
+
+
+if __name__ == "__main__":
+    unittest.main()

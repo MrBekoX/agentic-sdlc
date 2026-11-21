@@ -180,13 +180,28 @@ class AntigravityProjectionTests(unittest.TestCase):
             project_roles.project_antigravity(text)
         self.assertIn("unknown_tool:NotebookEdit", str(ctx.exception))
 
+    def test_a_search_only_role_maps_to_read_file_and_stays_read_only(self):
+        # Glob and Grep have no agy tool; they map to read_file, never to the web tool search_web.
+        text = "---\nname: g\ndescription: d\ntools: Grep, Glob\nmodel: inherit\n---\nB\n"
+        self.assertEqual(project_roles.project_antigravity(text),
+                         "---\nname: g\ndescription: d\ntools:\n  - read_file\nmodel: inherit\n"
+                         "subagent: true\nmainAgent: false\ninheritMcp: false\n---\nB\n")
+
     def test_role_without_a_frontmatter_or_tools_is_an_error(self):
         for text, code in (("no frontmatter\n", "frontmatter_missing"),
+                           ("---\n---\nB\n", "name_missing"),
+                           ("---\nname: x\ndescription: d\nmodel: inherit\n", "frontmatter_missing"),
                            ("---\nname: x\ndescription: d\nmodel: inherit\n---\nB\n", "tools_missing")):
             with self.subTest(code=code):
                 with self.assertRaises(project_roles.RoleError) as ctx:
                     project_roles.project_antigravity(text)
                 self.assertIn(code, str(ctx.exception))
+
+    def test_an_empty_frontmatter_is_a_role_error_for_every_target(self):
+        for target in project_roles.TARGETS:
+            with self.subTest(target=target):
+                with self.assertRaises(project_roles.RoleError):
+                    project_roles.project_role(target, "agents/e.md", b"---\n---\nB\n")
 
     def test_output_writes_the_antigravity_projection_outside_the_repository(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -59,12 +59,19 @@ function text(value) {
   return typeof value === 'string' ? value : '';
 }
 
-// The payload `cwd` is the agent's working directory, where its commands run by default.
-function projectCwd(input) {
+// The payload `cwd` is the agent's working directory, where its commands run by default; the first
+// workspace path stands in when it is missing. With neither, the hook's own folder (the plugin root)
+// is all that is left: SessionStart and Stop may use it, but a tool call judged there would be judged
+// in the wrong folder, so commandCwd makes it Unreadable.
+function payloadCwd(input) {
   if (text(input.cwd)) return input.cwd;
   const roots = input.workspacePaths;
   if (Array.isArray(roots) && text(roots[0])) return roots[0];
-  return process.cwd();
+  return '';
+}
+
+function projectCwd(input) {
+  return payloadCwd(input) || process.cwd();
 }
 
 // The folder a run_command runs in. The live capture sent no `Cwd` argument (CommandLine,
@@ -73,7 +80,8 @@ function projectCwd(input) {
 // payload `cwd`, and one that is not a string or names no folder is Unreadable (the call is denied)
 // rather than judged in another folder.
 function commandCwd(input, call) {
-  const base = projectCwd(input);
+  const base = payloadCwd(input);
+  if (!base) throw new Unreadable('the hook payload names no working directory');
   const args = call.args;
   if (call.name !== 'run_command' || !Object.prototype.hasOwnProperty.call(args, 'Cwd')) return base;
   if (typeof args.Cwd !== 'string' || !args.Cwd) throw new Unreadable('run_command Cwd is not a folder name');

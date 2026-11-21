@@ -338,6 +338,7 @@ class AntigravitySelectionTests(unittest.TestCase):
             "error=antigravity_role_invalid:unknown_tool:NotebookEdit:agents/r.md": {
                 "agents/r.md": ("100644", b"---\nname: r\ndescription: d\ntools: NotebookEdit\nmodel: inherit\n---\nB\n")},
             "error=mcp_configuration:skills/.mcp.json": {"skills/.mcp.json": ("100644", b"{}\n")},
+            "error=antigravity_role_invalid:name_missing:agents/r.md": {"agents/r.md": ("100644", b"---\n---\nB\n")},
         }
         for expected, change in cases.items():
             with self.subTest(expected=expected):
