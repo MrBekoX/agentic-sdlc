@@ -660,6 +660,19 @@ class TestClaudeHookConfigCarriesNoCommentKeys(unittest.TestCase):
 
 
 @unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")
+class TestHookReferenceListsEveryScript(unittest.TestCase):
+    """hooks/README.md's "Real Hook Scripts" table is the hook reference: every shipped
+    hooks/*.mjs needs its own row, so a new launcher or helper cannot go undocumented."""
+
+    def test_every_hook_script_has_a_row(self):
+        text = (REPO / "hooks" / "README.md").read_text(encoding="utf-8")
+        section = text.split("## Real Hook Scripts", 1)[1].split("\n## ", 1)[0]
+        rows = set(re.findall(r"(?m)^\| `([^`]+\.mjs)` \|", section))
+        scripts = {path.name for path in (REPO / "hooks").glob("*.mjs")}
+        self.assertEqual(sorted(scripts - rows), [])
+        self.assertEqual(sorted(rows - scripts), [])
+
+
 class TestScanCommitSecretScan(unittest.TestCase):
     """scan-commit.mjs blocks secrets ADDED in a commit, scanning with the HIGH set. The HIGH
     set used to recognize only 4 shapes (PEM header, AWS AKIA, password=, JSON credential), so
