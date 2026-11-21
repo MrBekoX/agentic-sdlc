@@ -57,6 +57,11 @@ grok plugin install agentic-sdlc --trust
 Grok names a marketplace after its source's last path segment, not the catalog
 `name`, so use the name `grok plugin marketplace list` prints. Source access and
 organization policy still apply. See [distribution details](../docs/publication/grok-marketplace.md).
+The shipped `url` source carries no `sha`. A personal `grok plugin marketplace add`
+accepts that, but the official xai-org/plugin-marketplace requires a full
+40-character `sha` on every `url` source, and an install under `[marketplace] require_sha = true`
+(a `[marketplace]` table in the Grok config) or `GROK_MARKETPLACE_REQUIRE_SHA=1` refuses an unpinned source (marketplace README and
+`09-plugins.md`, checked 2026-11-21). Pin a real commit before any official submission.
 
 Installation requires `--trust`. Pick up changes with `r` in the Plugins tab
 (`/plugins`) or a new session.
@@ -85,8 +90,15 @@ mode follows the configured house policy. No MCP server or network integration
 is declared. Durable plugin state belongs under `GROK_PLUGIN_DATA`.
 
 Write scanning, startup and Stop/flow readers remain unwired: this candidate
-does not verify their Grok payload/reader contracts. The Claude and Codex
-transcript readers must not be wired merely because Grok exposes a Stop event.
+does not verify their Grok payload/reader contracts. The Grok hook guide
+(`10-hooks.md`, checked 2026-11-21) gives `Stop` a camelCase payload with
+`stopHookActive` and `lastAssistantMessage` (a script reading `.stop_hook_active`
+must switch to `.stopHookActive`), and for `SessionStart` stdout is ignored. Among
+the shared Stop handlers, the completion and flow guards read Claude transcripts or
+Codex rollouts, and all three (they and `worktree-scan.mjs`) test the snake_case
+`stop_hook_active`. `session-start.mjs` delivers its context on stdout. Neither
+works on Grok as written, so both stay unwired until a Grok output mode exists. The Claude and Codex transcript readers must not be wired merely
+because Grok exposes a Stop event.
 
 Grok workflows live in project `.grok/workflows/*.rhai` or user
 `~/.grok/workflows/*.rhai` catalogs. The repository contains
@@ -114,6 +126,22 @@ runner prints one role card at a time for `spawn_subagent` instead.
 The staged script has not run on a live Grok client yet: the gate pins its
 structure, and a reviewer ran it under standalone Rhai 1.27 beside the Claude
 engine.
+
+Two `spec-plan-draft.rhai` files exist on purpose; they are different programs
+with different consumers, not copies:
+
+- `.grok/workflows/spec-plan-draft.rhai` is the 0.6.0 project-catalog script. A
+  Grok session in a clone of this repository reaches it with
+  `/workflow spec-plan-draft`. It is not delivered by `grok plugin install`,
+  because `plugin.json` has no workflows component.
+- `workflows/grok/spec-plan-draft.rhai` is the 0.7.0 runner engine. The flow
+  runner stages it into the work package byte for byte and records its sha256;
+  it ships in the plugin package.
+
+Merging them would break the engine contract (`tests/test_grok_rhai_workflows.py`)
+and the byte-for-byte ship check. The catalog script is to be removed in a
+follow-up, once the skills that name `/workflow spec-plan-draft` move onto the
+runner.
 
 ## Update and versioning
 

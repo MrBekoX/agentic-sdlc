@@ -142,6 +142,164 @@ class TestZcodeMarketplace(unittest.TestCase):
         self.assertNotIn("sha256", entry)
 
 
+def runtime_adapter_section(heading_prefix):
+    """The `## <heading_prefix>...` section of docs/runtime-adapter.md, up to the next `## `."""
+    text = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
+    start = text.index("\n## " + heading_prefix)
+    end = text.find("\n## ", start + 1)
+    return text[start:end if end >= 0 else len(text)]
+
+
+def tracked_markdown(root=REPO):
+    """Tracked *.md paths, or None when they cannot be listed (no git, not a work tree, or
+    an empty listing), so the sweep skips instead of passing over zero files."""
+    git = shutil.which("git")
+    if git is None:
+        return None
+    proc = subprocess.run([git, "ls-files", "-z", "--", "*.md"], cwd=str(root),
+                          capture_output=True, text=True, encoding="utf-8")
+    names = [name for name in proc.stdout.split("\0") if name]
+    if proc.returncode != 0 or not names:
+        return None
+    return names
+
+
+# The retired claim: ZCode reads a directory or GitHub source through the Claude catalog
+# first / before / instead of the root file. Paraphrases are covered, not only the old text.
+STALE_ZCODE_CATALOG_CLAIMS = (
+    re.compile(r"\.claude-plugin/marketplace\.json`?\s+(first|before|instead|takes precedence)"),
+    re.compile(r"prefers\s+(the\s+)?`?\.claude-plugin/marketplace\.json"),
+    re.compile(r"先读取\s*`\.claude-plugin/marketplace\.json`"),
+    re.compile(r"先通过\s*`\.claude-plugin/marketplace\.json`"),
+)
+
+# Historical records may quote the retired claim in order to say it was removed.
+HISTORICAL_RECORDS = re.compile(r"^(CHANGELOG\.md|docs/release-evidence-[^/]+\.md)$")
+
+
+def stale_zcode_catalog_claim(text):
+    return any(pattern.search(text) for pattern in STALE_ZCODE_CATALOG_CLAIMS)
+
+
+def sweep_targets(names):
+    return [name for name in names if not HISTORICAL_RECORDS.match(name)]
+
+
+class TestRootMarketplaceStaysTheZcodeCatalog(unittest.TestCase):
+    """The root marketplace.json is ZCode's only documented catalog location.
+
+    zcode.z.ai/en/docs/plugin (fetched 2026-11-21): "list them in a marketplace.json at the
+    root, and push to GitHub"; a marketplace source is "A GitHub repository", "A Git URL" or
+    "A local marketplace file or directory". `.claude-plugin` appears there only in the
+    plugin-manifest lookup (.zcode-plugin/plugin.json -> .claude-plugin/plugin.json), never as
+    a catalog location. Removing the root file removes the documented ZCode install path.
+    """
+
+    def test_root_marketplace_is_present_and_the_zcode_schema_catalog(self):
+        self.assertTrue(ZCODE_MARKETPLACE.is_file(),
+                        "root marketplace.json is ZCode's only documented catalog; keep it")
+        market = read_json(ZCODE_MARKETPLACE)
+        self.assertEqual(market["name"], "mrbekox")
+        self.assertEqual(len(market["plugins"]), 1)
+        entry = market["plugins"][0]
+        self.assertEqual(entry["name"], "agentic-sdlc")
+        self.assertEqual(entry["source"], "./")
+        self.assertEqual(entry["category"], "developer-tools")
+        i18n = entry.get("description_i18n")
+        self.assertIsInstance(i18n, dict, "description_i18n is the ZCode-only catalog field")
+        self.assertTrue(i18n.get("en"))
+        self.assertTrue(i18n.get("zh-CN"))
+
+    def test_no_tracked_doc_says_zcode_reads_the_claude_catalog_first(self):
+        # The claim "a directory or GitHub source is read through the Claude catalog first" was
+        # never observed natively (git history and the E9/E14/E15 lifecycle runs show no such
+        # observation) and the vendor doc does not document it. CHANGELOG.md and the
+        # docs/release-evidence-*.md records are excluded: they may name the retired claim.
+        files = tracked_markdown()
+        if files is None:
+            self.skipTest("tracked docs cannot be listed (no git work tree)")
+        for name in sweep_targets(files):
+            text = (REPO / name).read_text(encoding="utf-8")
+            self.assertFalse(stale_zcode_catalog_claim(text), f"{name} repeats the undocumented claim")
+
+    def test_stale_claim_patterns_catch_paraphrases_but_not_the_correction(self):
+        claude = "`.claude-plugin/marketplace.json`"
+        for claim in (
+            f"a GitHub source is read through {claude} first",
+            f"a directory source reads {claude} before the root file",
+            f"ZCode uses {claude} instead of the root file",
+            f"{claude} takes precedence over the root file",
+            f"ZCode prefers {claude} for such sources",
+            f"目录源会先读取 {claude}",
+        ):
+            self.assertTrue(stale_zcode_catalog_claim(claim), claim)
+        for correction in (
+            f"whether ZCode reads {claude} from such a source is undocumented",
+            f"a {claude} catalog fallback is undocumented and not observed",
+        ):
+            self.assertFalse(stale_zcode_catalog_claim(correction), correction)
+
+    def test_sweep_excludes_only_the_historical_records(self):
+        self.assertEqual(
+            sweep_targets(["CHANGELOG.md", "docs/release-evidence-0.7.0.md", "README.md",
+                           "docs/troubleshooting.md", "docs/CHANGELOG.md"]),
+            ["README.md", "docs/troubleshooting.md", "docs/CHANGELOG.md"])
+
+    def test_tracked_markdown_is_none_outside_a_work_tree(self):
+        if shutil.which("git") is None:
+            self.skipTest("git not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=tmp,
+                                   capture_output=True, text=True, encoding="utf-8")
+            if probe.returncode == 0:
+                self.skipTest("TMPDIR is inside a git work tree")
+            self.assertIsNone(tracked_markdown(Path(tmp)))
+
+    def test_zcode_docs_do_not_overstate_how_a_source_is_resolved(self):
+        # The vendor page tells catalog authors to put marketplace.json at the root; it does not
+        # say how ZCode resolves a directory or repository source, so that is an expectation.
+        names = (".zcode-plugin/README.md", "docs/zcode-runtime-adapter.md", "docs/runtime-adapter.md",
+                 "docs/plugin-readme.md", "docs/troubleshooting.md", "README.md",
+                 "docs/publication/multi-platform-distribution.md", "docs/release-readiness.md")
+        for name in names:
+            flat = " ".join((REPO / name).read_text(encoding="utf-8").split())
+            for phrase in ("documented to use", "documented to read", "as ZCode documents",
+                           "ZCode documents a directory or GitHub"):
+                self.assertNotIn(phrase, flat, f"{name} overstates the vendor doc: {phrase}")
+        for name, text in (
+            (".zcode-plugin/README.md", (REPO / ".zcode-plugin" / "README.md").read_text(encoding="utf-8")),
+            ("docs/runtime-adapter.md#ZCode", runtime_adapter_section("ZCode adapter")),
+            ("docs/zcode-runtime-adapter.md", (REPO / "docs" / "zcode-runtime-adapter.md").read_text(encoding="utf-8")),
+        ):
+            flat = " ".join(text.split())
+            self.assertIn("is expected to use the same", flat, name)
+            self.assertIn("not natively observed", flat, name)
+
+    def test_troubleshooting_does_not_present_the_claude_entry_as_a_known_symptom(self):
+        text = (REPO / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
+        self.assertNotIn("## ZCode Shows The Claude Entry", text)
+        start = text.index("\n## ZCode ")
+        section = " ".join(text[start:text.find("\n## ", start + 1)].split())
+        self.assertIn("precaution", section)
+        self.assertIn("E9, E14 and E15", section)
+
+    def test_zcode_docs_name_the_documented_catalog_and_flag_the_fallback(self):
+        docs = {
+            ".zcode-plugin/README.md": (REPO / ".zcode-plugin" / "README.md").read_text(encoding="utf-8"),
+            "docs/runtime-adapter.md#ZCode": runtime_adapter_section("ZCode adapter"),
+            "docs/zcode-runtime-adapter.md": (REPO / "docs" / "zcode-runtime-adapter.md").read_text(encoding="utf-8"),
+        }
+        for name, text in docs.items():
+            flat = " ".join(text.split())
+            self.assertIn("zcode.z.ai/en/docs/plugin", flat, name)
+            self.assertIn("2026-11-21", flat, name)
+            self.assertIn("root `marketplace.json`", flat, name)
+            self.assertIn("is undocumented", flat, name)
+        cn = (REPO / ".zcode-plugin" / "README_CN.md").read_text(encoding="utf-8")
+        self.assertIn("2026-11-21", cn)
+        self.assertIn("文档未记载", cn)
+
+
 class TestZcodeHookWire(unittest.TestCase):
     def setUp(self):
         self.wire = read_json(ZCODE_HOOKS)

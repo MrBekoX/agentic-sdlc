@@ -231,6 +231,61 @@ class TestKimiHookWire(unittest.TestCase):
                 self.assertNotIn(token, name, f"{name} carries unverified-reader token {token}")
 
 
+def runtime_adapter_section(heading_prefix):
+    """The `## <heading_prefix>...` section of docs/runtime-adapter.md, up to the next `## `."""
+    text = (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")
+    start = text.index("\n## " + heading_prefix)
+    end = text.find("\n## ", start + 1)
+    return text[start:end if end >= 0 else len(text)]
+
+
+class TestKimiStopAndSessionStartStayUnwired(unittest.TestCase):
+    """Kimi's Stop/SessionStart output contract differs from the shared handlers' output.
+
+    Kimi hooks doc (fetched 2026-11-21): a Stop block is exit 2 with the reason on stderr, or
+    stdout {"hookSpecificOutput":{"permissionDecision":"deny",...}}; SessionStart is
+    observation-only and its exit-0 stdout "may be appended to context"; the payload has no
+    transcript field and no stop_hook_active. worktree-scan.mjs prints Claude-style
+    decision/systemMessage and exits 0, and session-start.mjs prints additionalContext JSON,
+    so neither is a documented Kimi result. Routing is already done by sessionStart.skill.
+    """
+
+    def test_manifest_declares_no_stop_or_session_start_hook(self):
+        events = {entry["event"] for entry in read_json(KIMI_MANIFEST)["hooks"]}
+        self.assertNotIn("Stop", events)
+        self.assertNotIn("SessionStart", events)
+        self.assertEqual(read_json(KIMI_MANIFEST)["sessionStart"]["skill"], "using-agentic-sdlc")
+
+    def test_docs_state_why_stop_and_session_start_stay_unwired(self):
+        docs = {
+            ".kimi-plugin/README.md": (REPO / ".kimi-plugin" / "README.md").read_text(encoding="utf-8"),
+            "docs/runtime-adapter.md#Kimi": runtime_adapter_section("Kimi Code adapter"),
+        }
+        for name, text in docs.items():
+            flat = " ".join(text.split())
+            for marker in (
+                "checked 2026-11-21",
+                "exit 2",
+                "hookSpecificOutput.permissionDecision",
+                "observation-only",
+                "no transcript field",
+                "stop_hook_active",
+                "`sessionStart.skill`",
+                "A future Kimi mode",
+                "payload `cwd`",
+                "hookEventName",
+                "GitHub-installed",
+            ):
+                self.assertIn(marker, flat, f"{name} missing {marker}")
+
+    def test_readme_does_not_settle_the_hook_cwd_the_docs_leave_open(self):
+        # K3: plugins.html says hook cwd is the plugin root, hooks.html says the session's
+        # project directory; the docs do not reconcile the two.
+        flat = " ".join((REPO / ".kimi-plugin" / "README.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("which for a Kimi plugin hook is the plugin root", flat)
+        self.assertIn("the docs do not reconcile them", flat)
+
+
 class TestAdapterFilesKeepHouseContracts(unittest.TestCase):
     def test_no_root_portable_manifest_and_no_auto_discovered_hook_file(self):
         self.assertFalse((REPO / "plugin.json").exists())

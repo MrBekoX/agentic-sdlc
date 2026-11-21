@@ -116,10 +116,47 @@ is required. No MCP server or network integration is declared.
 Write scanning and Claude/Codex transcript-based Stop/flow readers remain
 unwired because this candidate has no verified Kimi input/reader contract.
 Startup uses `sessionStart.skill` rather than the Claude `session-start.mjs`
-hook. Static packaging and relocated handler replays do not prove installer,
+hook (see below). Static packaging and relocated handler replays do not prove installer,
 router invocation, frontmatter tolerance, update or native lifecycle behavior;
 the native lifecycle evidence is listed below. A manually copied managed
 directory is not an installer transcript.
+
+### Why Stop and SessionStart stay unwired
+
+The Kimi hooks reference (checked 2026-11-21) defines an output contract the
+shared handlers do not follow:
+
+- A `Stop` hook blocks only with exit 2 and the reason on stderr, or with stdout
+  `hookSpecificOutput.permissionDecision: "deny"`; a blocked Stop starts a
+  continuation turn. The Stop matcher is an empty string.
+- `SessionStart` is observation-only: it cannot block, and its exit-0 stdout
+  "may be appended to context".
+- The payload is snake_case with no transcript field and no `stop_hook_active`.
+
+The shared Stop handlers (`worktree-scan.mjs` and the completion and flow guards)
+print Claude-style `decision`/`systemMessage` JSON and exit 0, which is not a
+documented Kimi block. The guards read a transcript Kimi does not provide, and
+their `stop_hook_active` loop guard would never fire. `session-start.mjs` prints
+`hookSpecificOutput.additionalContext` JSON and runs Git in the process cwd,
+which the Kimi plugins page sets to the plugin root (the hooks page says the session's
+project directory; the docs do not reconcile them, checked 2026-11-21). Routing is already done by
+`sessionStart.skill`, so a SessionStart hook would add nothing.
+
+A future Kimi mode would need Stop results as exit 2 with a stderr reason (or the
+deny JSON), SessionStart context as plain stdout text, loop protection that does
+not rely on `stop_hook_active` (for example a per-turn counter keyed by
+`session_id` and `turn_id`), no transcript dependency, and the project taken from
+the payload `cwd` rather than the process cwd.
+
+Still unverified, because no Kimi CLI was available for a live run:
+
+- whether hooks of a GitHub-installed plugin run. The docs say plugin hooks fire
+  while the plugin is enabled and every install goes into a managed copy, with no
+  exception by source, but no sentence says so directly.
+- whether Kimi accepts the extra `hookEventName` key in the wired guards' deny
+  payload. The documented stdout form has only `permissionDecision` and
+  `permissionDecisionReason`. If the key is rejected, the unambiguous form is
+  exit 2 with a stderr reason.
 
 ## Native evidence
 
