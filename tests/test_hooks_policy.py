@@ -619,10 +619,12 @@ def _keys_at_any_depth(node, path="$"):
 
 
 class TestClaudeHookConfigCarriesNoCommentKeys(unittest.TestCase):
-    """Claude Code 2.1.330 logs a WARN and an ERROR line at every plugin load for each
-    "$comment" key in hooks-claude.json ('hooks.json: unknown keys "$comment" in
-    hooks.PreToolUse[0] ... ignored'), and `claude plugin validate --strict` does not report it.
-    The rationale those keys carried lives in hooks/README.md instead."""
+    """Claude Code 2.1.330 logged a WARN and an ERROR line at every plugin load for the two
+    matcher-group "$comment" keys in hooks-claude.json ('hooks.json: unknown keys "$comment" in
+    hooks.PreToolUse[0], "$comment" in hooks.PreToolUse[1] ignored'); the third, handler-level
+    key was not named in the log but the plugins reference documents no comment field, so none
+    may come back. `claude plugin validate --strict` reported none of them. The rationale those
+    keys carried lives in the hooks/README.md 'Claude Code wiring notes' section instead."""
 
     CONFIG = REPO / "hooks" / "hooks-claude.json"
 
@@ -631,14 +633,30 @@ class TestClaudeHookConfigCarriesNoCommentKeys(unittest.TestCase):
         found = [f"{path}.{key}" for path, key in _keys_at_any_depth(data) if key == "$comment"]
         self.assertEqual(found, [], "hooks-claude.json must not carry $comment keys")
 
-    def test_moved_rationale_is_in_the_hooks_readme(self):
+    HEADING = "### Claude Code wiring notes (`hooks-claude.json`)"
+
+    def _wiring_notes_section(self):
         readme = (REPO / "hooks" / "README.md").read_text(encoding="utf-8")
-        for phrase in ("`Write|Edit|MultiEdit|Bash|PowerShell`",
+        start = readme.find(self.HEADING)
+        self.assertNotEqual(start, -1, "hooks/README.md lost its Claude Code wiring notes section")
+        body = readme[start + len(self.HEADING):]
+        match = re.search(r"^#{1,6} ", body, flags=re.MULTILINE)
+        return body[:match.start()] if match else body
+
+    def test_moved_rationale_is_in_the_hooks_readme(self):
+        # Asserted inside the wiring-notes section only: several of these tokens also occur
+        # elsewhere in the README (the Codex table names AGENTIC_WORKTREE_SCAN_BLOCK=true), so a
+        # whole-file check would not notice the moved rationale being deleted.
+        section = self._wiring_notes_section()
+        for phrase in ("`PreToolUse` `Bash|PowerShell`",
+                       "git ci",
+                       "`Write|Edit|MultiEdit|Bash|PowerShell`",
                        "sed -i, a redirect, a heredoc, tee",
+                       "effect-layer detection",
                        "AGENTIC_WORKTREE_SCAN_BLOCK=true",
                        "unknown keys \"$comment\""):
             with self.subTest(phrase=phrase):
-                self.assertIn(phrase, readme)
+                self.assertIn(phrase, section)
 
 
 @unittest.skipIf(NODE is None or shutil.which("git") is None, "node or git not available")

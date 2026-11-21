@@ -141,7 +141,8 @@ jobs:
   # stable name to require. `if: always()` makes it run even when a needed job fails; without the
   # explicit result test it would then report success.
   # The manifest checks Anthropic's own review pipeline runs on a submission. Verified to need no
-  # credentials: with an empty HOME, an empty config directory and no API key, both calls exit 0.
+  # credentials: with an empty HOME, an empty config directory and no API key, both calls exit 0
+  # (first on 2.1.293; re-run on 2.1.319 and 2.1.330 on 2026-11-21 against a `git archive` export).
   # The CLI is pinned so a new release cannot turn an unrelated day's run red; bumping the pin is
   # a reviewable change, like any other dependency. The pin is the newest release at least 14 days
   # old: 2.1.319 (published 2026-11-06), checked on 2026-11-21 with both strict targets passing on a
