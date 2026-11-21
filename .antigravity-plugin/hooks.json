@@ -1,0 +1,51 @@
+{
+  "agentic-sdlc": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/agy-launch.mjs --event PreToolUse --handler scan-commit.mjs",
+            "timeout": 25
+          },
+          {
+            "type": "command",
+            "command": "node ./hooks/agy-launch.mjs --event PreToolUse --handler destructive-command-guard.mjs",
+            "timeout": 25
+          },
+          {
+            "type": "command",
+            "command": "node ./hooks/agy-launch.mjs --event PreToolUse --handler branch-guard.mjs",
+            "timeout": 25
+          }
+        ]
+      },
+      {
+        "matcher": "write_file|edit_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/agy-launch.mjs --event PreToolUse --handler scan-write.mjs",
+            "timeout": 25
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node ./hooks/agy-launch.mjs --event SessionStart --handler session-start.mjs",
+        "timeout": 25
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node ./hooks/agy-launch.mjs --event Stop --handler worktree-scan.mjs",
+        "timeout": 25
+      }
+    ]
+  }
+}
