@@ -229,7 +229,9 @@ async function main() {
   } else {
     cwd = projectCwd(input);
     translated = event === 'Stop'
-      ? { hook_event_name: 'Stop', cwd, stop_hook_active: input.continuationActive === true }
+      // The conversation id is the worktree scan's session key for its per-session dedup.
+      ? { hook_event_name: 'Stop', cwd, stop_hook_active: input.continuationActive === true,
+        session_id: text(input.conversationId) }
       : { hook_event_name: 'SessionStart', cwd };
   }
 

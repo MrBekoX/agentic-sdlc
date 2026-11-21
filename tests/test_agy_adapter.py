@@ -138,23 +138,42 @@ class AgyReplayTests(unittest.TestCase):
         self.assertIn("feature/x", text)
         self.assertIn("Antigravity adapter", text)
 
+    def block_env(self):
+        # worktree-scan.mjs dedups findings per session in a state file; keep each test's own.
+        return {"AGENTIC_WORKTREE_SCAN_BLOCK": "true",
+                "AGENTIC_WORKTREE_SCAN_STATE": str(Path(self.tmp.name) / "scan-state.json")}
+
     def test_stop_continues_only_when_blocking_is_set_and_a_secret_is_found(self):
         secret = "ghp_" + "a1B2" * 9
         (self.work / "leak.py").write_text(f'token = "{secret}"\n', encoding="utf-8")
         payload = fixture("stop", self.work)
-        blocked = launch("Stop", "worktree-scan.mjs", payload, env={"AGENTIC_WORKTREE_SCAN_BLOCK": "true"})
+        blocked = launch("Stop", "worktree-scan.mjs", payload, env=self.block_env())
         out = answer(blocked)
         self.assertEqual(out["decision"], "continue")
         self.assertIn("secret", out["reason"].lower())
         self.assertNotIn(secret, blocked.stdout)
         self.assertEqual(answer(launch("Stop", "worktree-scan.mjs", payload)), {})
         payload["continuationActive"] = True
-        self.assertEqual(answer(launch("Stop", "worktree-scan.mjs", payload,
-                                       env={"AGENTIC_WORKTREE_SCAN_BLOCK": "true"})), {})
+        self.assertEqual(answer(launch("Stop", "worktree-scan.mjs", payload, env=self.block_env())), {})
+
+    def test_stop_findings_are_deduplicated_per_conversation(self):
+        # The conversation id is the scan's session key: one conversation is told once, and another
+        # conversation is told again (without it every agy conversation shared one key).
+        (self.work / "leak.py").write_text('token = "ghp_' + "a1B2" * 9 + '"\n', encoding="utf-8")
+        first = fixture("stop", self.work)
+        first["conversationId"] = "conversation-one"
+        second = dict(first, conversationId="conversation-two")
+        env = dict(self.block_env())
+        env.pop("AGENTIC_WORKTREE_SCAN_STATE")
+        env["TMPDIR"] = str(Path(self.tmp.name) / "scan-tmp")
+        Path(env["TMPDIR"]).mkdir()
+        self.assertEqual(answer(launch("Stop", "worktree-scan.mjs", first, env=env))["decision"], "continue")
+        self.assertEqual(answer(launch("Stop", "worktree-scan.mjs", first, env=env)), {})
+        self.assertEqual(answer(launch("Stop", "worktree-scan.mjs", second, env=env))["decision"], "continue")
 
     def test_clean_stop_allows_the_stop(self):
         self.assertEqual(answer(launch("Stop", "worktree-scan.mjs", fixture("stop", self.work),
-                                       env={"AGENTIC_WORKTREE_SCAN_BLOCK": "true"})), {})
+                                       env=self.block_env())), {})
 
 
 @unittest.skipUnless(NODE, "node is required")
