@@ -218,9 +218,15 @@ class AgyReplayTests(unittest.TestCase):
         second = dict(first, conversationId="conversation-two")
         env = dict(self.block_env())
         env.pop("AGENTIC_WORKTREE_SCAN_STATE")
-        env["TMPDIR"] = str(Path(self.tmp.name) / "scan-tmp")
-        Path(env["TMPDIR"]).mkdir()
+        # The scan keeps its default state under Node's os.tmpdir(), which reads TMPDIR on POSIX but
+        # TEMP/TMP on Windows. All three point at this test's folder, or a state file left by an
+        # earlier run of the suite in the same job would make the first call a repeat.
+        scan_tmp = Path(self.tmp.name) / "scan-tmp"
+        scan_tmp.mkdir()
+        for key in ("TMPDIR", "TEMP", "TMP"):
+            env[key] = str(scan_tmp)
         self.assertEqual(answer(launch("Stop", "worktree-scan.mjs", first, env=env))["decision"], "continue")
+        self.assertTrue((scan_tmp / "agentic-sdlc" / "worktree-scan-conversation-one.json").is_file())
         self.assertEqual(answer(launch("Stop", "worktree-scan.mjs", first, env=env)), {})
         self.assertEqual(answer(launch("Stop", "worktree-scan.mjs", second, env=env))["decision"], "continue")
 
