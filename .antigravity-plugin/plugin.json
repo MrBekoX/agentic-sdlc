@@ -1,4 +1,21 @@
 {
   "name": "agentic-sdlc",
-  "description": "Spec- and plan-driven SDLC skills with adversarial critique, TDD implementation control, multi-lens review, and evidence-gated completion."
+  "displayName": "Agentic SDLC",
+  "version": "0.7.0",
+  "description": "Spec- and plan-driven SDLC skills with adversarial critique, TDD implementation control, multi-lens review, and evidence-gated completion.",
+  "author": {
+    "name": "Beko",
+    "url": "https://github.com/MrBekoX"
+  },
+  "homepage": "https://github.com/MrBekoX/agentic-sdlc",
+  "repository": "https://github.com/MrBekoX/agentic-sdlc",
+  "license": "MIT",
+  "keywords": [
+    "sdlc",
+    "skills",
+    "tdd",
+    "security",
+    "code-review"
+  ],
+  "logo": "assets/logo.png"
 }

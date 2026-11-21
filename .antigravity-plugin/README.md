@@ -1,74 +1,69 @@
 # agentic-sdlc — Google Antigravity Experimental Adapter
 
-> Status: **Experimental adapter** for local workspace and user-level plugin/skill installs. **Not a supported release target** (supported release targets remain Claude Code and Codex; see [`docs/runtime-adapter.md`](../docs/runtime-adapter.md) and [`docs/publication/multi-platform-distribution.md`](../docs/publication/multi-platform-distribution.md)).
+> Status: **Experimental adapter**. **Not a supported release target** (supported release targets remain Claude Code and Codex; see [`docs/runtime-adapter.md`](../docs/runtime-adapter.md) and [`docs/publication/multi-platform-distribution.md`](../docs/publication/multi-platform-distribution.md)). The native install, reinstall and uninstall of the built package and one headless turn were recorded with agy 1.5.14 on 2026-11-21 ([compatibility matrix](../docs/publication/compatibility-matrix.md#google-antigravity)); nothing else is claimed.
 
-## 1. Verified Antigravity Manifest Schema (`plugin.json`)
+Sources, all read on 2026-11-21: the references bundled with the Antigravity CLI `agy` 1.5.14 (`build-plugins.md`, `subagents.md`, and the `agy-customizations` skill's `hooks.md`), the [workflows-to-skills migration page](https://antigravity.google/docs/migration/workflows-to-skills), and `agy` 1.5.14 runs in isolated profiles. A claim below without one of these sources is marked unverified.
 
-The official Antigravity plugin schema (`https://antigravity.google/schemas/v1/plugin.json`, published at `https://antigravity.google/docs/plugins`) specifies:
+## 1. Manifest (`.antigravity-plugin/plugin.json`)
 
-- `required`: `["name"]` (`pattern: "^[a-zA-Z0-9-_]+$"`)
-- `properties`: `name` (`string`) and `description` (`string`)
-- `additionalProperties`: `false`
+agy reads the manifest in place at `<plugin-root>/.antigravity-plugin/plugin.json`; it takes precedence over a root `plugin.json`, so no root `plugin.json` is created (a root one would also reach Codex's portable-manifest loader). The schema `https://antigravity.google/schemas/v1/plugin.json` requires only `name` (kebab-case) and sets `additionalProperties`: `false`; its other properties include `displayName`, `description`, `version`, `logo`, `author`, `homepage`, `repository`, `license` and `keywords`.
 
-Accordingly, `.antigravity-plugin/plugin.json` contains **only** the verified `name` and `description` fields and does not copy Claude Code or Codex manifest keys (`version`, `author`, `license`, `skills`, `hooks`, `interface`). Version tracking for this schema-constrained manifest is handled in `scripts/bump_version.py` (`VERSIONLESS_PLUGIN_MANIFESTS`), which verifies that `.antigravity-plugin/plugin.json` stays registered and free of unsupported keys across version bumps.
+This manifest carries `name`, `displayName`, `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords` and `logo` (`assets/logo.png`). `version` is one of the versioned manifests in `scripts/bump_version.py`, so `--check` fails when it differs from `VERSION` and a bump rewrites it. agy reads the version from this file; without one it fell back to `.claude-plugin/plugin.json` (probe, 2026-11-21).
 
-### Why `plugin.json` and `hooks/hooks.json` are not at the repository root
+## 2. Build, install, upgrade and uninstall
 
-1. **Codex 0.154.0 hook compatibility:** Codex `loader.rs` treats any repository containing a root `plugin.json` as a portable `AgentPlugin` and suppresses all 8 legacy hooks in `hooks/hooks-codex.json`.
-2. **Cross-runtime hook auto-discovery:** Claude Code, ZCode, and Grok CLI auto-discover `hooks/hooks.json` when present.
-
-To preserve Claude Code and Codex behavior while supporting Antigravity's `<plugin-root>/plugin.json` layout, keep `.antigravity-plugin/plugin.json` in this adapter directory inside the source repository and copy it to `<installed-plugin-root>/plugin.json` when staging an Antigravity plugin install.
-
-## 2. Local Installation & Staging (Antigravity IDE & Antigravity 2.0 App)
-
-Antigravity discovers plugins from:
-- **Workspace plugin root:** `<workspace>/.agents/plugins/agentic-sdlc/` (or paths listed in `<workspace>/.agents/plugins.json`)
-- **Global user plugin root:** `~/.gemini/config/plugins/agentic-sdlc/`
-- **Antigravity CLI (`agy`) root:** `~/.gemini/antigravity-cli/plugins/agentic-sdlc/` (via `agy plugin install <staged-dir>`)
-
-### Stage an isolated Antigravity plugin directory
-
-From the repository root, stage the single-source skills, contracts, runtime helpers (the flow runner `scripts/sdlc.py` included), the runner's `flows/` manifests, assets, and commands alongside `.antigravity-plugin/plugin.json` as `<plugin-root>/plugin.json`:
+Build the package from the committed tree, extract it, and install the folder:
 
 ```bash
-# Example target: <workspace>/.agents/plugins/agentic-sdlc
-# (or ~/.gemini/config/plugins/agentic-sdlc for a user-wide install)
-TARGET="<workspace>/.agents/plugins/agentic-sdlc"
-mkdir -p "$TARGET"
-cp .antigravity-plugin/plugin.json "$TARGET/plugin.json"
-cp -R skills contracts scripts flows assets commands LICENSE "$TARGET/"
+python3 scripts/build_release.py --output <zip> --antigravity
+python3 scripts/build_release.py --verify <zip>
+python3 -m zipfile -e <zip> <package-dir>
+agy plugin validate --json <package-dir>
+agy plugin install <package-dir>
 ```
 
-```powershell
-# PowerShell equivalent
-$Target = "<workspace>\.agents\plugins\agentic-sdlc"
-New-Item -ItemType Directory -Force -Path $Target | Out-Null
-Copy-Item ".antigravity-plugin\plugin.json" (Join-Path $Target "plugin.json") -Force
-foreach ($item in @("skills", "contracts", "scripts", "flows", "assets", "commands", "LICENSE")) {
-    Copy-Item $item $Target -Recurse -Force
-}
-```
+`agy plugin install` takes a folder, not a `.zip`, and copies it into `~/.gemini/config/plugins/agentic-sdlc/`. The package holds `.antigravity-plugin/plugin.json`, a root `hooks.json` (a copy of [`.antigravity-plugin/hooks.json`](hooks.json)), the hook launcher and the handlers it starts, the 16 skills, `contracts/`, `scripts/`, `flows/`, `assets/`, the roles as agy agents in `agents/`, the docs and workflow file the skills name as `<runtime-root>/...`, this README and `LICENSE`. It holds no `commands/`, `rules/`, `cursor/` or other runtime's manifest or hook wire.
 
-The flow runner `scripts/sdlc.py` looks for its role files in `<plugin-root>/agents/` and then in `skills/using-agentic-sdlc/references/roles/`. This staged folder has neither, so a runner spec/plan loop (`start --option loop`) or spec check stops at its first role card with `role_file_missing`; the skills themselves do not call the runner in 0.7.0.
+- Upgrade: build the new version and run `agy plugin install <package-dir>` again; it replaces the installed folder. There is no `agy plugin update` in agy 1.5.14 (`agy update` updates the CLI).
+- Uninstall: `agy plugin uninstall agentic-sdlc`. Unrelated files in the profile stay.
+- A workspace-only install is the same folder at `<workspace>/.agents/plugins/agentic-sdlc/`.
+- `agy plugin validate` reports one warning, a known limitation (so `--strict` exits non-zero): agy loads only the first 24000 bytes of a `SKILL.md` body, and the body of `skills/agentic-sdlc-pipeline/SKILL.md` is 40735 bytes (agy 1.5.14, 2026-11-21). About 41% of the full-envelope pipeline skill therefore never reaches the model on agy. The skill is not split.
 
-> **Important — Do not copy `agents/*.md` as custom Antigravity subagent definitions without tool-name mapping:**
-> The official Antigravity Subagents documentation (`https://antigravity.google/docs/subagents`) warns:
-> *"Known issue (tool validation): Specifying an unmapped or misspelled tool name in the `tools` list may cause the subagent process to hang during execution. Double-check exact tool names (such as `view_file` or `run_command`) when configuring custom subagents."*
-> Because `agents/*.md` declare Claude Code tool names (`Glob, Grep, Read, WebFetch, WebSearch`), copy `agents/` into `<plugin-root>/agents/` **only** when read as role instruction files by built-in subagents (`research` / `self`), or keep `agents/*.md` as role reference files and invoke Antigravity's built-in `research` (read-only) or `self` subagent via `invoke_subagent`.
+## 3. Roles as agy agents
 
-### Workspace skill-only discovery (no plugin wrapper)
+`scripts/project_roles.py --target antigravity` generates `agents/<role>.md` from the shared `agents/*.md` at build time. agy skips an agent whose `tools` is a comma string, so each generated agent has a YAML-list `tools` of agy runtime names (`Read`/`Glob`/`Grep` -> `read_file`, `WebFetch`/`WebSearch` -> `search_web`, `Write` -> `write_file`, `Edit`/`MultiEdit` -> `edit_file`, `Bash`/`PowerShell` -> `run_command`), `model: inherit`, `subagent: true` and `mainAgent: false`. A read-only role (no write or shell tool) also gets `inheritMcp: false`. The body is the shared role body, byte for byte. `agy plugin validate` reports 11 agents.
 
-In a repository checkout or workspace skill setup, Antigravity also discovers skills directly from `<workspace>/.agents/skills/<skill-name>/SKILL.md` or `~/.gemini/config/skills/<skill-name>/SKILL.md`.
+agy has no grep, glob or directory-list tool, so a read-only role can only read the files it is told about: the orchestrating skill passes it an explicit file list (for example from the diff). The tool allowlist was enforced in a live probe; the runtime still added `manage_task` and the MCP tools (`inheritMcp` defaults to `true`). What `manage_task` can do there is unverified.
 
-## 3. Runtime Capabilities & Fallbacks on Antigravity
+## 4. Hooks
 
-| Capability | Antigravity Mechanism | Adapter Behavior & Notes |
+The root `hooks.json` is one named group, `agentic-sdlc`. agy runs each command with `sh -c` (`cmd /c` on Windows, unverified here) in the folder that holds `hooks.json` and exports `PLUGIN_ROOT`, so the commands are relative: `node ./hooks/agy-launch.mjs --event <event> --handler <file>`.
+
+| Event | Matcher | Shared handler |
 |---|---|---|
-| **Session router (`using-agentic-sdlc`)** | `AGENTS.md` (`always_on` rule in repo checkouts) + `<skills>` catalog / `/using-agentic-sdlc` slash command | In repo checkouts, `AGENTS.md` loads automatically as an `always_on` rule and routes through `using-agentic-sdlc`. In plugin installs, invoke `/using-agentic-sdlc` or rely on autonomous `<skills>` description matching. |
-| **Skill discovery & invocation** | `<plugin-root>/skills/<name>/SKILL.md` or `.agents/skills/<name>/SKILL.md`; `/<skill-name>` slash command or `view_file` | Antigravity injects each discovered skill's description and exact absolute `SKILL.md` path into `<skills>`. Read the selected `SKILL.md` with `view_file` before acting. |
-| **Plugin root (`<runtime-root>`)** | Portable two-levels-up resolution from `<runtime-root>/skills/<name>/SKILL.md` | Antigravity does not export an undocumented plugin-root environment variable into shell commands. Resolve `<runtime-root>` as the directory two levels above the loaded `SKILL.md` path shown in `<skills>`, verify `<runtime-root>/scripts/validate_artifacts.py` exists, and pass that quoted absolute path to `python3` (or `py -3` on Windows). |
-| **Rules & contracts** | Workspace `AGENTS.md` / `GEMINI.md` (`always_on`); on-demand `<runtime-root>/contracts/skills/*.md` | `contracts/skills/00`–`10` stay single-source on-demand skill contracts rather than always-on `.agents/rules/*.md` files (`trigger: always_on`), preserving session context budget. |
-| **Specialist subagents** | `invoke_subagent` tool (`TypeName: "research"` for read-only roles; `TypeName: "self"` with `Workspace: "branch"` for isolated writes) | Read the specialist instructions from `<runtime-root>/agents/<role>.md` (stripping YAML frontmatter) and pass them in `Prompt` to `invoke_subagent` with `TypeName: "research"` (read-only) or `"self"`. Do not register custom `agents/*.md` with unmapped Claude tool names (`Glob`, `Grep`, `Read`), which can hang subagent validation. If `invoke_subagent` is unavailable, run inline and record `Delegation Degraded: subagents unavailable (single-session inline fallback)`. |
-| **Workflows (`spec-plan-draft`, `multi-lens-review`, `skill-draft`)** | Embedded author -> critic -> revise adapter via `invoke_subagent` + `validate_artifacts.py` | Legacy Antigravity `.agents/workflows/*.md` prompt macros are deprecated on **October 19, 2026** (`https://antigravity.google/docs/migration/workflows-to-skills`) and are not equivalent to Claude Code's JS `Workflow` runtime. No `.agents/workflows/` files are used. Draft artifacts, dispatch a fresh-context critic via `invoke_subagent(TypeName="research")`, revise up to 2 rounds, and run `validate_artifacts.py` (or record `Delegation Degraded: no-workflow-runtime (single-session inline fallback)` when subagents are unavailable). |
-| **Hooks (`PreToolUse`, `PostToolUse`, `SessionStart`, `Stop`)** | `<plugin-root>/hooks.json` or `.agents/hooks.json` (**unwired by default**) | Antigravity hooks use a named-group top-level schema (`{"<group>": {"enabled": true, "PreToolUse": [...]}}`), `toolCall.name` / `toolCall.args` (`run_command` with `CommandLine`/`Cwd`, `write_to_file`/`replace_file_content` with `TargetFile`), `workspacePaths[]`, and require `{"decision": "allow"\|"deny"\|...}` on `PreToolUse` stdout. Existing `hooks/*.mjs` target Claude/Codex/Grok/ZCode payloads and are **not wired by default** on Antigravity. Prompt/skill gates are procedural only and do not provide deterministic pre-tool blocking unless an approved Antigravity hook adapter is wired. |
-| **Artifact & evidence paths** | Dual layout (`docs/agentic-sdlc/specs/<work_id>.md` + `docs/agentic-sdlc/<slug>/spec/<work_id>.md`, `docs/agentic-sdlc/<slug>/evidence/<work_id>.md`) | Per-package Finalize evidence at `docs/agentic-sdlc/<slug>/evidence/<work_id>.md` is per-package-only, overwritten per run, git-ignored, has no validator mode, and is written by the main finalize step — not the read-only auditor. Change detection uses a filesystem scan via `resolve_work_package.py`. |
+| `PreToolUse` | `run_command` | `scan-commit.mjs`, `destructive-command-guard.mjs`, `branch-guard.mjs` |
+| `PreToolUse` | `write_file\|edit_file` | `scan-write.mjs` |
+| `SessionStart` | — | `session-start.mjs` |
+| `Stop` | — | `worktree-scan.mjs` |
+
+`hooks/agy-launch.mjs` reads the payload's `toolCall.name` and `toolCall.args` (`CommandLine`; `Path` with `Content` for `write_file`; `Path` with `Replacement` for `edit_file`) and the payload `cwd`, hands the shared handler the Claude-shaped input it already reads, and prints one JSON object: a deny becomes `{"decision":"deny","reason":...}`, a warning becomes an allow with a `reason`, and anything else `{"decision":"allow"}`. A PreToolUse guard that crashes, times out or prints something other than a JSON object denies the call, and so does a tool call whose `CommandLine`, `Path`, `Content` or `Replacement` is missing or not a string. agy blocked the call on exit status 2 and on invalid JSON from a PreToolUse hook (one probe each, 2026-11-21); other exit codes are unverified, and the launcher does not rely on either. SessionStart injects the bootstrap as `injectSteps` `systemMessage`; Stop continues the agent only when `AGENTIC_WORKTREE_SCAN_BLOCK` is set, the scan finds a secret and `continuationActive` is not `true`. Payload text never reaches a shell.
+
+Trade-offs and gaps of this wiring (agy 1.5.14, 2026-11-21):
+
+- **`allow` is the only no-objection answer.** agy's `hooks.md` defines `"allow"` as "Automatically allow the tool execution" and `"ask"` as a permission prompt. There is no neutral answer: in a probe, a PreToolUse hook that printed `{}` made agy deny the `run_command` ("tool call denied by pre-tool hook"). So the launcher answers `allow` when the guards have no objection, including for a write the scanner flagged. In headless `-p` probes, that `allow` did not override a user's `permissions.ask` rule (the call was still auto-denied because no prompt was possible) or `permissions.deny` rule (still "Permission denied ... deny rule"). Whether `allow` skips a prompt that agy's interactive default policy would show was not tested; treat that as unverified. To keep a confirmation step on agy, add `permissions.ask` or `permissions.deny` rules in agy's `settings.json`.
+- **Only `run_command`, `write_file` and `edit_file` are guarded.** agy's other tools that can act, such as `manage_task`, MCP tools (`call_mcp_tool`), and `run_workflow` and `swarm`, reach no guard. Whether `manage_task` can run commands is unverified.
+- **The default Stop advisory is dropped.** Without `AGENTIC_WORKTREE_SCAN_BLOCK`, `worktree-scan.mjs` answers a finding with a `systemMessage` advisory. agy's Stop output only injects `reason` on `continue`, so on agy that advisory reaches nobody and the launcher answers `{}`. Set `AGENTIC_WORKTREE_SCAN_BLOCK=true` on agy to hear about a finding (one continuation per turn).
+- **Live hook delivery was seen only for a workspace plugin** (`<workspace>/.agents/plugins/agentic-sdlc/`). Hooks of a plugin installed with `agy plugin install`, and the Stop path, were not exercised in a live turn.
+
+Not wired: the flow-order guard and the completion-claim and flow-step Stop readers, which read a Claude transcript and Claude `Skill`/`Agent` tool events that agy does not produce. `PostToolUse`, `PreInvocation` and `PostInvocation` are not used.
+
+## 5. Runtime capabilities on Antigravity
+
+| Capability | Antigravity mechanism | Adapter behavior |
+|---|---|---|
+| Session router (`using-agentic-sdlc`) | SessionStart bootstrap, the skill catalog, `/using-agentic-sdlc` | The bootstrap names the router; read the selected `SKILL.md` with `read_file` before acting. |
+| Plugin root (`<runtime-root>`) | Two levels above the loaded `SKILL.md` | Verify `<runtime-root>/scripts/validate_artifacts.py` exists and pass that quoted absolute path to `python3` (`py -3` on Windows). `PLUGIN_ROOT` is set for hook commands (and plugin MCP servers); it is not substituted in skill text. |
+| Specialist subagents | `invoke_subagent` | Use the bundled agent of the role, or pass the body of `<runtime-root>/agents/<role>.md` (frontmatter stripped) to a built-in subagent. Give read-only roles explicit file lists. If `invoke_subagent` is unavailable, run inline and record `Delegation Degraded: subagents unavailable (single-session inline fallback)`. |
+| Workflows (`spec-plan-draft`, `multi-lens-review`, `skill-draft`) | Embedded author -> critic -> revise via `invoke_subagent` + `validate_artifacts.py` | Antigravity `.agents/workflows/*.md` prompt macros are deprecated (no removal date announced) and are not Claude Code's JS `Workflow` runtime; no `.agents/workflows/` file is used. |
+| Commands | — | `commands/` is not shipped: agy reported converting `git-safety-check` to a skill on install, but no such skill folder appeared and its use in a session is unverified. Known gap: the pipeline's read-only `git-safety-check` step has no installed command on agy. |
+| Artifact and evidence paths | Dual layout under `docs/agentic-sdlc/` | Unchanged; change detection uses `resolve_work_package.py`. |
