@@ -99,7 +99,7 @@ In a project chat, start with `/using-agentic-sdlc`. A full delivery request use
 
 ### Google Antigravity (experimental adapter)
 
-Build the agy package and install the extracted folder with the Antigravity CLI (agy 1.5.14, 2026-11-21): `python3 scripts/build_release.py --output <zip> --antigravity`, `python3 -m zipfile -e <zip> <package-dir>`, then `agy plugin install <package-dir>` (a folder, not a `.zip`). The package carries `.antigravity-plugin/plugin.json`, a root `hooks.json`, the roles as agy agents and the 16 skills; see [`.antigravity-plugin/README.md`](.antigravity-plugin/README.md). It is an experimental adapter, not a supported release target.
+Build the agy package and install the extracted folder with the Antigravity CLI (agy 1.5.14, 2026-11-21): `python3 scripts/build_release.py --output <zip> --antigravity`, `python3 -m zipfile -e <zip> <package-dir>`, then `agy plugin install <package-dir>` (a folder, not a `.zip`). The package carries `.antigravity-plugin/plugin.json`, a root `hooks.json`, the roles as agy agents and the 16 skills; see [`.antigravity-plugin/README.md`](.antigravity-plugin/README.md). It is an experimental adapter, not a supported release target. To pin the CLI itself (the official installer always takes the latest), download the build named in the installer's release manifest from its versioned URL, check its sha512, and run agy with `AGY_CLI_DISABLE_AUTO_UPDATE=true`; [`.github/workflows/native-lifecycle-agy.yml`](.github/workflows/native-lifecycle-agy.yml) does this on Linux, Windows and macOS.
 
 ### Update and uninstall
 
