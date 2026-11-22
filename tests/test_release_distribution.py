@@ -2168,7 +2168,13 @@ class TestCiWorkflowHygiene(unittest.TestCase):
     def test_plugin_validate_pins_the_cli_and_names_both_manifests(self):
         block = job_block(self.text, "plugin-validate")
         # A floating CLI install would make an unrelated upstream release fail an unrelated PR.
-        self.assertIn("npm install -g @anthropic-ai/claude-code@2.1.293", block)
+        # 2.1.319 (published 2026-11-06) was the newest release at least 14 days old on
+        # 2026-11-21; it passed both strict targets on a build_release package that day.
+        self.assertIn("npm install -g @anthropic-ai/claude-code@2.1.319", block)
+        # The macOS native-lifecycle workflow installs the same Claude Code version.
+        macos = (REPO / ".github" / "workflows" / "native-lifecycle-macos.yml").read_text(encoding="utf-8")
+        self.assertIn("@anthropic-ai/claude-code@2.1.319 ", macos)
+        self.assertNotIn("@anthropic-ai/claude-code@2.1.293", macos)
         self.assertIn("2.1.289+", self.text)
         # On 2.1.289+ `validate .` also checks the plugin; the plugin manifest stays a named target.
         self.assertIn("claude plugin validate . --strict --json", block)

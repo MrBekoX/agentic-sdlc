@@ -56,6 +56,18 @@ For `agentic-sdlc-pipeline`, the `dispatch`, `security` and `control` steps matc
 
 All paths resolve through `${CLAUDE_PLUGIN_ROOT}`. `node` must be on `PATH`.
 
+Claude Code loads `hooks/hooks.json` by default and merges the manifest `hooks` file into it ([plugins reference](https://code.claude.com/docs/en/plugins-reference), read 2026-11-21). This repository keeps `hooks/hooks.json` absent, so only `hooks/hooks-claude.json` loads. A `hooks.json` at the package root is not loaded: on 2.1.330 (2026-11-21, isolated `CLAUDE_CONFIG_DIR`, `--plugin-dir`) probe hooks there never registered, while the same probes in `hooks/hooks.json` did. `.antigravity-plugin/hooks.json` is not loaded either, in a separate run the same day: with SessionStart and PreToolUse probes there, 2.1.330 registered 9 hooks and none came from the probe file. `hooks/hooks-claude.json` carries no `$comment` keys: 2.1.330 logged the two matcher-group keys (`PreToolUse[0]`, `PreToolUse[1]`) as unknown keys (`[WARN]` and `[ERROR]`) at every load, and `claude plugin validate --strict` did not report them; the third, handler-level key was not named in the log but was removed too, because the plugins reference documents no comment field; the wiring rationale lives in [hooks/README.md](../hooks/README.md#claude-code-wiring-notes-hooks-claudejson).
+
+## Validating locally
+
+CI pins Claude Code 2.1.319 and runs `claude plugin validate . --strict --json` and `claude plugin validate .claude-plugin/plugin.json --strict --json` on the git checkout, which, like a `build_release` package, has no gitignored `CLAUDE.md`. Both targets pass on a `build_release` package and on a `git archive HEAD` export with 2.1.319 and 2.1.330 (2026-11-21; the 2.1.319 and 2.1.330 runs on the export used an empty `HOME`, an empty `CLAUDE_CONFIG_DIR` and no API key). Run them on a `build_release` export, not on the working tree: a local, gitignored `CLAUDE.md` at the root makes `validate .` fail on 2.1.330 with `CLAUDE.md at the plugin root is not loaded as project context`, and the release archive excludes that file.
+
+```bash
+python3 scripts/build_release.py --output <scratch>/pkg.zip
+python3 -m zipfile -e <scratch>/pkg.zip <scratch>/pkg
+cd <scratch>/pkg && claude plugin validate . --strict --json
+```
+
 ## Local `.claude/`
 
 The repo may contain `.claude/settings.json` for local workspace settings. That file is not the skill source and should not contain duplicate skills.
@@ -75,7 +87,7 @@ Canonical `SKILL.md` frontmatter for new plugin skills should stay to:
 - `metadata`
 - `compatibility`
 
-The repository gate rejects frontmatter keys outside that list. Public skill docs and new skills stay inside it. The external skill-creator validator is the stricter package contract. Agent role files have their own frontmatter shape (`name`, `description`, `tools`, `model`). Treat `scripts/check_all.py` and `tests/skills/harness.py` as the current repo gate; treat external packaging validation as the stricter package-valid contract.
+The repository gate rejects frontmatter keys outside that list. Public skill docs and new skills stay inside it. The external skill-creator validator is the stricter package contract. Agent role files have their own frontmatter shape (`name`, `description`, `tools`, `model`); Claude Code accepts `tools` as a comma-separated string or a YAML list ([sub-agents](https://code.claude.com/docs/en/sub-agents), read 2026-11-21), and `claude plugin validate` does not check tool names (on 2.1.330, 2026-11-21, an agent with `tools: NotATool, AlsoBogus` still passed `validate . --strict` with no finding). Treat `scripts/check_all.py` and `tests/skills/harness.py` as the current repo gate; treat external packaging validation as the stricter package-valid contract.
 
 ## Artifact Layouts And Per-Package Evidence
 

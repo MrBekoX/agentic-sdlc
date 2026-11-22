@@ -35,13 +35,15 @@ jobs:
           python3 scripts/build_release.py --output "$RUNNER_TEMP/full.zip"
           python3 scripts/build_release.py --verify "$RUNNER_TEMP/full.zip"
           python3 -m zipfile -e "$RUNNER_TEMP/full.zip" "$RUNNER_TEMP/package"
-      # Versions match the Windows/Linux evidence rows. Each vendor installer is fetched to a file
+      # Codex, Kimi and Grok versions match the Windows/Linux evidence rows. Claude Code follows the
+      # ci.yml plugin-validate pin (2.1.319 since 2026-11-21; the E10 macOS row was run on 2.1.293
+      # and has not been re-run on 2.1.319). Each vendor installer is fetched to a file
       # first (not piped into a shell) and told not to edit shell profiles; Kimi's installer checks
       # the binary's sha256, Grok's runs the downloaded binary's --version before linking it.
       - name: Install the pinned plugin-managing CLIs
         shell: bash
         run: |
-          npm install -g @anthropic-ai/claude-code@2.1.293 @openai/codex@0.162.1
+          npm install -g @anthropic-ai/claude-code@2.1.319 @openai/codex@0.162.1
           curl -fsSL -o "$RUNNER_TEMP/kimi-install.sh" https://code.kimi.com/kimi-code/install.sh
           KIMI_NO_MODIFY_PATH=1 bash "$RUNNER_TEMP/kimi-install.sh" --version 2.1.1
           curl -fsSL -o "$RUNNER_TEMP/grok-install.sh" https://x.ai/cli/install.sh

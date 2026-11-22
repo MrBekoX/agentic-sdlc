@@ -47,7 +47,11 @@ LOCK_DIGESTS = {
     # for a git alias).
     # Rebased 2026-11-18 (bug audit FH-1, SW-9 wiring): flow-order-guard.mjs is also wired on Bash|PowerShell
     # (no `if`), and the write scan on NotebookEdit. Covered by tests/test_audit_fh.py.
-    "hooks/hooks-claude.json": "8edcd24c344be67d070f4a8465b4ced4db2dae1f73414132b08066f60920fbac",
+    # Rebased 2026-11-21 (runtime-adapters-refresh): the three `$comment` keys were removed because
+    # Claude Code 2.1.330 logs them as unknown keys at every load; events, matchers, commands, args,
+    # timeouts and status messages are unchanged, and the rationale moved to hooks/README.md.
+    # Covered by tests/test_hooks_policy.py TestClaudeHookConfigCarriesNoCommentKeys.
+    "hooks/hooks-claude.json": "a800dfba51de926799bbacc10be7c7bfe66f6c882ac5cbeacf93c54704bb8f9f",
 }
 
 NODE = shutil.which("node")

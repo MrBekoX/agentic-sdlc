@@ -1,9 +1,10 @@
 """Build, verify and history-scan agentic-sdlc distribution archives.
 
 Three fixed modes (spec public interface):
-  --output <zip> [--skills-only]  build the release archive, or the BR24 skills-only archive,
-                                  from the tree of the recorded HEAD commit; worktree bytes never
-                                  enter an archive.
+  --output <zip> [--skills-only | --antigravity]
+                                  build the release archive, the BR24 skills-only archive or the
+                                  Google Antigravity (agy) package from the tree of the recorded
+                                  HEAD commit; worktree bytes never enter an archive.
   --verify <zip>                  verify an archive against its recorded source commit.
   --scan-history <mirror>         scan every ref of a local bare mirror for secrets and private paths.
 
@@ -35,10 +36,10 @@ from pathlib import Path
 
 try:
     from scripts.eval_safety import require_relative_pattern
-    from scripts.check_plugin_portability import portability_errors
+    from scripts.check_plugin_portability import EXTRA_DEPENDENCIES, IMPORT_REF, portability_errors
 except ModuleNotFoundError:
     from eval_safety import require_relative_pattern
-    from check_plugin_portability import portability_errors
+    from check_plugin_portability import EXTRA_DEPENDENCIES, IMPORT_REF, portability_errors
 
 
 # BR13 exclusion classes. A member in any class never enters an archive.
@@ -284,6 +285,22 @@ PUBLIC_DOCS = (
     "runtime-adapter", "zcode-runtime-adapter", "plugin-readme", "testing",
     "skill-boundaries", "troubleshooting",
 )
+
+# The Google Antigravity (agy) package. agy reads `.antigravity-plugin/plugin.json` in place (it takes
+# precedence over a root plugin.json) and `hooks.json` at the package root, with the hook cwd set to
+# that root (agy 1.5.14 bundled build-plugins.md and hooks.md, read 2026-11-21). The roles ship as agy
+# agents generated from `agents/*.md`; hooks ship as the launcher, the handlers it is wired to and
+# their imports. No other runtime's manifest, hook wire, commands/ or Cursor files enter it.
+ANTIGRAVITY_MANIFEST = ".antigravity-plugin/plugin.json"
+ANTIGRAVITY_README = ".antigravity-plugin/README.md"
+ANTIGRAVITY_WIRE = ".antigravity-plugin/hooks.json"
+ANTIGRAVITY_LAUNCHER = "hooks/agy-launch.mjs"
+ANTIGRAVITY_ROOTS = ("skills/", "contracts/", "scripts/", "flows/", "assets/")
+# Source folders a skill may name as `<runtime-root>/<file>`; only the named files ship.
+ANTIGRAVITY_REFERENCED_ROOTS = ("docs/", "workflows/")
+_RUNTIME_ROOT_REF = re.compile(r"<runtime-root>/([A-Za-z0-9_./-]+)")
+_WIRED_HANDLER = re.compile(r"--handler ([a-z0-9-]+\.mjs)")
+ARCHIVE_KINDS = ("release", "skills-only", "antigravity")
 
 
 class ReleaseError(Exception):
@@ -707,25 +724,113 @@ def _select_skills_only(members: dict) -> dict:
     return selected
 
 
-def _kind_members(commit: str, *, cwd: Path, skills_only: bool) -> dict:
+def _mcp_errors(paths) -> list:
+    # SEC-4: compare the NORMALIZED basename (see _select_skills_only).
+    return [f"error=mcp_configuration:{p}" for p in _utf8_order(paths)
+            if unicodedata.normalize("NFC", p).rsplit("/", 1)[-1].casefold().rstrip(". ") == ".mcp.json"]
+
+
+def _antigravity_hooks(members: dict) -> tuple:
+    """(hook members, errors): the launcher, every handler the agy wire names, and their imports."""
+    try:
+        wire = json.loads(members[ANTIGRAVITY_WIRE][1].decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return {}, [f"error=antigravity_wire_unreadable:{ANTIGRAVITY_WIRE}"]
+    if not isinstance(wire, dict):
+        return {}, [f"error=antigravity_wire_unreadable:{ANTIGRAVITY_WIRE}"]
+    pending = [ANTIGRAVITY_LAUNCHER] + ["hooks/" + name for name in _WIRED_HANDLER.findall(json.dumps(wire))]
+    selected, errors, seen = {}, [], set()
+    while pending:
+        path = pending.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        if path not in members:
+            errors.append(f"error=antigravity_hook_dependency_missing:{path}")
+            continue
+        selected[path] = members[path]
+        if path.endswith(".mjs"):
+            text = members[path][1].decode("utf-8", "replace")
+            pending += [posixpath.normpath(posixpath.join(posixpath.dirname(path), rel))
+                        for rel in IMPORT_REF.findall(text)]
+            pending += list(EXTRA_DEPENDENCIES.get(path, ()))
+    return selected, sorted(set(errors))
+
+
+def _project_roles():
+    # Imported here so the release and skills-only paths keep their import surface.
+    try:
+        from scripts.project_roles import RoleError, project_role
+    except ModuleNotFoundError:
+        from project_roles import RoleError, project_role
+    return RoleError, project_role
+
+
+def _select_antigravity(members: dict) -> dict:
+    """Project committed source into the agy package (see ANTIGRAVITY_MANIFEST)."""
+    RoleError, project_role = _project_roles()
+    errors = [f"error=antigravity_member_missing:{p}"
+              for p in (ANTIGRAVITY_MANIFEST, ANTIGRAVITY_WIRE, ANTIGRAVITY_LAUNCHER, "LICENSE") if p not in members]
+    if errors:
+        raise ReleaseError(errors)
+    selected = {p: v for p, v in members.items() if p == "LICENSE" or p.startswith(ANTIGRAVITY_ROOTS)}
+    errors += _mcp_errors(selected)
+    selected[ANTIGRAVITY_MANIFEST] = members[ANTIGRAVITY_MANIFEST]
+    if ANTIGRAVITY_README in members:
+        selected[ANTIGRAVITY_README] = members[ANTIGRAVITY_README]
+    selected["hooks.json"] = members[ANTIGRAVITY_WIRE]
+    hooks, hook_errors = _antigravity_hooks(members)
+    selected.update(hooks)
+    errors += hook_errors
+    for path in _utf8_order(members):
+        if path.startswith("agents/") and path.endswith(".md") and path.count("/") == 1:
+            try:
+                selected[path] = (members[path][0], project_role("antigravity", path, members[path][1]))
+            except RoleError as exc:
+                errors.append(f"error=antigravity_role_invalid:{exc}")
+    for path in _utf8_order(selected):
+        if not (path.endswith(".md") and path.startswith(("skills/", "contracts/"))):
+            continue
+        for ref in _RUNTIME_ROOT_REF.findall(selected[path][1].decode("utf-8", "replace")):
+            core = ref.rstrip(".,;:")
+            if core.startswith(ANTIGRAVITY_REFERENCED_ROOTS) and core in members:
+                selected[core] = members[core]
+    errors += _collisions(selected)
+    if errors:
+        raise ReleaseError(errors)
+    return selected
+
+
+def _kind_members(commit: str, *, cwd: Path, kind: str = "release") -> dict:
     members = _commit_members(commit, cwd=cwd)
-    return _select_skills_only(members) if skills_only else members
+    if kind == "skills-only":
+        return _select_skills_only(members)
+    if kind == "antigravity":
+        return _select_antigravity(members)
+    return members
 
 
-def _identity_line(members: dict, skills_only: bool) -> str:
+def _identity_line(members: dict, kind: str) -> str:
     data = {p: d for p, (_m, d) in members.items()}
-    if skills_only:
+    if kind == "skills-only":
         return "skills_only_payload_identity=" + payload_identity(data, frozenset())
+    if kind == "antigravity":
+        return "antigravity_payload_identity=" + payload_identity(data, frozenset())
     return "runtime_payload_identity=" + payload_identity(data, RUNTIME_PAYLOAD_EXCLUDE)
 
 
-def build_archive(repo_root, output, *, skills_only: bool = False) -> BuildResult:
-    """Build the release (or BR24 skills-only) archive from the recorded HEAD commit of repo_root."""
+def build_archive(repo_root, output, *, skills_only: bool = False, antigravity: bool = False) -> BuildResult:
+    """Build the release, BR24 skills-only or agy archive from the recorded HEAD commit of repo_root."""
     emit = _Emitter()
     repo_root = Path(repo_root)
+    if skills_only and antigravity:
+        emit("error=archive_kind_conflict")
+        emit("build=failed")
+        return BuildResult(2, emit.lines)
+    kind = "skills-only" if skills_only else "antigravity" if antigravity else "release"
     try:
         commit = _resolve_head_commit(repo_root)
-        members = _kind_members(commit, cwd=repo_root, skills_only=skills_only)
+        members = _kind_members(commit, cwd=repo_root, kind=kind)
         portability = portability_errors({p: blob for p, (_mode, blob) in members.items()})
         if portability:
             raise ReleaseError(['error=' + error for error in portability])
@@ -741,11 +846,11 @@ def build_archive(repo_root, output, *, skills_only: bool = False) -> BuildResul
         emit("error=output_unwritable")
         emit("build=failed")
         return BuildResult(2, emit.lines)
-    emit("archive_kind=" + ("skills-only" if skills_only else "release"))
+    emit("archive_kind=" + kind)
     emit(f"source_commit={commit}")
     emit(f"members={len(members)}")
     emit("archive_sha256=" + hashlib.sha256(data).hexdigest())
-    emit(_identity_line(members, skills_only))
+    emit(_identity_line(members, kind))
     emit("build=passed")
     return BuildResult(0, emit.lines)
 
@@ -1042,16 +1147,16 @@ def verify_archive(zip_path, repo_root) -> VerifyReport:
         for line in exc.lines:
             emit(line)
         return finish(exc.exit_code)
-    try:
-        skills = _select_skills_only(release)
-    except ReleaseError:
-        skills = None
+    candidates = {"release": release}
+    for name, select in (("skills-only", _select_skills_only), ("antigravity", _select_antigravity)):
+        try:
+            candidates[name] = select(release)
+        except ReleaseError:
+            pass
     names = set(data)
-    kind = "release"
-    if names != set(release):
-        if skills is not None and (names == set(skills) or len(names ^ set(skills)) < len(names ^ set(release))):
-            kind = "skills-only"
-    expected = skills if kind == "skills-only" else release
+    # The kind is the candidate whose member set is nearest to the archive's (release wins ties).
+    kind = min(candidates, key=lambda name: (len(names ^ set(candidates[name])), ARCHIVE_KINDS.index(name)))
+    expected = candidates[kind]
     errors = [f"error=unexpected_member:{n}" for n in _utf8_order(names - set(expected))]
     errors += ['error=' + error for error in portability_errors(data)]
     errors += [f"error=missing_member:{n}" for n in _utf8_order(set(expected) - names)]
@@ -1077,7 +1182,7 @@ def verify_archive(zip_path, repo_root) -> VerifyReport:
     emit(f"archive_kind={kind}")
     emit(f"source_commit={commit}")
     emit(f"archive_sha256={archive_sha}")
-    emit(_identity_line({n: (None, d) for n, d in data.items()}, kind == "skills-only"))
+    emit(_identity_line({n: (None, d) for n, d in data.items()}, kind))
     for line in findings + suppressed:
         emit(line)
     emit(f"suppressed_count={len(suppressed)}")
@@ -1524,8 +1629,12 @@ def _parser() -> argparse.ArgumentParser:
     mode.add_argument("--output", metavar="ZIP", help="build an archive from the recorded HEAD commit")
     mode.add_argument("--verify", metavar="ZIP", help="verify an archive against its recorded commit")
     mode.add_argument("--scan-history", metavar="MIRROR", help="scan a local bare mirror")
-    parser.add_argument(
+    kind = parser.add_mutually_exclusive_group()
+    kind.add_argument(
         "--skills-only", action="store_true", help="with --output: build the BR24 skills-only archive"
+    )
+    kind.add_argument(
+        "--antigravity", action="store_true", help="with --output: build the Google Antigravity (agy) package"
     )
     return parser
 
@@ -1535,8 +1644,11 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.skills_only and not args.output:
         parser.error("--skills-only is accepted only together with --output")
+    if args.antigravity and not args.output:
+        parser.error("--antigravity is accepted only together with --output")
     if args.output:
-        return build_archive(Path.cwd(), Path(args.output), skills_only=args.skills_only).exit_code
+        return build_archive(Path.cwd(), Path(args.output), skills_only=args.skills_only,
+                             antigravity=args.antigravity).exit_code
     if args.verify:
         return verify_archive(Path(args.verify), Path.cwd()).exit_code
     mirror = _history_mirror(args.scan_history, _Emitter())

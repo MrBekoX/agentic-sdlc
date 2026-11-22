@@ -49,8 +49,10 @@ from scripts.sensitive_redaction import redact_text
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "check_native_lifecycle.py"
-PLATFORMS = ("claude", "codex", "grok", "kimi", "zcode")
-LINE_RE = re.compile(r"^native_(claude|codex|grok|kimi|zcode)=(passed|failed:[a-z0-9_:=,.-]+|not-run:[a-z0-9_:=,.-]+)$")
+PLATFORMS = ("claude", "codex", "grok", "kimi", "zcode", "antigravity")
+# The fake (and real) program name of each platform's CLI; Google Antigravity's CLI is `agy`.
+CLI = {"claude": "claude", "codex": "codex", "grok": "grok", "kimi": "kimi", "antigravity": "agy"}
+LINE_RE = re.compile(r"^native_(claude|codex|grok|kimi|zcode|antigravity)=(passed|failed:[a-z0-9_:=,.-]+|not-run:[a-z0-9_:=,.-]+)$")
 FORBIDDEN_PREFIXES = ("ANTHROPIC_", "OPENAI_", "XAI_", "GROK_API", "MOONSHOT_", "KIMI_API", "ZHIPU_", "ZAI_",
                       "AWS_", "AZURE_", "GOOGLE_", "CLAUDE_CODE_USE_", "GITHUB_TOKEN", "GH_TOKEN", "CI_", "NPM_TOKEN")
 SECRET_NAMES = (
@@ -110,6 +112,7 @@ def build_package(base):
     _write_json(pkg / ".grok-plugin" / "marketplace.json", {
         "name": "fixture-market", "plugins": [{"name": "fixture-plugin", "version": "1.2.3", "source": "./"}]})
     _write_json(pkg / ".kimi-plugin" / "plugin.json", dict(plugin, skills="./skills/", commands="./commands/"))
+    _write_json(pkg / ".antigravity-plugin" / "plugin.json", plugin)
     _write(pkg / "VERSION", "1.2.3\n")
     return pkg
 
@@ -128,7 +131,8 @@ ARGV = sys.argv[1:]
 with open(os.path.join(HERE, "fake-config.json"), encoding="utf-8") as fh:
     CONFIG = json.load(fh)
 MODE = CONFIG.get("modes", {}).get(NAME, "ok")
-HOME_VAR = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME", "grok": "GROK_HOME", "kimi": "KIMI_CODE_HOME"}[NAME]
+HOME_VAR = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME", "grok": "GROK_HOME", "kimi": "KIMI_CODE_HOME",
+            "agy": "HOME"}[NAME]
 
 
 def record_violation(why):
@@ -513,7 +517,71 @@ def kimi():
     violation("argv outside the kimi allowlist")
 
 
-{"claude": claude, "codex": codex, "grok": grok, "kimi": kimi}[NAME]()
+AGY_PLUGIN_USAGE = """Usage: agy plugin <command> [arguments]
+
+Commands:
+  list [--json]          List installed plugins
+  install <target>       Install a plugin (supports plugin[@marketplace])
+  uninstall <name>       Uninstall a plugin
+  validate [target] [--strict] [--json]
+  help                   Show this help
+"""
+
+
+def agy():
+    # agy 1.5.14 subcommands act on a trailing `--help` (`uninstall --help` uninstalls a plugin named
+    # "--help"), so only `agy plugin --help` may be probed.
+    if ARGV == ["plugin", "--help"]:
+        print("Usage: agy [options] [prompt]\n" if MODE == "old" else AGY_PLUGIN_USAGE)
+        sys.exit(0)
+    if "--help" in ARGV:
+        violation("subcommand --help acts on agy")
+    if MODE == "old":
+        violation("plugin argv sent to a CLI whose help lacks the subcommand")
+    config = os.path.join(STATE_HOME, ".gemini", "config")
+    reg_path = os.path.join(config, "fake-registry.json")
+    reg = read_json(reg_path, {})
+    a = ARGV
+    if a[:2] == ["plugin", "install"] and len(a) == 3:
+        src = a[2]
+        check_source(src)
+        manifest = read_json(os.path.join(src, ".antigravity-plugin", "plugin.json"), {})
+        name = manifest["name"]
+        dest = os.path.join(config, "plugins", name)
+        if MODE == "install_fail":
+            sys.stderr.write("fake install failure\n")
+            sys.exit(1)
+        if not (MODE == "no_refresh" and os.path.isdir(dest)):
+            copy_plugin(src, dest)
+        reg[name] = {"version": manifest["version"], "path": dest}
+        write_json(reg_path, reg)
+        print("  [ok]    %s\n          Installed to %s" % (name, dest))
+        return
+    if a == ["plugin", "list", "--json"]:
+        rows = []
+        for name, rec in reg.items():
+            names = skills(rec["path"])
+            if MODE == "discovery_short":
+                names = names[:-1]
+            rows.append({"name": name, "enabled": True, "version": rec["version"], "source": "antigravity",
+                         "path": rec["path"], "skills": names, "agents": [], "hooks": []})
+        return out(rows)
+    if a[:2] == ["plugin", "uninstall"] and len(a) == 3:
+        rec = reg.get(a[2])
+        if rec is not None and MODE != "keep_record":
+            reg.pop(a[2])
+            shutil.rmtree(rec["path"], ignore_errors=True)
+            write_json(reg_path, reg)
+        if MODE == "clobber_settings":
+            with open(os.path.join(STATE_HOME, ".gemini", "agentic-native-lifecycle-sentinel.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("")
+        print('Uninstalled plugin "%s"' % a[2])
+        return
+    violation("argv outside the agy allowlist")
+
+
+{"claude": claude, "codex": codex, "grok": grok, "kimi": kimi, "agy": agy}[NAME]()
 '''
 
 
@@ -725,7 +793,7 @@ class FakeCliLifecycleTests(unittest.TestCase):
         for folder in (self.fakebin, self.scratch, self.pretend_home):
             folder.mkdir()
         self.package = build_package(self.base)
-        for name in ("claude", "codex", "grok", "kimi"):
+        for name in CLI.values():
             install_fake(self.fakebin, name)
 
     def tearDown(self):
@@ -775,12 +843,13 @@ class FakeCliLifecycleTests(unittest.TestCase):
     def test_all_platforms_pass_and_exit_zero(self):
         proc = self.run_checker("--platform", "all")
         self.assertEqual(self.lines(proc), ["native_claude=passed", "native_codex=passed", "native_grok=passed",
-                                            "native_kimi=passed", "native_zcode=not-run:no_headless_installer"],
+                                            "native_kimi=passed", "native_zcode=not-run:no_headless_installer",
+                                            "native_antigravity=passed"],
                          proc.stderr[-3000:])
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(self.violations(), "")
         clis = {call["cli"] for call in self.calls()}
-        self.assertEqual(clis, {"claude", "codex", "grok", "kimi"})
+        self.assertEqual(clis, {"claude", "codex", "grok", "kimi", "agy"})
 
     def test_default_platform_is_all(self):
         proc = self.run_checker()
@@ -790,7 +859,7 @@ class FakeCliLifecycleTests(unittest.TestCase):
     def test_only_plugin_management_argv_reaches_the_clis(self):
         self.run_checker("--platform", "all")
         allowed_heads = {"claude": {("plugin",)}, "codex": {("plugin",), ("app-server",)},
-                         "grok": {("plugin",), ("inspect",)}, "kimi": {("web",)}}
+                         "grok": {("plugin",), ("inspect",)}, "kimi": {("web",)}, "agy": {("plugin",)}}
         for call in self.calls():
             with self.subTest(cli=call["cli"], argv=call["argv"]):
                 self.assertIn(tuple(call["argv"][:1]), allowed_heads[call["cli"]])
@@ -825,34 +894,54 @@ class FakeCliLifecycleTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
 
     def test_discovery_count_is_verified_per_platform(self):
-        expected = {"claude": 4, "codex": 4, "grok": 4, "kimi": 3}
+        # agy lists skill directories only; a migrated command is not among its `skills`.
+        expected = {"claude": 4, "codex": 4, "grok": 4, "kimi": 3, "antigravity": 3}
         for platform, count in expected.items():
             with self.subTest(platform=platform):
-                proc = self.run_checker("--platform", platform, modes={platform: "discovery_short"})
+                proc = self.run_checker("--platform", platform, modes={CLI[platform]: "discovery_short"})
                 self.assertEqual(self.lines(proc), ["native_%s=failed:discovery_mismatch:expected=%d,got=%d"
                                                     % (platform, count, count - 1)], proc.stderr[-2000:])
                 self.assertEqual(proc.returncode, 1)
 
     def test_refresh_must_replace_the_installed_bytes(self):
-        for platform in ("claude", "codex", "grok", "kimi"):
+        for platform in ("claude", "codex", "grok", "kimi", "antigravity"):
             with self.subTest(platform=platform):
-                proc = self.run_checker("--platform", platform, modes={platform: "no_refresh"})
+                proc = self.run_checker("--platform", platform, modes={CLI[platform]: "no_refresh"})
                 self.assertEqual(self.lines(proc), ["native_%s=failed:refresh_not_applied" % platform],
                                  proc.stderr[-2000:])
 
     def test_uninstall_must_remove_the_plugin_record(self):
-        for platform in ("claude", "codex", "grok", "kimi"):
+        for platform in ("claude", "codex", "grok", "kimi", "antigravity"):
             with self.subTest(platform=platform):
-                proc = self.run_checker("--platform", platform, modes={platform: "keep_record"})
+                proc = self.run_checker("--platform", platform, modes={CLI[platform]: "keep_record"})
                 self.assertEqual(self.lines(proc), ["native_%s=failed:record_not_removed" % platform],
                                  proc.stderr[-2000:])
 
     def test_unrelated_sentinel_setting_must_survive(self):
-        for platform in ("claude", "codex", "grok", "kimi"):
+        for platform in ("claude", "codex", "grok", "kimi", "antigravity"):
             with self.subTest(platform=platform):
-                proc = self.run_checker("--platform", platform, modes={platform: "clobber_settings"})
+                proc = self.run_checker("--platform", platform, modes={CLI[platform]: "clobber_settings"})
                 self.assertEqual(self.lines(proc), ["native_%s=failed:sentinel_lost" % platform],
                                  proc.stderr[-2000:])
+
+    def test_antigravity_failures_are_reported(self):
+        proc = self.run_checker("--platform", "antigravity", modes={"agy": "install_fail"})
+        self.assertEqual(self.lines(proc), ["native_antigravity=failed:install_failed"])
+        self.assertEqual(proc.returncode, 1)
+
+    def test_antigravity_without_agy_is_not_run_unless_required(self):
+        (self.fakebin / "agy").unlink()
+        proc = self.run_checker("--platform", "antigravity")
+        self.assertEqual(self.lines(proc), ["native_antigravity=not-run:agy_missing"])
+        self.assertEqual(proc.returncode, 0)
+        proc = self.run_checker("--platform", "antigravity", "--require", "antigravity")
+        self.assertEqual(proc.returncode, 1)
+
+    def test_antigravity_without_its_manifest_is_not_run(self):
+        shutil.rmtree(self.package / ".antigravity-plugin")
+        proc = self.run_checker("--platform", "antigravity")
+        self.assertEqual(self.lines(proc), ["native_antigravity=not-run:no_platform_manifest"])
+        self.assertEqual(self.violations(), "")
 
     def test_absent_cli_is_not_run_unless_required(self):
         (self.fakebin / "kimi").unlink()
@@ -863,9 +952,9 @@ class FakeCliLifecycleTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
 
     def test_old_cli_is_not_run_and_never_receives_plugin_argv(self):
-        for platform in ("claude", "codex", "grok", "kimi"):
+        for platform in ("claude", "codex", "grok", "kimi", "antigravity"):
             with self.subTest(platform=platform):
-                proc = self.run_checker("--platform", platform, modes={platform: "old"})
+                proc = self.run_checker("--platform", platform, modes={CLI[platform]: "old"})
                 self.assertEqual(self.lines(proc), ["native_%s=not-run:cli_too_old" % platform])
                 self.assertEqual(proc.returncode, 0)
                 self.assertEqual(self.violations(), "")
@@ -898,9 +987,10 @@ class FakeCliLifecycleTests(unittest.TestCase):
             identity.append(user)
         runs = [
             self.run_checker("--platform", "all", modes={"claude": "install_fail", "codex": "discovery_short",
-                                                         "grok": "keep_record", "kimi": "needs_login"}),
+                                                         "grok": "keep_record", "kimi": "needs_login",
+                                                         "agy": "install_fail"}),
             self.run_checker("--platform", "all", modes={"claude": "no_refresh", "codex": "clobber_settings",
-                                                         "grok": "old", "kimi": "no_server"}),
+                                                         "grok": "old", "kimi": "no_server", "agy": "no_refresh"}),
         ]
         for proc in runs:
             self.assertEqual(len(self.lines(proc)), len(PLATFORMS))
@@ -983,12 +1073,14 @@ def _real_profile_files(platform):
         "codex": Path(os.environ.get("CODEX_HOME") or home / ".codex"),
         "grok": Path(os.environ.get("GROK_HOME") or home / ".grok"),
         "kimi": Path(os.environ.get("KIMI_CODE_HOME") or home / ".kimi-code"),
+        "antigravity": home / ".gemini" / "config",
     }
     names = {
         "claude": ("settings.json", "plugins/installed_plugins.json", "plugins/known_marketplaces.json"),
         "codex": ("config.toml",),
         "grok": ("config.toml", "installed-plugins/registry.json"),
         "kimi": ("plugins/installed.json", "tui.toml"),
+        "antigravity": ("config.json", "import_manifest.json", "plugins"),
     }
     return [roots[platform] / name for name in names[platform]]
 
@@ -1014,7 +1106,7 @@ class RealCliLifecycleTests(unittest.TestCase):
     def _run_real(self, platform):
         checker = load_checker()
         try:
-            checker.resolve_cli(platform)
+            checker.resolve_cli(checker.CLI_NAMES.get(platform, platform))
         except checker.NotRun as exc:
             self.skipTest("REAL %s CLI not usable here (%s); native lifecycle not verified" % (platform, exc.reason))
         before = _snapshot(_real_profile_files(platform))
@@ -1039,6 +1131,9 @@ class RealCliLifecycleTests(unittest.TestCase):
 
     def test_real_kimi_cli_lifecycle(self):
         self._run_real("kimi")
+
+    def test_real_antigravity_cli_lifecycle(self):
+        self._run_real("antigravity")
 
 
 # --- Direct native layer (no checker) ---
@@ -1509,6 +1604,54 @@ class OptionalNativeLifecycleTests(unittest.TestCase):
             self.assertFalse(any(row.get("name") == "agentic-sdlc" for row in json.loads(plugin("list", "--json").stdout)))
             preserved()
             self.assertFalse((profile / "sessions").exists())
+
+
+class AntigravityWorkflowTests(unittest.TestCase):
+    """The manual agy workflow: it installs an unpinned, self-updating CLI, so it stays out of ci.yml."""
+
+    WORKFLOW = REPO / ".github" / "workflows" / "native-lifecycle-linux-agy.yml"
+
+    def setUp(self):
+        self.text = self.WORKFLOW.read_text(encoding="utf-8")
+
+    def test_manual_dispatch_only_with_read_permission(self):
+        self.assertRegex(self.text, r"(?m)^on:\n  workflow_dispatch:\n\n")
+        for trigger in ("push:", "pull_request", "schedule:"):
+            self.assertNotIn(trigger, self.text)
+        self.assertRegex(self.text, r"(?m)^permissions:\n  contents: read\n")
+        self.assertIn("persist-credentials: false", self.text)
+
+    def test_actions_use_the_same_pins_as_the_other_native_workflows(self):
+        zcode = (REPO / ".github" / "workflows" / "native-lifecycle-linux-zcode.yml").read_text(encoding="utf-8")
+        pins = set(re.findall(r"uses: (\S+@[0-9a-f]{40})", self.text))
+        self.assertTrue(pins)
+        self.assertLessEqual(pins, set(re.findall(r"uses: (\S+@[0-9a-f]{40})", zcode)))
+        self.assertNotRegex(self.text, r"uses: \S+@(?![0-9a-f]{40}\b)")
+
+    def test_steps_install_build_validate_and_run_the_lifecycle(self):
+        for required in (
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+            "agy --version",
+            # The run log identifies the agy binary bytes that ran (the installer is unpinned).
+            'sha256sum "$(command -v agy)"',
+            "python3 scripts/build_release.py --output \"$RUNNER_TEMP/agy.zip\" --antigravity",
+            "python3 scripts/build_release.py --verify \"$RUNNER_TEMP/agy.zip\"",
+            "agy plugin validate --json",
+            "only the first 24000 are loaded",
+            "skills/agentic-sdlc-pipeline/SKILL.md",
+            "python3 scripts/check_native_lifecycle.py --package \"$RUNNER_TEMP/package\" "
+            "--platform antigravity --require antigravity",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, self.text)
+        self.assertNotIn("-p ", self.text.replace("mkdir -p ", ""))
+        self.assertNotIn("GEMINI_API_KEY", self.text)
+        self.assertNotIn("secrets.", self.text)
+
+    def test_the_required_ci_does_not_install_agy(self):
+        ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertNotIn("antigravity.google/cli/install.sh", ci)
+        self.assertNotIn("--platform antigravity", ci)
 
 
 if __name__ == "__main__":
