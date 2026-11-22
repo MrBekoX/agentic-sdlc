@@ -26,7 +26,9 @@ DMG）和 Linux（x64 AppImage）版本。
    （Claude 目录），因此查找顺序文档未记载。现有一次原生观察（兼容性矩阵 E36，2026-11-22）：
    ZCode 桌面版 3.14.5 附带的 agent CLI 0.16.9 以 GitHub 源 `MrBekoX/agentic-sdlc` 添加时，
    读取的是 `.claude-plugin/marketplace.json`；其查找顺序为显式文件、`.claude-plugin/marketplace.json`、
-   根目录 `marketplace.json`。安装仍然成功（插件清单优先查找 `.zcode-plugin/plugin.json`），
+   根目录 `marketplace.json`。同日阅读附带的 `zcode.cjs` 可见，agent CLI 0.16.9 对目录、Git 与 GitHub
+   源以及目录的 `plugins validate` 都使用同一查找，因此以仓库根目录作为目录源同样会得到 Claude 目录卡片；
+   实际运行的仅有 GitHub 源。安装仍然成功（插件清单优先查找 `.zcode-plugin/plugin.json`），
    但 ZCode 专有的目录字段（类别、标签、翻译）只在根目录文件中。桌面 GUI 的添加流程未经驱动，
    因此以文件源指定根目录 `marketplace.json` 仍是文档化的途径。ZCode 会在添加前进行校验。
 3. 请先查看下方「信任与副作用」中的 Hook 表：新安装的插件**默认即启用**，其 Hook 会立即

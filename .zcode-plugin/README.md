@@ -32,7 +32,10 @@ Windows (x64/ARM64), macOS (Apple Silicon/Intel DMG) and Linux (x64 AppImage).
    the agent CLI 0.16.9 bundled with ZCode desktop 3.14.5, given the GitHub source
    `MrBekoX/agentic-sdlc`, read `.claude-plugin/marketplace.json` first; its lookup tries
    an explicit file, then `.claude-plugin/marketplace.json`, then the root
-   `marketplace.json`. The install still worked (the plugin manifest lookup takes
+   `marketplace.json`. A reading of the bundled `zcode.cjs` (same day) shows the agent CLI
+   0.16.9 uses that one lookup for directory, Git and GitHub sources and for `plugins
+   validate` of a directory, so a directory source at the repository root also yields the
+   Claude catalog card; only the GitHub source was run. The install still worked (the plugin manifest lookup takes
    `.zcode-plugin/plugin.json` first), but the ZCode-only catalog fields (category, tags,
    translations) come from the root file only. The desktop GUI add flow was not driven,
    so a file source naming the root `marketplace.json` stays the documented route. ZCode

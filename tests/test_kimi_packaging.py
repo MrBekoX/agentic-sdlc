@@ -427,6 +427,22 @@ class TestKimiNativeHookEvidenceIsRecorded(unittest.TestCase):
             self.assertIn("2.7.2", rows[row_id])
             self.assertIn(result, rows[row_id])
 
+    def test_warn_mode_claim_matches_a_commit_that_succeeded(self):
+        # The first warn turn stopped at git's missing author identity after the hook allowed the
+        # call; the claim stands only on the re-run with a repo-local identity, where the commit
+        # succeeded. The GitHub-URL provenance (source, ref, installed sha) is recorded in E30.
+        readme = " ".join((REPO / ".kimi-plugin" / "README.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("the warned commit ran and", readme)
+        self.assertIn("repo-local Git identity", readme)
+        log = (REPO / "docs" / "publication" / "compatibility-matrix.md").read_text(encoding="utf-8")
+        rows = {r.split("|")[1].strip(): r for r in log.split("## Evidence log", 1)[1].splitlines()
+                if r.startswith("| E")}
+        self.assertIn("user.email", rows["E31"])
+        self.assertIn("succeeded on `main`", rows["E31"])
+        for field in ("original_source", "installed_sha", "0e93e820032a84a7535f20521e6b37a270cb3e42",
+                      "GET /api/v1/plugins/agentic-sdlc"):
+            self.assertIn(field, rows["E30"])
+
 
 class TestAdapterFilesKeepHouseContracts(unittest.TestCase):
     def test_no_root_portable_manifest_and_no_auto_discovered_hook_file(self):

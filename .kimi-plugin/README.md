@@ -114,8 +114,8 @@ checks. Guards read `tool_input.command` and local Git state, and can return
 `hookSpecificOutput.permissionDecision: "deny"`. Branch warning/block behavior
 follows the configured house policy; Kimi shows only blocking decisions, so warn-mode
 messages are not visible there (Kimi reads a top-level `message`, and the warning is in
-`systemMessage`; in a live 2.7.2 turn the warned commit ran and no warning reached the
-model, E31). Hook errors fail open, so Node availability
+`systemMessage`; in a live 2.7.2 turn with a repo-local Git identity the warned commit
+succeeded on `main` and no warning text reached the next model request, E31). Hook errors fail open, so Node availability
 is required. No MCP server or network integration is declared.
 
 Write scanning and Claude/Codex transcript-based Stop/flow readers remain
