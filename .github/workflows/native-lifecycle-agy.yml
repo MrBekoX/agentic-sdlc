@@ -1,0 +1,143 @@
+name: Native lifecycle (Google Antigravity on Linux, Windows and macOS)
+
+# Manual only. Each runner downloads one pinned agy build from its versioned release URL and checks
+# it against a pinned sha512 before it runs; no installer script is fetched or piped to a shell.
+# The pins come from the release manifests the official installer reads
+# (https://antigravity.google/cli/install.sh -> <updater>/manifests/<platform>.json, fetched
+# 2026-11-22: agy 1.5.14). agy's background self-update is turned off with
+# AGY_CLI_DISABLE_AUTO_UPDATE=true (the only value agy 1.5.14 honours), and the last step fails the
+# job if the binary's version or bytes changed anyway. The job builds the agy package, runs
+# `agy plugin validate --json` (no error and no warning), and drives
+# scripts/check_native_lifecycle.py --platform antigravity in an isolated HOME/USERPROFILE.
+# No login, no secret and no model prompt is used, so no live agent turn runs here. The result
+# lines feed the Antigravity rows of docs/publication/compatibility-matrix.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AGY_CLI_DISABLE_AUTO_UPDATE: "true"
+
+jobs:
+  agy:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            agy_url: https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.14-5302690847260672/linux-x64/cli_linux_x64.tar.gz
+            agy_sha512: 83311d3f354567612dc16c1ae2ea9b503d6f6833aa4e138d39aa229da3f3bb99b0e4d7cca0bce4796b0060d6a51d8113eb7449ed5dc0e7900bf217107ea5bff9
+          # macos-15 is Apple Silicon, so it takes the darwin arm64 build.
+          - os: macos-15
+            agy_url: https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.14-5302690847260672/darwin-arm/cli_mac_arm64.tar.gz
+            agy_sha512: 26830fd46bfb9200d073cf3e71bf94b707552557b4380ec01afd6e99f3a2b030e65422dab1867f77318078692defc859a7547d17ec4b0b1e9369f13c9c3caea6
+          - os: windows-2025
+            agy_url: https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.14-5302690847260672/windows-x64/cli_windows_x64.exe
+            agy_sha512: 785548b23242ec9112759bb4b525d94a3d4d2e9868e5cedb9ea34e5ce01dbb00abf5de66c41d8f4903e8a4379445f685483f999ece91867bfbd9d4812760d835
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      AGY_VERSION: "1.5.14"
+      AGY_URL: ${{ matrix.agy_url }}
+      AGY_SHA512: ${{ matrix.agy_sha512 }}
+    steps:
+      # Same pins as ci.yml; Dependabot keeps the SHA and the version comment current.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install the pinned agy (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/agy-download" "$RUNNER_TEMP/agy-bin"
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/agy-download/agy.tar.gz" "$AGY_URL"
+          echo "$AGY_SHA512  $RUNNER_TEMP/agy-download/agy.tar.gz" | sha512sum -c -
+          tar -xzf "$RUNNER_TEMP/agy-download/agy.tar.gz" -C "$RUNNER_TEMP/agy-download" antigravity
+          mv "$RUNNER_TEMP/agy-download/antigravity" "$RUNNER_TEMP/agy-bin/agy"
+          chmod 755 "$RUNNER_TEMP/agy-bin/agy"
+          echo "$RUNNER_TEMP/agy-bin" >> "$GITHUB_PATH"
+      - name: Install the pinned agy (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/agy-download" "$RUNNER_TEMP/agy-bin"
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/agy-download/agy.tar.gz" "$AGY_URL"
+          echo "$AGY_SHA512  $RUNNER_TEMP/agy-download/agy.tar.gz" | shasum -a 512 -c -
+          tar -xzf "$RUNNER_TEMP/agy-download/agy.tar.gz" -C "$RUNNER_TEMP/agy-download" antigravity
+          mv "$RUNNER_TEMP/agy-download/antigravity" "$RUNNER_TEMP/agy-bin/agy"
+          chmod 755 "$RUNNER_TEMP/agy-bin/agy"
+          echo "$RUNNER_TEMP/agy-bin" >> "$GITHUB_PATH"
+      - name: Install the pinned agy (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:RUNNER_TEMP 'agy-bin'
+          New-Item -ItemType Directory -Force -Path $bin | Out-Null
+          $exe = Join-Path $bin 'agy.exe'
+          curl.exe --proto '=https' --tlsv1.2 -fsSL -o $exe $env:AGY_URL
+          if ($LASTEXITCODE -ne 0) { throw "download failed" }
+          $hash = (Get-FileHash -Algorithm SHA512 -LiteralPath $exe).Hash.ToLowerInvariant()
+          if ($hash -ne $env:AGY_SHA512) {
+            Remove-Item -LiteralPath $exe
+            throw "sha512 mismatch: got $hash"
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+      - name: Record the agy version and binary hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(agy --version)" = "$AGY_VERSION"
+          python3 -c "import hashlib,shutil,sys; p=shutil.which('agy'); d=hashlib.sha256(open(p,'rb').read()).hexdigest(); print(d)" \
+            > "$RUNNER_TEMP/agy-binary.sha256"
+          echo "agy $(agy --version) sha256 $(cat "$RUNNER_TEMP/agy-binary.sha256")"
+      - name: Build and verify the Antigravity package
+        shell: bash
+        run: |
+          python3 scripts/build_release.py --output "$RUNNER_TEMP/agy.zip" --antigravity
+          python3 scripts/build_release.py --verify "$RUNNER_TEMP/agy.zip"
+          python3 -m zipfile -e "$RUNNER_TEMP/agy.zip" "$RUNNER_TEMP/package"
+      - name: Validate the package with agy
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/validate-home"
+          HOME="$RUNNER_TEMP/validate-home" USERPROFILE="$RUNNER_TEMP/validate-home" \
+            agy plugin validate --json "$RUNNER_TEMP/package" > "$RUNNER_TEMP/validate.json" || true
+          python3 - "$RUNNER_TEMP/validate.json" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          problems = [f for f in report.get("findings", []) if f.get("severity") in ("error", "warning")]
+          components = report.get("components", {})
+          print("validate_components=" + json.dumps(components, sort_keys=True))
+          for finding in problems:
+              print("validate_problem=" + json.dumps(finding, sort_keys=True))
+          expected = {"skills": 16, "agents": 11, "hooks": 1}
+          if problems or report.get("manifest") != ".antigravity-plugin/plugin.json" or any(
+                  components.get(key) != value for key, value in expected.items()):
+              sys.exit(1)
+          PY
+      - name: Native install, reinstall and uninstall
+        shell: bash
+        run: python3 scripts/check_native_lifecycle.py --package "$RUNNER_TEMP/package" --platform antigravity --require antigravity
+      - name: Check that agy did not update itself
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/agy-binary.sha256" || exit 0
+          now="$(agy --version)"
+          sum="$(python3 -c "import hashlib,shutil; print(hashlib.sha256(open(shutil.which('agy'),'rb').read()).hexdigest())")"
+          echo "agy_version_after=$now"
+          if [ "$now" != "$AGY_VERSION" ] || [ "$sum" != "$(cat "$RUNNER_TEMP/agy-binary.sha256")" ]; then
+            echo "agy changed during the run (self-update)"; exit 1
+          fi

@@ -70,6 +70,7 @@ ALLOWED_CHILD_ENV = {
     "XDG_CACHE_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "KIMI_CODE_HOME",
     "DISABLE_AUTOUPDATER", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING",
     "GROK_DISABLE_AUTOUPDATER", "GROK_TELEMETRY_ENABLED", "KIMI_DISABLE_TELEMETRY",
+    "AGY_CLI_DISABLE_AUTO_UPDATE",
 }
 HOME_VARS = ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
              "XDG_CACHE_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "KIMI_CODE_HOME",
@@ -531,8 +532,16 @@ Commands:
 def agy():
     # agy 1.5.14 subcommands act on a trailing `--help` (`uninstall --help` uninstalls a plugin named
     # "--help"), so only `agy plugin --help` may be probed.
+    if os.environ.get("AGY_CLI_DISABLE_AUTO_UPDATE") != "true":
+        violation("agy started without its self-update disabled")
     if ARGV == ["plugin", "--help"]:
-        print("Usage: agy [options] [prompt]\n" if MODE == "old" else AGY_PLUGIN_USAGE)
+        if MODE == "old":
+            print("Usage: agy [options] [prompt]\n")
+        elif MODE == "exe_usage":
+            # A Go binary names itself after argv[0]: agy.exe on Windows prints "Usage: agy.exe plugin".
+            print(AGY_PLUGIN_USAGE.replace("Usage: agy plugin", "Usage: agy.exe plugin"))
+        else:
+            print(AGY_PLUGIN_USAGE)
         sys.exit(0)
     if "--help" in ARGV:
         violation("subcommand --help acts on agy")
@@ -777,6 +786,11 @@ class ChildEnvironmentTests(unittest.TestCase):
             self.assertEqual(env["LANG"], "C.UTF-8")
             self.assertEqual(env["DISABLE_AUTOUPDATER"], "1")
             self.assertEqual(env["KIMI_DISABLE_TELEMETRY"], "1")
+            # agy 1.5.14 honours only the exact value "true" (log: "Auto-update disabled via
+            # environment variable AGY_CLI_DISABLE_AUTO_UPDATE"; "1", "TRUE" and "yes" still spawn it).
+            self.assertEqual(env["AGY_CLI_DISABLE_AUTO_UPDATE"], "true")
+            # agy reads its profile from HOME on Linux/macOS and USERPROFILE on Windows.
+            self.assertEqual(env["HOME"], env["USERPROFILE"])
 
 
 @unittest.skipIf(sys.platform == "win32",
@@ -928,6 +942,12 @@ class FakeCliLifecycleTests(unittest.TestCase):
         proc = self.run_checker("--platform", "antigravity", modes={"agy": "install_fail"})
         self.assertEqual(self.lines(proc), ["native_antigravity=failed:install_failed"])
         self.assertEqual(proc.returncode, 1)
+
+    def test_antigravity_accepts_the_windows_program_name_in_its_usage(self):
+        proc = self.run_checker("--platform", "antigravity", "--require", "antigravity",
+                                modes={"agy": "exe_usage"})
+        self.assertEqual(self.lines(proc), ["native_antigravity=passed"], proc.stderr[-2000:])
+        self.assertEqual(proc.returncode, 0)
 
     def test_antigravity_without_agy_is_not_run_unless_required(self):
         (self.fakebin / "agy").unlink()
@@ -1607,12 +1627,29 @@ class OptionalNativeLifecycleTests(unittest.TestCase):
 
 
 class AntigravityWorkflowTests(unittest.TestCase):
-    """The manual agy workflow: it installs an unpinned, self-updating CLI, so it stays out of ci.yml."""
+    """The manual three-OS agy workflow: a pinned, hash-checked CLI, kept out of ci.yml."""
 
-    WORKFLOW = REPO / ".github" / "workflows" / "native-lifecycle-linux-agy.yml"
+    WORKFLOW = REPO / ".github" / "workflows" / "native-lifecycle-agy.yml"
+    # From the official installer's release manifests (antigravity.google/cli/install.sh reads
+    # <updater>/manifests/<platform>.json), fetched 2026-11-22: agy 1.5.14.
+    PINS = {
+        "ubuntu-24.04": ("linux-x64/cli_linux_x64.tar.gz",
+                         "83311d3f354567612dc16c1ae2ea9b503d6f6833aa4e138d39aa229da3f3bb99"
+                         "b0e4d7cca0bce4796b0060d6a51d8113eb7449ed5dc0e7900bf217107ea5bff9"),
+        "macos-15": ("darwin-arm/cli_mac_arm64.tar.gz",
+                     "26830fd46bfb9200d073cf3e71bf94b707552557b4380ec01afd6e99f3a2b030"
+                     "e65422dab1867f77318078692defc859a7547d17ec4b0b1e9369f13c9c3caea6"),
+        "windows-2025": ("windows-x64/cli_windows_x64.exe",
+                         "785548b23242ec9112759bb4b525d94a3d4d2e9868e5cedb9ea34e5ce01dbb00"
+                         "abf5de66c41d8f4903e8a4379445f685483f999ece91867bfbd9d4812760d835"),
+    }
+    BASE = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.14-5302690847260672/"
 
     def setUp(self):
         self.text = self.WORKFLOW.read_text(encoding="utf-8")
+
+    def test_the_linux_only_workflow_was_replaced(self):
+        self.assertFalse((REPO / ".github" / "workflows" / "native-lifecycle-linux-agy.yml").exists())
 
     def test_manual_dispatch_only_with_read_permission(self):
         self.assertRegex(self.text, r"(?m)^on:\n  workflow_dispatch:\n\n")
@@ -1628,22 +1665,70 @@ class AntigravityWorkflowTests(unittest.TestCase):
         self.assertLessEqual(pins, set(re.findall(r"uses: (\S+@[0-9a-f]{40})", zcode)))
         self.assertNotRegex(self.text, r"uses: \S+@(?![0-9a-f]{40}\b)")
 
-    def test_steps_install_build_validate_and_run_the_lifecycle(self):
+    def test_matrix_runs_linux_windows_and_macos_without_cancelling_the_others(self):
+        self.assertIn("runs-on: ${{ matrix.os }}", self.text)
+        self.assertIn("fail-fast: false", self.text)
+        for runner in self.PINS:
+            with self.subTest(runner=runner):
+                self.assertRegex(self.text, r"(?m)^\s+- os: %s$" % re.escape(runner))
+
+    def test_each_runner_downloads_a_pinned_versioned_url_with_a_pinned_sha512(self):
+        for runner, (artifact, sha512) in self.PINS.items():
+            with self.subTest(runner=runner):
+                block = re.search(r"(?ms)^\s+- os: %s$(.*?)(?=^\s+- os: |^    runs-on:)" % re.escape(runner),
+                                  self.text)
+                self.assertIsNotNone(block, runner)
+                self.assertIn("agy_url: " + self.BASE + artifact, block.group(1))
+                self.assertIn("agy_sha512: " + sha512, block.group(1))
+        self.assertIn('AGY_VERSION: "1.5.14"', self.text)
+
+    def test_no_installer_script_and_nothing_is_piped_to_a_shell(self):
+        # The installer script is named as the pins' source only; it is never downloaded or run.
+        self.assertNotRegex(self.text, r"(?im)^(?!\s*#).*install\.sh")
+        self.assertNotRegex(self.text, r"\|\s*(?:ba|z)?sh\b")
+        self.assertNotRegex(self.text, r"(?i)\|\s*(?:iex|invoke-expression)\b")
+        self.assertNotRegex(self.text, r"(?i)\biex\b|invoke-expression|irm\b")
+
+    def test_the_download_is_hash_checked_before_it_runs(self):
+        # Linux sha512sum, macOS shasum -a 512, Windows Get-FileHash; each step fails on a mismatch
+        # before the binary is extracted or run.
+        for required in ('sha512sum -c -', "shasum -a 512 -c -",
+                         "Get-FileHash -Algorithm SHA512", "agy.exe", "tar -xzf",
+                         "antigravity"):
+            with self.subTest(required=required):
+                self.assertIn(required, self.text)
+        for step in ("Install the pinned agy (Linux)", "Install the pinned agy (macOS)",
+                     "Install the pinned agy (Windows)"):
+            body = self.text.split("name: " + step, 1)[1].split("- name:", 1)[0]
+            with self.subTest(step=step):
+                self.assertIn("curl", body)
+                self.assertIn("--proto '=https'" if "Windows" not in step else "curl.exe", body)
+                self.assertNotIn("install", body.replace("Install the pinned", ""))
+                verify = body.index("512")
+                self.assertLess(verify, body.index("agy --version") if "agy --version" in body else len(body))
+
+    def test_self_update_is_disabled_and_the_version_is_checked_after_the_run(self):
+        self.assertRegex(self.text, r'(?m)^  AGY_CLI_DISABLE_AUTO_UPDATE: "true"$')
+        self.assertIn("Check that agy did not update itself", self.text)
+        tail = self.text.split("Check that agy did not update itself", 1)[1]
+        self.assertIn("if: always()", tail.split("run:", 1)[0])
+        self.assertIn("agy --version", tail)
+        self.assertIn("$AGY_VERSION", tail)
+        self.assertIn("agy-binary.sha256", self.text)
+
+    def test_steps_build_validate_strictly_and_run_the_lifecycle(self):
         for required in (
-            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-            "agy --version",
-            # The run log identifies the agy binary bytes that ran (the installer is unpinned).
-            'sha256sum "$(command -v agy)"',
             "python3 scripts/build_release.py --output \"$RUNNER_TEMP/agy.zip\" --antigravity",
             "python3 scripts/build_release.py --verify \"$RUNNER_TEMP/agy.zip\"",
             "agy plugin validate --json",
-            "only the first 24000 are loaded",
-            "skills/agentic-sdlc-pipeline/SKILL.md",
+            'USERPROFILE="$RUNNER_TEMP/validate-home"',
             "python3 scripts/check_native_lifecycle.py --package \"$RUNNER_TEMP/package\" "
             "--platform antigravity --require antigravity",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, self.text)
+        # The pipeline skill is split for agy, so a truncation warning is no longer allow-listed.
+        self.assertNotIn("only the first 24000 are loaded", self.text)
         self.assertNotIn("-p ", self.text.replace("mkdir -p ", ""))
         self.assertNotIn("GEMINI_API_KEY", self.text)
         self.assertNotIn("secrets.", self.text)
@@ -1651,7 +1736,27 @@ class AntigravityWorkflowTests(unittest.TestCase):
     def test_the_required_ci_does_not_install_agy(self):
         ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertNotIn("antigravity.google/cli/install.sh", ci)
+        self.assertNotIn("antigravity-cli", ci)
         self.assertNotIn("--platform antigravity", ci)
+
+    def test_docs_name_the_three_os_workflow(self):
+        for rel in ("docs/testing.md", "docs/runtime-adapter.md", "docs/publication/compatibility-matrix.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            with self.subTest(doc=rel):
+                self.assertNotIn("native-lifecycle-linux-agy.yml", text)
+                self.assertIn("native-lifecycle-agy.yml", text)
+
+    def test_evidence_rows_record_the_main_run_the_pin_and_the_interactive_probe(self):
+        matrix = (REPO / "docs" / "publication" / "compatibility-matrix.md").read_text(encoding="utf-8")
+        for required in ("run 45019470314", "pinned_install=passed", "interactive_probe=recorded",
+                         "Auto-update disabled via environment variable AGY_CLI_DISABLE_AUTO_UPDATE"):
+            with self.subTest(required=required):
+                self.assertIn(required, matrix)
+        for rel in ("README.md", "docs/publication/multi-platform-distribution.md"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            with self.subTest(doc=rel):
+                self.assertIn("AGY_CLI_DISABLE_AUTO_UPDATE=true", text)
+                self.assertIn("native-lifecycle-agy.yml", text)
 
 
 if __name__ == "__main__":
