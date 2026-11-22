@@ -3,7 +3,7 @@
     "enabled": true,
     "PreToolUse": [
       {
-        "matcher": "run_command",
+        "matcher": "run_command|manage_task|run_workflow",
         "hooks": [
           {
             "type": "command",
@@ -28,6 +28,16 @@
           {
             "type": "command",
             "command": "node ./hooks/agy-launch.mjs --event PreToolUse --handler scan-write.mjs",
+            "timeout": 25
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/agy-launch.mjs --event PreToolUse --handler scan-tool-args.mjs",
             "timeout": 25
           }
         ]

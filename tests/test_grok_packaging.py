@@ -12,6 +12,7 @@ entry; these tests independently bind their values to VERSION.
 """
 import importlib.util
 import json
+import os
 import subprocess
 import shutil
 import re
@@ -286,6 +287,126 @@ def load_lifecycle_checker():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+                   cwd=str(cwd), check=True, capture_output=True)
+
+
+def make_protected_repo(root, stage_secret=False):
+    """A throwaway Git repository on `main` with one commit (and optionally a staged synthetic secret)."""
+    repo = Path(root) / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+    if stage_secret:
+        (repo / "config.txt").write_text('token = "%s"\n' % ("ghp_" + "a1B2" * 9), encoding="utf-8")
+        _git(repo, "add", "config.txt")
+    return repo
+
+
+def grok_pretooluse_decision(exit_code, stdout):
+    """The PreToolUse reply rules of the installed Grok 1.0.92 user guide (`10-hooks.md`, read
+    2026-11-22, compatibility matrix E32): a `deny` in `hookSpecificOutput.permissionDecision`
+    (or top-level `decision`) is honored at any exit code, and the nested value wins; its message
+    is `permissionDecisionReason`, else `reason`; exit 2 denies; a decision word outside
+    allow/deny/ask/defer (legacy approve/block) is a hook failure that fails open. The nested
+    decision is read for a reply whose `hookEventName` is absent, empty or `PreToolUse`."""
+    words = {"allow": "allow", "deny": "deny", "ask": "ask", "defer": "defer", "approve": "allow", "block": "deny"}
+    try:
+        reply = json.loads(stdout) if stdout.strip() else {}
+    except ValueError:
+        reply = None
+    if isinstance(reply, dict):
+        nested = reply.get("hookSpecificOutput") if isinstance(reply.get("hookSpecificOutput"), dict) else {}
+        if nested.get("hookEventName") not in (None, "", "PreToolUse"):
+            nested = {}
+        word = nested.get("permissionDecision", reply.get("decision"))
+        if word is not None:
+            if word not in words:
+                return {"decision": "deny" if exit_code == 2 else "allow", "failure": True}
+            reason = nested.get("permissionDecisionReason", reply.get("reason"))
+            return {"decision": words[word], "reason": reason}
+    return {"decision": "deny" if exit_code == 2 else "allow"}
+
+
+class TestGrokGuardOutputUnderTheDocumentedReplyRules(unittest.TestCase):
+    """The wired launchers, run as Grok runs them (argv from hooks-grok.json, GROK_PLUGIN_ROOT,
+    camelCase payload with the `run_terminal_command` tool), deny under Grok's reply rules. The same
+    three denials ("Hook denied: ...") were seen in live headless Grok 1.0.92 turns (E33)."""
+
+    def setUp(self):
+        if shutil.which("node") is None or shutil.which("git") is None:
+            self.skipTest("node and git are required to replay the Grok hooks")
+        self.commands = {command_script_basename(h["command"]): h["command"] for h in wired_hooks(read_json(GROK_HOOKS))}
+
+    def run_guard(self, script, command, block=False, stage_secret=False):
+        import shlex
+        with tempfile.TemporaryDirectory(prefix="grok-guard-") as tmp:
+            repo = make_protected_repo(tmp, stage_secret=stage_secret)
+            payload = {"hookEventName": "pre_tool_use", "hook_event_name": "PreToolUse", "sessionId": "s",
+                       "cwd": str(repo), "workspaceRoot": str(repo), "toolName": "run_terminal_command",
+                       "toolInput": {"command": command}, "toolUseId": "t", "toolInputTruncated": False}
+            env = {k: v for k, v in os.environ.items() if not k.startswith("AGENTIC_")}
+            env.update({"TMPDIR": tmp, "TEMP": tmp, "TMP": tmp, "GROK_PLUGIN_ROOT": str(REPO),
+                        "CLAUDE_PLUGIN_ROOT": str(REPO)})
+            if block:
+                env["AGENTIC_BRANCH_GUARD_BLOCK"] = "true"
+            proc = subprocess.run(shlex.split(self.commands[script]), cwd=str(repo), input=json.dumps(payload),
+                                  capture_output=True, text=True, encoding="utf-8", timeout=60, env=env)
+        return proc, grok_pretooluse_decision(proc.returncode, proc.stdout)
+
+    def assert_denies(self, script, command, expected, **kw):
+        proc, result = self.run_guard(script, command, **kw)
+        self.assertEqual(result["decision"], "deny", proc.stdout + proc.stderr)
+        self.assertIn(expected, result["reason"])
+
+    def test_destructive_guard_denies(self):
+        self.assert_denies("destructive-command-guard.mjs", "git reset --hard", "git-reset-hard")
+
+    def test_branch_guard_denies_in_block_mode(self):
+        self.assert_denies("branch-guard.mjs", "git commit --allow-empty -m x", "Protected branch 'main'", block=True)
+
+    def test_secret_scan_denies_a_staged_secret(self):
+        self.assert_denies("scan-commit.mjs", "git commit -m x", "possible secret", stage_secret=True)
+
+    def test_branch_warning_allows(self):
+        proc, result = self.run_guard("branch-guard.mjs", "git commit --allow-empty -m x")
+        self.assertEqual(result["decision"], "allow", proc.stdout)
+
+
+class TestGrokNativeHookEvidenceIsRecorded(unittest.TestCase):
+    """Hook registration and delivery of the three guards were observed natively on Grok 1.0.92
+    (compatibility matrix E32, E33); the docs must say so and name the folder-trust gate."""
+
+    def docs(self):
+        return {
+            ".grok-plugin/README.md": (REPO / ".grok-plugin" / "README.md").read_text(encoding="utf-8"),
+            "docs/runtime-adapter.md#Grok": (lambda t: t[t.index("\n## Grok CLI adapter"):t.index("\n## Kimi Code adapter")])(
+                (REPO / "docs" / "runtime-adapter.md").read_text(encoding="utf-8")),
+        }
+
+    def test_docs_cite_the_native_hook_evidence_and_the_trust_gate(self):
+        for name, text in self.docs().items():
+            flat = " ".join(text.split())
+            for marker in ("E32", "E33", "1.0.92", "waitsForFolderTrust", "local OpenAI-compatible"):
+                self.assertIn(marker, flat, f"{name} missing {marker}")
+
+    def test_docs_no_longer_call_hook_delivery_unverified(self):
+        for name, text in self.docs().items():
+            flat = " ".join(text.split())
+            self.assertNotIn("hook delivery and live model behavior remain unverified", flat, name)
+
+    def test_matrix_records_the_grok_rows(self):
+        log = (REPO / "docs" / "publication" / "compatibility-matrix.md").read_text(encoding="utf-8")
+        log = log.split("## Evidence log", 1)[1]
+        rows = {r.split("|")[1].strip(): r for r in log.splitlines() if r.startswith("| E")}
+        for row_id, result in (("E32", "hook_registration=passed"), ("E33", "hook_delivery=passed")):
+            self.assertIn(row_id, rows)
+            self.assertIn("Grok CLI", rows[row_id])
+            self.assertIn("1.0.92", rows[row_id])
+            self.assertIn(result, rows[row_id])
 
 
 class TestGrokVendorValidator(unittest.TestCase):

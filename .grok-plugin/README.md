@@ -2,9 +2,9 @@
 
 Grok CLI is an experimental adapter. It was **not a 0.4.3 release target**; the
 next release includes it as an experimental adapter. Native install, discovery,
-refresh and uninstall passed on Grok CLI 1.0.50 on Windows, Linux and macOS (see
-[Native evidence](#native-evidence)); hook delivery and live skill behavior are not
-proven. See the [current distribution guide](../docs/publication/multi-platform-distribution.md)
+refresh and uninstall passed on Grok CLI 1.0.50 on Windows, Linux and macOS, and
+hook registration and delivery of the three guards passed on Grok CLI 1.0.92 on Linux
+(see [Native evidence](#native-evidence)); live skill behavior is not proven. See the [current distribution guide](../docs/publication/multi-platform-distribution.md)
 for installation, evidence limits and the remaining publication steps.
 
 This package shares the root `skills/`, `commands/` and `agents/` sources. The
@@ -66,6 +66,13 @@ accepts that, but the official xai-org/plugin-marketplace requires a full
 Installation requires `--trust`. Pick up changes with `r` in the Plugins tab
 (`/plugins`) or a new session.
 
+Folder trust also gates the guards. On Grok 1.0.92 `grok inspect --json` lists the
+plugin's `hooks/hooks-grok.json` with `waitsForFolderTrust: true`: an interactive
+session runs plugin hooks only in a trusted folder (`/hooks-trust`, or launch with
+`--trust`), and until then they are skipped without an error. A headless `grok -p` run
+counts the folder as trusted for your own and plugin hooks (`10-hooks.md`, read
+2026-11-22). Trust the repository before relying on the guards in the TUI.
+
 ## Using it and paths
 
 - Invoke `/using-agentic-sdlc`, or `/agentic-sdlc:using-agentic-sdlc` on a name collision.
@@ -85,7 +92,8 @@ Installation requires `--trust`. Pick up changes with `r` in the Plugins tab
 `Bash|run_terminal_command`: `scan-commit.mjs`, `destructive-command-guard.mjs`
 and `branch-guard.mjs`. They read stdin JSON (`toolInput.command`, with
 `tool_input.command` fallback) and local Git state; guards can return
-`hookSpecificOutput.permissionDecision: "deny"`. The branch guard's warn/block
+`hookSpecificOutput.permissionDecision: "deny"`, which Grok honors at any exit code
+(`10-hooks.md`); the model sees `Hook denied: <reason>`. The branch guard's warn/block
 mode follows the configured house policy. No MCP server or network integration
 is declared. Durable plugin state belongs under `GROK_PLUGIN_DATA`.
 
@@ -181,7 +189,18 @@ uninstall, with unrelated files kept (E3, E8, E13 in the
 [compatibility matrix](../docs/publication/compatibility-matrix.md)). Temporary
 trust and the moving-branch update fixture are recorded in
 [marketplace readiness](../docs/publication/marketplace-readiness-2026-10-11.md).
-None of this proves native hook delivery or skill-trigger behavior; no model turn ran.
+Those lifecycle runs did not exercise hooks.
+
+Hook evidence, Grok CLI 1.0.92 on Linux, 2026-11-22 (E32, E33): the CLI from the
+official `x.ai/cli/install.sh` installer into a separate folder with an isolated home;
+`grok plugin install --trust` of the package; `grok inspect --json` lists the plugin hook
+file. Headless `grok -p` turns in default mode, with a `[model.*]` entry pointing at a
+local OpenAI-compatible endpoint that scripts one `run_terminal_command` call (no xAI
+account or login), were refused with `Hook denied: ...` by each of the three guards
+(`git reset --hard`, a commit on `main` in block mode, a commit of a staged secret), the
+uncommitted change survived, and with the plugin uninstalled the same call ran. Skill
+triggering and Grok-model behavior were not measured; a turn with a Grok model needs
+`grok login` or an xAI API key.
 No official catalog submission or release tagging is performed here. Follow the
 [publication checklist](../docs/publication/grok-marketplace.md).
 

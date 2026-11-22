@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 
@@ -23,7 +24,16 @@ WIRE = REPO / ".antigravity-plugin" / "hooks.json"
 NODE = shutil.which("node")
 FIXTURE_NAMES = ("session-start", "pre-run-command", "post-run-command", "pre-write-file", "post-write-file",
                  "pre-edit-file", "post-edit-file", "stop")
+# The argument shapes of the other tools that can run commands or carry text, from a capture hook
+# in a throwaway workspace (agy 1.5.14, 2026-11-22), sanitized the same way.
+OTHER_TOOL_FIXTURES = {
+    "pre-manage-task": "manage_task", "pre-send-message": "send_message", "pre-define-subagent": "define_subagent",
+    "pre-run-workflow": "run_workflow", "pre-schedule": "schedule", "pre-swarm": "swarm",
+    "pre-ask-question": "ask_question", "pre-search-web": "search_web", "pre-invoke-subagent": "invoke_subagent",
+}
 COMMAND_GUARDS = ("scan-commit.mjs", "destructive-command-guard.mjs", "branch-guard.mjs")
+ARG_SCAN = "scan-tool-args.mjs"
+SECRET = "ghp_" + "a1B2" * 9
 
 
 def fixture(name, workspace=None):
@@ -374,6 +384,14 @@ class AgyFailClosedTests(unittest.TestCase):
                                       fixture("pre-write-file", self.work)))
         self.assertEqual(out["decision"], "deny")
 
+    def test_argument_scan_failure_denies(self):
+        payload = fixture("pre-send-message", self.work)
+        for label, body in self.STANDINS.items():
+            with self.subTest(case=label):
+                out = answer(self.run_standin(ARG_SCAN, body, "PreToolUse", payload))
+                self.assertEqual(out["decision"], "deny")
+                self.assertIn(ARG_SCAN, out["reason"])
+
     def test_empty_guard_output_allows(self):
         out = answer(self.run_standin("branch-guard.mjs", "", "PreToolUse", fixture("pre-run-command", self.work)))
         self.assertEqual(out, {"decision": "allow"})
@@ -432,6 +450,222 @@ class AgyFailClosedTests(unittest.TestCase):
                 self.assertEqual(out, {"decision": "allow"})
 
 
+@unittest.skipUnless(NODE, "node is required")
+class AgyEveryToolTests(unittest.TestCase):
+    """AC3: every agy tool reaches a guard: commands, writes, and a secret scan of all other arguments."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.work = git_repo(Path(self.tmp.name) / "project")
+
+    def test_every_captured_other_tool_passes_the_argument_scan(self):
+        for name, tool in OTHER_TOOL_FIXTURES.items():
+            with self.subTest(fixture=name):
+                payload = fixture(name, self.work)
+                self.assertEqual(payload["toolCall"]["name"], tool)
+                # manage_task and run_workflow are command tools: the argument scan leaves them alone,
+                # but it never answers `allow` for run_workflow or terminal input (agy applies the
+                # strictest answer of the groups, probe 2026-11-22, so this keeps the ask).
+                out = answer(launch("PreToolUse", ARG_SCAN, payload))
+                if tool == "run_workflow":
+                    self.assertEqual(out["decision"], "ask")
+                    self.assertIn("run_workflow", out["reason"])
+                elif tool == "manage_task":
+                    self.assertEqual(out["decision"], "ask")
+                    self.assertIn("terminal task", out["reason"])
+                else:
+                    self.assertEqual(out, {"decision": "allow"})
+
+    def test_no_handler_answers_allow_for_run_workflow(self):
+        payload = fixture("pre-run-workflow", self.work)
+        for handler in (*COMMAND_GUARDS, ARG_SCAN, "scan-write.mjs"):
+            with self.subTest(handler=handler):
+                self.assertEqual(answer(launch("PreToolUse", handler, payload))["decision"], "ask")
+
+    def test_terminal_input_with_no_objection_asks_because_its_folder_is_unknown(self):
+        # manage_task send_input types into a terminal task that may run in another folder (its own
+        # Cwd, or a `cd` inside the shell), which the folder-sensitive guards cannot see. With nothing
+        # to report, no handler answers allow for it; a guard's own deny still wins.
+        payload = fixture("pre-manage-task", self.work)
+        payload["toolCall"]["args"]["Input"] = "ls\n"
+        for handler in (*COMMAND_GUARDS, ARG_SCAN, "scan-write.mjs"):
+            with self.subTest(handler=handler):
+                out = answer(launch("PreToolUse", handler, payload))
+                self.assertEqual(out["decision"], "ask")
+                self.assertIn("folder", out["reason"])
+        payload["toolCall"]["args"]["Input"] = "git reset --hard\n"
+        self.assertEqual(answer(launch("PreToolUse", "destructive-command-guard.mjs", payload))["decision"], "deny")
+        # An action that types nothing (status, kill) runs no command and is not asked about.
+        status = fixture("pre-manage-task", self.work)
+        status["toolCall"]["args"].pop("Input", None)
+        status["toolCall"]["args"]["Action"] = "status"
+        self.assertEqual(answer(launch("PreToolUse", "branch-guard.mjs", status))["decision"], "allow")
+
+    def test_a_secret_in_any_other_tool_argument_is_denied_without_echoing_it(self):
+        cases = {
+            "pre-send-message": ("Message", f"here is the key {SECRET}"),
+            "pre-invoke-subagent": ("Prompt", f"Use token {SECRET} to call the API."),
+            "pre-define-subagent": ("SystemPrompt", f"GITHUB_TOKEN={SECRET}"),
+            "pre-schedule": ("Prompt", f"later: {SECRET}"),
+            "pre-swarm": ("brief", f"x {SECRET}"),
+            "pre-search-web": ("query", SECRET),
+        }
+        for name, (key, value) in cases.items():
+            with self.subTest(fixture=name):
+                payload = fixture(name, self.work)
+                payload["toolCall"]["args"][key] = value
+                proc = launch("PreToolUse", ARG_SCAN, payload)
+                out = answer(proc)
+                self.assertEqual(out["decision"], "deny")
+                self.assertIn("secret", out["reason"].lower())
+                self.assertIn("github-token", out["reason"])
+                self.assertIn(OTHER_TOOL_FIXTURES[name], out["reason"])
+                self.assertNotIn(SECRET, proc.stdout + proc.stderr)
+                self.assertNotIn(SECRET[4:20], proc.stdout + proc.stderr)
+
+    def test_a_secret_object_key_is_denied_whatever_its_value_and_never_echoed(self):
+        for value in ("v", {}, {"inner": 1}, [], 1, True, None):
+            with self.subTest(value=value):
+                payload = fixture("pre-send-message", self.work)
+                payload["toolCall"]["args"]["Extra"] = {SECRET: value}
+                proc = launch("PreToolUse", ARG_SCAN, payload)
+                out = answer(proc)
+                self.assertEqual(out["decision"], "deny", proc.stdout)
+                self.assertIn("github-token", out["reason"])
+                self.assertNotIn(SECRET, proc.stdout + proc.stderr)
+                self.assertNotIn(SECRET[4:20], proc.stdout + proc.stderr)
+        # A secret value under a secret key: the reported path masks the key too.
+        payload = fixture("pre-send-message", self.work)
+        payload["toolCall"]["args"]["Extra"] = {SECRET: {"deeper": f"x {SECRET}"}}
+        proc = launch("PreToolUse", ARG_SCAN, payload)
+        self.assertEqual(answer(proc)["decision"], "deny")
+        self.assertNotIn(SECRET[4:20], proc.stdout + proc.stderr)
+
+    def test_nested_values_json_in_a_string_and_unknown_tools_are_scanned(self):
+        nested = fixture("pre-ask-question", self.work)
+        nested["toolCall"]["args"]["questions"][0]["options"].append(f"use {SECRET}")
+        as_json = fixture("pre-send-message", self.work)
+        as_json["toolCall"]["args"]["Message"] = json.dumps({"auth": {"api_key": "q7Wm4" + "Zr9Lp2Xv8Nt5Kc3"}})
+        mcp = fixture("pre-send-message", self.work)
+        mcp["toolCall"] = {"id": "call_201", "name": "call_mcp_tool", "args": {
+            "ServerName": "other_server", "ToolName": "post", "Arguments": {"body": {"text": f"x {SECRET}"}}}}
+        future = fixture("pre-send-message", self.work)
+        future["toolCall"] = {"id": "call_202", "name": "some_future_tool", "args": {"x": [1, {"y": SECRET}]}}
+        aws = fixture("pre-send-message", self.work)
+        aws["toolCall"]["args"]["Message"] = "AKIA" + "Q3XRT7ZK2MWN4PLA"
+        for label, payload in (("nested", nested), ("json string", as_json), ("mcp", mcp), ("future", future),
+                               ("aws", aws)):
+            with self.subTest(case=label):
+                proc = launch("PreToolUse", ARG_SCAN, payload)
+                self.assertEqual(answer(proc)["decision"], "deny", proc.stdout)
+                self.assertNotIn(SECRET, proc.stdout + proc.stderr)
+
+    def test_placeholders_allow_markers_and_keys_alone_are_not_findings(self):
+        for value in ("ghp_" + "x" * 36, "token: ${GITHUB_TOKEN}", f"{SECRET} agentic-sdlc:allow-secret",
+                      "the api_key field holds the key"):
+            with self.subTest(value=value[:12]):
+                payload = fixture("pre-send-message", self.work)
+                payload["toolCall"]["args"]["Message"] = value
+                self.assertEqual(answer(launch("PreToolUse", ARG_SCAN, payload)), {"decision": "allow"})
+
+    def test_oversized_or_too_deep_arguments_deny(self):
+        big = fixture("pre-send-message", self.work)
+        big["toolCall"]["args"]["Message"] = "a" * (5 * 1024 * 1024)
+        deep = fixture("pre-send-message", self.work)
+        value = "leaf"
+        for _ in range(200):
+            value = {"k": value}
+        deep["toolCall"]["args"]["Message"] = value
+        for label, payload in (("big", big), ("deep", deep)):
+            with self.subTest(case=label):
+                out = answer(launch("PreToolUse", ARG_SCAN, payload))
+                self.assertEqual(out["decision"], "deny")
+                self.assertTrue(out["reason"].startswith("agentic-sdlc:"))
+
+    def test_the_argument_scan_leaves_command_and_write_tools_to_their_guards(self):
+        for name in ("pre-run-command", "pre-write-file", "pre-edit-file"):
+            payload = fixture(name, self.work)
+            key = {"pre-run-command": "CommandLine", "pre-write-file": "Content", "pre-edit-file": "Replacement"}[name]
+            payload["toolCall"]["args"][key] = f"echo {SECRET}"
+            with self.subTest(fixture=name):
+                self.assertEqual(answer(launch("PreToolUse", ARG_SCAN, payload)), {"decision": "allow"})
+
+    def test_manage_task_input_reaches_the_command_guards(self):
+        # The captured benign input gets the guards' no-objection answer for terminal input: ask.
+        payload = fixture("pre-manage-task", self.work)
+        for handler in COMMAND_GUARDS:
+            with self.subTest(handler=handler):
+                out = answer(launch("PreToolUse", handler, payload))
+                self.assertEqual(out["decision"], "ask")
+                self.assertIn("terminal task", out["reason"])
+        payload["toolCall"]["args"]["Input"] = "git reset --hard"
+        out = answer(launch("PreToolUse", "destructive-command-guard.mjs", payload))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("reset --hard", out["reason"])
+
+    def test_manage_task_without_input_runs_nothing_and_a_bad_input_denies(self):
+        status = fixture("pre-manage-task", self.work)
+        status["toolCall"]["args"] = {"Action": "status", "TaskId": "t1"}
+        self.assertEqual(answer(launch("PreToolUse", "destructive-command-guard.mjs", status)), {"decision": "allow"})
+        for value in (["git", "reset"], 7, None):
+            with self.subTest(value=value):
+                bad = fixture("pre-manage-task", self.work)
+                bad["toolCall"]["args"]["Input"] = value
+                out = answer(launch("PreToolUse", "destructive-command-guard.mjs", bad))
+                self.assertEqual(out["decision"], "deny")
+
+    def test_run_workflow_scripts_reach_the_command_guards_and_never_auto_approve(self):
+        payload = fixture("pre-run-workflow", self.work)
+        for handler in COMMAND_GUARDS:
+            with self.subTest(handler=handler):
+                out = answer(launch("PreToolUse", handler, payload))
+                self.assertEqual(out["decision"], "ask")
+                self.assertIn("run_workflow", out["reason"])
+        payload["toolCall"]["args"]["Script"] = "git reset --hard"
+        out = answer(launch("PreToolUse", "destructive-command-guard.mjs", payload))
+        self.assertEqual(out["decision"], "deny")
+        script = Path(self.tmp.name) / "wf.py"
+        script.write_text("git reset --hard\n", encoding="utf-8")
+        by_path = fixture("pre-run-workflow", self.work)
+        del by_path["toolCall"]["args"]["Script"]
+        by_path["toolCall"]["args"]["ScriptPath"] = str(script)
+        out = answer(launch("PreToolUse", "destructive-command-guard.mjs", by_path))
+        self.assertEqual(out["decision"], "deny")
+        for args in ({"Description": "d"}, {"Description": "d", "ScriptPath": str(Path(self.tmp.name) / "no.py")},
+                     {"Description": "d", "Script": 7}):
+            with self.subTest(args=args):
+                bad = fixture("pre-run-workflow", self.work)
+                bad["toolCall"]["args"] = args
+                self.assertEqual(answer(launch("PreToolUse", "branch-guard.mjs", bad))["decision"], "deny")
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs are required")
+    def test_a_run_workflow_script_path_that_is_not_a_regular_file_denies_at_once(self):
+        fifo = Path(self.tmp.name) / "wf.fifo"
+        os.mkfifo(fifo)
+        folder = Path(self.tmp.name) / "wf-dir"
+        folder.mkdir()
+        for target in (fifo, folder):
+            with self.subTest(target=target.name):
+                payload = fixture("pre-run-workflow", self.work)
+                del payload["toolCall"]["args"]["Script"]
+                payload["toolCall"]["args"]["ScriptPath"] = str(target)
+                started = time.monotonic()
+                out = answer(launch("PreToolUse", "destructive-command-guard.mjs", payload))
+                self.assertLess(time.monotonic() - started, 20)
+                self.assertEqual(out["decision"], "deny")
+                self.assertIn("ScriptPath", out["reason"])
+
+    def test_run_workflow_cwd_is_the_folder_the_guard_checks(self):
+        protected = git_repo(Path(self.tmp.name) / "protected")
+        subprocess.run(["git", "checkout", "-q", "-b", "main"], cwd=protected, check=True, capture_output=True)
+        payload = fixture("pre-run-workflow", self.work)
+        payload["toolCall"]["args"]["Cwd"] = str(protected)
+        payload["toolCall"]["args"]["Script"] = "git commit -q --allow-empty -m x"
+        out = answer(launch("PreToolUse", "branch-guard.mjs", payload, env={"AGENTIC_BRANCH_GUARD_BLOCK": "true"}))
+        self.assertEqual(out["decision"], "deny")
+
+
 class AgyWireTests(unittest.TestCase):
     def setUp(self):
         self.wire = json.loads(WIRE.read_text(encoding="utf-8"))
@@ -452,8 +686,9 @@ class AgyWireTests(unittest.TestCase):
     def test_pretooluse_wires_the_command_and_write_guards(self):
         base = "node ./hooks/agy-launch.mjs --event PreToolUse --handler "
         self.assertEqual(self.commands("PreToolUse"), {
-            "run_command": [base + h for h in COMMAND_GUARDS],
+            "run_command|manage_task|run_workflow": [base + h for h in COMMAND_GUARDS],
             "write_file|edit_file": [base + "scan-write.mjs"],
+            "*": [base + ARG_SCAN],
         })
 
     def test_session_start_and_stop(self):
@@ -488,7 +723,7 @@ class AgyWireTests(unittest.TestCase):
             work = git_repo(Path(tmp) / "project")
             payload = fixture("pre-run-command", work)
             payload["toolCall"]["args"]["CommandLine"] = "git reset --hard"
-            command = self.commands("PreToolUse")["run_command"][1]
+            command = self.commands("PreToolUse")["run_command|manage_task|run_workflow"][1]
             proc = subprocess.run(["/bin/sh", "-c", command], input=json.dumps(payload), text=True,
                                   encoding="utf-8", capture_output=True, cwd=pkg, timeout=60)
             self.assertEqual(answer(proc)["decision"], "deny")
@@ -496,7 +731,10 @@ class AgyWireTests(unittest.TestCase):
 
 class AgyFixtureHygieneTests(unittest.TestCase):
     def test_every_captured_event_has_a_fixture(self):
-        self.assertEqual(sorted(p.stem for p in FIXTURES.glob("*.json")), sorted(FIXTURE_NAMES))
+        self.assertEqual(sorted(p.stem for p in FIXTURES.glob("*.json")),
+                         sorted(FIXTURE_NAMES + tuple(OTHER_TOOL_FIXTURES)))
+        for name, tool in OTHER_TOOL_FIXTURES.items():
+            self.assertEqual(fixture(name)["toolCall"]["name"], tool)
         events = {name: fixture(name)["hookEventName"] for name in FIXTURE_NAMES}
         self.assertEqual(events["session-start"], "SessionStart")
         self.assertEqual(events["stop"], "Stop")

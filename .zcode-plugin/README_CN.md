@@ -21,21 +21,28 @@ DMG）和 Linux（x64 AppImage）版本。
    （**Create → Add marketplace**）。
 2. 将根目录的 `marketplace.json`（ZCode marketplace 模式）**作为文件源**添加。ZCode 文档将
    marketplace 源列为 GitHub 仓库、Git URL 或本地 marketplace 文件或目录，并说明共享目录应是
-   仓库根目录下的 `marketplace.json`（[插件文档](https://zcode.z.ai/en/docs/plugin)，2026-11-21 获取），
-   因此以目录或 GitHub 源添加本仓库时，预期使用的也是同一个根目录 `marketplace.json`（未经原生观察：
-   该页面并未说明如何解析源）。本仓库
-   另有 `.claude-plugin/marketplace.json`（Claude 目录）；ZCode 是否会从目录或 GitHub 源读取该文件、
-   或优先于根目录文件读取它，文档未记载，也未经观察。ZCode 会在添加前进行校验。
+   仓库根目录下的 `marketplace.json`（[插件文档](https://zcode.z.ai/en/docs/plugin)，2026-11-21 获取）。
+   该页面并未说明如何解析目录或 GitHub 源，而本仓库另有 `.claude-plugin/marketplace.json`
+   （Claude 目录），因此查找顺序文档未记载。现有一次原生观察（兼容性矩阵 E36，2026-11-22）：
+   ZCode 桌面版 3.14.5 附带的 agent CLI 0.16.9 以 GitHub 源 `MrBekoX/agentic-sdlc` 添加时，
+   读取的是 `.claude-plugin/marketplace.json`；其查找顺序为显式文件、`.claude-plugin/marketplace.json`、
+   根目录 `marketplace.json`。同日阅读附带的 `zcode.cjs` 可见，agent CLI 0.16.9 对目录、Git 与 GitHub
+   源以及目录的 `plugins validate` 都使用同一查找，因此以仓库根目录作为目录源同样会得到 Claude 目录卡片；
+   实际运行的仅有 GitHub 源。安装仍然成功（插件清单优先查找 `.zcode-plugin/plugin.json`），
+   但 ZCode 专有的目录字段（类别、标签、翻译）只在根目录文件中。桌面 GUI 的添加流程未经驱动，
+   因此以文件源指定根目录 `marketplace.json` 仍是文档化的途径。ZCode 会在添加前进行校验。
 3. 请先查看下方「信任与副作用」中的 Hook 表：新安装的插件**默认即启用**，其 Hook 会立即
    运行。在 **Personal** 分区找到 `agentic-sdlc` 卡片（名称、版本、类别 `developer-tools`），
    点击 **Install**。只有在停用后才需要在「Manage installed」中再次点击 **Enable**。
 4. 开启新会话（或重新加载），使技能、命令与 Hook 被发现。
 
 没有本地包目录时，在第 2 步改为将 GitHub 仓库 `MrBekoX/agentic-sdlc`（或其 URL）添加为
-marketplace 源。仓库自 2026-10-12 起已公开；该方式尚未经过原生验证。厂商插件页面将
+marketplace 源。仓库自 2026-10-12 起已公开；通过附带的 agent CLI 0.16.9，该方式添加了 `mrbekox`
+目录并安装了 `agentic-sdlc@mrbekox` 0.7.0（16 个技能、5 个可运行的 Hook 声明），Hook 也实际运行
+（E35、E36）；GUI 途径未经驱动。厂商插件页面将
 GitHub 仓库列为 marketplace 源（2026-10-08 核对），并将仓库根目录的 `marketplace.json` 作为
 GitHub marketplace 的目录（2026-11-21 核对），即本仓库带类别、标签与翻译的 ZCode 模式目录。
-如第 2 步所述，ZCode 回退读取 `.claude-plugin/marketplace.json` 一事文档未记载。
+如第 2 步所述，ZCode 对 `.claude-plugin/marketplace.json` 的查找顺序文档未记载，仅有 E36 的观察。
 
 前提条件：`node` 必须在 `PATH` 上——每个 Hook 执行器都是通过 argv 运行
 `node <script>`。辅助工作流还需要 Python 3（已测试 3.12；技能运行的辅助脚本经静态检查
@@ -73,7 +80,12 @@ wire 传入字面量 `--zcode-runtime` argv 参数，且 ZCode 会把 `ZCODE_PLU
 变量注入 —— 在该模式下只输出已文档的键（`hooks/hook-output.mjs`）：警告移入
 `hookSpecificOutput.additionalContext`，绝不写出顶层的 `systemMessage` 建议通道（Claude
 Code 的约定）。在线 Hook 文档称 ZCode 会忽略未知字段，而内置的 `diagnosing-hooks` 技能称
-任何多余的键都会使运行失败并丢弃其效果；两种读法下输出都安全。原生显示与调用尚未验证。
+任何多余的键都会使运行失败并丢弃其效果；两种读法下输出都安全。原生调用已通过附带的 agent
+CLI 0.16.9 观察到（2026-11-22，兼容性矩阵 E34、E35）：`plugins list --json` 将 5 个声明报告为
+带 `--zcode-runtime` 的 `type: process` argv，且均为 runnable；在由本地 OpenAI 兼容端点驱动的
+无头 `-p` 回合中（未使用 Z.AI 账号），三个守卫均拦截了各自的命令并将原因作为工具结果返回，
+SessionStart 上下文以及警告与写入扫描的 `additionalContext` 均进入下一次模型请求，停用插件后
+同一命令得以运行。桌面 GUI 如何显示这些内容尚未检查。
 **没有网络访问**
 （未声明任何 MCP 服务器），数据不会离开本机。长期可写数据应放在 `ZCODE_PLUGIN_DATA`
 下，而不是安装目录。
@@ -117,7 +129,10 @@ ZCode 在客户端 3.14.0 中新增了动态工作流（官方更新日志，202
 Hook 声明）、版本递增后的更新以及经确认的卸载：Windows（E9）、Linux x64 AppImage（E15）
 与 macOS Apple Silicon DMG（E14），见[兼容性矩阵](../docs/publication/compatibility-matrix.md)。
 该 CLI 只在 Electron 的 Node 模式下管理插件，这不是文档化的用户路径，因此上述证据只验证了
-附带的插件管理器；桌面 GUI 流程、GitHub 源、实际的 Hook 投递与模型行为仍未验证。更早的
+附带的插件管理器。2026-11-22 的 Hook 证据（Linux，E34、E35、E36）：同一 3.14.5 AppImage 的
+agent CLI 0.16.9 将 5 个 Hook 声明登记为可运行，并在对接本地 OpenAI 兼容端点的无头回合中实际运行；
+GitHub 源同样完成安装并运行了 Hook。桌面 GUI 流程、技能触发与厂商模型行为仍未验证；使用 GLM
+模型的回合需要 `zcode login`（Z.AI OAuth）或 Z.ai API Key。更早的
 准备证据见 [marketplace 就绪记录](../docs/publication/marketplace-readiness-2026-10-11.md)。
 
 ## 官方市场提交

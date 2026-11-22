@@ -26,9 +26,10 @@ read-only `skills/list` request of `codex app-server --stdio`; Grok `grok plugin
 install|list|uninstall` and `grok inspect --json`; Kimi Code the local `kimi web` REST API (bound to
 127.0.0.1) with the bearer token from its startup banner, or else from the token file it keeps in
 the isolated profile; ZCode has no supported headless installer (see run_platform); Google
-Antigravity `agy plugin install|list|uninstall` with an isolated HOME (agy keeps its profile in
-HOME/.gemini; a second install of the bumped copy replaces the first, as there is no plugin update
-command in agy 1.5.14).
+Antigravity `agy plugin install|list|uninstall` with an isolated HOME and USERPROFILE (agy keeps its
+profile in <home>/.gemini; both variables name the same folder, so the Windows home lookup lands
+there too) and its self-update off; a second install of the bumped copy replaces the first, as
+there is no plugin update command in agy 1.5.14).
 
 It never sends a model prompt: every argv must start with an allowlisted plugin-management word,
 each subcommand is probed with `--help` first (an older CLI never receives plugin argv; agy is the
@@ -116,6 +117,9 @@ _DISABLE_FLAGS = {
     "GROK_DISABLE_AUTOUPDATER": "1",
     "GROK_TELEMETRY_ENABLED": "false",
     "KIMI_DISABLE_TELEMETRY": "1",
+    # agy 1.5.14 spawns a background updater that replaces its own binary; only the exact value
+    # "true" turns it off (its log then says "Auto-update disabled via environment variable").
+    "AGY_CLI_DISABLE_AUTO_UPDATE": "true",
 }
 _ABSOLUTE_WINDOWS_ENTRY = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|//)")
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
@@ -993,14 +997,14 @@ def _agy_probe(lc: Lifecycle) -> None:
 
     Unlike the other CLIs, agy 1.5.14 does not treat a trailing `--help` on a plugin subcommand as
     help (`agy plugin uninstall --help` uninstalls a plugin named "--help"), so only the plugin
-    command group's own help is read.
+    command group's own help is read. The usage line names argv[0], which is `agy.exe` on Windows.
     """
     try:
         code, out, err = lc.run(["plugin", "--help"], "probe", check=False)
     except Failed as exc:
         raise NotRun("cli_unresponsive" if exc.reason == "probe_timeout" else "cli_unusable") from None
     text = out + "\n" + err
-    if code != 0 or not re.search(r"Usage:\s+agy\s+plugin\s", text) or any(s not in text for s in AGY_SUBCOMMANDS):
+    if code != 0 or not re.search(r"Usage:\s+agy(?:\.exe)?\s+plugin\s", text) or any(s not in text for s in AGY_SUBCOMMANDS):
         raise NotRun("cli_too_old")
 
 

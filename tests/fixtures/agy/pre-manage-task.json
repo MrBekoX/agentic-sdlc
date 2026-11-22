@@ -1,0 +1,22 @@
+{
+  "artifactDirectoryPath": "<agy-brain>/***MASKED***",
+  "conversationId": "***MASKED***",
+  "cwd": "/workspace/project",
+  "hookEventName": "PreToolUse",
+  "lastUserInput": "Tool-argument capture probe (throwaway workspace): try manage_task, send_message, define_subagent, run_workflow, schedule, swarm, ask_question, search_web and invoke_subagent once each with small harmless arguments.",
+  "modelName": "gemini-4-neon-high",
+  "stepIdx": 2,
+  "toolCall": {
+    "args": {
+      "Action": "send_input",
+      "Input": "echo cap-manage",
+      "TaskId": "cap-task"
+    },
+    "id": "call_101",
+    "name": "manage_task"
+  },
+  "transcriptPath": "<agy-brain>/***MASKED***/.system_generated",
+  "workspacePaths": [
+    "/workspace/project"
+  ]
+}

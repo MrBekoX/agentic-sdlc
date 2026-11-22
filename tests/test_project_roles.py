@@ -152,6 +152,20 @@ class AntigravityProjectionTests(unittest.TestCase):
         self.assertEqual(tools_of("debugger"), ["read_file", "search_web", "run_command"])
         self.assertNotIn("inheritMcp", self.generated["draft-scribe.md"])
 
+    def test_search_comes_from_the_bundled_mcp_server_not_from_a_tool_grant(self):
+        # agy 1.5.14 live probes (2026-11-22): a subagent listing `call_mcp_tool` in `tools` fails to
+        # start ("tool \"call_mcp_tool\" not found in registry"), `mcpServers` in agent frontmatter is
+        # ignored, and a plugin subagent with `inheritMcp: false` still gets call_mcp_tool and the
+        # plugin's own MCP servers. So the projection grants neither, and the docstring says where
+        # Grep/Glob go.
+        for name, text in sorted(self.generated.items()):
+            with self.subTest(role=name):
+                head = _split(text)[0]
+                self.assertFalse(any("call_mcp_tool" in line or "mcpServers" in line for line in head))
+        self.assertIn("agentic-sdlc_search", project_roles.__doc__)
+        self.assertNotIn("agy has no grep or glob tool, so a read-only role reads", project_roles.__doc__)
+        self.assertEqual(project_roles.AGY_SEARCH_SERVER, "agentic-sdlc_search")
+
     def test_mapping_is_deduplicated_in_a_stable_order(self):
         text = ("---\nname: w\ndescription: d\nmodel: inherit\n"
                 "tools: Bash, Edit, MultiEdit, Write, WebSearch, Grep, Read, PowerShell, WebFetch, Glob\n---\nB\n")
