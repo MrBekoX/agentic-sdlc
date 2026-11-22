@@ -167,6 +167,55 @@ class SearchServerTests(unittest.TestCase):
                 self.assertTrue(error, text)
                 self.assertTrue(text.startswith("error: "), text)
 
+    def test_an_invalid_glob_is_refused_and_the_server_keeps_serving(self):
+        client = self.client()
+        for name, args in (
+            ("glob", {"pattern": "[z-a]"}),
+            ("glob", {"pattern": "**/[z-a].txt"}),
+            ("glob", {"pattern": "[/]x"}),
+            ("grep", {"pattern": NEEDLE, "path": "[z-a]"}),
+        ):
+            with self.subTest(name=name, args=args):
+                error, text = client.call(name, args)
+                self.assertTrue(error, text)
+                self.assertTrue(text.startswith("error: the glob is not valid"), text)
+                error, text = client.call("glob", {"pattern": "**/*.py"})
+                self.assertFalse(error, text)
+                self.assertIn("a.py", text)
+        self.assertEqual(client.request("ping", {})["result"], {})
+
+    def test_an_internal_error_answers_the_call_and_keeps_serving(self):
+        import importlib.util
+        import io
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location("agy_search_mcp_under_test", SERVER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        lines = [
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "glob", "arguments": {"pattern": "*"}}},
+            {"jsonrpc": "2.0", "id": 2, "method": "ping"},
+            {"jsonrpc": "2.0", "id": 3, "method": "ping"},
+        ]
+        stdin = io.StringIO("".join(json.dumps(line) + "\n" for line in lines))
+        stdout = io.StringIO()
+        server = module.Server(stdin, stdout, [str(self.ws)], 5)
+        real_handle = server.handle
+
+        def handle(message):
+            if message.get("id") == 2:
+                raise RuntimeError("bug")
+            real_handle(message)
+
+        with mock.patch.object(module, "call_tool", side_effect=KeyError("bug")), \
+                mock.patch.object(server, "handle", side_effect=handle):
+            self.assertEqual(server.serve(), 0)
+        replies = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual([r["id"] for r in replies], [1, 2, 3])
+        self.assertTrue(replies[0]["result"]["isError"])
+        self.assertIn("internal error (KeyError)", replies[0]["result"]["content"][0]["text"])
+        self.assertEqual(replies[1]["error"]["code"], -32603)
+        self.assertEqual(replies[2]["result"], {})
+
     def test_results_are_bounded(self):
         many = self.ws / "many.txt"
         many.write_text("hit\n" * 2000, encoding="utf-8")

@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 
@@ -463,8 +464,22 @@ class AgyEveryToolTests(unittest.TestCase):
             with self.subTest(fixture=name):
                 payload = fixture(name, self.work)
                 self.assertEqual(payload["toolCall"]["name"], tool)
-                # manage_task and run_workflow are command tools: the argument scan leaves them alone.
-                self.assertEqual(answer(launch("PreToolUse", ARG_SCAN, payload)), {"decision": "allow"})
+                # manage_task and run_workflow are command tools: the argument scan leaves them alone,
+                # but it never answers `allow` for run_workflow, so the `*` group cannot approve a
+                # script that the command group holds for review (how agy merges a sibling group's
+                # allow with ask is not measured).
+                out = answer(launch("PreToolUse", ARG_SCAN, payload))
+                if tool == "run_workflow":
+                    self.assertEqual(out["decision"], "ask")
+                    self.assertIn("run_workflow", out["reason"])
+                else:
+                    self.assertEqual(out, {"decision": "allow"})
+
+    def test_no_handler_answers_allow_for_run_workflow(self):
+        payload = fixture("pre-run-workflow", self.work)
+        for handler in (*COMMAND_GUARDS, ARG_SCAN, "scan-write.mjs"):
+            with self.subTest(handler=handler):
+                self.assertEqual(answer(launch("PreToolUse", handler, payload))["decision"], "ask")
 
     def test_a_secret_in_any_other_tool_argument_is_denied_without_echoing_it(self):
         cases = {
@@ -487,6 +502,24 @@ class AgyEveryToolTests(unittest.TestCase):
                 self.assertIn(OTHER_TOOL_FIXTURES[name], out["reason"])
                 self.assertNotIn(SECRET, proc.stdout + proc.stderr)
                 self.assertNotIn(SECRET[4:20], proc.stdout + proc.stderr)
+
+    def test_a_secret_object_key_is_denied_whatever_its_value_and_never_echoed(self):
+        for value in ("v", {}, {"inner": 1}, [], 1, True, None):
+            with self.subTest(value=value):
+                payload = fixture("pre-send-message", self.work)
+                payload["toolCall"]["args"]["Extra"] = {SECRET: value}
+                proc = launch("PreToolUse", ARG_SCAN, payload)
+                out = answer(proc)
+                self.assertEqual(out["decision"], "deny", proc.stdout)
+                self.assertIn("github-token", out["reason"])
+                self.assertNotIn(SECRET, proc.stdout + proc.stderr)
+                self.assertNotIn(SECRET[4:20], proc.stdout + proc.stderr)
+        # A secret value under a secret key: the reported path masks the key too.
+        payload = fixture("pre-send-message", self.work)
+        payload["toolCall"]["args"]["Extra"] = {SECRET: {"deeper": f"x {SECRET}"}}
+        proc = launch("PreToolUse", ARG_SCAN, payload)
+        self.assertEqual(answer(proc)["decision"], "deny")
+        self.assertNotIn(SECRET[4:20], proc.stdout + proc.stderr)
 
     def test_nested_values_json_in_a_string_and_unknown_tools_are_scanned(self):
         nested = fixture("pre-ask-question", self.work)
@@ -581,6 +614,23 @@ class AgyEveryToolTests(unittest.TestCase):
                 bad = fixture("pre-run-workflow", self.work)
                 bad["toolCall"]["args"] = args
                 self.assertEqual(answer(launch("PreToolUse", "branch-guard.mjs", bad))["decision"], "deny")
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs are required")
+    def test_a_run_workflow_script_path_that_is_not_a_regular_file_denies_at_once(self):
+        fifo = Path(self.tmp.name) / "wf.fifo"
+        os.mkfifo(fifo)
+        folder = Path(self.tmp.name) / "wf-dir"
+        folder.mkdir()
+        for target in (fifo, folder):
+            with self.subTest(target=target.name):
+                payload = fixture("pre-run-workflow", self.work)
+                del payload["toolCall"]["args"]["Script"]
+                payload["toolCall"]["args"]["ScriptPath"] = str(target)
+                started = time.monotonic()
+                out = answer(launch("PreToolUse", "destructive-command-guard.mjs", payload))
+                self.assertLess(time.monotonic() - started, 20)
+                self.assertEqual(out["decision"], "deny")
+                self.assertIn("ScriptPath", out["reason"])
 
     def test_run_workflow_cwd_is_the_folder_the_guard_checks(self):
         protected = git_repo(Path(self.tmp.name) / "protected")

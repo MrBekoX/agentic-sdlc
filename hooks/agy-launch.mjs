@@ -22,7 +22,7 @@
 // always names a decision: agy 1.5.14 denied a call whose hook printed `{}` (probe 2026-11-21), so
 // "nothing to say" is `{"decision":"allow"}`. SessionStart and Stop failures answer `{}`.
 import { spawn } from 'node:child_process';
-import { openSync, readSync, closeSync, readFileSync, statSync } from 'node:fs';
+import { constants, openSync, readSync, closeSync, fstatSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -156,8 +156,12 @@ function workflowScript(args, cwd) {
   let fd;
   try {
     const target = resolve(cwd, path);
-    if (statSync(target).size > MAX_SCRIPT_BYTES) throw new Unreadable('the run_workflow script is too large to check');
-    fd = openSync(target, 'r');
+    // O_NONBLOCK: opening a FIFO must not wait for a writer; fstat on the opened descriptor then
+    // refuses anything but a regular file (a FIFO, a device, a folder) without a stat/open race.
+    fd = openSync(target, constants.O_RDONLY | (constants.O_NONBLOCK || 0));
+    const stats = fstatSync(fd);
+    if (!stats.isFile()) throw new Unreadable('the run_workflow ScriptPath is not a regular file');
+    if (stats.size > MAX_SCRIPT_BYTES) throw new Unreadable('the run_workflow script is too large to check');
     const buffer = Buffer.alloc(MAX_SCRIPT_BYTES);
     const size = readSync(fd, buffer, 0, MAX_SCRIPT_BYTES, 0);
     return buffer.subarray(0, size).toString('utf8');
@@ -321,7 +325,9 @@ async function main() {
       if (!(error instanceof Unreadable)) throw error;
       return denied(handler, error.message);
     }
-    if (!HANDLER_TOOLS[handler](call.name)) return { decision: 'allow' };
+    // A handler that does not check this tool still never answers `allow` for run_workflow: agy runs
+    // every matching group, and how it merges one group's ask with another's allow is not measured.
+    if (!HANDLER_TOOLS[handler](call.name)) return noObjection(call.name);
     try {
       cwd = commandCwd(input, call);
       translated = translateTool(call, cwd);

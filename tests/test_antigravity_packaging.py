@@ -458,6 +458,20 @@ class AntigravitySelectionTests(unittest.TestCase):
         _note, kept, rest = self.assert_split(selected, body, first=b"## B\n")
         self.assertIn(b"## not a heading", kept)
 
+    def test_a_fenced_heading_is_never_a_cut_even_when_it_is_the_only_one_that_fits(self):
+        # Read as a heading, the fenced `## not a heading` would make `## A` two pieces of ~15000 and
+        # ~18000 bytes, and the greedy head would end inside the fence. Honoured, the fence keeps
+        # `### A1` (~20000 bytes, fence included) whole, so the cut falls before `### A1`.
+        filler = (b"q" * 79 + b"\n") * 125
+        fence = b"```text\n" + filler + b"## not a heading\n" + filler + b"```\n"
+        a = self.section("A", 5000) + b"### A1\n" + fence + self.section("A2", 8000, 3)
+        body = b"# T\n\n" + a + self.section("B", 3000)
+        selected, _ = self.split(body)
+        _note, kept, rest = self.assert_split(selected, body, first=b"### A1\n")
+        self.assertEqual(kept.count(b"```"), 0)
+        self.assertEqual(rest.count(b"```"), 2)
+        self.assertIn(b"## not a heading", rest)
+
     def test_a_section_over_the_limit_splits_at_the_next_lower_heading(self):
         big = b"## A\n\n" + self.section("A1", 15000, 3) + self.section("A2", 15000, 3)
         body = b"# T\n\n" + big + self.section("B", 3000)

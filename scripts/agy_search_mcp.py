@@ -132,7 +132,10 @@ def glob_regex(pattern: str) -> re.Pattern:
         else:
             out.append(re.escape(pattern[i]))
             i += 1
-    return re.compile("".join(out) + r"\Z", re.S)
+    try:
+        return re.compile("".join(out) + r"\Z", re.S)
+    except re.error as exc:
+        raise ToolError(f"the glob is not valid: {exc}") from None
 
 
 def real_roots(roots) -> list:
@@ -427,14 +430,26 @@ class Server:
                 reply["result"] = {"content": [{"type": "text", "text": text}], "isError": False}
             except ToolError as exc:
                 reply["result"] = {"content": [{"type": "text", "text": f"error: {exc}"}], "isError": True}
+            except Exception as exc:  # a bug must answer this call, never stop the server
+                reply["result"] = {"content": [{"type": "text", "text": f"error: internal error ({type(exc).__name__})"}],
+                                   "isError": True}
         else:
             reply["error"] = {"code": -32601, "message": f"method not found: {method}"}
         self.send(reply)
 
+    def safe_handle(self, message: dict) -> None:
+        """handle(), answering JSON-RPC -32603 instead of letting a bug stop the server."""
+        try:
+            self.handle(message)
+        except Exception as exc:  # noqa: BLE001 - last resort, the server must keep serving
+            if "id" in message and "method" in message:
+                self.send({"jsonrpc": "2.0", "id": message["id"],
+                           "error": {"code": -32603, "message": f"internal error ({type(exc).__name__})"}})
+
     def serve(self) -> int:
         while True:
             if self.backlog:
-                self.handle(self.backlog.pop(0))
+                self.safe_handle(self.backlog.pop(0))
                 continue
             line = self.stdin.readline()
             if not line:
@@ -443,7 +458,7 @@ class Server:
                 continue
             message = self.parse(line)
             if message is not None:
-                self.handle(message)
+                self.safe_handle(message)
 
 
 def main(argv=None) -> int:
