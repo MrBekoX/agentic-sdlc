@@ -40,8 +40,9 @@ const HANDLER_TOOLS = {
 };
 // run_workflow runs a Python script with full access to the machine. The command guards read it as
 // shell text, which catches a destructive git or push command written in it but cannot prove the
-// script harmless, so their no-objection answer is `ask`: the user approves the script, and a
-// headless run without that approval does not run it.
+// script harmless, so their no-objection answer is `ask`, never `allow`. Measured in headless agy
+// 1.5.14 (2026-11-22): `ask` does not hold the call by itself; agy's own command permission decides
+// (denied with no allow rule, run with a matching `permissions.allow` rule), and a guard's deny wins.
 const WORKFLOW_REVIEW = 'agentic-sdlc: run_workflow runs a Python script that the command guards cannot fully check; review it before approving.';
 const MAX_SCRIPT_BYTES = 1024 * 1024;
 const EVENT_HANDLERS = {
