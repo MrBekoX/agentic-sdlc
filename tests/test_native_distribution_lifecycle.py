@@ -1689,32 +1689,68 @@ class AntigravityWorkflowTests(unittest.TestCase):
         self.assertNotRegex(self.text, r"(?i)\|\s*(?:iex|invoke-expression)\b")
         self.assertNotRegex(self.text, r"(?i)\biex\b|invoke-expression|irm\b")
 
-    def test_the_download_is_hash_checked_before_it_runs(self):
-        # Linux sha512sum, macOS shasum -a 512, Windows Get-FileHash; each step fails on a mismatch
-        # before the binary is extracted or run.
-        for required in ('sha512sum -c -', "shasum -a 512 -c -",
-                         "Get-FileHash -Algorithm SHA512", "agy.exe", "tar -xzf",
-                         "antigravity"):
-            with self.subTest(required=required):
-                self.assertIn(required, self.text)
-        for step in ("Install the pinned agy (Linux)", "Install the pinned agy (macOS)",
-                     "Install the pinned agy (Windows)"):
-            body = self.text.split("name: " + step, 1)[1].split("- name:", 1)[0]
-            with self.subTest(step=step):
-                self.assertIn("curl", body)
-                self.assertIn("--proto '=https'" if "Windows" not in step else "curl.exe", body)
-                self.assertNotIn("install", body.replace("Install the pinned", ""))
-                verify = body.index("512")
-                self.assertLess(verify, body.index("agy --version") if "agy --version" in body else len(body))
+    def _step(self, name):
+        """The text of one workflow step, from its name up to the next step."""
+        self.assertIn("- name: " + name + "\n", self.text)
+        return self.text.split("- name: " + name + "\n", 1)[1].split("\n      - ", 1)[0]
 
-    def test_self_update_is_disabled_and_the_version_is_checked_after_the_run(self):
+    def assertInOrder(self, body, *needles):
+        positions = []
+        for needle in needles:
+            self.assertIn(needle, body)
+            positions.append(body.index(needle))
+        self.assertEqual(positions, sorted(positions), "out of order: %r" % (needles,))
+
+    def test_the_download_is_hash_checked_before_it_is_extracted_or_put_on_path(self):
+        checks = {"Linux": 'echo "$AGY_SHA512  $RUNNER_TEMP/agy-download/agy.tar.gz" | sha512sum -c -',
+                  "macOS": 'echo "$AGY_SHA512  $RUNNER_TEMP/agy-download/agy.tar.gz" | shasum -a 512 -c -'}
+        for os_name, check in checks.items():
+            body = self._step("Install the pinned agy (%s)" % os_name)
+            with self.subTest(os=os_name):
+                self.assertIn("shell: bash\n", body)
+                # Without -e and pipefail a failed hash check does not stop the step.
+                self.assertRegex(body, r"run: \|\n\s+set -euo pipefail\n")
+                self.assertIn("curl --proto '=https' --tlsv1.2 -fsSL", body)
+                self.assertInOrder(body, "curl --proto", check,
+                                   'tar -xzf "$RUNNER_TEMP/agy-download/agy.tar.gz" -C "$RUNNER_TEMP/agy-download" antigravity',
+                                   'mv "$RUNNER_TEMP/agy-download/antigravity" "$RUNNER_TEMP/agy-bin/agy"',
+                                   "chmod 755", '>> "$GITHUB_PATH"')
+                self.assertNotIn("agy --version", body)
+                self.assertNotIn("install", body)
+        body = self._step("Install the pinned agy (Windows)")
+        self.assertNotIn("install", body)
+        self.assertIn("shell: pwsh\n", body)
+        self.assertRegex(body, r"run: \|\n\s+\$ErrorActionPreference = 'Stop'\n")
+        self.assertRegex(body, r"curl\.exe --proto '=https' --tlsv1\.2 -fsSL -o \$exe \$env:AGY_URL\n"
+                               r"\s+if \(\$LASTEXITCODE -ne 0\) \{ throw ")
+        self.assertRegex(body, r"\$hash = \(Get-FileHash -Algorithm SHA512 -LiteralPath \$exe\)\.Hash\.ToLowerInvariant\(\)\n"
+                               r"\s+if \(\$hash -ne \$env:AGY_SHA512\) \{\n"
+                               r"\s+Remove-Item -LiteralPath \$exe\n"
+                               r"\s+throw \"sha512 mismatch")
+        self.assertInOrder(body, "curl.exe", "Get-FileHash", "if ($hash -ne $env:AGY_SHA512)", "throw \"sha512 mismatch",
+                           "Add-Content -Path $env:GITHUB_PATH")
+        self.assertNotIn("agy --version", body)
+        self.assertNotIn("Start-Process", body)
+
+    def test_the_installed_version_is_asserted_before_anything_else_runs(self):
+        body = self._step("Record the agy version and binary hash")
+        self.assertRegex(body, r"run: \|\n\s+set -euo pipefail\n\s+test \"\$\(agy --version\)\" = \"\$AGY_VERSION\"\n")
+        self.assertIn('> "$RUNNER_TEMP/agy-binary.sha256"', body)
+        self.assertInOrder(self.text, "name: Record the agy version and binary hash",
+                           "name: Build and verify the Antigravity package", "name: Validate the package with agy",
+                           "name: Native install, reinstall and uninstall", "name: Check that agy did not update itself")
+
+    def test_self_update_is_disabled_and_a_changed_binary_fails_the_job(self):
         self.assertRegex(self.text, r'(?m)^  AGY_CLI_DISABLE_AUTO_UPDATE: "true"$')
-        self.assertIn("Check that agy did not update itself", self.text)
-        tail = self.text.split("Check that agy did not update itself", 1)[1]
-        self.assertIn("if: always()", tail.split("run:", 1)[0])
-        self.assertIn("agy --version", tail)
-        self.assertIn("$AGY_VERSION", tail)
-        self.assertIn("agy-binary.sha256", self.text)
+        body = self._step("Check that agy did not update itself")
+        self.assertRegex(body, r"^\s+if: always\(\)\n")
+        self.assertRegex(body, r"run: \|\n\s+set -euo pipefail\n")
+        self.assertIn('if [ "$now" != "$AGY_VERSION" ] || [ "$sum" != "$(cat "$RUNNER_TEMP/agy-binary.sha256")" ]; then', body)
+        self.assertRegex(body, r'then\n\s+echo "agy changed during the run \(self-update\)"; exit 1\n\s+fi\s*$')
+        self.assertEqual(body.count("exit 0"), 1)
+        self.assertIn('test -f "$RUNNER_TEMP/agy-binary.sha256" || exit 0', body)
+        self.assertIn('now="$(agy --version)"', body)
+        self.assertIn("shutil.which('agy')", body)
 
     def test_steps_build_validate_strictly_and_run_the_lifecycle(self):
         for required in (
@@ -1749,9 +1785,21 @@ class AntigravityWorkflowTests(unittest.TestCase):
     def test_evidence_rows_record_the_main_run_the_pin_and_the_interactive_probe(self):
         matrix = (REPO / "docs" / "publication" / "compatibility-matrix.md").read_text(encoding="utf-8")
         for required in ("run 45019470314", "pinned_install=passed", "interactive_probe=recorded",
-                         "Auto-update disabled via environment variable AGY_CLI_DISABLE_AUTO_UPDATE"):
+                         "Auto-update disabled via environment variable AGY_CLI_DISABLE_AUTO_UPDATE",
+                         # E21 counts every session, says the hook was a fixed-answer stand-in and
+                         # marks the settings key it relied on as undocumented.
+                         "twelve `agy -i` sessions", "a stand-in hook that printed a fixed answer",
+                         "not `hooks/agy-launch.mjs`", "(undocumented key, from agy 1.5.14 binary strings)",
+                         "`curl` to an outside host ran with no prompt"):
             with self.subTest(required=required):
                 self.assertIn(required, matrix)
+        self.assertNotIn("eleven `agy -i` sessions", matrix)
+        paragraph = matrix.split("Google Antigravity is an experimental adapter", 1)[1].split("\n\n", 1)[0]
+        # The conclusion stays inside the probed cases, and the silent sandbox bypass is stated.
+        self.assertNotIn("so the launcher's `allow` is a no-objection answer there too", paragraph)
+        self.assertIn("in the probed cases", paragraph)
+        self.assertIn("BypassSandbox", paragraph)
+        self.assertIn("outside the workspace with no prompt and no hook", paragraph)
         for rel in ("README.md", "docs/publication/multi-platform-distribution.md"):
             text = (REPO / rel).read_text(encoding="utf-8")
             with self.subTest(doc=rel):
