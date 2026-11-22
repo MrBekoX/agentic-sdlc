@@ -12,9 +12,11 @@ marketplace-kimi.json intentionally carries no plugin version (its "2" is the ma
 SCHEMA version), so bump tracking stays on the manifest and this suite pins that shape.
 """
 import json
+import os
 import subprocess
 import shutil
 import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -284,6 +286,162 @@ class TestKimiStopAndSessionStartStayUnwired(unittest.TestCase):
         flat = " ".join((REPO / ".kimi-plugin" / "README.md").read_text(encoding="utf-8").split())
         self.assertNotIn("which for a Kimi plugin hook is the plugin root", flat)
         self.assertIn("the docs do not reconcile them", flat)
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+                   cwd=str(cwd), check=True, capture_output=True)
+
+
+def make_protected_repo(root, stage_secret=False):
+    """A throwaway Git repository on `main` with one commit (and optionally a staged synthetic secret)."""
+    repo = Path(root) / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+    if stage_secret:
+        (repo / "config.txt").write_text('token = "%s"\n' % ("ghp_" + "a1B2" * 9), encoding="utf-8")
+        _git(repo, "add", "config.txt")
+    return repo
+
+
+def node_env(root, **extra):
+    """The caller's environment without house-policy switches, with Node's temp folder isolated
+    (TMPDIR, TEMP and TMP: Node reads TEMP/TMP on Windows)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AGENTIC_")}
+    for key in ("TMPDIR", "TEMP", "TMP"):
+        env[key] = str(root)
+    env.update(extra)
+    return env
+
+
+def kimi_2_7_2_hook_result(exit_code, stdout, stderr):
+    """Mirror of `resultFromExitCode()` / `structuredOutput()` in
+    packages/agent-core-v2/src/features/externalHooks/internal/runHook.ts as shipped inside the
+    installed Kimi Code 2.7.2 binary (read 2026-11-22, compatibility matrix E30).
+
+    Exit 2 blocks with stderr as the reason. On exit 0 the stdout is parsed with a zod
+    `looseObject` ({message?, hookSpecificOutput?: looseObject({message?, permissionDecision?,
+    permissionDecisionReason?})}): unknown keys such as `hookEventName` or a top-level
+    `systemMessage` are kept and ignored, and only `permissionDecision == "deny"` blocks.
+    Anything else (other exit codes, unparsable stdout) allows: hooks fail open.
+    """
+    if exit_code == 2:
+        return {"action": "block", "reason": stderr.strip()}
+    if exit_code != 0 or not stdout.strip():
+        return {"action": "allow"}
+    try:
+        parsed = json.loads(stdout.strip())
+    except ValueError:
+        return {"action": "allow"}
+    if not isinstance(parsed, dict):
+        return {"action": "allow"}
+    specific = parsed.get("hookSpecificOutput")
+    specific = specific if isinstance(specific, dict) else {}
+    message = parsed.get("message", specific.get("message"))
+    if specific.get("permissionDecision") != "deny":
+        return {"action": "allow", "message": message}
+    reason = specific.get("permissionDecisionReason")
+    return {"action": "block", "reason": reason if isinstance(reason, str) else None, "message": message}
+
+
+class TestKimiGuardOutputUnderTheInstalledParser(unittest.TestCase):
+    """K5: the wired guards' stdout, run as Kimi runs them (cwd = plugin root, snake_case payload),
+    decides as Kimi Code 2.7.2's own hook parser decides. The same three blocks and the warn-mode
+    allow were seen in live `kimi -p` turns (E31)."""
+
+    def run_guard(self, script, command, block=False, stage_secret=False):
+        with tempfile.TemporaryDirectory(prefix="kimi-guard-") as tmp:
+            repo = make_protected_repo(tmp, stage_secret=stage_secret)
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s", "cwd": str(repo),
+                       "tool_name": "Bash", "tool_input": {"command": command}, "tool_call_id": "c"}
+            extra = {"KIMI_PLUGIN_ROOT": str(REPO)}
+            if block:
+                extra["AGENTIC_BRANCH_GUARD_BLOCK"] = "true"
+            proc = subprocess.run(["node", "./hooks/" + script], cwd=str(REPO), input=json.dumps(payload),
+                                  capture_output=True, text=True, encoding="utf-8", timeout=60,
+                                  env=node_env(tmp, **extra))
+        return proc, kimi_2_7_2_hook_result(proc.returncode, proc.stdout, proc.stderr)
+
+    def setUp(self):
+        if shutil.which("node") is None or shutil.which("git") is None:
+            self.skipTest("node and git are required to replay the Kimi hooks")
+
+    def assert_blocks(self, script, command, expected, **kw):
+        proc, result = self.run_guard(script, command, **kw)
+        self.assertEqual(result["action"], "block", proc.stdout + proc.stderr)
+        self.assertIn(expected, result["reason"])
+        # The extra key Kimi's documented example does not show is present and tolerated.
+        self.assertEqual(json.loads(proc.stdout)["hookSpecificOutput"]["hookEventName"], "PreToolUse")
+
+    def test_destructive_guard_blocks(self):
+        self.assert_blocks("destructive-command-guard.mjs", "git reset --hard", "git-reset-hard")
+
+    def test_branch_guard_blocks_in_block_mode(self):
+        self.assert_blocks("branch-guard.mjs", "git commit --allow-empty -m x", "Protected branch 'main'", block=True)
+
+    def test_secret_scan_blocks_a_staged_secret(self):
+        self.assert_blocks("scan-commit.mjs", "git commit -m x", "possible secret", stage_secret=True)
+
+    def test_branch_warning_allows_and_is_not_shown(self):
+        proc, result = self.run_guard("branch-guard.mjs", "git commit --allow-empty -m x")
+        self.assertEqual(result["action"], "allow", proc.stdout)
+        # Kimi reads only `message`; the warn text sits in `systemMessage`, so Kimi shows nothing.
+        self.assertIsNone(result.get("message"))
+        self.assertIn("systemMessage", json.loads(proc.stdout))
+
+
+class TestKimiNativeHookEvidenceIsRecorded(unittest.TestCase):
+    """K4 and K5 were settled natively on Kimi Code 2.7.2 (compatibility matrix E30, E31); the docs
+    must say so instead of listing them as unverified."""
+
+    def docs(self):
+        return {
+            ".kimi-plugin/README.md": (REPO / ".kimi-plugin" / "README.md").read_text(encoding="utf-8"),
+            "docs/runtime-adapter.md#Kimi": runtime_adapter_section("Kimi Code adapter"),
+        }
+
+    def test_docs_cite_the_native_hook_evidence(self):
+        for name, text in self.docs().items():
+            flat = " ".join(text.split())
+            for marker in ("E30", "E31", "2.7.2", "looseObject", "local OpenAI-compatible"):
+                self.assertIn(marker, flat, f"{name} missing {marker}")
+
+    def test_docs_no_longer_list_k4_and_k5_as_unverified(self):
+        for name, text in self.docs().items():
+            flat = " ".join(text.split())
+            for stale in ("Still unverified, because no Kimi CLI was available",
+                          "Unverified without a live Kimi run",
+                          "that route is not natively verified here",
+                          "Hook delivery and live model behavior are unverified",
+                          "without a model session or hook execution claim"):
+                self.assertNotIn(stale, flat, f"{name} still says: {stale}")
+
+    def test_matrix_records_the_kimi_rows(self):
+        log = (REPO / "docs" / "publication" / "compatibility-matrix.md").read_text(encoding="utf-8")
+        log = log.split("## Evidence log", 1)[1]
+        rows = {r.split("|")[1].strip(): r for r in log.splitlines() if r.startswith("| E")}
+        for row_id, result in (("E30", "hook_registration=passed"), ("E31", "hook_delivery=passed")):
+            self.assertIn(row_id, rows)
+            self.assertIn("Kimi Code", rows[row_id])
+            self.assertIn("2.7.2", rows[row_id])
+            self.assertIn(result, rows[row_id])
+
+    def test_warn_mode_claim_matches_a_commit_that_succeeded(self):
+        # The first warn turn stopped at git's missing author identity after the hook allowed the
+        # call; the claim stands only on the re-run with a repo-local identity, where the commit
+        # succeeded. The GitHub-URL provenance (source, ref, installed sha) is recorded in E30.
+        readme = " ".join((REPO / ".kimi-plugin" / "README.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("the warned commit ran and", readme)
+        self.assertIn("repo-local Git identity", readme)
+        log = (REPO / "docs" / "publication" / "compatibility-matrix.md").read_text(encoding="utf-8")
+        rows = {r.split("|")[1].strip(): r for r in log.split("## Evidence log", 1)[1].splitlines()
+                if r.startswith("| E")}
+        self.assertIn("user.email", rows["E31"])
+        self.assertIn("succeeded on `main`", rows["E31"])
+        for field in ("original_source", "installed_sha", "0e93e820032a84a7535f20521e6b37a270cb3e42",
+                      "GET /api/v1/plugins/agentic-sdlc"):
+            self.assertIn(field, rows["E30"])
 
 
 class TestAdapterFilesKeepHouseContracts(unittest.TestCase):

@@ -177,8 +177,30 @@ STALE_ZCODE_CATALOG_CLAIMS = (
 HISTORICAL_RECORDS = re.compile(r"^(CHANGELOG\.md|docs/release-evidence-[^/]+\.md)$")
 
 
+# The one native observation of the lookup order (compatibility matrix E36, 2026-11-22: the agent
+# CLI 0.16.9 bundled with ZCode desktop 3.14.5, `plugins marketplace add MrBekoX/agentic-sdlc`).
+# A paragraph may state the order only while it cites that row (the exact id) and names the scope
+# E36 observed (the agent CLI 0.16.9 and a GitHub source); the clause that states the order must not
+# extend it to the desktop GUI, which was not driven. Anything else is still stale.
+CATALOG_ORDER_EVIDENCE = re.compile(r"\bE36\b")
+CATALOG_ORDER_SCOPE = ("agent CLI 0.16.9", "GitHub")
+CLAUSE_BREAK = re.compile(r"(?<=[。；])|(?<=[.;])\s+")
+
+
+def _cited_in_scope(paragraph, clause):
+    flat = " ".join(paragraph.split())
+    return (CATALOG_ORDER_EVIDENCE.search(flat) is not None
+            and all(term in flat for term in CATALOG_ORDER_SCOPE)
+            and "GUI" not in clause)
+
+
 def stale_zcode_catalog_claim(text):
-    return any(pattern.search(text) for pattern in STALE_ZCODE_CATALOG_CLAIMS)
+    for paragraph in re.split(r"\n\s*\n", text):
+        for clause in CLAUSE_BREAK.split(" ".join(paragraph.split())):
+            if any(pattern.search(clause) for pattern in STALE_ZCODE_CATALOG_CLAIMS) \
+                    and not _cited_in_scope(paragraph, clause):
+                return True
+    return False
 
 
 def sweep_targets(names):
@@ -211,9 +233,10 @@ class TestRootMarketplaceStaysTheZcodeCatalog(unittest.TestCase):
         self.assertTrue(i18n.get("zh-CN"))
 
     def test_no_tracked_doc_says_zcode_reads_the_claude_catalog_first(self):
-        # The claim "a directory or GitHub source is read through the Claude catalog first" was
-        # never observed natively (git history and the E9/E14/E15 lifecycle runs show no such
-        # observation) and the vendor doc does not document it. CHANGELOG.md and the
+        # The claim "a directory or GitHub source is read through the Claude catalog first" is
+        # not in the vendor doc, and the E9/E14/E15 lifecycle runs did not observe it. The agent
+        # CLI 0.16.9 did read `.claude-plugin/marketplace.json` first for a GitHub source on
+        # 2026-11-22 (E36), so a paragraph may say so only while it cites E36. CHANGELOG.md and the
         # docs/release-evidence-*.md records are excluded: they may name the retired claim.
         files = tracked_markdown()
         if files is None:
@@ -236,8 +259,20 @@ class TestRootMarketplaceStaysTheZcodeCatalog(unittest.TestCase):
         for correction in (
             f"whether ZCode reads {claude} from such a source is undocumented",
             f"a {claude} catalog fallback is undocumented and not observed",
+            f"for a GitHub source the agent CLI 0.16.9 read {claude} first (E36)",
         ):
             self.assertFalse(stale_zcode_catalog_claim(correction), correction)
+        # The citation must sit in the same paragraph as the claim.
+        self.assertTrue(stale_zcode_catalog_claim(f"see E36.\n\nZCode prefers {claude} for such sources"))
+        # A citation does not license a wider claim than E36 observed (agent CLI 0.16.9, a GitHub
+        # source run; the GUI was not driven), and only the exact row id counts as a citation.
+        for overreach in (
+            f"The ZCode desktop GUI and every directory source read {claude} first (E36).",
+            f"ZCode reads {claude} first for every source (E36).",
+            f"for a GitHub source the agent CLI 0.16.9 read {claude} first (E360)",
+            f"the agent CLI 0.16.9 read {claude} first for a GitHub source, and so does the GUI (E36)",
+        ):
+            self.assertTrue(stale_zcode_catalog_claim(overreach), overreach)
 
     def test_sweep_excludes_only_the_historical_records(self):
         self.assertEqual(
@@ -257,7 +292,8 @@ class TestRootMarketplaceStaysTheZcodeCatalog(unittest.TestCase):
 
     def test_zcode_docs_do_not_overstate_how_a_source_is_resolved(self):
         # The vendor page tells catalog authors to put marketplace.json at the root; it does not
-        # say how ZCode resolves a directory or repository source, so that is an expectation.
+        # say how ZCode resolves a directory or repository source, so only an observation (E36)
+        # may say it.
         names = (".zcode-plugin/README.md", "docs/zcode-runtime-adapter.md", "docs/runtime-adapter.md",
                  "docs/plugin-readme.md", "docs/troubleshooting.md", "README.md",
                  "docs/publication/multi-platform-distribution.md", "docs/release-readiness.md")
@@ -272,8 +308,15 @@ class TestRootMarketplaceStaysTheZcodeCatalog(unittest.TestCase):
             ("docs/zcode-runtime-adapter.md", (REPO / "docs" / "zcode-runtime-adapter.md").read_text(encoding="utf-8")),
         ):
             flat = " ".join(text.split())
-            self.assertIn("is expected to use the same", flat, name)
-            self.assertIn("not natively observed", flat, name)
+            # The lookup order is an observation of one CLI build, cited to its evidence row; the
+            # desktop GUI flow was not driven, so the docs must not generalise it to the GUI.
+            self.assertIn("agent CLI 0.16.9", flat, name)
+            self.assertIn("E36", flat, name)
+            self.assertIn("GUI", flat, name)
+            # The bundled code uses the same lookup for a directory source (code read 2026-11-22),
+            # so the docs state that consequence and that only the GitHub source was run.
+            self.assertIn("directory source", flat, name)
+            self.assertIn("only the GitHub source was run", flat, name)
 
     def test_troubleshooting_does_not_present_the_claude_entry_as_a_known_symptom(self):
         text = (REPO / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
@@ -374,6 +417,48 @@ class TestAdapterFilesKeepHouseContracts(unittest.TestCase):
         self.assertIn("ZCode", adapter)
         self.assertIn("experimental", adapter.lower())
         self.assertIn("not a 0.4.3 release target", adapter)
+
+
+class TestZcodeNativeHookEvidenceIsRecorded(unittest.TestCase):
+    """Hook registration and delivery of all five ZCode declarations were observed natively with
+    the agent CLI 0.16.9 of ZCode desktop 3.14.5 (compatibility matrix E34, E35), and the GitHub
+    marketplace source's catalog lookup was recorded (E36); the docs must say so."""
+
+    def docs(self):
+        return {
+            ".zcode-plugin/README.md": (REPO / ".zcode-plugin" / "README.md").read_text(encoding="utf-8"),
+            "docs/runtime-adapter.md#ZCode": runtime_adapter_section("ZCode adapter"),
+            "docs/zcode-runtime-adapter.md": (REPO / "docs" / "zcode-runtime-adapter.md").read_text(encoding="utf-8"),
+        }
+
+    def test_docs_cite_the_native_hook_evidence(self):
+        for name, text in self.docs().items():
+            flat = " ".join(text.split())
+            for marker in ("E34", "E35", "E36", "runnable", "local OpenAI-compatible"):
+                self.assertIn(marker, flat, f"{name} missing {marker}")
+        cn = (REPO / ".zcode-plugin" / "README_CN.md").read_text(encoding="utf-8")
+        for marker in ("E34", "E35", "E36"):
+            self.assertIn(marker, cn)
+
+    def test_docs_no_longer_call_hook_delivery_unverified(self):
+        for name, text in self.docs().items():
+            flat = " ".join(text.split())
+            for stale in ("Native display and invocation remain unverified",
+                          "Native delivery/display remains unverified",
+                          "actual hook delivery and model behavior remain unverified",
+                          "does not cover the desktop GUI flow, hook execution"):
+                self.assertNotIn(stale, flat, f"{name} still says: {stale}")
+
+    def test_matrix_records_the_zcode_rows(self):
+        log = (REPO / "docs" / "publication" / "compatibility-matrix.md").read_text(encoding="utf-8")
+        log = log.split("## Evidence log", 1)[1]
+        rows = {r.split("|")[1].strip(): r for r in log.splitlines() if r.startswith("| E")}
+        for row_id, result in (("E34", "hook_registration=passed"), ("E35", "hook_delivery=passed"),
+                               ("E36", "catalog_lookup=recorded")):
+            self.assertIn(row_id, rows)
+            self.assertIn("ZCode", rows[row_id])
+            self.assertIn("agent CLI 0.16.9", rows[row_id])
+            self.assertIn(result, rows[row_id])
 
 
 class TestZcodeSkillAdapters(unittest.TestCase):

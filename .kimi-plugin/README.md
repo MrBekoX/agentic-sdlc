@@ -2,9 +2,10 @@
 
 Kimi Code is an experimental adapter. It was **not a 0.4.3 release target**; the
 next release includes it as an experimental adapter. Native install, update and
-remove passed on Kimi Code 2.1.1 on Windows, Linux and macOS (see
-[Native evidence](#native-evidence)); hook delivery and live skill/model behavior
-are not proven. See the [current distribution guide](../docs/publication/multi-platform-distribution.md)
+remove passed on Kimi Code 2.1.1 on Windows, Linux and macOS, and hook registration
+and delivery of the three guards passed on Kimi Code 2.7.2 on Linux, for a local and a
+GitHub-URL install (see [Native evidence](#native-evidence)); live skill and model
+behavior are not proven. See the [current distribution guide](../docs/publication/multi-platform-distribution.md)
 for scope, evidence and publication limits.
 
 The Kimi manifest is `.kimi-plugin/plugin.json`; the custom catalog is root
@@ -41,8 +42,10 @@ repository, `/tree/<ref>`, `/releases/tag/<tag>` and `/commit/<sha>`. A bare
 repository URL selects its latest release, falling back to the default branch.
 Choose a ref that actually contains this candidate's Kimi manifest; an older
 release is not assumed to include it. Remote installation requires source access:
-the repository is public since 2026-10-12, so a GitHub URL install can reach it;
-that route is not natively verified here.
+the repository is public since 2026-10-12. On Kimi Code 2.7.2 an install from
+`https://github.com/MrBekoX/agentic-sdlc` recorded `source: github`, ref `HEAD` (the
+default branch, as no release exists) and the installed commit, with 16 skills,
+1 command and 3 hooks, and its hooks ran (compatibility matrix E30, E31).
 
 To browse the prepared custom catalog:
 
@@ -110,7 +113,9 @@ identifies the repository the command runs in for Git
 checks. Guards read `tool_input.command` and local Git state, and can return
 `hookSpecificOutput.permissionDecision: "deny"`. Branch warning/block behavior
 follows the configured house policy; Kimi shows only blocking decisions, so warn-mode
-messages are not visible there. Hook errors fail open, so Node availability
+messages are not visible there (Kimi reads a top-level `message`, and the warning is in
+`systemMessage`; in a live 2.7.2 turn with a repo-local Git identity the warned commit
+succeeded on `main` and no warning text reached the next model request, E31). Hook errors fail open, so Node availability
 is required. No MCP server or network integration is declared.
 
 Write scanning and Claude/Codex transcript-based Stop/flow readers remain
@@ -148,15 +153,21 @@ not rely on `stop_hook_active` (for example a per-turn counter keyed by
 `session_id` and `turn_id`), no transcript dependency, and the project taken from
 the payload `cwd` rather than the process cwd.
 
-Still unverified, because no Kimi CLI was available for a live run:
+Verified natively on Kimi Code 2.7.2 (2026-11-22, compatibility matrix E30, E31):
 
-- whether hooks of a GitHub-installed plugin run. The docs say plugin hooks fire
-  while the plugin is enabled and every install goes into a managed copy, with no
-  exception by source, but no sentence says so directly.
-- whether Kimi accepts the extra `hookEventName` key in the wired guards' deny
-  payload. The documented stdout form has only `permissionDecision` and
-  `permissionDecisionReason`. If the key is rejected, the unambiguous form is
-  exit 2 with a stderr reason.
+- K4, GitHub-installed hooks: after an install from the GitHub URL, the plugin reports
+  3 hooks and they fired in a live turn, as they do for a local-directory install.
+- K5, the extra `hookEventName` key: the installed binary's hook parser
+  (`runHook.ts` `structuredOutput()`) reads stdout with a zod `looseObject`, which keeps
+  unknown keys and ignores them; only `hookSpecificOutput.permissionDecision: "deny"` on
+  exit 0, or exit 2, blocks. In live turns the deny payload with `hookEventName` blocked
+  `git reset --hard`, a commit on `main` in block mode and a commit of a staged secret, and
+  each `permissionDecisionReason` reached the model as the tool error. No Kimi output mode
+  is needed for the PreToolUse guards.
+
+The live turns ran `kimi -p` against a local OpenAI-compatible endpoint that scripts one
+`Bash` call, so no Kimi account was used; they prove hook delivery, not model behavior. A
+turn with a Kimi model needs `kimi login`.
 
 ## Native evidence
 
@@ -169,7 +180,13 @@ drove Kimi's own plugin manager through the local authenticated `kimi web` API,
 not the TUI `/plugins install` command, and did not exercise the Enter-update
 path. Earlier preparation evidence is in
 [marketplace readiness](../docs/publication/marketplace-readiness-2026-10-11.md).
-This is native management evidence, without a model session or hook execution claim.
+
+Hook evidence, Kimi Code 2.7.2 on Linux, 2026-11-22 (E30, E31): the CLI from the
+official `code.kimi.com/kimi-code/install.sh` installer, isolated profile, plugin
+installed through the same `kimi web` API from the package directory and from the
+GitHub URL; headless `kimi -p` turns against a local OpenAI-compatible endpoint (no
+Kimi account) showed all three guards blocking and a removed plugin letting the same
+command run. Skill triggering and vendor-model behavior were not measured.
 
 ## Versioning and publication
 
