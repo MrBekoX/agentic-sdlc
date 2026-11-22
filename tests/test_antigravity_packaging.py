@@ -177,8 +177,8 @@ FOREIGN_ROOTS = ("commands/", "cursor/", "rules/", "workflows/grok/", "tests/", 
                  ".claude-plugin/", ".codex-plugin/", ".kimi-plugin/", ".zcode-plugin/", ".grok-plugin/",
                  ".cursor-plugin/")
 FOREIGN_FILES = ("plugin.json", "marketplace.json", "marketplace-kimi.json", "AGENTS.md", "CLAUDE.md",
-                 "hooks/hooks.json", ".antigravity-plugin/hooks.json")
-AGY_HANDLERS = ("agy-launch.mjs", "scan-commit.mjs", "destructive-command-guard.mjs", "branch-guard.mjs",
+                 "hooks/hooks.json", ".antigravity-plugin/hooks.json", ".antigravity-plugin/mcp_config.json")
+AGY_HANDLERS = ("agy-launch.mjs", "scan-commit.mjs", "destructive-command-guard.mjs", "branch-guard.mjs", "scan-tool-args.mjs",
                 "scan-write.mjs", "session-start.mjs", "worktree-scan.mjs")
 
 
@@ -210,6 +210,12 @@ class AntigravityPackageBuildTests(unittest.TestCase):
         self.assertEqual(self.members["hooks.json"], self.head[".antigravity-plugin/hooks.json"])
         self.assertIn("LICENSE", self.members)
         self.assertIn("assets/logo.png", self.members)
+
+    def test_search_server_ships_with_its_root_mcp_config(self):
+        # AC2: agy reads <plugin-root>/mcp_config.json (bundled plugins.md / mcp_servers.md, agy 1.5.14).
+        self.assertEqual(self.members["mcp_config.json"], self.head[".antigravity-plugin/mcp_config.json"])
+        self.assertNotIn(".antigravity-plugin/mcp_config.json", self.members)
+        self.assertEqual(self.members["scripts/agy_search_mcp.py"], self.head["scripts/agy_search_mcp.py"])
 
     def test_no_other_runtime_component_ships(self):
         for name in self.members:
@@ -378,6 +384,12 @@ class AntigravitySelectionTests(unittest.TestCase):
             else:
                 members[path] = value
         return build_release._select_antigravity(members)
+
+    def test_the_mcp_config_moves_to_the_package_root(self):
+        config = ("100644", b'{"mcpServers": {}}\n')
+        selected = self.select(**{".antigravity-plugin__mcp_config.json": config})
+        self.assertEqual(selected["mcp_config.json"], config)
+        self.assertNotIn(".antigravity-plugin/mcp_config.json", selected)
 
     def test_selection_follows_the_wire_and_the_skill_references(self):
         selected = self.select()

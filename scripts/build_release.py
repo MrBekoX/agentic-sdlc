@@ -294,6 +294,8 @@ PUBLIC_DOCS = (
 ANTIGRAVITY_MANIFEST = ".antigravity-plugin/plugin.json"
 ANTIGRAVITY_README = ".antigravity-plugin/README.md"
 ANTIGRAVITY_WIRE = ".antigravity-plugin/hooks.json"
+# The read-only search server (scripts/agy_search_mcp.py); agy reads it from the package root.
+ANTIGRAVITY_MCP = ".antigravity-plugin/mcp_config.json"
 ANTIGRAVITY_LAUNCHER = "hooks/agy-launch.mjs"
 ANTIGRAVITY_ROOTS = ("skills/", "contracts/", "scripts/", "flows/", "assets/")
 # Source folders a skill may name as `<runtime-root>/<file>`; only the named files ship.
@@ -864,6 +866,8 @@ def _select_antigravity(members: dict) -> dict:
     if ANTIGRAVITY_README in members:
         selected[ANTIGRAVITY_README] = members[ANTIGRAVITY_README]
     selected["hooks.json"] = members[ANTIGRAVITY_WIRE]
+    if ANTIGRAVITY_MCP in members:
+        selected["mcp_config.json"] = members[ANTIGRAVITY_MCP]
     hooks, hook_errors = _antigravity_hooks(members)
     selected.update(hooks)
     errors += hook_errors

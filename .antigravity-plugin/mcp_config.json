@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "search": {
+      "command": "python3",
+      "args": ["${PLUGIN_ROOT}/scripts/agy_search_mcp.py"]
+    }
+  }
+}

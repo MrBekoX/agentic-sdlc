@@ -16,8 +16,13 @@ Cursor rules: keep `name`, `description` and `model` verbatim, drop `tools`, and
 Antigravity rules (agy 1.5.14): `tools` is a YAML list of agy runtime names (a comma string makes
 the agy loader skip the agent), `subagent: true`, `mainAgent: false`, `model: inherit`, and
 read-only roles add `inheritMcp: false`. A role model other than `inherit` is an error: agy model
-names are not Claude's, so a pinned model is never silently replaced. agy has no grep or glob tool, so a read-only role reads
-only the files the orchestrating skill names. The body is copied byte for byte in both.
+names are not Claude's, so a pinned model is never silently replaced. agy has no grep or glob tool:
+`Grep` and `Glob` map to `read_file`, and the search itself is the package's read-only MCP server
+`agentic-sdlc_search` (scripts/agy_search_mcp.py, tools grep and glob). agy 1.5.14 gives every plugin
+subagent `call_mcp_tool` and its plugin's MCP servers even with `inheritMcp: false`, while a
+`call_mcp_tool` entry in `tools` stops the agent from starting and `mcpServers` in agent frontmatter
+is ignored (live probes 2026-11-22), so the projection grants neither. The body is copied byte for
+byte in both.
 
 Output: key=value lines, error=<code>:<detail> lines; exit 0 pass, 1 check failure or bad role,
 2 usage error.
@@ -31,6 +36,7 @@ from pathlib import Path
 WRITING_TOOLS = frozenset({"Write", "Edit", "Bash", "PowerShell", "NotebookEdit"})
 # Claude tool -> agy runtime tool (names from a live agy 1.5.14 session and its bundled
 # migrate-agent-settings skill; the web-doc names view_file/grep_search are not runtime names).
+# Grep and Glob search through AGY_SEARCH_SERVER, which needs no entry here.
 AGY_TOOLS = {
     "Read": "read_file", "Glob": "read_file", "Grep": "read_file",
     "WebFetch": "search_web", "WebSearch": "search_web",
@@ -40,6 +46,8 @@ AGY_TOOLS = {
 }
 AGY_ORDER = ("read_file", "search_web", "write_file", "edit_file", "run_command")
 AGY_WRITE = frozenset({"write_file", "edit_file", "run_command"})
+# The name agy gives the bundled search server: `<plugin name>_<server key in mcp_config.json>`.
+AGY_SEARCH_SERVER = "agentic-sdlc_search"
 TARGETS = ("cursor", "antigravity")
 MIRROR = {"cursor": "cursor/agents"}
 
