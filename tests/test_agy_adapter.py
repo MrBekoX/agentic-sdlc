@@ -465,13 +465,15 @@ class AgyEveryToolTests(unittest.TestCase):
                 payload = fixture(name, self.work)
                 self.assertEqual(payload["toolCall"]["name"], tool)
                 # manage_task and run_workflow are command tools: the argument scan leaves them alone,
-                # but it never answers `allow` for run_workflow, so the `*` group cannot approve a
-                # script that the command group holds for review (how agy merges a sibling group's
-                # allow with ask is not measured).
+                # but it never answers `allow` for run_workflow or terminal input (agy applies the
+                # strictest answer of the groups, probe 2026-11-22, so this keeps the ask).
                 out = answer(launch("PreToolUse", ARG_SCAN, payload))
                 if tool == "run_workflow":
                     self.assertEqual(out["decision"], "ask")
                     self.assertIn("run_workflow", out["reason"])
+                elif tool == "manage_task":
+                    self.assertEqual(out["decision"], "ask")
+                    self.assertIn("terminal task", out["reason"])
                 else:
                     self.assertEqual(out, {"decision": "allow"})
 
@@ -480,6 +482,25 @@ class AgyEveryToolTests(unittest.TestCase):
         for handler in (*COMMAND_GUARDS, ARG_SCAN, "scan-write.mjs"):
             with self.subTest(handler=handler):
                 self.assertEqual(answer(launch("PreToolUse", handler, payload))["decision"], "ask")
+
+    def test_terminal_input_with_no_objection_asks_because_its_folder_is_unknown(self):
+        # manage_task send_input types into a terminal task that may run in another folder (its own
+        # Cwd, or a `cd` inside the shell), which the folder-sensitive guards cannot see. With nothing
+        # to report, no handler answers allow for it; a guard's own deny still wins.
+        payload = fixture("pre-manage-task", self.work)
+        payload["toolCall"]["args"]["Input"] = "ls\n"
+        for handler in (*COMMAND_GUARDS, ARG_SCAN, "scan-write.mjs"):
+            with self.subTest(handler=handler):
+                out = answer(launch("PreToolUse", handler, payload))
+                self.assertEqual(out["decision"], "ask")
+                self.assertIn("folder", out["reason"])
+        payload["toolCall"]["args"]["Input"] = "git reset --hard\n"
+        self.assertEqual(answer(launch("PreToolUse", "destructive-command-guard.mjs", payload))["decision"], "deny")
+        # An action that types nothing (status, kill) runs no command and is not asked about.
+        status = fixture("pre-manage-task", self.work)
+        status["toolCall"]["args"].pop("Input", None)
+        status["toolCall"]["args"]["Action"] = "status"
+        self.assertEqual(answer(launch("PreToolUse", "branch-guard.mjs", status))["decision"], "allow")
 
     def test_a_secret_in_any_other_tool_argument_is_denied_without_echoing_it(self):
         cases = {
@@ -571,10 +592,13 @@ class AgyEveryToolTests(unittest.TestCase):
                 self.assertEqual(answer(launch("PreToolUse", ARG_SCAN, payload)), {"decision": "allow"})
 
     def test_manage_task_input_reaches_the_command_guards(self):
+        # The captured benign input gets the guards' no-objection answer for terminal input: ask.
         payload = fixture("pre-manage-task", self.work)
         for handler in COMMAND_GUARDS:
             with self.subTest(handler=handler):
-                self.assertEqual(answer(launch("PreToolUse", handler, payload)), {"decision": "allow"})
+                out = answer(launch("PreToolUse", handler, payload))
+                self.assertEqual(out["decision"], "ask")
+                self.assertIn("terminal task", out["reason"])
         payload["toolCall"]["args"]["Input"] = "git reset --hard"
         out = answer(launch("PreToolUse", "destructive-command-guard.mjs", payload))
         self.assertEqual(out["decision"], "deny")

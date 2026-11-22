@@ -43,6 +43,7 @@ const HANDLER_TOOLS = {
 // script harmless, so their no-objection answer is `ask`, never `allow`. Measured in headless agy
 // 1.5.14 (2026-11-22): `ask` does not hold the call by itself; agy's own command permission decides
 // (denied with no allow rule, run with a matching `permissions.allow` rule), and a guard's deny wins.
+const TERMINAL_REVIEW = 'agentic-sdlc: manage_task types this input into a running terminal task whose folder the guards cannot see; review it before approving.';
 const WORKFLOW_REVIEW = 'agentic-sdlc: run_workflow runs a Python script that the command guards cannot fully check; review it before approving.';
 const MAX_SCRIPT_BYTES = 1024 * 1024;
 const EVENT_HANDLERS = {
@@ -229,9 +230,17 @@ function translatePreToolUse(handler, payload, tool) {
   return { decision: 'ask', reason: message };
 }
 
-// The answer for a call the guard has nothing to say about.
-function noObjection(tool) {
-  return tool === 'run_workflow' ? { decision: 'ask', reason: WORKFLOW_REVIEW } : { decision: 'allow' };
+// The answer for a call the guard has nothing to say about. run_workflow and the terminal input of
+// manage_task are never allowed outright: a workflow script cannot be proven harmless as shell text,
+// and a terminal task may run in another folder (its own Cwd, or a `cd` inside its shell), which the
+// folder-sensitive guards cannot see.
+function noObjection(call) {
+  const name = call && call.name;
+  if (name === 'run_workflow') return { decision: 'ask', reason: WORKFLOW_REVIEW };
+  if (name === 'manage_task' && call.args && Object.prototype.hasOwnProperty.call(call.args, 'Input')) {
+    return { decision: 'ask', reason: TERMINAL_REVIEW };
+  }
+  return { decision: 'allow' };
 }
 
 function translateSessionStart(payload) {
@@ -317,7 +326,7 @@ async function main() {
 
   let translated;
   let cwd;
-  let tool = '';
+  let tool = null;
   if (event === 'PreToolUse') {
     let call;
     try {
@@ -326,9 +335,10 @@ async function main() {
       if (!(error instanceof Unreadable)) throw error;
       return denied(handler, error.message);
     }
-    // A handler that does not check this tool still never answers `allow` for run_workflow: agy runs
-    // every matching group, and how it merges one group's ask with another's allow is not measured.
-    if (!HANDLER_TOOLS[handler](call.name)) return noObjection(call.name);
+    // A handler that does not check this tool still never answers `allow` for run_workflow or terminal
+    // input. agy runs every matching group and applies the strictest answer: an interactive probe
+    // (2026-11-22, agy 1.5.14) showed one group's `ask` and another's `allow` prompting in either order.
+    if (!HANDLER_TOOLS[handler](call.name)) return noObjection(call);
     try {
       cwd = commandCwd(input, call);
       translated = translateTool(call, cwd);
@@ -336,8 +346,8 @@ async function main() {
       if (!(error instanceof Unreadable)) throw error;
       return denied(handler, error.message);
     }
-    if (!translated) return noObjection(call.name);
-    tool = call.name;
+    if (!translated) return noObjection(call);
+    tool = call;
   } else {
     cwd = projectCwd(input);
     translated = event === 'Stop'

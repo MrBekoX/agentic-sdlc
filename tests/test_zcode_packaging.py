@@ -323,8 +323,11 @@ class TestRootMarketplaceStaysTheZcodeCatalog(unittest.TestCase):
         self.assertNotIn("## ZCode Shows The Claude Entry", text)
         start = text.index("\n## ZCode ")
         section = " ".join(text[start:text.find("\n## ", start + 1)].split())
-        self.assertIn("precaution", section)
+        # Since E36 (2026-11-22) the Claude-entry card is an observed agent CLI 0.16.9 result, so
+        # the section cites it and keeps the remedy; the lifecycle runs it relied on stay named.
+        self.assertIn("E36", section)
         self.assertIn("E9, E14 and E15", section)
+        self.assertIn("add the root file as a file source instead", section)
 
     def test_zcode_docs_name_the_documented_catalog_and_flag_the_fallback(self):
         docs = {

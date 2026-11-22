@@ -213,7 +213,7 @@ State: GAP. Native install, skill discovery, recopy and removal of a package bui
 
 **Steps.** ZCode discovers `.zcode-plugin/plugin.json`, a flat `skills/<name>/SKILL.md` layout, and loads the separate [`hooks/hooks-zcode.json`](hooks/hooks-zcode.json) wire declared by the manifest (`hooks/hooks.json` is never created — ZCode auto-loads that standard location).
 
-1. **Settings → Plugins → Discover**, click **+** (**Create → Add marketplace**), and add the package's root [`marketplace.json`](marketplace.json) **as a file source** — the ZCode marketplace schema (`name=mrbekox`, `source="./"`, `category=developer-tools`). The ZCode [plugin docs](https://zcode.z.ai/en/docs/plugin) (fetched 2026-11-21) describe a repository catalog as a root `marketplace.json`, so a directory or GitHub-repository source is expected to use this same file (not natively observed); whether ZCode reads `.claude-plugin/marketplace.json` from such a source is undocumented and not observed. Without a package directory, the GitHub repository `MrBekoX/agentic-sdlc` can be added as that source: the vendor plugin page lists a GitHub repository as a marketplace source (checked 2026-10-08). The repository is public since 2026-10-12; that route has not been natively verified.
+1. **Settings → Plugins → Discover**, click **+** (**Create → Add marketplace**), and add the package's root [`marketplace.json`](marketplace.json) **as a file source** — the ZCode marketplace schema (`name=mrbekox`, `source="./"`, `category=developer-tools`). A GitHub-repository source is read through `.claude-plugin/marketplace.json` first by the ZCode agent CLI 0.16.9 and shows the Claude entry without ZCode's category, tags and translations (E36, 2026-11-22; a directory source uses the same lookup by a reading of the bundled code; the desktop app was not driven). Without a package directory, the GitHub repository `MrBekoX/agentic-sdlc` can be added as that source: the vendor plugin page lists a GitHub repository as a marketplace source (checked 2026-10-08). The repository is public since 2026-10-12; that route has not been natively verified.
 2. Review the wired hooks first: ZCode enables newly installed plugins by default, which lets their hooks run. In the **Personal** segment, **Install** the `agentic-sdlc` card.
 3. Start a new session, then check **Settings → Skills** (16 plugin skills), **Settings → Hooks** (plugin hook entries), and invoke `$using-agentic-sdlc` once.
 
@@ -365,7 +365,7 @@ hooks/                 Deterministic guard scripts, flow evidence, and runtime h
 contracts/skills/      Durable behavior contracts
 commands/              Manual slash-command definitions
 flows/                 The flow runner's JSON flows, loop definition and schemas (read by scripts/sdlc.py)
-scripts/               27 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check, native lifecycle check, Cursor package check and install, the middleware-chain runner entry
+scripts/               28 Python helpers: probes, validators, eval runners, release archives, marketplace staging, portability, strict evidence, versioning, git-hook install, hook trust check, native lifecycle check, Cursor package check and install, the Antigravity read-only search server, the middleware-chain runner entry
 tests/                 Unit tests, harness, fixtures, golden refs, eval seeds
 docs/                  Component reference, boundaries, testing, release notes
 ```
