@@ -25,12 +25,17 @@ Windows (x64/ARM64), macOS (Apple Silicon/Intel DMG) and Linux (x64 AppImage).
 2. Add the root `marketplace.json` (the ZCode marketplace schema) **as a file source**.
    ZCode documents a marketplace source as a GitHub repository, a Git URL, or a local
    marketplace file or directory, and a shared catalog as a `marketplace.json` at the
-   repository root ([plugin docs](https://zcode.z.ai/en/docs/plugin), fetched 2026-11-21),
-   so a directory or GitHub source of this repository is expected to use the same root
-   `marketplace.json` (not natively observed: the page does not say how a source is
-   resolved). The repository also carries `.claude-plugin/marketplace.json` (the
-   Claude catalog); whether ZCode reads that file from a directory or GitHub source, or
-   prefers it over the root file, is undocumented and has not been observed. ZCode
+   repository root ([plugin docs](https://zcode.z.ai/en/docs/plugin), fetched 2026-11-21).
+   The page does not say how a directory or GitHub source is resolved, and the repository
+   also carries `.claude-plugin/marketplace.json` (the Claude catalog), so the lookup
+   order is undocumented. One observation exists (compatibility matrix E36, 2026-11-22):
+   the agent CLI 0.16.9 bundled with ZCode desktop 3.14.5, given the GitHub source
+   `MrBekoX/agentic-sdlc`, read `.claude-plugin/marketplace.json` first; its lookup tries
+   an explicit file, then `.claude-plugin/marketplace.json`, then the root
+   `marketplace.json`. The install still worked (the plugin manifest lookup takes
+   `.zcode-plugin/plugin.json` first), but the ZCode-only catalog fields (category, tags,
+   translations) come from the root file only. The desktop GUI add flow was not driven,
+   so a file source naming the root `marketplace.json` stays the documented route. ZCode
    validates before adding.
 3. Review the hook table under **Trust and side effects** first: newly installed plugins
    are **enabled by default**, which lets their hooks run. In the **Personal** segment,
@@ -40,7 +45,9 @@ Windows (x64/ARM64), macOS (Apple Silicon/Intel DMG) and Linux (x64 AppImage).
 
 Without a local package directory, add the GitHub repository `MrBekoX/agentic-sdlc` (or
 its URL) as the marketplace source in step 2. The repository is public since
-2026-10-12; this route has not been natively verified. The vendor plugin page lists a GitHub
+2026-10-12; with the bundled agent CLI 0.16.9 this route added the `mrbekox` catalog and
+installed `agentic-sdlc@mrbekox` 0.7.0 with 16 skills and five runnable hook
+declarations, and the hooks ran (E35, E36); the GUI route was not driven. The vendor plugin page lists a GitHub
 repository as a marketplace source (checked 2026-10-08) and names the root
 `marketplace.json` as the catalog of a GitHub marketplace (checked 2026-11-21); that is
 this repository's ZCode-schema catalog, with its category, tags and translations. A
@@ -89,7 +96,14 @@ keys (`hooks/hook-output.mjs`): warns move into `hookSpecificOutput.additionalCo
 and the advisory top-level `systemMessage` channel (a Claude Code convention) is never
 written. The live hook doc says ZCode ignores unknown fields, while the bundled
 `diagnosing-hooks` skill says any extra key fails the run and discards its effect; the
-output is safe under either reading. Native display and invocation remain unverified.
+output is safe under either reading. Native invocation was observed with the bundled
+agent CLI 0.16.9 (2026-11-22, compatibility matrix E34, E35): `plugins list --json` reports
+the five declarations as `type: process` argv with `--zcode-runtime`, each `runnable`; in
+headless `-p` turns driven by a local OpenAI-compatible endpoint (no Z.AI account), the
+three guards blocked their commands with the reason as the tool result, the SessionStart
+context and the warn and write-scan `additionalContext` reached the next model request,
+and a disabled plugin let the same command run. How the desktop GUI displays them was not
+checked.
 There is **no network
 access** (no MCP servers are declared) and no data leaves the machine. Long-lived
 writable data would belong under `ZCODE_PLUGIN_DATA`, not the install directory.
@@ -141,8 +155,13 @@ native validate, marketplace add of a catalog folder derived from the root
 2026-10-12: Windows (E9), Linux x64 AppImage (E15) and macOS Apple Silicon DMG (E14) in
 the [compatibility matrix](../docs/publication/compatibility-matrix.md). That CLI manages
 plugins only in Electron's Node mode, which is not a documented user path, so this
-verifies the bundled plugin manager only; the desktop GUI flow, a GitHub source, actual
-hook delivery and model behavior remain unverified. Earlier preparation evidence is in
+verifies the bundled plugin manager only.
+
+Hook evidence, Linux, 2026-11-22 (E34, E35, E36): the same 3.14.5 AppImage's agent CLI
+0.16.9 registered the five hook declarations as runnable and ran them in headless turns
+against a local OpenAI-compatible endpoint; a GitHub source installed and ran them too.
+The desktop GUI flow, skill triggering and vendor-model behavior remain unverified; a
+turn with a GLM model needs `zcode login` (Z.AI OAuth) or a Z.ai API key. Earlier preparation evidence is in
 [marketplace readiness](../docs/publication/marketplace-readiness-2026-10-11.md).
 
 ## Official marketplace submission
