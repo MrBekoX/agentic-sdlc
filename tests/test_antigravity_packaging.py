@@ -3,6 +3,7 @@ from pathlib import Path
 import contextlib
 import io
 import json
+import posixpath
 import re
 import shutil
 import subprocess
@@ -241,6 +242,62 @@ class AntigravityPackageBuildTests(unittest.TestCase):
                 expected = project_roles.project_antigravity(self.head[name].decode("utf-8")).encode("utf-8")
                 self.assertEqual(self.members[name], expected)
 
+    def test_over_long_skill_bodies_are_split_and_the_rest_ships_whole(self):
+        # AC1: agy loads only the first 24000 bytes of a SKILL.md body (agy 1.5.14 `plugin validate`).
+        limit = build_release.AGY_SKILL_BODY_LIMIT
+        continuation = build_release.AGY_SKILL_CONTINUATION
+        split = []
+        for name, data in sorted(self.head.items()):
+            if not name.startswith("skills/"):
+                continue
+            with self.subTest(member=name):
+                if not (name.endswith("/SKILL.md") and name.count("/") == 2):
+                    self.assertEqual(self.members[name], data)
+                    continue
+                head_fm, head_body = build_release._skill_parts(data)
+                out_fm, out_body = build_release._skill_parts(self.members[name])
+                self.assertEqual(out_fm, head_fm)
+                self.assertLessEqual(len(out_body), limit)
+                extra = name.rsplit("/", 1)[0] + "/" + continuation
+                if len(head_body) <= limit:
+                    self.assertEqual(self.members[name], data)
+                    self.assertNotIn(extra, self.members)
+                    continue
+                split.append(name)
+                rest = self.members[extra]
+                note_end = out_body.index(b"\n\n") + 2
+                self.assertIn(continuation.encode(), out_body[:note_end])
+                self.assertIn(b"read_file", out_body[:note_end])
+                self.assertIn(rest.split(b"\n", 1)[0].lstrip(b"#").strip(), out_body[:note_end])
+                self.assertEqual(out_body[note_end:] + rest, head_body)
+                self.assertTrue(rest.startswith(b"#"))
+        self.assertIn("skills/agentic-sdlc-pipeline/SKILL.md", split)
+        pipeline_rest = self.members["skills/agentic-sdlc-pipeline/" + continuation]
+        self.assertIn(b"\n## Finalize\n", pipeline_rest)
+
+    def test_projected_skill_relative_links_resolve(self):
+        link = re.compile(r"\]\((?!https?:|#|mailto:)([^)\s#]+)")
+        for name, data in sorted(self.members.items()):
+            if not (name.startswith("skills/") and name.endswith(".md")) or self.head.get(name) == data:
+                continue
+            folder = name.rsplit("/", 1)[0]
+            for rel in link.findall(data.decode("utf-8")):
+                target = posixpath.normpath(posixpath.join(folder, rel))
+                with self.subTest(doc=name, link=rel):
+                    self.assertTrue(target in self.members or any(m.startswith(target + "/") for m in self.members),
+                                    target)
+
+    @unittest.skipUnless(shutil.which("agy"), "agy CLI not installed")
+    def test_agy_strict_validate_passes_on_the_built_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with zipfile.ZipFile(self.out) as zf:
+                zf.extractall(tmp)
+            proc = subprocess.run(["agy", "plugin", "validate", "--strict", "--json", tmp], capture_output=True,
+                                  text=True, encoding="utf-8", check=False, timeout=120)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertEqual([f for f in report["findings"] if f["severity"] != "note"], [])
+
     def test_skills_ship_whole_and_every_runtime_root_reference_resolves(self):
         with tempfile.TemporaryDirectory() as tmp:
             plugin_root = Path(tmp) / "consumer-workspace" / ".agents" / "plugins" / "agentic-sdlc"
@@ -329,6 +386,99 @@ class AntigravitySelectionTests(unittest.TestCase):
             "skills/s/SKILL.md", "docs/a.md", "agents/r.md", "LICENSE",
         ]))
         self.assertIn(b"  - read_file\n", selected["agents/r.md"][1])
+
+    @staticmethod
+    def skill(body: bytes, frontmatter: bytes = b"---\nname: s\ndescription: d\n---\n") -> tuple:
+        return ("100644", frontmatter + body)
+
+    @staticmethod
+    def section(title: str, size: int, level: int = 2) -> bytes:
+        """A section of exactly `size` bytes: one heading line, then filler lines, ending in a newline."""
+        head = ("#" * level + " " + title + "\n").encode()
+        filler = size - len(head)
+        lines, tail = divmod(filler, 80)
+        data = head + (b"x" * 79 + b"\n") * lines
+        if tail:
+            data += b"y" * (tail - 1) + b"\n"
+        assert len(data) == size
+        return data
+
+    def split(self, body: bytes, frontmatter: bytes = b"---\nname: s\ndescription: d\n---\n"):
+        members = dict(self.BASE)
+        members["skills/s/SKILL.md"] = self.skill(body, frontmatter)
+        selected = build_release._select_antigravity(members)
+        return selected, body
+
+    def assert_split(self, selected, body, frontmatter=b"---\nname: s\ndescription: d\n---\n", first=None):
+        limit = build_release.AGY_SKILL_BODY_LIMIT
+        out = selected["skills/s/SKILL.md"][1]
+        self.assertTrue(out.startswith(frontmatter))
+        out_body = out[len(frontmatter):]
+        self.assertLessEqual(len(out_body), limit)
+        rest = selected["skills/s/" + build_release.AGY_SKILL_CONTINUATION][1]
+        self.assertEqual(selected["skills/s/" + build_release.AGY_SKILL_CONTINUATION][0], "100644")
+        note_end = out_body.index(b"\n\n") + 2
+        self.assertEqual(out_body[note_end:] + rest, body)
+        if first is not None:
+            self.assertTrue(rest.startswith(first), rest[:80])
+        return out_body[:note_end], out_body[note_end:], rest
+
+    def test_body_at_the_limit_is_kept_and_one_byte_more_is_split(self):
+        limit = build_release.AGY_SKILL_BODY_LIMIT
+        intro = b"# T\n\nIntro.\n\n"
+        at_limit = intro + self.section("A", 12000) + self.section("B", limit - 12000 - len(intro))
+        self.assertEqual(len(at_limit), limit)
+        selected, _ = self.split(at_limit)
+        self.assertEqual(selected["skills/s/SKILL.md"][1], self.skill(at_limit)[1])
+        self.assertNotIn("skills/s/" + build_release.AGY_SKILL_CONTINUATION, selected)
+        over = at_limit + b"z"
+        selected, _ = self.split(over)
+        note, kept, rest = self.assert_split(selected, over, first=b"## B\n")
+        self.assertIn(b"agy loads only", note.lower().replace(b"antigravity (agy)", b"agy"))
+        self.assertIn(b"skills/s/" + build_release.AGY_SKILL_CONTINUATION.encode(), note)
+        self.assertIn(b"read_file", note)
+        self.assertIn(b"B", note)
+
+    def test_split_ignores_headings_inside_code_fences(self):
+        fenced = b"## A\n```\n" + b"## not a heading\n" + (b"q" * 79 + b"\n") * 200 + b"```\n"
+        body = b"# T\n\n" + fenced + self.section("B", 20000)
+        selected, _ = self.split(body)
+        _note, kept, rest = self.assert_split(selected, body, first=b"## B\n")
+        self.assertIn(b"## not a heading", kept)
+
+    def test_a_section_over_the_limit_splits_at_the_next_lower_heading(self):
+        big = b"## A\n\n" + self.section("A1", 15000, 3) + self.section("A2", 15000, 3)
+        body = b"# T\n\n" + big + self.section("B", 3000)
+        selected, _ = self.split(body)
+        self.assert_split(selected, body, first=b"### A2\n")
+
+    def test_crlf_frontmatter_is_kept(self):
+        frontmatter = b"---\r\nname: s\r\ndescription: d\r\n---\r\n"
+        body = b"# T\r\n\r\n" + self.section("A", 20000) + self.section("B", 6000)
+        selected, _ = self.split(body, frontmatter)
+        out = selected["skills/s/SKILL.md"][1]
+        self.assertTrue(out.startswith(frontmatter))
+        out_body = out[len(frontmatter):]
+        rest = selected["skills/s/" + build_release.AGY_SKILL_CONTINUATION][1]
+        note_end = out_body.index(b"\r\n\r\n") + 4
+        self.assertEqual(out_body[note_end:] + rest, body)
+        self.assertLessEqual(len(out_body), build_release.AGY_SKILL_BODY_LIMIT)
+
+    def test_unsplittable_skill_and_continuation_collision_fail_the_build(self):
+        cases = {
+            "error=antigravity_skill_unsplittable:skills/s/SKILL.md": {
+                "skills/s/SKILL.md": self.skill(b"# T\n\n" + b"x" * 30000 + b"\n")},
+            "error=antigravity_skill_continuation_exists:skills/s/" + build_release.AGY_SKILL_CONTINUATION: {
+                "skills/s/SKILL.md": self.skill(b"# T\n\n" + self.section("A", 20000) + self.section("B", 6000)),
+                "skills/s/" + build_release.AGY_SKILL_CONTINUATION: ("100644", b"# taken\n")},
+        }
+        for expected, change in cases.items():
+            with self.subTest(expected=expected):
+                members = dict(self.BASE)
+                members.update(change)
+                with self.assertRaises(build_release.ReleaseError) as ctx:
+                    build_release._select_antigravity(members)
+                self.assertIn(expected, ctx.exception.lines)
 
     def test_missing_pieces_and_bad_roles_fail_the_build(self):
         cases = {

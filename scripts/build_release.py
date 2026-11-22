@@ -301,6 +301,19 @@ ANTIGRAVITY_REFERENCED_ROOTS = ("docs/", "workflows/")
 _RUNTIME_ROOT_REF = re.compile(r"<runtime-root>/([A-Za-z0-9_./-]+)")
 _WIRED_HANDLER = re.compile(r"--handler ([a-z0-9-]+\.mjs)")
 ARCHIVE_KINDS = ("release", "skills-only", "antigravity")
+# agy loads only the first 24000 bytes of a SKILL.md body. `agy plugin validate` (1.5.14, probes
+# 2026-11-22) measures the bytes after the frontmatter's closing `---` line with surrounding
+# whitespace trimmed: 24000 passes, 24001 warns, and three-byte characters count three. The package
+# keeps every untrimmed body at or under the limit, and a longer one is split at heading boundaries
+# into SKILL.md (a read-first note plus the leading sections) and a continuation file in the same
+# folder, so relative links keep resolving. The shared source skills are never changed.
+AGY_SKILL_BODY_LIMIT = 24000
+AGY_SKILL_CONTINUATION = "SKILL-continued.md"
+# Room kept in the body for the read-first note (its quoted heading is cut to fit).
+_AGY_NOTE_RESERVE = 600
+_SKILL_FRONTMATTER = re.compile(rb"\A---\r?\n(?:.*?\r?\n)?---[ \t]*(?:\r?\n|\Z)", re.S)
+_FENCE = re.compile(rb" {0,3}(`{3,}|~{3,})")
+_HEADING = re.compile(rb" {0,3}(#{1,6})(?:[ \t]|\r?\n|\Z)")
 
 
 class ReleaseError(Exception):
@@ -766,6 +779,78 @@ def _project_roles():
     return RoleError, project_role
 
 
+def _skill_parts(data: bytes) -> tuple:
+    """(frontmatter, body) of a SKILL.md; a file without frontmatter is all body."""
+    match = _SKILL_FRONTMATTER.match(data)
+    return (data[:match.end()], data[match.end():]) if match else (b"", data)
+
+
+def _heading_sections(text: bytes, level: int) -> list:
+    """`text` cut before every level-`level` ATX heading outside fenced code; joined, the parts are `text`."""
+    parts, current, fence = [], [], None
+    for line in text.splitlines(keepends=True):
+        mark = _FENCE.match(line)
+        if fence is None and mark:
+            fence = mark.group(1)
+        elif fence is not None:
+            if mark and mark.group(1)[:1] == fence[:1] and len(mark.group(1)) >= len(fence) \
+                    and not line[mark.end():].strip():
+                fence = None
+        else:
+            heading = _HEADING.match(line)
+            if heading and len(heading.group(1)) == level and current:
+                parts.append(b"".join(current))
+                current = []
+        current.append(line)
+    if current:
+        parts.append(b"".join(current))
+    return parts
+
+
+def _skill_pieces(text: bytes, level: int, budget: int) -> list:
+    """`text` as heading-bounded pieces of at most `budget` bytes, cutting at the shallowest level that does."""
+    if len(text) <= budget:
+        return [text]
+    if level > 6:
+        raise ValueError("unsplittable")
+    pieces = []
+    for part in _heading_sections(text, level):
+        pieces += _skill_pieces(part, level + 1, budget) if len(part) > budget else [part]
+    return pieces
+
+
+def _agy_read_first_note(skill_dir: str, piece: bytes, newline: bytes) -> bytes:
+    title = piece.splitlines()[0].strip() if piece.strip() else b""
+    if len(title) > 160:
+        title = title[:160].decode("utf-8", "ignore").encode("utf-8") + b"..."
+    return (b"> **agy loads only part of this skill.** Before acting on it, read `" + skill_dir.encode("utf-8")
+            + b"/" + AGY_SKILL_CONTINUATION.encode("utf-8") + b"` (the file next to this SKILL.md in this skill"
+            b" folder) with read_file: it continues from the section `" + title + b"` and holds the rest of"
+            b" this skill." + newline + newline)
+
+
+def _agy_skill_projection(path: str, data: bytes, members: dict) -> dict:
+    """{path: bytes} for one SKILL.md in the agy package: itself, or a split head plus its continuation."""
+    frontmatter, body = _skill_parts(data)
+    if len(body) <= AGY_SKILL_BODY_LIMIT:
+        return {path: data}
+    skill_dir = path.rsplit("/", 1)[0]
+    continuation = skill_dir + "/" + AGY_SKILL_CONTINUATION
+    if continuation in members:
+        raise ReleaseError([f"error=antigravity_skill_continuation_exists:{continuation}"])
+    try:
+        pieces = _skill_pieces(body, 1, AGY_SKILL_BODY_LIMIT - _AGY_NOTE_RESERVE)
+    except ValueError:
+        raise ReleaseError([f"error=antigravity_skill_unsplittable:{path}"]) from None
+    newline = b"\r\n" if frontmatter.endswith(b"\r\n") else b"\n"
+    for keep in range(len(pieces) - 1, 0, -1):
+        note = _agy_read_first_note(skill_dir, pieces[keep], newline)
+        head = note + b"".join(pieces[:keep])
+        if len(head) <= AGY_SKILL_BODY_LIMIT:
+            return {path: frontmatter + head, continuation: b"".join(pieces[keep:])}
+    raise ReleaseError([f"error=antigravity_skill_unsplittable:{path}"])
+
+
 def _select_antigravity(members: dict) -> dict:
     """Project committed source into the agy package (see ANTIGRAVITY_MANIFEST)."""
     RoleError, project_role = _project_roles()
@@ -788,6 +873,15 @@ def _select_antigravity(members: dict) -> dict:
                 selected[path] = (members[path][0], project_role("antigravity", path, members[path][1]))
             except RoleError as exc:
                 errors.append(f"error=antigravity_role_invalid:{exc}")
+    for path in _utf8_order(selected):
+        if path.startswith("skills/") and path.endswith("/SKILL.md") and path.count("/") == 2:
+            try:
+                projected = _agy_skill_projection(path, selected[path][1], members)
+            except ReleaseError as exc:
+                errors += exc.lines
+                continue
+            for name, data in projected.items():
+                selected[name] = (selected[path][0], data)
     for path in _utf8_order(selected):
         if not (path.endswith(".md") and path.startswith(("skills/", "contracts/"))):
             continue
